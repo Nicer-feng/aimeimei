@@ -2870,8 +2870,8 @@ INDEX_HTML = r'''<!doctype html>
 
     /* Claude-inspired product refresh */
     :root {
-      --bg: #f7f1ea;
-      --bg-elevated: #fbf7f1;
+      --bg: #ffffff;
+      --bg-elevated: #ffffff;
       --sidebar: #efe7dc;
       --sidebar-strong: #e8ded0;
       --surface: #fffdf8;
@@ -2909,9 +2909,7 @@ INDEX_HTML = r'''<!doctype html>
       --code-text: #f5efe6;
     }
     body {
-      background:
-        radial-gradient(circle at 78% 10%, color-mix(in srgb, var(--accent-soft) 52%, transparent), transparent 28%),
-        linear-gradient(180deg, var(--bg-elevated), var(--bg));
+      background: var(--bg);
       font-size: 16px;
       line-height: 1.62;
     }
@@ -3038,9 +3036,7 @@ INDEX_HTML = r'''<!doctype html>
     }
     .main {
       grid-template-rows: auto minmax(0, 1fr) auto;
-      background:
-        radial-gradient(circle at 50% 0, color-mix(in srgb, var(--accent-soft) 50%, transparent), transparent 36%),
-        linear-gradient(180deg, var(--bg-elevated), var(--bg));
+      background: var(--bg);
     }
     .topbar {
       min-height: 66px;
@@ -3256,14 +3252,14 @@ INDEX_HTML = r'''<!doctype html>
       background: var(--surface);
     }
     .composer {
-      padding: 10px clamp(18px, 5vw, 72px) 22px;
+      padding: 8px clamp(18px, 5vw, 72px) 14px;
       background: linear-gradient(180deg, rgba(255,255,255,0), var(--bg) 32%);
     }
     .composer-box {
       width: min(var(--composer-width), 100%);
-      border-radius: 24px;
-      padding: 12px;
-      gap: 10px;
+      border-radius: 22px;
+      padding: 10px;
+      gap: 8px;
       border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
       background:
         linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, #fff 6%), var(--surface));
@@ -3277,13 +3273,13 @@ INDEX_HTML = r'''<!doctype html>
     .composer-chip-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 7px;
       padding: 0 2px;
     }
     .prompt-chip {
-      min-height: 34px;
+      min-height: 30px;
       border-radius: 999px;
-      padding: 0 12px;
+      padding: 0 10px;
       border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
       background: color-mix(in srgb, var(--surface-soft) 70%, transparent);
       color: var(--muted);
@@ -3296,27 +3292,27 @@ INDEX_HTML = r'''<!doctype html>
       background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
     }
     .input-row {
-      grid-template-columns: minmax(0, 1fr) 52px;
-      gap: 10px;
+      grid-template-columns: minmax(0, 1fr) 46px;
+      gap: 8px;
       align-items: end;
     }
     #prompt {
-      min-height: 84px;
-      max-height: 240px;
-      padding: 14px 12px;
+      min-height: 68px;
+      max-height: 210px;
+      padding: 10px 10px;
       font-size: 16px;
-      line-height: 1.6;
+      line-height: 1.55;
     }
     #send {
-      width: 52px;
-      min-width: 52px;
-      height: 52px;
-      min-height: 52px;
-      border-radius: 16px;
+      width: 46px;
+      min-width: 46px;
+      height: 46px;
+      min-height: 46px;
+      border-radius: 15px;
       box-shadow: 0 14px 30px var(--accent-shadow);
     }
     #send::before {
-      font-size: 24px;
+      font-size: 22px;
     }
     .composer-tools {
       padding: 0 2px 2px;
@@ -3327,8 +3323,8 @@ INDEX_HTML = r'''<!doctype html>
     }
     .model-select,
     .search-toggle {
-      height: 38px;
-      min-height: 38px;
+      height: 34px;
+      min-height: 34px;
       border-radius: 999px;
       background: color-mix(in srgb, var(--surface-soft) 66%, transparent);
       border-color: color-mix(in srgb, var(--line) 74%, transparent);
@@ -3342,7 +3338,7 @@ INDEX_HTML = r'''<!doctype html>
       font-size: 12px;
     }
     .scroll-latest {
-      bottom: 168px;
+      bottom: 148px;
       border-radius: 999px;
       border-color: color-mix(in srgb, var(--line) 80%, transparent);
     }
@@ -3356,7 +3352,7 @@ INDEX_HTML = r'''<!doctype html>
         padding: 22px 14px 24px;
       }
       .composer {
-        padding: 8px 12px 14px;
+        padding: 7px 12px 12px;
       }
       .topbar {
         padding: 0 10px;
@@ -3428,19 +3424,19 @@ INDEX_HTML = r'''<!doctype html>
         width: fit-content;
       }
       #prompt {
-        min-height: 76px;
+        min-height: 64px;
       }
       .input-row {
-        grid-template-columns: 1fr 50px;
+        grid-template-columns: 1fr 46px;
       }
       #send {
-        width: 50px;
-        min-width: 50px;
-        height: 50px;
-        min-height: 50px;
+        width: 46px;
+        min-width: 46px;
+        height: 46px;
+        min-height: 46px;
       }
       .scroll-latest {
-        bottom: 196px;
+        bottom: 174px;
       }
     }
 
@@ -3620,7 +3616,7 @@ INDEX_HTML = r'''<!doctype html>
         "chips chips"
         "input input"
         "tools tools";
-      row-gap: 8px;
+      row-gap: 6px;
     }
     .composer-chip-row {
       grid-area: chips;
@@ -3630,8 +3626,8 @@ INDEX_HTML = r'''<!doctype html>
     }
     .composer-tools {
       grid-area: tools;
-      margin-top: 2px;
-      padding-top: 10px;
+      margin-top: 0;
+      padding-top: 8px;
       border-top: 1px solid color-mix(in srgb, var(--line) 54%, transparent);
     }
     .composer-left {
@@ -3657,7 +3653,75 @@ INDEX_HTML = r'''<!doctype html>
     }
     #send {
       align-self: end;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
+    }
+    .font-toggle {
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    html[data-font-size="small"] {
+      --ui-font-size: 15px;
+      --reading-font-size: 15px;
+      --user-font-size: 15px;
+      --composer-font-size: 15px;
+      --chip-font-size: 12px;
+      --meta-font-size: 12px;
+      --brand-font-size: 21px;
+      --welcome-font-size: clamp(30px, 4vw, 50px);
+    }
+    html[data-font-size="medium"] {
+      --ui-font-size: 16px;
+      --reading-font-size: 16px;
+      --user-font-size: 16px;
+      --composer-font-size: 16px;
+      --chip-font-size: 13px;
+      --meta-font-size: 12px;
+      --brand-font-size: 22px;
+      --welcome-font-size: clamp(34px, 4.5vw, 56px);
+    }
+    html[data-font-size="large"] {
+      --ui-font-size: 17px;
+      --reading-font-size: 17.5px;
+      --user-font-size: 17px;
+      --composer-font-size: 17px;
+      --chip-font-size: 14px;
+      --meta-font-size: 13px;
+      --brand-font-size: 23px;
+      --welcome-font-size: clamp(36px, 4.8vw, 60px);
+    }
+    body {
+      font-size: var(--ui-font-size, 16px);
+    }
+    .brand h1 {
+      font-size: var(--brand-font-size, 22px);
+    }
+    .empty h2 {
+      font-size: var(--welcome-font-size, clamp(34px, 4.5vw, 56px));
+    }
+    .markdown,
+    .bubble.user .markdown,
+    .bubble.assistant .markdown > p:first-child {
+      font-size: var(--reading-font-size, 16px);
+    }
+    .bubble.user .bubble-shell {
+      font-size: var(--user-font-size, 16px);
+    }
+    #prompt {
+      font-size: var(--composer-font-size, 16px);
+    }
+    .prompt-chip,
+    .message-action {
+      font-size: var(--chip-font-size, 13px);
+    }
+    .message-time,
+    .status,
+    .top-title span,
+    .brand span,
+    .conv-meta,
+    .source-card strong,
+    .source-card span {
+      font-size: var(--meta-font-size, 12px);
     }
     @media (max-width: 620px) {
       .bubble.assistant .bubble-shell {
@@ -3701,7 +3765,7 @@ INDEX_HTML = r'''<!doctype html>
     }
     @media (max-width: 620px) {
       .composer {
-        padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
       }
       .sidebar {
         width: min(360px, 92vw);
@@ -3733,7 +3797,7 @@ INDEX_HTML = r'''<!doctype html>
         margin: 0;
       }
       #prompt {
-        font-size: 16px;
+        font-size: var(--composer-font-size, 16px);
       }
     }
   </style>
@@ -3753,7 +3817,7 @@ INDEX_HTML = r'''<!doctype html>
     <aside class="sidebar" id="sidebar">
       <div class="side-head">
         <div class="brand">
-          <h1>AI槑槑 <span class="app-version">v2.1.0</span></h1>
+          <h1>AI槑槑 <span class="app-version">v2.1.1</span></h1>
           <span id="health">连接中</span>
         </div>
         <button class="icon mobile-only" id="closeSide" title="关闭">×</button>
@@ -3782,6 +3846,7 @@ INDEX_HTML = r'''<!doctype html>
         </div>
         <div class="top-actions">
           <button class="icon accent-toggle" id="accentToggle" title="主色调">●</button>
+          <button class="icon font-toggle" id="fontSizeToggle" title="字体大小：中">中</button>
           <button class="icon" id="themeToggle" title="切换深浅色">◐</button>
           <button class="icon danger" id="deleteConversation" title="删除当前对话">⌫</button>
         </div>
@@ -4023,7 +4088,8 @@ INDEX_HTML = r'''<!doctype html>
 	      searchConfig: null,
 	      adminKey: localStorage.getItem("aiPlatformAdminKey") || "",
 	      theme: localStorage.getItem("aiPlatformTheme") || "",
-	      accent: localStorage.getItem("aiPlatformAccent") || "pink"
+	      accent: localStorage.getItem("aiPlatformAccent") || "pink",
+	      fontSize: localStorage.getItem("aiPlatformFontSize") || "medium"
 	    };
     $("adminKey").value = state.adminKey;
 
@@ -4268,6 +4334,40 @@ INDEX_HTML = r'''<!doctype html>
       applyTheme(preferredTheme() === "dark" ? "light" : "dark");
     }
 
+    const fontSizeOptions = ["small", "medium", "large"];
+    const fontSizeLabels = {
+      small: "小",
+      medium: "中",
+      large: "大"
+    };
+    const fontSizeNames = {
+      small: "小",
+      medium: "中",
+      large: "大"
+    };
+
+    function normalizeFontSize(value) {
+      return fontSizeOptions.includes(value) ? value : "medium";
+    }
+
+    function applyFontSize(value = state.fontSize || "medium") {
+      const size = normalizeFontSize(value);
+      state.fontSize = size;
+      document.documentElement.dataset.fontSize = size;
+      localStorage.setItem("aiPlatformFontSize", size);
+      const button = $("fontSizeToggle");
+      if (button) {
+        button.textContent = fontSizeLabels[size];
+        button.title = "字体大小：" + fontSizeNames[size];
+      }
+      autosizePrompt();
+    }
+
+    function toggleFontSize() {
+      const current = fontSizeOptions.indexOf(normalizeFontSize(state.fontSize));
+      applyFontSize(fontSizeOptions[(current + 1) % fontSizeOptions.length]);
+    }
+
     function renderAccentOptions() {
       const box = $("accentPresetList");
       if (!box) return;
@@ -4331,6 +4431,7 @@ INDEX_HTML = r'''<!doctype html>
       setStatus("accentStatus", "已恢复马卡龙粉", "ok");
     }
 
+    applyFontSize(state.fontSize);
     applyTheme(preferredTheme());
 
     function setStatus(id, text, kind = "") {
@@ -6293,6 +6394,7 @@ INDEX_HTML = r'''<!doctype html>
     });
     $("themeToggle").addEventListener("click", toggleTheme);
     $("accentToggle").addEventListener("click", openAccentDialog);
+    $("fontSizeToggle").addEventListener("click", toggleFontSize);
     $("closeAccentDialog").addEventListener("click", closeAccentDialog);
     $("accentDialog").addEventListener("click", (event) => {
       if (event.target === $("accentDialog")) closeAccentDialog();
