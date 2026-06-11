@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -15,10 +16,12 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlencode, urlparse
+from urllib.parse import unquote, urlencode, urlparse
 
 
 DATA_DIR = Path(os.environ.get("AI_PLATFORM_DATA", "/opt/ai-platform"))
+APP_DIR = Path(__file__).resolve().parent
+RES_DIR = APP_DIR / "res"
 LISTEN = os.environ.get("AI_PLATFORM_LISTEN", ":8080")
 DB_PATH = DATA_DIR / "ai-platform.db"
 SECRETS_PATH = DATA_DIR / "secrets.json"
@@ -639,6 +642,10 @@ class AppHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/":
             return self.html(INDEX_HTML)
+        if path == "/favicon.ico":
+            return self.static_file(RES_DIR / "favicon.ico")
+        if path.startswith("/res/"):
+            return self.handle_res_file(path)
         if path == "/api/health":
             return self.json({"status": "ok", "time": iso_now()})
         if path == "/api/me":
@@ -727,6 +734,29 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def handle_res_file(self, path):
+        name = unquote(path.removeprefix("/res/"))
+        if not name or name.startswith("/") or ".." in Path(name).parts:
+            return self.error(HTTPStatus.NOT_FOUND, "not found")
+        try:
+            target = (RES_DIR / name).resolve()
+            target.relative_to(RES_DIR.resolve())
+        except Exception:
+            return self.error(HTTPStatus.NOT_FOUND, "not found")
+        return self.static_file(target)
+
+    def static_file(self, target):
+        if not target.is_file():
+            return self.error(HTTPStatus.NOT_FOUND, "not found")
+        data = target.read_bytes()
+        content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "public, max-age=86400")
         self.end_headers()
         self.wfile.write(data)
 
@@ -1697,29 +1727,33 @@ INDEX_HTML = r'''<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AI槑槑</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="16x16" href="/res/favicon-16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/res/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="64x64" href="/res/favicon-64.png">
   <style>
     :root {
       color-scheme: light;
-      --bg: #f5f4f1;
-      --bg-elevated: #fbfaf7;
-      --sidebar: #f7f5f0;
-      --sidebar-strong: #ece8df;
+      --bg: #FAF8F4;
+      --bg-elevated: #fffdf9;
+      --sidebar: #fff8f4;
+      --sidebar-strong: #F6E9D6;
       --surface: #ffffff;
-      --surface-soft: #f1f5f4;
-      --surface-strong: #e8eeec;
-      --line: #ddd8cf;
-      --line-strong: #bdb6aa;
+      --surface-soft: #F6E9D6;
+      --surface-strong: #edd8c8;
+      --line: #eadfd2;
+      --line-strong: #d6bdab;
       --text: #1f2428;
-      --muted: #69716f;
-      --muted-2: #9aa19d;
-      --accent: #e58aa6;
-      --accent-strong: #c96986;
-      --accent-soft: #fdeaf1;
-      --accent-shadow: rgba(229, 138, 166, .2);
-      --focus-ring: rgba(229, 138, 166, .18);
+      --muted: #8A6D5A;
+      --muted-2: #b59a87;
+      --accent: #E9AFC0;
+      --accent-strong: #D98FA8;
+      --accent-soft: #FCE8EF;
+      --accent-shadow: rgba(217, 143, 168, .22);
+      --focus-ring: rgba(217, 143, 168, .18);
       --user-bg: #fff0f6;
-      --user-line: #f3c1d0;
-      --user-shadow: rgba(229, 138, 166, .12);
+      --user-line: #edc0cd;
+      --user-shadow: rgba(217, 143, 168, .12);
       --assistant-bg: #ffffff;
       --code-bg: #15201f;
       --code-text: #f3f7f5;
@@ -1842,18 +1876,39 @@ INDEX_HTML = r'''<!doctype html>
       place-items: center;
       padding: 20px;
       background:
+        radial-gradient(circle at 50% 8%, color-mix(in srgb, var(--accent-soft) 70%, transparent), transparent 34%),
         linear-gradient(180deg, var(--bg-elevated), var(--bg));
     }
     .login-panel {
-      width: min(420px, 100%);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
+      width: min(460px, 100%);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+      border-radius: 28px;
       background: var(--surface);
       box-shadow: var(--shadow);
-      padding: 26px;
+      padding: 22px;
+      display: grid;
+      gap: 14px;
+      overflow: hidden;
     }
-    .login-panel h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: 0; }
-    .login-panel p { margin: 0 0 22px; color: var(--muted); }
+    .login-mascot {
+      width: 100%;
+      border-radius: 24px;
+      display: block;
+      background: var(--accent-soft);
+      box-shadow: 0 14px 34px rgba(217, 143, 168, .14);
+    }
+    .login-copy {
+      display: grid;
+      gap: 4px;
+      text-align: center;
+      padding: 2px 4px 4px;
+    }
+    .login-panel h1 { margin: 0; font-size: 30px; letter-spacing: 0; }
+    .login-panel p { margin: 0; color: var(--muted); font-size: 16px; }
+    .login-panel label {
+      font-weight: 680;
+      color: var(--muted);
+    }
     .app {
       height: 100vh;
       min-height: 100vh;
@@ -2407,8 +2462,17 @@ INDEX_HTML = r'''<!doctype html>
       color: var(--muted);
       min-height: 26px;
     }
+    .thinking-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      object-fit: cover;
+      border: 2px solid rgba(255, 255, 255, .88);
+      box-shadow: 0 8px 18px rgba(217, 143, 168, .18);
+      animation: meimeiBreathe 1.8s ease-in-out infinite;
+    }
     .thinking strong {
-      color: var(--text);
+      color: var(--accent-strong);
       font-weight: 650;
     }
     .thinking-dots {
@@ -2428,6 +2492,10 @@ INDEX_HTML = r'''<!doctype html>
     @keyframes thinkingPulse {
       0%, 80%, 100% { opacity: .32; transform: translateY(0); }
       40% { opacity: 1; transform: translateY(-2px); }
+    }
+    @keyframes meimeiBreathe {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-1px) scale(1.04); }
     }
     .composer {
       background: linear-gradient(180deg, rgba(255,255,255,0), var(--bg) 34%);
@@ -2870,23 +2938,23 @@ INDEX_HTML = r'''<!doctype html>
 
     /* Claude-inspired product refresh */
     :root {
-      --bg: #ffffff;
-      --bg-elevated: #ffffff;
-      --sidebar: #efe7dc;
-      --sidebar-strong: #e8ded0;
-      --surface: #fffdf8;
-      --surface-soft: #f7efe5;
-      --surface-strong: #eee2d2;
-      --line: #e3d7c8;
-      --line-strong: #cdbca8;
+      --bg: #FAF8F4;
+      --bg-elevated: #fffdf9;
+      --sidebar: #fff8f4;
+      --sidebar-strong: #F6E9D6;
+      --surface: #ffffff;
+      --surface-soft: #F6E9D6;
+      --surface-strong: #efdcca;
+      --line: #eadfd2;
+      --line-strong: #d4b9a5;
       --text: #27231f;
-      --muted: #756d63;
-      --muted-2: #a19587;
+      --muted: #8A6D5A;
+      --muted-2: #b49a87;
       --assistant-bg: transparent;
       --code-bg: #181512;
       --code-text: #fbf7ef;
-      --shadow: 0 22px 60px rgba(73, 54, 35, .13);
-      --soft-shadow: 0 10px 26px rgba(73, 54, 35, .08);
+      --shadow: 0 22px 60px rgba(138, 109, 90, .13);
+      --soft-shadow: 0 10px 26px rgba(138, 109, 90, .08);
       --content: 1120px;
       --reading: 1040px;
       --composer-width: 1040px;
@@ -2909,7 +2977,9 @@ INDEX_HTML = r'''<!doctype html>
       --code-text: #f5efe6;
     }
     body {
-      background: var(--bg);
+      background:
+        radial-gradient(circle at 82% 8%, color-mix(in srgb, var(--accent-soft) 58%, transparent), transparent 27%),
+        linear-gradient(180deg, var(--bg-elevated), var(--bg));
       font-size: 16px;
       line-height: 1.62;
     }
@@ -2932,7 +3002,7 @@ INDEX_HTML = r'''<!doctype html>
       gap: 10px;
       border-right: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
       background:
-        linear-gradient(180deg, color-mix(in srgb, var(--sidebar) 94%, #fff 6%), var(--sidebar)),
+        linear-gradient(180deg, color-mix(in srgb, var(--sidebar) 92%, #fff 8%), var(--sidebar)),
         var(--sidebar);
     }
     .side-head {
@@ -2941,6 +3011,25 @@ INDEX_HTML = r'''<!doctype html>
     .brand h1 {
       font-size: 22px;
       font-weight: 760;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .brand-copy {
+      min-width: 0;
+    }
+    .brand-avatar {
+      width: 42px;
+      height: 42px;
+      border-radius: 16px;
+      object-fit: cover;
+      box-shadow: 0 10px 22px rgba(217, 143, 168, .2);
+      border: 2px solid rgba(255, 255, 255, .86);
+      background: var(--accent-soft);
+      flex: 0 0 auto;
     }
     .brand span {
       font-size: 13px;
@@ -3036,7 +3125,9 @@ INDEX_HTML = r'''<!doctype html>
     }
     .main {
       grid-template-rows: auto minmax(0, 1fr) auto;
-      background: var(--bg);
+      background:
+        radial-gradient(circle at 52% 0, color-mix(in srgb, var(--accent-soft) 38%, transparent), transparent 34%),
+        linear-gradient(180deg, var(--bg-elevated), var(--bg));
     }
     .topbar {
       min-height: 66px;
@@ -3071,6 +3162,15 @@ INDEX_HTML = r'''<!doctype html>
       gap: 26px;
       text-align: left;
       align-content: center;
+    }
+    .empty-hero {
+      width: min(520px, 88vw);
+      justify-self: center;
+      display: block;
+      border-radius: 28px;
+      border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+      box-shadow: 0 18px 48px rgba(138, 109, 90, .11);
+      background: var(--surface);
     }
     .empty h2 {
       font-size: clamp(34px, 4.5vw, 56px);
@@ -3490,17 +3590,15 @@ INDEX_HTML = r'''<!doctype html>
       font-size: 13px;
       font-weight: 760;
     }
-    .bubble.assistant .role::before {
-      content: "✦";
+    .role-avatar {
       width: 28px;
       height: 28px;
-      display: inline-grid;
-      place-items: center;
       border-radius: 999px;
-      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-      color: #fff;
-      font-size: 14px;
+      object-fit: cover;
       box-shadow: 0 10px 22px var(--accent-shadow);
+      border: 2px solid rgba(255, 255, 255, .88);
+      background: var(--accent-soft);
+      flex: 0 0 auto;
     }
     .bubble.assistant .bubble-shell {
       max-width: min(980px, 100%);
@@ -3843,10 +3941,13 @@ INDEX_HTML = r'''<!doctype html>
 <body>
   <div class="login" id="loginView">
     <form class="login-panel" id="loginForm">
-      <h1>AI槑槑</h1>
-	      <p>为家里人准备好的 AI 工作台</p>
-      <label>登录密码<input id="loginPassword" type="password" autocomplete="current-password"></label>
-      <button class="primary" type="submit" style="width:100%">登录</button>
+      <img class="login-mascot" src="/res/meimei-login.png" alt="槑槑猫咪">
+      <div class="login-copy">
+        <h1>欢迎回家</h1>
+        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
+      </div>
+      <label>请输入家庭密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入家庭密码"></label>
+      <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
     </form>
   </div>
@@ -3855,8 +3956,11 @@ INDEX_HTML = r'''<!doctype html>
     <aside class="sidebar" id="sidebar">
       <div class="side-head">
         <div class="brand">
-          <h1>AI槑槑 <span class="app-version">v2.1.3</span></h1>
-          <span id="health">连接中</span>
+          <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
+          <div class="brand-copy">
+            <h1>AI槑槑 <span class="app-version">v2.2.0</span></h1>
+            <span id="health">连接中</span>
+          </div>
         </div>
         <button class="icon mobile-only" id="closeSide" title="关闭">×</button>
       </div>
@@ -3989,10 +4093,10 @@ INDEX_HTML = r'''<!doctype html>
 	      </div>
 	    </div>
 	  </section>
-	  <section class="favorite-dialog" id="favoriteDialog">
+	      <section class="favorite-dialog" id="favoriteDialog">
 	    <div class="library-panel" role="dialog" aria-modal="true" aria-labelledby="favoriteDialogTitle">
 	      <div class="dialog-head">
-	        <strong id="favoriteDialogTitle">我的收藏</strong>
+	        <strong id="favoriteDialogTitle">🐾 我的收藏</strong>
 	        <button class="icon" id="closeFavoriteDialog" title="关闭">×</button>
 	      </div>
 	      <div class="dialog-body">
@@ -4135,21 +4239,21 @@ INDEX_HTML = r'''<!doctype html>
       pink: {
         label: "马卡龙粉",
         light: {
-          accent: "#e58aa6",
-          accentStrong: "#c96986",
-          accentSoft: "#fdeaf1",
-          accentShadow: "rgba(229, 138, 166, .2)",
-          focusRing: "rgba(229, 138, 166, .18)",
-          userBg: "#fff0f6",
-          userLine: "#f3c1d0",
-          userShadow: "rgba(229, 138, 166, .12)"
+          accent: "#E9AFC0",
+          accentStrong: "#D98FA8",
+          accentSoft: "#FCE8EF",
+          accentShadow: "rgba(217, 143, 168, .22)",
+          focusRing: "rgba(217, 143, 168, .18)",
+          userBg: "#fff1f5",
+          userLine: "#edc0cd",
+          userShadow: "rgba(217, 143, 168, .12)"
         },
         dark: {
-          accent: "#f0a9bc",
-          accentStrong: "#ffc0cf",
+          accent: "#f0b9c8",
+          accentStrong: "#ffcbd7",
           accentSoft: "#3b2630",
-          accentShadow: "rgba(240, 169, 188, .22)",
-          focusRing: "rgba(240, 169, 188, .22)",
+          accentShadow: "rgba(240, 185, 200, .22)",
+          focusRing: "rgba(240, 185, 200, .22)",
           userBg: "#3a2632",
           userLine: "#674055",
           userShadow: "rgba(0, 0, 0, .2)"
@@ -5283,20 +5387,21 @@ INDEX_HTML = r'''<!doctype html>
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png" alt="槑槑欢迎插画">
 	          <div>
-	            <div class="empty-kicker">AI槑槑 · 家庭 AI 助手</div>
-	            <h2>今天想聊什么？</h2>
-	            <p>${state.models[0] ? state.models[0].name : "选择一个模型"} 已就绪。可以直接提问，也可以从下面挑一个常用场景开始。</p>
+	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
+	            <h2>你好，我是槑槑 🐾</h2>
+	            <p>今天想聊点什么？${state.models[0] ? " " + state.models[0].name + " 已就绪。" : ""}</p>
 	          </div>
 	          <div class="prompt-grid"></div>
 	        </div>`;
 	      const quickPrompts = [
 	        { title: "润色文案", content: "帮我润色下面这段文字，让它更自然、更正式：" },
 	        { title: "深度改写", content: "帮我深度改写下面这段内容，保留原意，但让表达更有条理：" },
-	        { title: "扩写", content: "帮我扩写下面这段内容，补充细节，让它更完整：" },
-	        { title: "精简", content: "帮我精简下面这段内容，保留重点，表达更利落：" },
 	        { title: "工作总结", content: "帮我生成一份工作总结，结构清晰，语气正式：" },
-	        { title: "活动宣传", content: "帮我写一段活动宣传文案，有吸引力但不要太夸张：" }
+	        { title: "活动宣传", content: "帮我写一段活动宣传文案，有吸引力但不要太夸张：" },
+	        { title: "朋友圈文案", content: "帮我写一段朋友圈文案，语气自然一点：" },
+	        { title: "整理内容", content: "帮我把下面内容整理成条理清晰的要点：" }
 	      ];
 	      const grid = box.querySelector(".prompt-grid");
 	      for (const item of quickPrompts) {
@@ -5710,7 +5815,16 @@ INDEX_HTML = r'''<!doctype html>
 	      const continueWrite = wrap.querySelector(".continue-action");
 	      const reason = wrap.querySelector(".reason-action");
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
-	      role.textContent = message.role === "user" ? "你" : (message.thinking ? "AI槑槑 · 思考中" : "AI槑槑");
+	      role.replaceChildren();
+	      if (message.role === "user") {
+	        role.textContent = "你";
+	      } else {
+	        const avatar = document.createElement("img");
+	        avatar.className = "role-avatar";
+	        avatar.src = "/res/meimei-avatar.png";
+	        avatar.alt = "";
+	        role.append(avatar, document.createTextNode(message.thinking ? "槑槑 · 思考中" : "槑槑"));
+	      }
 	      renderSourcesPanel(sourcesPanel, message.role === "assistant" ? message.sources : []);
 	      if (time) {
 	        const tokens = message.role === "assistant" ? messageTotalTokens(message) : 0;
@@ -5721,8 +5835,9 @@ INDEX_HTML = r'''<!doctype html>
 	        text.className = "message-content";
 	        text.innerHTML = `
 	          <div class="thinking">
+	            <img class="thinking-avatar" src="/res/meimei-avatar.png" alt="">
 	            <span class="thinking-dots"><span></span><span></span><span></span></span>
-	            <span><strong>AI</strong> 正在组织答案</span>
+	            <span><strong>槑槑</strong>正在整理思路...</span>
 	          </div>`;
 	        copy.hidden = true;
 	        if (actions) actions.hidden = true;

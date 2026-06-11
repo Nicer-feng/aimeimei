@@ -2,7 +2,7 @@
 
 AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实现。项目保持单文件应用形态，无 Docker、无前端框架、无外部 Python 依赖。
 
-当前版本：`2.1.3`
+当前版本：`2.2.0`
 
 ## 目录说明
 
@@ -10,7 +10,7 @@ AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实
 - `app.server.py`：服务器旧版/备份应用文件，保留用于对照。
 - `ai-platform.service`：systemd 服务配置示例。
 - `verify.sh`：线上健康检查和基础接口验证脚本。
-- `res/`：项目资源文件。
+- `res/`：项目资源文件，包括槑槑头像、登录插画、空状态插画、favicon 和原始素材。
 - `VERSION`：当前项目版本号。
 - `CHANGELOG.md`：版本变更记录。
 
