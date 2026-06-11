@@ -3594,6 +3594,41 @@ INDEX_HTML = r'''<!doctype html>
       padding: 0 10px;
       color: color-mix(in srgb, var(--muted) 88%, var(--text));
     }
+    .message-action.copy-action {
+      width: 32px;
+      min-width: 32px;
+      height: 32px;
+      min-height: 32px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface) 86%, transparent);
+      color: var(--muted);
+      box-shadow: 0 8px 18px rgba(73, 54, 35, .06);
+    }
+    .message-action.copy-action:hover {
+      border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface));
+      color: var(--accent-strong);
+    }
+    .copy-action svg {
+      width: 15px;
+      height: 15px;
+      display: block;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .bubble.assistant .message-actions {
+      width: min(980px, calc(100% - 42px));
+    }
+    .bubble.assistant .copy-action {
+      margin-left: auto;
+    }
     .message-action::first-letter {
       letter-spacing: 0;
     }
@@ -3734,6 +3769,9 @@ INDEX_HTML = r'''<!doctype html>
       .bubble.assistant .reasoning-panel {
         margin-left: 0;
       }
+      .bubble.assistant .message-actions {
+        width: 100%;
+      }
       .bubble.user .bubble-shell {
         max-width: 94%;
         padding: 14px 16px;
@@ -3817,7 +3855,7 @@ INDEX_HTML = r'''<!doctype html>
     <aside class="sidebar" id="sidebar">
       <div class="side-head">
         <div class="brand">
-          <h1>AI槑槑 <span class="app-version">v2.1.2</span></h1>
+          <h1>AI槑槑 <span class="app-version">v2.1.3</span></h1>
           <span id="health">连接中</span>
         </div>
         <button class="icon mobile-only" id="closeSide" title="关闭">×</button>
@@ -5625,7 +5663,8 @@ INDEX_HTML = r'''<!doctype html>
 	      const copyAction = document.createElement("button");
 	      copyAction.className = "message-action copy-action";
 	      copyAction.type = "button";
-	      copyAction.textContent = "复制";
+	      copyAction.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path></svg>';
+	      copyAction.setAttribute("aria-label", "复制");
 	      copyAction.title = "复制这条消息";
 	      copyAction.addEventListener("click", () => copyText(visibleMessageContent(message), copyAction));
 	      const favorite = document.createElement("button");
@@ -5648,7 +5687,7 @@ INDEX_HTML = r'''<!doctype html>
 	      reason.className = "message-action reason-action";
 	      reason.type = "button";
 	      reason.addEventListener("click", () => toggleReasoning(message));
-	      actions.append(copyAction, favorite, regenerate, continueWrite, reason);
+	      actions.append(favorite, regenerate, continueWrite, reason, copyAction);
 
 	      shell.append(text, copy);
 	      wrap.append(role, shell, sourcesPanel, time, actions, reasoningPanel);
@@ -5825,9 +5864,11 @@ INDEX_HTML = r'''<!doctype html>
 
 	    function markCopied(button) {
 	      if (!button) return;
-	      const old = button.textContent;
+	      const old = button.innerHTML;
 	      button.textContent = "✓";
-	      setTimeout(() => button.textContent = old, 900);
+	      setTimeout(() => {
+	        button.innerHTML = old;
+	      }, 900);
 	    }
 
 	    function openManualCopy(text) {
