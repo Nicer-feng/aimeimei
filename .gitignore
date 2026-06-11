@@ -1,0 +1,24 @@
+.DS_Store
+
+# Python
+__pycache__/
+.pycache/
+*.py[cod]
+*.pyo
+
+# Local runtime data
+*.db
+*.db-*
+ai-platform.db
+secrets.json
+config.json
+admin.key
+family_password.txt
+*.key
+.env
+.env.*
+
+# Temporary files
+tmp/
+*.tmp
+*.log
