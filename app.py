@@ -3817,7 +3817,7 @@ INDEX_HTML = r'''<!doctype html>
     <aside class="sidebar" id="sidebar">
       <div class="side-head">
         <div class="brand">
-          <h1>AI槑槑 <span class="app-version">v2.1.1</span></h1>
+          <h1>AI槑槑 <span class="app-version">v2.1.2</span></h1>
           <span id="health">连接中</span>
         </div>
         <button class="icon mobile-only" id="closeSide" title="关闭">×</button>
@@ -5626,7 +5626,7 @@ INDEX_HTML = r'''<!doctype html>
 	      copyAction.className = "message-action copy-action";
 	      copyAction.type = "button";
 	      copyAction.textContent = "复制";
-	      copyAction.title = "复制这条回答";
+	      copyAction.title = "复制这条消息";
 	      copyAction.addEventListener("click", () => copyText(visibleMessageContent(message), copyAction));
 	      const favorite = document.createElement("button");
 	      favorite.className = "message-action favorite-action";
@@ -5695,9 +5695,12 @@ INDEX_HTML = r'''<!doctype html>
 	      const reasoningContent = messageReasoningContent(message);
 	      text.innerHTML = renderMarkdown(displayContent || "");
 	      copy.hidden = !displayContent || message.role === "assistant";
-	      if (actions) actions.hidden = !(message.role === "assistant" && (message.id || reasoningContent || displayContent));
+	      const canShowAssistantActions = message.role === "assistant" && (message.id || reasoningContent || displayContent);
+	      const canShowUserActions = message.role === "user" && displayContent;
+	      if (actions) actions.hidden = !(canShowAssistantActions || canShowUserActions);
 	      if (copyAction) {
-	        copyAction.hidden = !(message.role === "assistant" && displayContent);
+	        copyAction.hidden = !((message.role === "assistant" || message.role === "user") && displayContent);
+	        copyAction.title = message.role === "assistant" ? "复制这条回答" : "复制这条消息";
 	      }
 	      if (reason) {
 	        reason.hidden = !reasoningContent;
