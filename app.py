@@ -2595,7 +2595,7 @@ INDEX_HTML = r'''<!doctype html>
     }
     .input-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) 42px auto;
       gap: 8px;
       align-items: end;
     }
@@ -2609,6 +2609,28 @@ INDEX_HTML = r'''<!doctype html>
       box-shadow: none;
     }
     #prompt:focus { box-shadow: none; border-color: transparent; }
+    .composer-action {
+      width: 42px;
+      min-width: 42px;
+      height: 42px;
+      min-height: 42px;
+      padding: 0;
+      border-radius: 12px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+      background: color-mix(in srgb, var(--surface-soft) 76%, transparent);
+      color: var(--muted);
+      font-size: 19px;
+      font-weight: 800;
+      line-height: 1;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
+    }
+    .composer-action:hover {
+      color: var(--accent-strong);
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 66%, transparent);
+    }
     #send {
       width: 40px;
       min-width: 40px;
@@ -3425,7 +3447,7 @@ INDEX_HTML = r'''<!doctype html>
       background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
     }
     .input-row {
-      grid-template-columns: minmax(0, 1fr) 46px;
+      grid-template-columns: minmax(0, 1fr) 42px 46px;
       gap: 8px;
       align-items: end;
     }
@@ -3560,7 +3582,7 @@ INDEX_HTML = r'''<!doctype html>
         min-height: 64px;
       }
       .input-row {
-        grid-template-columns: 1fr 46px;
+        grid-template-columns: minmax(0, 1fr) 42px 46px;
       }
       #send {
         width: 46px;
@@ -3804,6 +3826,7 @@ INDEX_HTML = r'''<!doctype html>
     }
     .search-toggle,
     .model-select,
+    .composer-action,
     .prompt-chip {
       box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
     }
@@ -3989,7 +4012,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.2</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.3</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
@@ -4039,6 +4062,7 @@ INDEX_HTML = r'''<!doctype html>
 	          </div>
 	          <div class="input-row">
 	            <textarea id="prompt" placeholder="和 AI槑槑聊点什么..."></textarea>
+	            <button class="composer-action" id="insertNewline" type="button" title="换行（Shift+Enter）" aria-label="换行">↵</button>
 	            <button class="primary" id="send" title="发送">发送</button>
 	          </div>
 	          <div class="composer-tools">
@@ -6546,6 +6570,14 @@ INDEX_HTML = r'''<!doctype html>
       el.style.height = "auto";
       el.style.height = Math.min(el.scrollHeight, 180) + "px";
     }
+    function insertNewlineAtCursor() {
+      const el = $("prompt");
+      const start = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
+      const end = typeof el.selectionEnd === "number" ? el.selectionEnd : el.value.length;
+      el.setRangeText("\n", start, end, "end");
+      autosizePrompt();
+      el.focus();
+    }
 
     $("loginForm").addEventListener("submit", login);
     $("logout").addEventListener("click", logout);
@@ -6573,6 +6605,7 @@ INDEX_HTML = r'''<!doctype html>
       if (state.sending) stopGeneration();
       else sendMessage();
     });
+    $("insertNewline").addEventListener("click", insertNewlineAtCursor);
     $("deleteConversation").addEventListener("click", deleteCurrentConversation);
     $("messages").addEventListener("scroll", handleMessagesScroll, { passive: true });
     $("scrollLatest").addEventListener("click", () => scrollToLatest("smooth"));
