@@ -2341,15 +2341,47 @@ INDEX_HTML = r'''<!doctype html>
       border-color: var(--accent);
     }
     .reasoning-panel {
-      max-width: min(780px, 100%);
+      width: 100%;
+      max-width: 100%;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 14px;
       background: var(--surface-soft);
       color: var(--muted);
-      padding: 12px 14px;
-      box-shadow: var(--soft-shadow);
+      padding: 0;
+      margin: 0 0 14px;
+      overflow: hidden;
+      box-shadow: none;
     }
     .reasoning-panel[hidden] { display: none; }
+    .reasoning-toggle {
+      width: 100%;
+      min-height: 38px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 720;
+      box-shadow: none;
+    }
+    .reasoning-toggle::after {
+      content: "⌄";
+      color: var(--muted-2);
+      transition: transform .16s ease;
+    }
+    .reasoning-panel.open .reasoning-toggle::after {
+      transform: rotate(180deg);
+    }
+    .reasoning-body {
+      padding: 10px 12px 12px;
+      border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+    }
+    .reasoning-body[hidden] { display: none; }
     .reasoning-panel .markdown {
       color: var(--muted);
       font-size: 13px;
@@ -3293,7 +3325,8 @@ INDEX_HTML = r'''<!doctype html>
       border-color: color-mix(in srgb, var(--accent) 44%, var(--line));
     }
     .reasoning-panel {
-      max-width: min(900px, 100%);
+      width: 100%;
+      max-width: 100%;
       border-radius: 16px;
       border-color: color-mix(in srgb, var(--line) 76%, transparent);
       background: color-mix(in srgb, var(--surface-soft) 78%, transparent);
@@ -3614,8 +3647,7 @@ INDEX_HTML = r'''<!doctype html>
     }
     .bubble.assistant .message-time,
     .bubble.assistant .message-actions,
-    .bubble.assistant .sources-panel,
-    .bubble.assistant .reasoning-panel {
+    .bubble.assistant .sources-panel {
       margin-left: 42px;
     }
     .bubble.user .bubble-shell {
@@ -3863,8 +3895,7 @@ INDEX_HTML = r'''<!doctype html>
       }
       .bubble.assistant .message-time,
       .bubble.assistant .message-actions,
-      .bubble.assistant .sources-panel,
-      .bubble.assistant .reasoning-panel {
+      .bubble.assistant .sources-panel {
         margin-left: 0;
       }
       .bubble.assistant .message-actions {
@@ -3958,7 +3989,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.1</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.2</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
@@ -5610,6 +5641,28 @@ INDEX_HTML = r'''<!doctype html>
 	      return parts.filter(Boolean).join("\n\n").trim();
 	    }
 
+	    function renderReasoningPanel(panel, message, reasoningContent) {
+	      if (!panel) return;
+	      if (message.role !== "assistant" || !reasoningContent) {
+	        panel.hidden = true;
+	        panel.replaceChildren();
+	        return;
+	      }
+	      panel.hidden = false;
+	      panel.classList.toggle("open", Boolean(message.reasoning_open));
+	      const toggle = document.createElement("button");
+	      toggle.className = "reasoning-toggle";
+	      toggle.type = "button";
+	      toggle.textContent = message.reasoning_open ? "收起思考过程" : (message.thinking ? "槑槑正在思考" : "查看思考过程");
+	      toggle.title = message.reasoning_open ? "收起思考过程" : "展开思考过程";
+	      toggle.addEventListener("click", () => toggleReasoning(message));
+	      const body = document.createElement("div");
+	      body.className = "reasoning-body";
+	      body.hidden = !message.reasoning_open;
+	      body.innerHTML = '<div class="markdown">' + renderMarkdown(reasoningContent) + '</div>';
+	      panel.replaceChildren(toggle, body);
+	    }
+
 	    function sourceDomain(value) {
 	      try {
 	        return new URL(value).hostname.replace(/^www\./, "");
@@ -5792,10 +5845,10 @@ INDEX_HTML = r'''<!doctype html>
 	      reason.className = "message-action reason-action";
 	      reason.type = "button";
 	      reason.addEventListener("click", () => toggleReasoning(message));
-	      actions.append(favorite, regenerate, continueWrite, reason, copyAction);
+	      actions.append(favorite, regenerate, continueWrite, copyAction);
 
-	      shell.append(text, copy);
-	      wrap.append(role, shell, sourcesPanel, time, actions, reasoningPanel);
+	      shell.append(reasoningPanel, text, copy);
+	      wrap.append(role, shell, sourcesPanel, time, actions);
 	      updateMessageElement(wrap, message);
 	      return wrap;
 	    }
@@ -5831,7 +5884,11 @@ INDEX_HTML = r'''<!doctype html>
 	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
 	      }
 
-	      if (message.role === "assistant" && message.thinking && !message.content) {
+	      const displayContent = visibleMessageContent(message);
+	      const reasoningContent = messageReasoningContent(message);
+	      renderReasoningPanel(reasoningPanel, message, reasoningContent);
+
+	      if (message.role === "assistant" && message.thinking && !displayContent) {
 	        text.className = "message-content";
 	        text.innerHTML = `
 	          <div class="thinking">
@@ -5845,23 +5902,16 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 
 	      text.className = "message-content markdown";
-	      const displayContent = visibleMessageContent(message);
-	      const reasoningContent = messageReasoningContent(message);
 	      text.innerHTML = renderMarkdown(displayContent || "");
 	      copy.hidden = !displayContent || message.role === "assistant";
-	      const canShowAssistantActions = message.role === "assistant" && (message.id || reasoningContent || displayContent);
+	      const canShowAssistantActions = message.role === "assistant" && Boolean(displayContent);
 	      const canShowUserActions = message.role === "user" && displayContent;
 	      if (actions) actions.hidden = !(canShowAssistantActions || canShowUserActions);
 	      if (copyAction) {
 	        copyAction.hidden = !((message.role === "assistant" || message.role === "user") && displayContent);
 	        copyAction.title = message.role === "assistant" ? "复制这条回答" : "复制这条消息";
 	      }
-	      if (reason) {
-	        reason.hidden = !reasoningContent;
-	        reason.textContent = message.reasoning_open ? "收起思考" : "思考";
-	        reason.classList.toggle("active", Boolean(message.reasoning_open));
-	        reason.title = message.reasoning_open ? "收起思考过程" : "查看思考过程";
-	      }
+	      if (reason) reason.hidden = true;
 	      if (favorite) {
 	        favorite.hidden = !(message.role === "assistant" && message.id && displayContent);
 	        favorite.textContent = message.favorite_id ? "已收藏" : "收藏";
@@ -5873,10 +5923,6 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	      if (continueWrite) {
 	        continueWrite.hidden = !(message.role === "assistant" && displayContent);
-	      }
-	      if (reasoningPanel) {
-	        reasoningPanel.hidden = !(reasoningContent && message.reasoning_open);
-	        reasoningPanel.innerHTML = reasoningContent ? '<div class="markdown">' + renderMarkdown(reasoningContent) + '</div>' : "";
 	      }
 	    }
 
