@@ -129,22 +129,27 @@
     .word-layer {
       position: absolute;
       inset: 0;
+      color: rgba(121, 104, 96, .102);
+      font-size: clamp(34px, 4.5vw, 70px);
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .word-track {
+      position: absolute;
+      inset: -16% -18%;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      gap: clamp(10px, 1.4vw, 22px);
-      color: rgba(121, 104, 96, .105);
-      font-size: clamp(40px, 5.1vw, 82px);
-      font-weight: 900;
-      white-space: nowrap;
+      gap: clamp(30px, 4vw, 58px);
+      transform: rotate(-13deg) scale(1.06);
+      transform-origin: center;
     }
     .word-row {
       display: flex;
       align-items: center;
-      gap: clamp(28px, 4.8vw, 82px);
+      gap: clamp(36px, 5.2vw, 88px);
       line-height: 1;
-      transform: translateX(var(--shift, 0)) rotate(-13deg);
-      transform-origin: center;
+      transform: translateX(var(--shift, 0));
     }
     .word-row span {
       display: inline-block;
@@ -397,11 +402,14 @@
         width: 100%;
       }
       .word-layer {
-        gap: 12px;
-        font-size: 42px;
+        font-size: 38px;
+      }
+      .word-track {
+        gap: 34px;
+        transform: rotate(-13deg) scale(1.08);
       }
       .word-row {
-        gap: 34px;
+        gap: 42px;
       }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -504,10 +512,11 @@
     const base = document.getElementById("wordBase");
     const color = document.getElementById("wordColor");
     const words = ["槑槑小记", "生活片段", "温柔日常", "MEIMEI NOTES", "照片", "随笔"];
-    const rowCount = 13;
+    const rowCount = 11;
     const wordsPerRow = 14;
-    const rowShifts = ["-12vw", "-5vw", "2vw", "9vw"];
-    const fragment = document.createDocumentFragment();
+    const rowShifts = ["-15vw", "-8vw", "-1vw", "6vw"];
+    const track = document.createElement("div");
+    track.className = "word-track";
 
     for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
       const row = document.createElement("div");
@@ -518,9 +527,9 @@
         span.textContent = words[(rowIndex + wordIndex) % words.length];
         row.appendChild(span);
       }
-      fragment.appendChild(row);
+      track.appendChild(row);
     }
-    base.appendChild(fragment);
+    base.appendChild(track);
     color.innerHTML = base.innerHTML;
 
     function moveSpotlight(clientX, clientY) {
