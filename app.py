@@ -3229,11 +3229,11 @@ INDEX_HTML = r'''<!doctype html>
     }
     .empty-hero {
       width: min(640px, 100%);
-      height: clamp(220px, 24vw, 320px);
+      height: clamp(200px, 20vw, 270px);
       justify-self: center;
       display: block;
       object-fit: cover;
-      object-position: center 58%;
+      object-position: center center;
       border-radius: 28px;
       border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
       box-shadow: 0 18px 48px rgba(138, 109, 90, .11);
@@ -3536,7 +3536,7 @@ INDEX_HTML = r'''<!doctype html>
       }
       .empty-hero {
         width: min(560px, 100%);
-        height: 220px;
+        height: 205px;
       }
       .prompt-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3567,7 +3567,7 @@ INDEX_HTML = r'''<!doctype html>
         font-size: 34px;
       }
       .empty-hero {
-        height: 180px;
+        height: 168px;
         border-radius: 22px;
       }
       .prompt-grid {
@@ -4039,7 +4039,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.7</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.8</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
@@ -5469,7 +5469,7 @@ INDEX_HTML = r'''<!doctype html>
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state-cropped.png" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2>你好，我是槑槑 🐾</h2>
