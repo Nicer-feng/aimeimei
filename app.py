@@ -3217,7 +3217,7 @@ INDEX_HTML = r'''<!doctype html>
       padding: 30px clamp(18px, 5vw, 72px) 28px;
       gap: 28px;
       background: transparent;
-      padding-bottom: clamp(230px, 27vh, 310px);
+      padding-bottom: clamp(180px, 22vh, 248px);
     }
     .messages-inner,
     .bubble {
@@ -3429,36 +3429,28 @@ INDEX_HTML = r'''<!doctype html>
     }
     .composer {
       position: absolute;
-      inset: auto 0 0;
+      left: 0;
+      right: 0;
+      bottom: max(12px, env(safe-area-inset-bottom, 0px));
       z-index: 9;
-      padding: 44px clamp(18px, 5vw, 72px) 18px;
+      padding: 0 clamp(18px, 5vw, 72px);
       pointer-events: none;
-      background:
-        linear-gradient(180deg,
-          rgba(255,255,255,0) 0%,
-          color-mix(in srgb, var(--bg) 24%, transparent) 28%,
-          color-mix(in srgb, var(--bg) 58%, transparent) 68%,
-          color-mix(in srgb, var(--bg) 72%, transparent) 100%);
-      -webkit-backdrop-filter: blur(16px) saturate(1.18);
-      backdrop-filter: blur(16px) saturate(1.18);
+      background: transparent;
     }
     .composer-box {
       width: min(var(--composer-width), 100%);
-      border-radius: 22px;
-      padding: 10px;
-      gap: 8px;
+      border-radius: 28px;
+      padding: 11px;
+      gap: 9px;
       pointer-events: auto;
-      border: 1px solid color-mix(in srgb, var(--line) 62%, rgba(255,255,255,.72));
-      background:
-        linear-gradient(180deg,
-          color-mix(in srgb, var(--surface) 72%, rgba(255,255,255,.62)),
-          color-mix(in srgb, var(--surface) 50%, rgba(255,255,255,.36)));
-      -webkit-backdrop-filter: blur(28px) saturate(1.34);
-      backdrop-filter: blur(28px) saturate(1.34);
+      border: 1px solid color-mix(in srgb, var(--line) 52%, rgba(255,255,255,.72));
+      background: rgba(255, 252, 248, .58);
+      -webkit-backdrop-filter: blur(18px) saturate(160%);
+      backdrop-filter: blur(18px) saturate(160%);
       box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.76),
+        inset 0 1px 0 rgba(255,255,255,.82),
         inset 0 -1px 0 rgba(255,255,255,.34),
-        0 24px 70px rgba(73, 54, 35, .18);
+        0 18px 50px rgba(73, 54, 35, .14);
       transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
     }
     .composer-box:focus-within {
@@ -3466,27 +3458,31 @@ INDEX_HTML = r'''<!doctype html>
       box-shadow:
         inset 0 1px 0 rgba(255,255,255,.82),
         inset 0 -1px 0 rgba(255,255,255,.38),
-        0 28px 76px rgba(73, 54, 35, .2),
+        0 20px 58px rgba(73, 54, 35, .16),
         0 0 0 4px var(--focus-ring);
     }
     [data-theme="dark"] .composer {
-      background:
-        linear-gradient(180deg,
-          rgba(0,0,0,0) 0%,
-          color-mix(in srgb, var(--bg) 28%, transparent) 28%,
-          color-mix(in srgb, var(--bg) 64%, transparent) 68%,
-          color-mix(in srgb, var(--bg) 78%, transparent) 100%);
+      background: transparent;
     }
     [data-theme="dark"] .composer-box {
       border-color: color-mix(in srgb, var(--line) 58%, rgba(255,255,255,.18));
-      background:
-        linear-gradient(180deg,
-          color-mix(in srgb, var(--surface) 68%, rgba(255,255,255,.08)),
-          color-mix(in srgb, var(--surface) 50%, rgba(255,255,255,.04)));
+      background: rgba(31, 28, 25, .58);
       box-shadow:
         inset 0 1px 0 rgba(255,255,255,.14),
         inset 0 -1px 0 rgba(255,255,255,.05),
-        0 24px 70px rgba(0,0,0,.36);
+        0 18px 54px rgba(0,0,0,.34);
+    }
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .composer-box {
+        background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+      }
+      #prompt,
+      .prompt-chip,
+      .composer-action,
+      .model-select,
+      .search-toggle {
+        background: color-mix(in srgb, var(--surface) 86%, transparent);
+      }
     }
     .composer-chip-row {
       display: flex;
@@ -3515,19 +3511,32 @@ INDEX_HTML = r'''<!doctype html>
       align-items: end;
     }
     #prompt {
-      min-height: 68px;
-      max-height: 210px;
-      padding: 10px 10px;
+      min-height: 62px;
+      max-height: min(210px, 38vh);
+      padding: 12px 15px;
       font-size: 16px;
       line-height: 1.55;
+      border: 1px solid color-mix(in srgb, var(--line) 42%, transparent);
+      border-radius: 22px;
+      background: color-mix(in srgb, var(--surface) 34%, rgba(255,255,255,.26));
+      -webkit-backdrop-filter: blur(12px) saturate(1.25);
+      backdrop-filter: blur(12px) saturate(1.25);
+    }
+    #prompt:focus {
+      border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+      background: color-mix(in srgb, var(--surface) 42%, rgba(255,255,255,.32));
     }
     #send {
       width: 46px;
       min-width: 46px;
       height: 46px;
       min-height: 46px;
-      border-radius: 15px;
-      box-shadow: 0 14px 30px var(--accent-shadow);
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--accent) 28%, rgba(255,255,255,.44));
+      background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 82%, #fff 18%), var(--accent-strong));
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.44),
+        0 14px 30px var(--accent-shadow);
     }
     #send::before {
       font-size: 22px;
@@ -3544,11 +3553,18 @@ INDEX_HTML = r'''<!doctype html>
       height: 34px;
       min-height: 34px;
       border-radius: 999px;
-      background: color-mix(in srgb, var(--surface-soft) 50%, rgba(255,255,255,.34));
+      background: color-mix(in srgb, var(--surface-soft) 42%, rgba(255,255,255,.38));
       border-color: color-mix(in srgb, var(--line) 74%, transparent);
       color: var(--muted);
       -webkit-backdrop-filter: blur(18px) saturate(1.2);
       backdrop-filter: blur(18px) saturate(1.2);
+    }
+    .prompt-chip,
+    .composer-action {
+      background: color-mix(in srgb, var(--surface-soft) 38%, rgba(255,255,255,.38));
+      border-color: color-mix(in srgb, var(--line) 60%, transparent);
+      -webkit-backdrop-filter: blur(14px) saturate(1.25);
+      backdrop-filter: blur(14px) saturate(1.25);
     }
     .model-select {
       min-width: 270px;
@@ -3558,7 +3574,7 @@ INDEX_HTML = r'''<!doctype html>
       font-size: 12px;
     }
     .scroll-latest {
-      bottom: 198px;
+      bottom: 172px;
       border-radius: 999px;
       border-color: color-mix(in srgb, var(--line) 80%, transparent);
     }
@@ -3569,10 +3585,10 @@ INDEX_HTML = r'''<!doctype html>
         padding: 14px 12px;
       }
       .messages {
-        padding: 22px 14px 250px;
+        padding: 22px 14px 232px;
       }
       .composer {
-        padding: 34px 12px 12px;
+        padding: 0 12px;
       }
       .topbar {
         padding: 0 10px;
@@ -3607,7 +3623,7 @@ INDEX_HTML = r'''<!doctype html>
         min-width: 36px;
       }
       .messages {
-        padding: 18px 12px 300px;
+        padding: 18px 12px 210px;
         gap: 22px;
       }
       .empty h2 {
@@ -3627,7 +3643,7 @@ INDEX_HTML = r'''<!doctype html>
         font-size: 15px;
       }
       .composer-box {
-        border-radius: 20px;
+        border-radius: 24px;
         padding: 10px;
       }
       .composer-chip-row {
@@ -3639,21 +3655,31 @@ INDEX_HTML = r'''<!doctype html>
         white-space: nowrap;
       }
       .composer-tools {
-        align-items: stretch;
-        flex-direction: column;
+        align-items: center;
+        flex-direction: row;
+        gap: 8px;
+        padding-top: 6px;
       }
       .composer-left {
-        width: 100%;
+        width: auto;
+        flex: 1 1 auto;
+        flex-wrap: nowrap;
       }
       .model-select {
-        width: 100%;
+        width: auto;
         min-width: 0;
+        flex: 1 1 auto;
       }
       .search-toggle {
-        width: fit-content;
+        width: auto;
+        flex: 0 0 auto;
+        padding: 0 9px;
+      }
+      .status {
+        display: none;
       }
       #prompt {
-        min-height: 64px;
+        min-height: 58px;
       }
       .input-row {
         grid-template-columns: minmax(0, 1fr) 42px 46px;
@@ -3665,7 +3691,7 @@ INDEX_HTML = r'''<!doctype html>
         min-height: 46px;
       }
       .scroll-latest {
-        bottom: 226px;
+        bottom: 176px;
       }
     }
 
@@ -4029,7 +4055,8 @@ INDEX_HTML = r'''<!doctype html>
     }
     @media (max-width: 620px) {
       .composer {
-        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        bottom: max(10px, env(safe-area-inset-bottom, 0px));
+        padding: 0 10px;
       }
       .sidebar {
         width: min(360px, 92vw);
@@ -4086,7 +4113,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.14</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.15</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
