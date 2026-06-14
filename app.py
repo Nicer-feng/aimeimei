@@ -4039,7 +4039,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.12</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.13</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
@@ -5469,7 +5469,7 @@ INDEX_HTML = r'''<!doctype html>
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.2.13" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2>你好，我是槑槑 🐾</h2>
