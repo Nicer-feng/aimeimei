@@ -3221,19 +3221,27 @@ INDEX_HTML = r'''<!doctype html>
       width: min(var(--reading), 100%);
     }
     .empty {
-      width: min(920px, 100%);
-      gap: 26px;
-      text-align: left;
+      width: min(1040px, 100%);
+      gap: 22px;
+      text-align: center;
+      justify-items: center;
       align-content: center;
     }
     .empty-hero {
-      width: min(520px, 88vw);
+      width: min(640px, 100%);
+      height: clamp(220px, 24vw, 320px);
       justify-self: center;
       display: block;
+      object-fit: cover;
+      object-position: center 58%;
       border-radius: 28px;
       border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
       box-shadow: 0 18px 48px rgba(138, 109, 90, .11);
       background: var(--surface);
+    }
+    .empty-copy {
+      width: min(720px, 100%);
+      text-align: center;
     }
     .empty h2 {
       font-size: clamp(34px, 4.5vw, 56px);
@@ -3248,6 +3256,7 @@ INDEX_HTML = r'''<!doctype html>
       font-size: 17px;
     }
     .prompt-grid {
+      width: 100%;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 12px;
     }
@@ -3523,6 +3532,11 @@ INDEX_HTML = r'''<!doctype html>
       }
       .empty {
         width: min(720px, 100%);
+        gap: 18px;
+      }
+      .empty-hero {
+        width: min(560px, 100%);
+        height: 220px;
       }
       .prompt-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3551,6 +3565,10 @@ INDEX_HTML = r'''<!doctype html>
       }
       .empty h2 {
         font-size: 34px;
+      }
+      .empty-hero {
+        height: 180px;
+        border-radius: 22px;
       }
       .prompt-grid {
         grid-template-columns: 1fr;
@@ -4021,7 +4039,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.6</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.7</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
@@ -5452,7 +5470,7 @@ INDEX_HTML = r'''<!doctype html>
 	      box.innerHTML = `
 	        <div class="empty">
 	          <img class="empty-hero" src="/res/meimei-empty-state.png" alt="槑槑欢迎插画">
-	          <div>
+	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2>你好，我是槑槑 🐾</h2>
 	            <p>今天想聊点什么？${state.models[0] ? " " + state.models[0].name + " 已就绪。" : ""}</p>
