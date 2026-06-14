@@ -20,8 +20,6 @@
       --honey: #e8c37a;
       --shadow: 0 24px 70px rgba(103, 78, 67, .13);
       --radius: 28px;
-      --mx: 50%;
-      --my: 42%;
     }
     * {
       box-sizing: border-box;
@@ -34,9 +32,7 @@
       min-height: 100%;
       margin: 0;
       overflow-x: hidden;
-      background:
-        radial-gradient(circle at var(--mx) var(--my), rgba(233, 175, 192, .22), transparent 310px),
-        linear-gradient(135deg, #fff 0%, #fffaf4 46%, #fff 100%);
+      background: linear-gradient(135deg, #fff 0%, #fffaf4 46%, #fff 100%);
       color: var(--text);
       font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
       font-size: 16px;
@@ -102,21 +98,31 @@
       color: var(--text);
     }
     .hero {
+      --spot-x: 54%;
+      --spot-y: 42%;
       position: relative;
+      isolation: isolate;
       min-height: calc(100vh - 84px);
       display: grid;
       place-items: center;
       padding: 48px 16px 76px;
       overflow: hidden;
     }
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -3;
+      pointer-events: none;
+      background: radial-gradient(circle 340px at var(--spot-x) var(--spot-y), rgba(233, 175, 192, .22), transparent 72%);
+    }
     .word-field {
       --local-x: 50%;
       --local-y: 44%;
       position: absolute;
-      inset: -12%;
+      inset: -18%;
       z-index: -2;
       overflow: hidden;
-      transform: rotate(-7deg) scale(1.08);
       user-select: none;
       pointer-events: none;
     }
@@ -126,18 +132,19 @@
       display: flex;
       flex-direction: column;
       justify-content: center;
-      gap: clamp(18px, 2.3vw, 34px);
+      gap: clamp(10px, 1.4vw, 22px);
       color: rgba(121, 104, 96, .105);
-      font-size: clamp(36px, 4.2vw, 68px);
+      font-size: clamp(40px, 5.1vw, 82px);
       font-weight: 900;
       white-space: nowrap;
     }
     .word-row {
       display: flex;
       align-items: center;
-      gap: clamp(46px, 7vw, 124px);
+      gap: clamp(28px, 4.8vw, 82px);
       line-height: 1;
-      transform: translateX(var(--shift, 0));
+      transform: translateX(var(--shift, 0)) rotate(-13deg);
+      transform-origin: center;
     }
     .word-row span {
       display: inline-block;
@@ -146,8 +153,8 @@
     .word-layer.color {
       color: color-mix(in srgb, var(--pink-strong) 82%, var(--honey));
       opacity: .96;
-      -webkit-mask-image: radial-gradient(circle 190px at var(--local-x) var(--local-y), #000 0%, #000 35%, transparent 74%);
-      mask-image: radial-gradient(circle 190px at var(--local-x) var(--local-y), #000 0%, #000 35%, transparent 74%);
+      -webkit-mask-image: radial-gradient(circle 220px at var(--local-x) var(--local-y), #000 0%, #000 34%, transparent 74%);
+      mask-image: radial-gradient(circle 220px at var(--local-x) var(--local-y), #000 0%, #000 34%, transparent 74%);
       filter: saturate(1.08);
     }
     .hero-card {
@@ -390,11 +397,11 @@
         width: 100%;
       }
       .word-layer {
-        gap: 20px;
-        font-size: 40px;
+        gap: 12px;
+        font-size: 42px;
       }
       .word-row {
-        gap: 54px;
+        gap: 34px;
       }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -493,17 +500,19 @@
 
   <script>
     const field = document.getElementById("wordField");
+    const hero = field.closest(".hero");
     const base = document.getElementById("wordBase");
     const color = document.getElementById("wordColor");
     const words = ["槑槑小记", "生活片段", "温柔日常", "MEIMEI NOTES", "照片", "随笔"];
-    const rowCount = 9;
-    const wordsPerRow = 10;
+    const rowCount = 13;
+    const wordsPerRow = 14;
+    const rowShifts = ["-12vw", "-5vw", "2vw", "9vw"];
     const fragment = document.createDocumentFragment();
 
     for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
       const row = document.createElement("div");
       row.className = "word-row";
-      row.style.setProperty("--shift", `${rowIndex % 2 === 0 ? "-7vw" : "3vw"}`);
+      row.style.setProperty("--shift", rowShifts[rowIndex % rowShifts.length]);
       for (let wordIndex = 0; wordIndex < wordsPerRow; wordIndex += 1) {
         const span = document.createElement("span");
         span.textContent = words[(rowIndex + wordIndex) % words.length];
@@ -515,8 +524,9 @@
     color.innerHTML = base.innerHTML;
 
     function moveSpotlight(clientX, clientY) {
-      document.documentElement.style.setProperty("--mx", `${clientX}px`);
-      document.documentElement.style.setProperty("--my", `${clientY}px`);
+      const heroRect = hero.getBoundingClientRect();
+      hero.style.setProperty("--spot-x", `${clientX - heroRect.left}px`);
+      hero.style.setProperty("--spot-y", `${clientY - heroRect.top}px`);
       const rect = field.getBoundingClientRect();
       field.style.setProperty("--local-x", `${clientX - rect.left}px`);
       field.style.setProperty("--local-y", `${clientY - rect.top}px`);
