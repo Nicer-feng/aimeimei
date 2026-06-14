@@ -3187,6 +3187,8 @@ INDEX_HTML = r'''<!doctype html>
       font-weight: 620;
     }
     .main {
+      position: relative;
+      overflow: hidden;
       grid-template-rows: auto minmax(0, 1fr) auto;
       background:
         radial-gradient(circle at 52% 0, color-mix(in srgb, var(--accent-soft) 38%, transparent), transparent 34%),
@@ -3215,6 +3217,7 @@ INDEX_HTML = r'''<!doctype html>
       padding: 30px clamp(18px, 5vw, 72px) 28px;
       gap: 28px;
       background: transparent;
+      padding-bottom: clamp(230px, 27vh, 310px);
     }
     .messages-inner,
     .bubble {
@@ -3425,23 +3428,65 @@ INDEX_HTML = r'''<!doctype html>
       background: var(--surface);
     }
     .composer {
-      padding: 8px clamp(18px, 5vw, 72px) 14px;
-      background: linear-gradient(180deg, rgba(255,255,255,0), var(--bg) 32%);
+      position: absolute;
+      inset: auto 0 0;
+      z-index: 9;
+      padding: 44px clamp(18px, 5vw, 72px) 18px;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg,
+          rgba(255,255,255,0) 0%,
+          color-mix(in srgb, var(--bg) 24%, transparent) 28%,
+          color-mix(in srgb, var(--bg) 58%, transparent) 68%,
+          color-mix(in srgb, var(--bg) 72%, transparent) 100%);
+      -webkit-backdrop-filter: blur(16px) saturate(1.18);
+      backdrop-filter: blur(16px) saturate(1.18);
     }
     .composer-box {
       width: min(var(--composer-width), 100%);
       border-radius: 22px;
       padding: 10px;
       gap: 8px;
-      border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+      pointer-events: auto;
+      border: 1px solid color-mix(in srgb, var(--line) 62%, rgba(255,255,255,.72));
       background:
-        linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, #fff 6%), var(--surface));
-      box-shadow: 0 20px 60px rgba(73, 54, 35, .16);
+        linear-gradient(180deg,
+          color-mix(in srgb, var(--surface) 72%, rgba(255,255,255,.62)),
+          color-mix(in srgb, var(--surface) 50%, rgba(255,255,255,.36)));
+      -webkit-backdrop-filter: blur(28px) saturate(1.34);
+      backdrop-filter: blur(28px) saturate(1.34);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.76),
+        inset 0 -1px 0 rgba(255,255,255,.34),
+        0 24px 70px rgba(73, 54, 35, .18);
       transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
     }
     .composer-box:focus-within {
       border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
-      box-shadow: 0 24px 70px rgba(73, 54, 35, .18), 0 0 0 4px var(--focus-ring);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.82),
+        inset 0 -1px 0 rgba(255,255,255,.38),
+        0 28px 76px rgba(73, 54, 35, .2),
+        0 0 0 4px var(--focus-ring);
+    }
+    [data-theme="dark"] .composer {
+      background:
+        linear-gradient(180deg,
+          rgba(0,0,0,0) 0%,
+          color-mix(in srgb, var(--bg) 28%, transparent) 28%,
+          color-mix(in srgb, var(--bg) 64%, transparent) 68%,
+          color-mix(in srgb, var(--bg) 78%, transparent) 100%);
+    }
+    [data-theme="dark"] .composer-box {
+      border-color: color-mix(in srgb, var(--line) 58%, rgba(255,255,255,.18));
+      background:
+        linear-gradient(180deg,
+          color-mix(in srgb, var(--surface) 68%, rgba(255,255,255,.08)),
+          color-mix(in srgb, var(--surface) 50%, rgba(255,255,255,.04)));
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.14),
+        inset 0 -1px 0 rgba(255,255,255,.05),
+        0 24px 70px rgba(0,0,0,.36);
     }
     .composer-chip-row {
       display: flex;
@@ -3499,9 +3544,11 @@ INDEX_HTML = r'''<!doctype html>
       height: 34px;
       min-height: 34px;
       border-radius: 999px;
-      background: color-mix(in srgb, var(--surface-soft) 66%, transparent);
+      background: color-mix(in srgb, var(--surface-soft) 50%, rgba(255,255,255,.34));
       border-color: color-mix(in srgb, var(--line) 74%, transparent);
       color: var(--muted);
+      -webkit-backdrop-filter: blur(18px) saturate(1.2);
+      backdrop-filter: blur(18px) saturate(1.2);
     }
     .model-select {
       min-width: 270px;
@@ -3511,7 +3558,7 @@ INDEX_HTML = r'''<!doctype html>
       font-size: 12px;
     }
     .scroll-latest {
-      bottom: 148px;
+      bottom: 198px;
       border-radius: 999px;
       border-color: color-mix(in srgb, var(--line) 80%, transparent);
     }
@@ -3522,10 +3569,10 @@ INDEX_HTML = r'''<!doctype html>
         padding: 14px 12px;
       }
       .messages {
-        padding: 22px 14px 24px;
+        padding: 22px 14px 250px;
       }
       .composer {
-        padding: 7px 12px 12px;
+        padding: 34px 12px 12px;
       }
       .topbar {
         padding: 0 10px;
@@ -3560,7 +3607,7 @@ INDEX_HTML = r'''<!doctype html>
         min-width: 36px;
       }
       .messages {
-        padding: 18px 12px 18px;
+        padding: 18px 12px 300px;
         gap: 22px;
       }
       .empty h2 {
@@ -3618,7 +3665,7 @@ INDEX_HTML = r'''<!doctype html>
         min-height: 46px;
       }
       .scroll-latest {
-        bottom: 174px;
+        bottom: 226px;
       }
     }
 
@@ -4039,7 +4086,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.13</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.14</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
