@@ -22,6 +22,7 @@ from urllib.parse import unquote, urlencode, urlparse
 DATA_DIR = Path(os.environ.get("AI_PLATFORM_DATA", "/opt/ai-platform"))
 APP_DIR = Path(__file__).resolve().parent
 RES_DIR = APP_DIR / "res"
+HOME_PAGE_PATH = APP_DIR / "index.html"
 LISTEN = os.environ.get("AI_PLATFORM_LISTEN", ":8080")
 DB_PATH = DATA_DIR / "ai-platform.db"
 SECRETS_PATH = DATA_DIR / "secrets.json"
@@ -642,6 +643,8 @@ class AppHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/":
             return self.html(INDEX_HTML)
+        if path in ("/xiaoji", "/xiaoji/"):
+            return self.home_page()
         if path == "/favicon.ico":
             return self.static_file(RES_DIR / "favicon.ico")
         if path.startswith("/res/"):
@@ -736,6 +739,12 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def home_page(self):
+        try:
+            return self.html(HOME_PAGE_PATH.read_text())
+        except FileNotFoundError:
+            return self.error(HTTPStatus.NOT_FOUND, "home page not found")
 
     def handle_res_file(self, path):
         name = unquote(path.removeprefix("/res/"))
@@ -4012,7 +4021,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.4</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.5</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
