@@ -3021,6 +3021,15 @@ INDEX_HTML = r'''<!doctype html>
       --content: 1120px;
       --reading: 1040px;
       --composer-width: 1040px;
+      --composer-glass-rgb: 255, 252, 248;
+      --composer-field-rgb: 255, 255, 255;
+      --composer-control-rgb: 246, 233, 214;
+      --composer-glass-opacity: .8;
+      --composer-field-opacity: .38;
+      --composer-field-focus-opacity: .46;
+      --composer-control-opacity: .44;
+      --composer-glass-blur: 18px;
+      --composer-field-blur: 12px;
     }
     [data-theme="dark"] {
       --bg: #181614;
@@ -3038,6 +3047,9 @@ INDEX_HTML = r'''<!doctype html>
       --assistant-bg: transparent;
       --code-bg: #11100f;
       --code-text: #f5efe6;
+      --composer-glass-rgb: 31, 28, 25;
+      --composer-field-rgb: 255, 255, 255;
+      --composer-control-rgb: 255, 255, 255;
     }
     body {
       background:
@@ -3444,9 +3456,9 @@ INDEX_HTML = r'''<!doctype html>
       gap: 9px;
       pointer-events: auto;
       border: 1px solid color-mix(in srgb, var(--line) 52%, rgba(255,255,255,.72));
-      background: rgba(255, 252, 248, .58);
-      -webkit-backdrop-filter: blur(18px) saturate(160%);
-      backdrop-filter: blur(18px) saturate(160%);
+      background: rgba(var(--composer-glass-rgb), var(--composer-glass-opacity));
+      -webkit-backdrop-filter: blur(var(--composer-glass-blur)) saturate(160%);
+      backdrop-filter: blur(var(--composer-glass-blur)) saturate(160%);
       box-shadow:
         inset 0 1px 0 rgba(255,255,255,.82),
         inset 0 -1px 0 rgba(255,255,255,.34),
@@ -3466,7 +3478,6 @@ INDEX_HTML = r'''<!doctype html>
     }
     [data-theme="dark"] .composer-box {
       border-color: color-mix(in srgb, var(--line) 58%, rgba(255,255,255,.18));
-      background: rgba(31, 28, 25, .58);
       box-shadow:
         inset 0 1px 0 rgba(255,255,255,.14),
         inset 0 -1px 0 rgba(255,255,255,.05),
@@ -3506,7 +3517,7 @@ INDEX_HTML = r'''<!doctype html>
       background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
     }
     .input-row {
-      grid-template-columns: minmax(0, 1fr) 42px 46px;
+      grid-template-columns: minmax(0, 1fr) 42px 42px 46px;
       gap: 8px;
       align-items: end;
     }
@@ -3518,13 +3529,13 @@ INDEX_HTML = r'''<!doctype html>
       line-height: 1.55;
       border: 1px solid color-mix(in srgb, var(--line) 42%, transparent);
       border-radius: 22px;
-      background: color-mix(in srgb, var(--surface) 34%, rgba(255,255,255,.26));
-      -webkit-backdrop-filter: blur(12px) saturate(1.25);
-      backdrop-filter: blur(12px) saturate(1.25);
+      background: rgba(var(--composer-field-rgb), var(--composer-field-opacity));
+      -webkit-backdrop-filter: blur(var(--composer-field-blur)) saturate(1.25);
+      backdrop-filter: blur(var(--composer-field-blur)) saturate(1.25);
     }
     #prompt:focus {
       border-color: color-mix(in srgb, var(--accent) 32%, transparent);
-      background: color-mix(in srgb, var(--surface) 42%, rgba(255,255,255,.32));
+      background: rgba(var(--composer-field-rgb), var(--composer-field-focus-opacity));
     }
     #send {
       width: 46px;
@@ -3553,18 +3564,18 @@ INDEX_HTML = r'''<!doctype html>
       height: 34px;
       min-height: 34px;
       border-radius: 999px;
-      background: color-mix(in srgb, var(--surface-soft) 42%, rgba(255,255,255,.38));
+      background: rgba(var(--composer-control-rgb), var(--composer-control-opacity));
       border-color: color-mix(in srgb, var(--line) 74%, transparent);
       color: var(--muted);
-      -webkit-backdrop-filter: blur(18px) saturate(1.2);
-      backdrop-filter: blur(18px) saturate(1.2);
+      -webkit-backdrop-filter: blur(var(--composer-field-blur)) saturate(1.2);
+      backdrop-filter: blur(var(--composer-field-blur)) saturate(1.2);
     }
     .prompt-chip,
     .composer-action {
-      background: color-mix(in srgb, var(--surface-soft) 38%, rgba(255,255,255,.38));
+      background: rgba(var(--composer-control-rgb), var(--composer-control-opacity));
       border-color: color-mix(in srgb, var(--line) 60%, transparent);
-      -webkit-backdrop-filter: blur(14px) saturate(1.25);
-      backdrop-filter: blur(14px) saturate(1.25);
+      -webkit-backdrop-filter: blur(var(--composer-field-blur)) saturate(1.25);
+      backdrop-filter: blur(var(--composer-field-blur)) saturate(1.25);
     }
     .model-select {
       min-width: 270px;
@@ -3578,6 +3589,114 @@ INDEX_HTML = r'''<!doctype html>
       border-radius: 999px;
       border-color: color-mix(in srgb, var(--line) 80%, transparent);
     }
+    .interface-popover {
+      position: absolute;
+      right: clamp(18px, 5vw, 72px);
+      bottom: calc(100% + 12px);
+      z-index: 12;
+      width: min(390px, calc(100vw - 24px));
+      display: none;
+      pointer-events: auto;
+    }
+    .interface-popover.show {
+      display: block;
+    }
+    .interface-panel {
+      display: grid;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--line) 70%, rgba(255,255,255,.5));
+      border-radius: 24px;
+      background: rgba(var(--composer-glass-rgb), .88);
+      -webkit-backdrop-filter: blur(22px) saturate(150%);
+      backdrop-filter: blur(22px) saturate(150%);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.72),
+        0 22px 56px rgba(73, 54, 35, .18);
+    }
+    [data-theme="dark"] .interface-panel {
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.12),
+        0 22px 60px rgba(0,0,0,.42);
+    }
+    .interface-panel .dialog-head {
+      min-height: 54px;
+      padding: 0 14px 0 16px;
+      background: color-mix(in srgb, var(--surface) 44%, transparent);
+    }
+    .interface-panel .dialog-body {
+      display: grid;
+      gap: 14px;
+      padding: 14px;
+      background: transparent;
+      overflow: visible;
+    }
+    .interface-section {
+      display: grid;
+      gap: 12px;
+    }
+    .interface-section h2 {
+      margin: 0;
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 760;
+    }
+    .range-field {
+      display: grid;
+      gap: 9px;
+      margin: 0;
+      padding: 12px;
+      border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      border-radius: 18px;
+      background: color-mix(in srgb, var(--surface) 52%, transparent);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
+    }
+    .range-field-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--text);
+    }
+    .range-field-head strong {
+      font-size: 14px;
+      font-weight: 720;
+    }
+    .range-field-head span {
+      flex: 0 0 auto;
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 760;
+    }
+    .range-field input[type="range"] {
+      width: 100%;
+      min-height: 30px;
+      padding: 0;
+      accent-color: var(--accent);
+      cursor: pointer;
+      box-shadow: none;
+    }
+    .range-field small,
+    .interface-hint {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .interface-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .interface-actions button {
+      min-height: 38px;
+      border-radius: 999px;
+    }
+    #openInterfaceSettings.active {
+      color: var(--accent-strong);
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 66%, transparent);
+    }
     @media (max-width: 900px) {
       .app { grid-template-columns: 1fr; }
       .sidebar {
@@ -3589,6 +3708,9 @@ INDEX_HTML = r'''<!doctype html>
       }
       .composer {
         padding: 0 12px;
+      }
+      .interface-popover {
+        right: 12px;
       }
       .topbar {
         padding: 0 10px;
@@ -3682,7 +3804,7 @@ INDEX_HTML = r'''<!doctype html>
         min-height: 58px;
       }
       .input-row {
-        grid-template-columns: minmax(0, 1fr) 42px 46px;
+        grid-template-columns: minmax(0, 1fr) 42px 42px 46px;
       }
       #send {
         width: 46px;
@@ -4058,6 +4180,15 @@ INDEX_HTML = r'''<!doctype html>
         bottom: max(10px, env(safe-area-inset-bottom, 0px));
         padding: 0 10px;
       }
+      .interface-popover {
+        left: 10px;
+        right: 10px;
+        bottom: calc(100% + 10px);
+        width: auto;
+      }
+      .interface-panel {
+        border-radius: 22px;
+      }
       .sidebar {
         width: min(360px, 92vw);
         border-radius: 0 24px 24px 0;
@@ -4113,7 +4244,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.15</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.16</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
@@ -4161,11 +4292,12 @@ INDEX_HTML = r'''<!doctype html>
 	            <button class="prompt-chip" type="button" data-prompt-text="帮我精简下面这段内容，保留重点，表达更利落：">精简</button>
 	            <button class="prompt-chip" id="openPrompts" type="button">更多</button>
 	          </div>
-	          <div class="input-row">
-	            <textarea id="prompt" placeholder="和 AI槑槑聊点什么..."></textarea>
-	            <button class="composer-action" id="insertNewline" type="button" title="换行（Shift+Enter）" aria-label="换行">↵</button>
-	            <button class="primary" id="send" title="发送">发送</button>
-	          </div>
+		          <div class="input-row">
+		            <textarea id="prompt" placeholder="和 AI槑槑聊点什么..."></textarea>
+		            <button class="composer-action" id="insertNewline" type="button" title="换行（Shift+Enter）" aria-label="换行">↵</button>
+		            <button class="composer-action" id="openInterfaceSettings" type="button" title="界面设置" aria-label="界面设置">⚙</button>
+		            <button class="primary" id="send" title="发送">发送</button>
+		          </div>
 	          <div class="composer-tools">
 	            <div class="composer-left">
 	              <select class="model-select" id="modelSelect"></select>
@@ -4174,10 +4306,44 @@ INDEX_HTML = r'''<!doctype html>
 	                <span>联网搜索</span>
 	              </label>
 	            </div>
-	            <div class="status" id="chatStatus"></div>
-	          </div>
-	        </div>
-	      </footer>
+		            <div class="status" id="chatStatus"></div>
+		          </div>
+		        </div>
+		        <div class="interface-popover" id="interfacePopover" role="dialog" aria-modal="false" aria-labelledby="interfacePopoverTitle">
+		          <div class="interface-panel">
+		            <div class="dialog-head">
+		              <strong id="interfacePopoverTitle">界面设置</strong>
+		              <button class="icon" id="closeInterfaceSettings" type="button" title="关闭">×</button>
+		            </div>
+		            <div class="dialog-body">
+		              <section class="interface-section">
+		                <h2>输入区</h2>
+		                <label class="range-field">
+		                  <span class="range-field-head">
+		                    <strong>输入框透明度</strong>
+		                    <span id="composerOpacityValue">80%</span>
+		                  </span>
+		                  <input id="composerOpacityRange" type="range" min="0" max="100" step="1" value="80">
+		                  <small>推荐 20% ~ 90%，越高越不透明。</small>
+		                </label>
+		                <label class="range-field">
+		                  <span class="range-field-head">
+		                    <strong>毛玻璃强度</strong>
+		                    <span id="composerBlurValue">18px</span>
+		                  </span>
+		                  <input id="composerBlurRange" type="range" min="0" max="30" step="1" value="18">
+		                  <small>实时调整底部输入区的 backdrop-filter blur。</small>
+		                </label>
+		              </section>
+		              <div class="interface-actions">
+		                <button id="resetInterfaceSettings" type="button">恢复默认设置</button>
+		                <span class="interface-hint">后续可继续加入深色模式、字体大小、气泡宽度和 AI 回复字号。</span>
+		              </div>
+		              <div class="status" id="interfaceStatus"></div>
+		            </div>
+		          </div>
+		        </div>
+		      </footer>
     </main>
   </div>
 
@@ -4384,11 +4550,13 @@ INDEX_HTML = r'''<!doctype html>
 	      lastCompositionEndAt: 0,
 	      messageSeq: 0,
 	      searchConfig: null,
-	      adminKey: localStorage.getItem("aiPlatformAdminKey") || "",
-	      theme: localStorage.getItem("aiPlatformTheme") || "",
-	      accent: localStorage.getItem("aiPlatformAccent") || "pink",
-	      fontSize: localStorage.getItem("aiPlatformFontSize") || "medium"
-	    };
+		      adminKey: localStorage.getItem("aiPlatformAdminKey") || "",
+		      theme: localStorage.getItem("aiPlatformTheme") || "",
+		      accent: localStorage.getItem("aiPlatformAccent") || "pink",
+		      fontSize: localStorage.getItem("aiPlatformFontSize") || "medium",
+		      composerOpacity: localStorage.getItem("aiPlatformComposerOpacity") || "80",
+		      composerBlur: localStorage.getItem("aiPlatformComposerBlur") || "18"
+		    };
     $("adminKey").value = state.adminKey;
 
     const accentPresets = {
@@ -4661,12 +4829,97 @@ INDEX_HTML = r'''<!doctype html>
       autosizePrompt();
     }
 
-    function toggleFontSize() {
-      const current = fontSizeOptions.indexOf(normalizeFontSize(state.fontSize));
-      applyFontSize(fontSizeOptions[(current + 1) % fontSizeOptions.length]);
-    }
+	    function toggleFontSize() {
+	      const current = fontSizeOptions.indexOf(normalizeFontSize(state.fontSize));
+	      applyFontSize(fontSizeOptions[(current + 1) % fontSizeOptions.length]);
+	    }
 
-    function renderAccentOptions() {
+	    const interfaceDefaults = {
+	      composerOpacity: 80,
+	      composerBlur: 18
+	    };
+
+	    function clampNumber(value, min, max, fallback) {
+	      const number = Number(value);
+	      if (!Number.isFinite(number)) return fallback;
+	      return Math.max(min, Math.min(max, number));
+	    }
+
+	    function updateInterfaceControls(opacity, blur) {
+	      const opacityRange = $("composerOpacityRange");
+	      const blurRange = $("composerBlurRange");
+	      const opacityValue = $("composerOpacityValue");
+	      const blurValue = $("composerBlurValue");
+	      if (opacityRange) opacityRange.value = String(opacity);
+	      if (blurRange) blurRange.value = String(blur);
+	      if (opacityValue) opacityValue.textContent = opacity + "%";
+	      if (blurValue) blurValue.textContent = blur + "px";
+	    }
+
+	    function applyInterfaceSettings(options = {}) {
+	      const opacity = Math.round(clampNumber(
+	        options.opacity ?? state.composerOpacity,
+	        0,
+	        100,
+	        interfaceDefaults.composerOpacity
+	      ));
+	      const blur = Math.round(clampNumber(
+	        options.blur ?? state.composerBlur,
+	        0,
+	        30,
+	        interfaceDefaults.composerBlur
+	      ));
+	      state.composerOpacity = String(opacity);
+	      state.composerBlur = String(blur);
+	      const ratio = opacity / 100;
+	      const root = document.documentElement;
+	      root.style.setProperty("--composer-glass-opacity", ratio.toFixed(2));
+	      root.style.setProperty("--composer-field-opacity", (ratio * .48).toFixed(2));
+	      root.style.setProperty("--composer-field-focus-opacity", Math.min(1, ratio * .48 + .08).toFixed(2));
+	      root.style.setProperty("--composer-control-opacity", (ratio * .55).toFixed(2));
+	      root.style.setProperty("--composer-glass-blur", blur + "px");
+	      root.style.setProperty("--composer-field-blur", Math.round(blur * .67) + "px");
+	      if (options.save !== false) {
+	        localStorage.setItem("aiPlatformComposerOpacity", String(opacity));
+	        localStorage.setItem("aiPlatformComposerBlur", String(blur));
+	      }
+	      updateInterfaceControls(opacity, blur);
+	    }
+
+	    function openInterfaceSettings() {
+	      $("interfacePopover").classList.add("show");
+	      $("openInterfaceSettings").classList.add("active");
+	      setStatus("interfaceStatus", "");
+	      updateInterfaceControls(Number(state.composerOpacity), Number(state.composerBlur));
+	    }
+
+	    function closeInterfaceSettings() {
+	      $("interfacePopover").classList.remove("show");
+	      $("openInterfaceSettings").classList.remove("active");
+	    }
+
+	    function toggleInterfaceSettings(event) {
+	      event?.stopPropagation();
+	      if ($("interfacePopover").classList.contains("show")) closeInterfaceSettings();
+	      else openInterfaceSettings();
+	    }
+
+	    function resetInterfaceSettings() {
+	      applyInterfaceSettings({
+	        opacity: interfaceDefaults.composerOpacity,
+	        blur: interfaceDefaults.composerBlur
+	      });
+	      setStatus("interfaceStatus", "已恢复默认设置", "ok");
+	    }
+
+	    function handleInterfaceOutsideClick(event) {
+	      const popover = $("interfacePopover");
+	      if (!popover.classList.contains("show")) return;
+	      if (popover.contains(event.target) || $("openInterfaceSettings").contains(event.target)) return;
+	      closeInterfaceSettings();
+	    }
+
+	    function renderAccentOptions() {
       const box = $("accentPresetList");
       if (!box) return;
       box.innerHTML = "";
@@ -4729,8 +4982,9 @@ INDEX_HTML = r'''<!doctype html>
       setStatus("accentStatus", "已恢复马卡龙粉", "ok");
     }
 
-    applyFontSize(state.fontSize);
-    applyTheme(preferredTheme());
+	    applyInterfaceSettings({ save: false });
+	    applyFontSize(state.fontSize);
+	    applyTheme(preferredTheme());
 
     function setStatus(id, text, kind = "") {
       const el = $(id);
@@ -6710,11 +6964,31 @@ INDEX_HTML = r'''<!doctype html>
     $("deleteConversation").addEventListener("click", deleteCurrentConversation);
     $("messages").addEventListener("scroll", handleMessagesScroll, { passive: true });
     $("scrollLatest").addEventListener("click", () => scrollToLatest("smooth"));
-    $("prompt").addEventListener("input", autosizePrompt);
-    $("prompt").addEventListener("focus", handlePromptFocus);
-    $("prompt").addEventListener("compositionstart", () => {
-      state.isComposing = true;
-    });
+	    $("prompt").addEventListener("input", autosizePrompt);
+	    $("prompt").addEventListener("focus", handlePromptFocus);
+	    $("openInterfaceSettings").addEventListener("click", toggleInterfaceSettings);
+	    $("closeInterfaceSettings").addEventListener("click", closeInterfaceSettings);
+	    $("interfacePopover").addEventListener("click", (event) => event.stopPropagation());
+	    $("composerOpacityRange").addEventListener("input", () => {
+	      applyInterfaceSettings({
+	        opacity: $("composerOpacityRange").value,
+	        blur: $("composerBlurRange").value
+	      });
+	    });
+	    $("composerBlurRange").addEventListener("input", () => {
+	      applyInterfaceSettings({
+	        opacity: $("composerOpacityRange").value,
+	        blur: $("composerBlurRange").value
+	      });
+	    });
+	    $("resetInterfaceSettings").addEventListener("click", resetInterfaceSettings);
+	    document.addEventListener("click", handleInterfaceOutsideClick);
+	    document.addEventListener("keydown", (event) => {
+	      if (event.key === "Escape") closeInterfaceSettings();
+	    });
+	    $("prompt").addEventListener("compositionstart", () => {
+	      state.isComposing = true;
+	    });
     $("prompt").addEventListener("compositionend", () => {
       state.isComposing = false;
       state.lastCompositionEndAt = Date.now();
