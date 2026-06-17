@@ -1922,7 +1922,7 @@ INDEX_HTML = r'''<!doctype html>
       height: 100vh;
       min-height: 100vh;
       display: grid;
-      grid-template-columns: 304px minmax(0, 1fr);
+      grid-template-columns: var(--sidebar-width, 304px) minmax(0, 1fr);
       overflow: hidden;
       background: var(--bg);
     }
@@ -1935,6 +1935,7 @@ INDEX_HTML = r'''<!doctype html>
       min-height: 0;
       min-width: 0;
       overflow: hidden;
+      position: relative;
     }
     .side-head {
       padding: 18px 14px 12px;
@@ -2069,6 +2070,21 @@ INDEX_HTML = r'''<!doctype html>
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .conv-model {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .conv-time {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+    .conv-time::before {
+      content: "·";
+      margin: 0 6px;
+      color: var(--muted-2);
     }
     .conv-actions {
       display: flex;
@@ -3020,6 +3036,7 @@ INDEX_HTML = r'''<!doctype html>
       --soft-shadow: 0 10px 26px rgba(138, 109, 90, .08);
       --content: 1120px;
       --reading: 1040px;
+      --sidebar-width: 322px;
       --composer-width: 1040px;
       --composer-glass-rgb: 255, 252, 248;
       --composer-field-rgb: 255, 255, 255;
@@ -3069,7 +3086,7 @@ INDEX_HTML = r'''<!doctype html>
       transform: translateY(-1px);
     }
     .app {
-      grid-template-columns: 322px minmax(0, 1fr);
+      grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
       background: transparent;
     }
     .sidebar {
@@ -3177,6 +3194,9 @@ INDEX_HTML = r'''<!doctype html>
     .conv-meta {
       font-size: 12px;
       color: var(--muted);
+      display: flex;
+      align-items: center;
+      min-width: 0;
     }
     .conv-action {
       width: 30px;
@@ -3197,6 +3217,54 @@ INDEX_HTML = r'''<!doctype html>
       background: color-mix(in srgb, var(--surface) 64%, transparent);
       color: var(--muted);
       font-weight: 620;
+    }
+    .sidebar-resizer {
+      display: none;
+      position: absolute;
+      top: 0;
+      right: -6px;
+      bottom: 0;
+      width: 12px;
+      min-width: 12px;
+      min-height: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      cursor: col-resize;
+      z-index: 8;
+      touch-action: none;
+    }
+    .sidebar-resizer::before {
+      content: "";
+      position: absolute;
+      top: 18px;
+      bottom: 18px;
+      left: 5px;
+      width: 2px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 38%, transparent);
+      opacity: 0;
+      transition: opacity .16s ease, background .16s ease;
+    }
+    .sidebar-resizer:hover::before,
+    .sidebar-resizer:focus-visible::before,
+    body.sidebar-resizing .sidebar-resizer::before {
+      opacity: 1;
+      background: color-mix(in srgb, var(--accent) 72%, var(--line));
+    }
+    body.sidebar-resizing {
+      cursor: col-resize;
+      user-select: none;
+    }
+    body.sidebar-resizing .main,
+    body.sidebar-resizing .messages {
+      pointer-events: none;
+    }
+    @media (min-width: 901px) {
+      .sidebar-resizer {
+        display: block;
+      }
     }
     .main {
       position: relative;
@@ -3702,6 +3770,9 @@ INDEX_HTML = r'''<!doctype html>
       .sidebar {
         width: min(340px, 88vw);
         padding: 14px 12px;
+      }
+      .sidebar-resizer {
+        display: none;
       }
       .messages {
         padding: 22px 14px 232px;
@@ -4244,7 +4315,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.16</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.17</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
@@ -4262,6 +4333,7 @@ INDEX_HTML = r'''<!doctype html>
         <button id="openSettings">模型管理</button>
         <button id="logout">退出</button>
       </div>
+      <button class="sidebar-resizer" id="sidebarResizer" type="button" aria-label="调整侧边栏宽度" title="拖动调整侧边栏宽度"></button>
     </aside>
 
     <main class="main">
@@ -4555,7 +4627,8 @@ INDEX_HTML = r'''<!doctype html>
 		      accent: localStorage.getItem("aiPlatformAccent") || "pink",
 		      fontSize: localStorage.getItem("aiPlatformFontSize") || "medium",
 		      composerOpacity: localStorage.getItem("aiPlatformComposerOpacity") || "80",
-		      composerBlur: localStorage.getItem("aiPlatformComposerBlur") || "18"
+		      composerBlur: localStorage.getItem("aiPlatformComposerBlur") || "18",
+		      sidebarWidth: localStorage.getItem("aiPlatformSidebarWidth") || "322"
 		    };
     $("adminKey").value = state.adminKey;
 
@@ -5072,11 +5145,67 @@ INDEX_HTML = r'''<!doctype html>
       document.body.classList.toggle("dialog-open", open);
     }
 
-    function isSmallScreen() {
-      return window.matchMedia && window.matchMedia("(max-width: 620px)").matches;
-    }
+	    function isSmallScreen() {
+	      return window.matchMedia && window.matchMedia("(max-width: 620px)").matches;
+	    }
 
-    function handlePromptFocus() {
+	    const sidebarWidthDefaults = {
+	      min: 286,
+	      value: 322
+	    };
+
+	    function isSidebarResizableViewport() {
+	      return window.matchMedia && window.matchMedia("(min-width: 901px)").matches;
+	    }
+
+	    function maxSidebarWidth() {
+	      return Math.max(sidebarWidthDefaults.min, Math.floor(window.innerWidth * .5));
+	    }
+
+	    function normalizeSidebarWidth(value) {
+	      return Math.round(clampNumber(value, sidebarWidthDefaults.min, maxSidebarWidth(), sidebarWidthDefaults.value));
+	    }
+
+	    function applySidebarWidth(value = state.sidebarWidth, save = true) {
+	      if (!isSidebarResizableViewport()) return;
+	      const width = normalizeSidebarWidth(value);
+	      state.sidebarWidth = String(width);
+	      document.documentElement.style.setProperty("--sidebar-width", width + "px");
+	      if (save) localStorage.setItem("aiPlatformSidebarWidth", String(width));
+	    }
+
+	    function startSidebarResize(event) {
+	      if (!isSidebarResizableViewport() || event.button !== 0) return;
+	      if (document.body.classList.contains("sidebar-resizing")) return;
+	      event.preventDefault();
+	      closeInterfaceSettings();
+	      document.body.classList.add("sidebar-resizing");
+	      const appLeft = $("appView").getBoundingClientRect().left;
+	      const moveEvent = event.type === "mousedown" ? "mousemove" : "pointermove";
+	      const upEvent = event.type === "mousedown" ? "mouseup" : "pointerup";
+	      const cancelEvent = event.type === "mousedown" ? "mouseleave" : "pointercancel";
+	      function widthFromEvent(pointerEvent) {
+	        return pointerEvent.clientX - appLeft;
+	      }
+	      function onMove(pointerEvent) {
+	        applySidebarWidth(widthFromEvent(pointerEvent), false);
+	      }
+	      function onUp(pointerEvent) {
+	        applySidebarWidth(widthFromEvent(pointerEvent), true);
+	        document.body.classList.remove("sidebar-resizing");
+	        document.removeEventListener(moveEvent, onMove);
+	        document.removeEventListener(upEvent, onUp);
+	        document.removeEventListener(cancelEvent, onUp);
+	      }
+	      document.addEventListener(moveEvent, onMove);
+	      document.addEventListener(upEvent, onUp);
+	      document.addEventListener(cancelEvent, onUp);
+	      onMove(event);
+	    }
+
+	    applySidebarWidth(state.sidebarWidth, false);
+
+	    function handlePromptFocus() {
       if (!isSmallScreen()) return;
       setTimeout(() => {
         if (state.messages.length && isNearBottom()) scrollToLatest("auto");
@@ -5639,13 +5768,14 @@ INDEX_HTML = r'''<!doctype html>
 	            input.select();
 	          }, 0);
 	        } else {
-	          const main = document.createElement("button");
-	          main.className = "conv-main";
-	          main.type = "button";
-	          main.innerHTML = `<span class="conv-title"></span><span class="conv-meta"></span>`;
-	          main.querySelector(".conv-title").textContent = conv.title;
-	          main.querySelector(".conv-meta").textContent = conv.model_name + " · " + formatTime(conv.updated_at);
-	          main.addEventListener("click", () => selectConversation(conv.id));
+		          const main = document.createElement("button");
+		          main.className = "conv-main";
+		          main.type = "button";
+		          main.innerHTML = `<span class="conv-title"></span><span class="conv-meta"><span class="conv-model"></span><span class="conv-time"></span></span>`;
+		          main.querySelector(".conv-title").textContent = conv.title;
+		          main.querySelector(".conv-model").textContent = conv.model_name || "未命名模型";
+		          main.querySelector(".conv-time").textContent = formatTime(conv.updated_at);
+		          main.addEventListener("click", () => selectConversation(conv.id));
 
 	          const actions = document.createElement("div");
 	          actions.className = "conv-actions";
@@ -6955,8 +7085,11 @@ INDEX_HTML = r'''<!doctype html>
     $("favoriteDialog").addEventListener("click", (event) => {
       if (event.target === $("favoriteDialog")) closeFavorites();
     });
-    $("refreshConversations").addEventListener("click", loadConversations);
-    $("send").addEventListener("click", () => {
+	    $("refreshConversations").addEventListener("click", loadConversations);
+	    $("sidebarResizer").addEventListener("pointerdown", startSidebarResize);
+	    $("sidebarResizer").addEventListener("mousedown", startSidebarResize);
+	    $("sidebarResizer").addEventListener("dblclick", () => applySidebarWidth(sidebarWidthDefaults.value, true));
+	    $("send").addEventListener("click", () => {
       if (state.sending) stopGeneration();
       else sendMessage();
     });
@@ -7048,8 +7181,9 @@ INDEX_HTML = r'''<!doctype html>
 	        setStatus("chatStatus", "已复制", "ok");
 	      }
 	    });
-	    syncViewportHeight();
-	    window.addEventListener("resize", syncViewportHeight, { passive: true });
+		    syncViewportHeight();
+		    window.addEventListener("resize", syncViewportHeight, { passive: true });
+		    window.addEventListener("resize", () => applySidebarWidth(state.sidebarWidth, true), { passive: true });
 	    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
 	    window.visualViewport?.addEventListener("scroll", syncViewportHeight, { passive: true });
 
