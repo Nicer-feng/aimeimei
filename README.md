@@ -2,7 +2,7 @@
 
 AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实现。项目保持单文件应用形态，无 Docker、无前端框架、无外部 Python 依赖。
 
-当前版本：`2.2.19`
+当前版本：`2.2.20`
 
 ## 目录说明
 
@@ -10,7 +10,7 @@ AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实
 - `index.html`：槑槑小记个人首页，当前可通过 `/xiaoji` 预览，备案通过后可作为主域名首页。
 - `app.server.py`：服务器旧版/备份应用文件，保留用于对照。
 - `ai-platform.service`：systemd 服务配置示例。
-- `deploy/nginx/aimeimei.conf`：域名访问用的 Nginx 配置示例，`feng.asia` 和 `www.feng.asia` 首页指向槑槑小记，其他路径反代到 AI 平台。
+- `deploy/nginx/aimeimei.conf`：域名访问用的 Nginx 配置示例，`feng.asia` 和 `www.feng.asia` 首页指向槑槑小记，AI 平台挂载在 `/ai`。
 - `verify.sh`：线上健康检查和基础接口验证脚本。
 - `res/`：项目资源文件，包括无文字槑槑头像、登录插画、空状态插画、favicon 和原始猫咪照片。
 - `VERSION`：当前项目版本号。
