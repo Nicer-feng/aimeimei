@@ -31,23 +31,97 @@
   </script>
   <style>
     html { scroll-behavior: smooth; }
-    body { background: #FAF8F4; color: #27211F; }
+    body { background: #fbf7f2; color: #2b2523; }
     .safe-bottom { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
-    .cat-card { break-inside: avoid; }
+    .cat-card {
+      break-inside: avoid;
+      border-radius: 18px;
+      border: 1px solid rgba(80, 60, 50, .08);
+      box-shadow: 0 10px 28px rgba(80, 60, 50, .06);
+      transition: transform .18s ease, box-shadow .18s ease;
+    }
+    @media (hover: hover) {
+      .cat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 16px 34px rgba(80, 60, 50, .09);
+      }
+      .cat-pill:hover,
+      .cat-close:hover {
+        background: rgba(216, 138, 166, .12);
+      }
+    }
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { scrollbar-width: none; }
-    .soft-focus:focus { outline: none; box-shadow: 0 0 0 4px rgba(233, 175, 192, .28); border-color: #E9AFC0; }
-    .bg-cream { background-color: #FAF8F4; }
+    .soft-focus:focus { outline: none; box-shadow: 0 0 0 4px rgba(216, 138, 166, .18); border-color: rgba(216, 138, 166, .46); }
+    .bg-cream { background-color: #fbf7f2; }
     .bg-milk { background-color: #FFFDF9; }
     .bg-rose { background-color: #E9AFC0; }
-    .bg-roseDark { background-color: #D98FA8; }
-    .bg-ink { background-color: #27211F; }
-    .text-muted { color: #8F7A70; }
-    .text-roseDark { color: #D98FA8; }
-    .text-ink { color: #27211F; }
+    .bg-roseDark { background-color: #d88aa6; }
+    .bg-ink { background-color: #2b2523; }
+    .text-muted { color: #8b817c; }
+    .text-roseDark { color: #d88aa6; }
+    .text-ink { color: #2b2523; }
     .border-rose { border-color: #E9AFC0; }
-    .rounded-app { border-radius: 16px; }
-    .shadow-soft { box-shadow: 0 18px 50px rgba(91, 67, 55, .10); }
+    .rounded-app { border-radius: 14px; }
+    .shadow-soft { box-shadow: 0 14px 36px rgba(80, 60, 50, .08); }
+    .cat-header {
+      background: rgba(250, 248, 245, .75);
+      border-color: rgba(80, 60, 50, .08);
+      backdrop-filter: blur(16px) saturate(150%);
+      -webkit-backdrop-filter: blur(16px) saturate(150%);
+    }
+    .cat-shell { width: min(100% - 32px, 1040px); margin-inline: auto; }
+    .cat-hero {
+      border: 1px solid rgba(80, 60, 50, .08);
+      background:
+        radial-gradient(circle at 86% 18%, rgba(233, 175, 192, .24), transparent 32%),
+        linear-gradient(145deg, rgba(255, 255, 255, .96), rgba(255, 251, 247, .9));
+    }
+    .cat-pill {
+      min-height: 44px;
+      border: 1px solid rgba(80, 60, 50, .08);
+      background: rgba(255, 255, 255, .62);
+      transition: background .18s ease, transform .18s ease, border-color .18s ease;
+    }
+    .cat-primary {
+      min-height: 44px;
+      background: #d88aa6;
+      color: #fff;
+      box-shadow: 0 12px 26px rgba(216, 138, 166, .22);
+      transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+    }
+    .cat-primary:active,
+    .cat-pill:active { transform: scale(.98); }
+    .cat-primary:hover { background: #d17f9d; }
+    .album-feed { columns: 2; column-gap: 10px; }
+    @media (min-width: 640px) { .album-feed { columns: 3; column-gap: 12px; } }
+    @media (min-width: 1024px) { .album-feed { columns: 4; column-gap: 14px; } }
+    .album-feed.feed-few {
+      max-width: 420px;
+      margin-inline: auto;
+      columns: 1;
+    }
+    .skeleton-img {
+      background: linear-gradient(110deg, #f4ece5 8%, #fff8f3 18%, #f4ece5 33%);
+      background-size: 200% 100%;
+      animation: shimmer 1.2s linear infinite;
+    }
+    @keyframes shimmer {
+      to { background-position-x: -200%; }
+    }
+    .cat-close {
+      transition: background .18s ease, transform .18s ease;
+    }
+    .cat-close:active { transform: scale(.94); }
+    @media (max-width: 639px) {
+      .cat-modal-panel {
+        width: calc(100vw - 32px);
+        margin-inline: auto;
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+      }
+      .upload-zone { min-height: 118px; max-height: 140px; }
+    }
   </style>
 </head>
 <body class="min-h-screen antialiased">
@@ -90,53 +164,66 @@
   </section>
 
   <section id="mainView" class="hidden min-h-screen pb-24">
-    <header class="sticky top-0 z-30 border-b border-[#EFE3D8]/80 bg-cream/88 backdrop-blur-xl">
-      <div class="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
+    <header class="cat-header sticky top-0 z-30 border-b">
+      <div class="cat-shell flex items-center gap-3 py-3">
         <button id="refreshBtn" class="flex min-w-0 flex-1 items-center gap-3 text-left">
-          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] bg-white shadow-soft">🐱</div>
+          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-white/82 shadow-soft">🐱</div>
           <div class="min-w-0">
-            <h1 class="truncate text-xl font-semibold tracking-tight">槑槑相册</h1>
+            <div class="flex items-center gap-2">
+              <h1 class="truncate text-lg font-semibold tracking-tight">槑槑相册</h1>
+              <span class="hidden rounded-full bg-[#f4e7dc] px-2 py-0.5 text-[11px] font-medium text-muted sm:inline">朋友可见</span>
+            </div>
             <p id="userLine" class="truncate text-xs text-muted">朋友家的猫都在这里</p>
           </div>
         </button>
-        <button id="adminOpenBtn" class="hidden h-10 rounded-full border border-[#EADBCF] bg-white px-3 text-sm font-medium text-muted">账号</button>
-        <button id="logoutBtn" class="h-10 rounded-full border border-[#EADBCF] bg-white px-3 text-sm font-medium text-muted">退出</button>
+        <button id="adminOpenBtn" class="cat-pill hidden rounded-full px-3 text-sm font-semibold text-muted">账号</button>
+        <button id="logoutBtn" class="cat-pill rounded-full px-3 text-sm font-semibold text-muted">退出</button>
       </div>
     </header>
 
-    <main class="mx-auto max-w-5xl px-4 pt-5">
-      <section class="mb-5 rounded-[28px] bg-white p-5 shadow-soft">
-        <p class="text-sm font-medium text-roseDark">今日猫咪</p>
-        <h2 class="mt-2 text-3xl font-semibold tracking-tight">分享一张猫猫近况</h2>
-        <p class="mt-3 text-base leading-7 text-muted">单图、多图都可以。这里不做公开社区，只安静地放朋友们的猫。</p>
-        <button id="publishOpenBtn" class="mt-5 h-12 w-full rounded-app bg-ink text-base font-semibold text-white transition active:scale-[.98] sm:w-auto sm:px-6">发布猫咪动态</button>
+    <main class="cat-shell pt-4 sm:pt-5">
+      <section class="cat-hero mb-5 rounded-[24px] p-4 shadow-soft sm:flex sm:items-center sm:justify-between sm:gap-5 sm:p-5">
+        <div class="min-w-0">
+          <p class="text-xs font-semibold uppercase tracking-[.18em] text-roseDark">Meimei Cat Album</p>
+          <h2 class="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">分享一张猫猫近况</h2>
+          <p class="mt-2 max-w-2xl text-sm leading-6 text-muted sm:text-[15px]">单图、多图都可以。这里只给熟人小圈子，安静地放朋友们的猫。</p>
+        </div>
+        <button id="publishOpenBtn" class="cat-primary mt-4 w-full rounded-[16px] px-5 text-base font-semibold sm:mt-0 sm:w-auto sm:shrink-0">发布猫咪动态</button>
       </section>
 
-      <section id="emptyFeed" class="hidden rounded-[28px] border border-dashed border-[#E2D2C5] bg-white/70 p-8 text-center">
+      <div class="mb-3 flex items-end justify-between">
+        <div>
+          <p class="text-xs font-semibold text-roseDark">Latest</p>
+          <h3 class="text-xl font-semibold tracking-tight">最近猫咪动态</h3>
+        </div>
+        <span id="feedCount" class="text-xs text-muted"></span>
+      </div>
+
+      <section id="emptyFeed" class="hidden rounded-[24px] border border-dashed border-[rgba(80,60,50,.12)] bg-white/72 p-8 text-center shadow-soft">
         <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-[22px] bg-white shadow-soft">🐾</div>
         <h3 class="text-xl font-semibold">还没有猫咪动态</h3>
-        <p class="mt-2 text-sm text-muted">先发布第一张猫咪照片吧。</p>
+        <p class="mt-2 text-sm text-muted">还没有猫猫动态，发第一张吧。</p>
       </section>
 
-      <section id="feed" class="columns-2 gap-3 sm:columns-3 lg:columns-4"></section>
-      <button id="loadMoreBtn" class="mx-auto mt-5 hidden h-11 rounded-full border border-[#EADBCF] bg-white px-5 text-sm font-semibold text-muted">加载更多</button>
+      <section id="feed" class="album-feed"></section>
+      <button id="loadMoreBtn" class="cat-pill mx-auto mt-5 hidden rounded-full px-5 text-sm font-semibold text-muted">加载更多</button>
       <div id="feedSentinel" class="h-8"></div>
     </main>
   </section>
 
   <div id="publishModal" class="fixed inset-0 z-50 hidden bg-black/28 p-3 backdrop-blur-sm">
-    <div class="safe-bottom mx-auto flex h-full max-w-2xl items-end sm:items-center">
-      <form id="publishForm" class="max-h-[92vh] w-full overflow-y-auto rounded-[28px] bg-white p-5 shadow-soft">
-        <div class="mb-4 flex items-center justify-between">
+    <div class="safe-bottom mx-auto flex h-full items-end sm:items-center sm:justify-center">
+      <form id="publishForm" class="cat-modal-panel max-h-[92vh] w-full max-w-[560px] overflow-y-auto rounded-[28px] border border-[rgba(80,60,50,.08)] bg-white p-4 shadow-soft sm:p-5">
+        <div class="mb-3 flex items-start justify-between gap-4">
           <div>
-            <p class="text-sm font-medium text-roseDark">发布动态</p>
-            <h2 class="text-2xl font-semibold">新的猫咪照片</h2>
+            <p class="text-xs font-semibold uppercase tracking-[.18em] text-roseDark">New Post</p>
+            <h2 class="mt-1 text-xl font-semibold">新的猫咪照片</h2>
           </div>
-          <button type="button" data-close="publishModal" class="h-10 w-10 rounded-full bg-cream text-xl">×</button>
+          <button type="button" data-close="publishModal" class="cat-close h-10 w-10 shrink-0 rounded-full bg-cream text-xl">×</button>
         </div>
-        <input id="postTitle" class="soft-focus mb-3 h-12 w-full rounded-app border border-[#E7D8CC] bg-milk px-4 text-base" maxlength="80" placeholder="标题，例如 今天又睡成一团">
-        <textarea id="postContent" class="soft-focus mb-4 min-h-28 w-full resize-none rounded-app border border-[#E7D8CC] bg-milk p-4 text-base leading-7" maxlength="4000" placeholder="写一点猫咪近况..."></textarea>
-        <label class="mb-3 flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-[24px] border border-dashed border-rose bg-[#FFF7FA] p-5 text-center">
+        <input id="postTitle" class="soft-focus mb-3 h-11 w-full rounded-app border border-[rgba(80,60,50,.10)] bg-milk px-4 text-base" maxlength="80" placeholder="标题，例如 今天又睡成一团">
+        <textarea id="postContent" class="soft-focus mb-3 min-h-24 w-full resize-none rounded-app border border-[rgba(80,60,50,.10)] bg-milk p-4 text-base leading-7" maxlength="4000" placeholder="写一点猫咪近况..."></textarea>
+        <label class="upload-zone mb-3 flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-[20px] border border-dashed border-[rgba(216,138,166,.38)] bg-[#fff7fa] p-4 text-center">
           <span class="text-3xl">＋</span>
           <span class="mt-2 font-semibold">选择照片</span>
           <span class="mt-1 text-sm text-muted">最多 9 张，每张建议不超过 12MB</span>
@@ -144,7 +231,7 @@
         </label>
         <div id="uploadHint" class="mb-3 hidden rounded-app bg-cream px-3 py-2 text-sm text-muted"></div>
         <div id="selectedImages" class="mb-5 grid grid-cols-3 gap-2"></div>
-        <button id="publishSubmitBtn" class="h-12 w-full rounded-app bg-roseDark text-base font-semibold text-white transition active:scale-[.98]">发布</button>
+        <button id="publishSubmitBtn" class="cat-primary h-12 w-full rounded-[16px] text-base font-semibold">发布</button>
       </form>
     </div>
   </div>
@@ -255,9 +342,9 @@
 
     function avatar(author) {
       if (author?.avatar_url) {
-        return `<img src="${esc(author.avatar_url)}" alt="" class="h-7 w-7 rounded-full object-cover">`;
+        return `<img src="${esc(author.avatar_url)}" alt="" class="h-6 w-6 rounded-full object-cover">`;
       }
-      return `<div class="flex h-7 w-7 items-center justify-center rounded-full bg-cream text-sm">🐱</div>`;
+      return `<div class="flex h-6 w-6 items-center justify-center rounded-full bg-cream text-xs">🐱</div>`;
     }
 
     function setView(name) {
@@ -267,21 +354,25 @@
 
     function renderFeed(reset = false) {
       const feed = $("feed");
+      feed.classList.toggle("feed-few", state.posts.length > 0 && state.posts.length <= 2);
+      $("feedCount").textContent = state.posts.length ? `${state.posts.length} 条` : "";
       $("emptyFeed").classList.toggle("hidden", state.posts.length > 0);
       feed.innerHTML = state.posts.map((post) => `
-        <article class="cat-card mb-3 overflow-hidden rounded-app bg-white shadow-soft transition duration-200 active:scale-[.99]" data-post-id="${esc(post.id)}">
+        <article class="cat-card mb-[10px] overflow-hidden bg-white active:scale-[.99] sm:mb-3" data-post-id="${esc(post.id)}">
           <div class="cursor-pointer" data-open-post="${esc(post.id)}">
-            <img src="${esc(post.cover_url)}" alt="${esc(post.title)}" class="w-full bg-cream object-cover" loading="lazy">
-            <div class="px-3 pt-3">
-              <h3 class="line-clamp-2 text-[15px] font-semibold leading-6">${esc(post.title)}</h3>
+            <div class="skeleton-img overflow-hidden rounded-t-[18px]">
+              <img src="${esc(post.cover_url)}" alt="${esc(post.title)}" class="w-full rounded-t-[18px] bg-cream object-cover" loading="lazy" onload="this.parentElement.classList.remove('skeleton-img')">
+            </div>
+            <div class="px-3 pt-2.5">
+              <h3 class="line-clamp-2 text-[15px] font-semibold leading-5 text-ink">${esc(post.title)}</h3>
             </div>
           </div>
-          <div class="flex items-center gap-2 px-3 pb-3 pt-3 text-xs text-muted">
+          <div class="flex items-center gap-2 px-3 pb-3 pt-2.5 text-xs text-muted">
             <button class="flex min-w-0 items-center gap-2" data-open-profile="${esc(post.author.id)}" type="button">
               ${avatar(post.author)}
-              <span class="truncate">${esc(post.author.nickname)}</span>
+              <span class="truncate text-[#9a8f89]">${esc(post.author.nickname)}</span>
             </button>
-            <span class="ml-auto shrink-0">${timeText(post.created_at)}</span>
+            <span class="ml-auto shrink-0 text-[#aaa09a]">${timeText(post.created_at)}</span>
           </div>
         </article>
       `).join("");
