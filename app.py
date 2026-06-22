@@ -16,13 +16,14 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlencode, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 
 DATA_DIR = Path(os.environ.get("AI_PLATFORM_DATA", "/opt/ai-platform"))
 APP_DIR = Path(__file__).resolve().parent
 RES_DIR = APP_DIR / "res"
 HOME_PAGE_PATH = APP_DIR / "index.html"
+CAT_PAGE_PATH = APP_DIR / "cat.html"
 LISTEN = os.environ.get("AI_PLATFORM_LISTEN", ":8080")
 DB_PATH = DATA_DIR / "ai-platform.db"
 SECRETS_PATH = DATA_DIR / "secrets.json"
@@ -31,6 +32,10 @@ FAMILY_PASSWORD_PATH = DATA_DIR / "family_password.txt"
 LEGACY_CONFIG_PATH = DATA_DIR / "config.json"
 SESSION_COOKIE = "ap_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 14
+CAT_SESSION_COOKIE = "cat_session"
+CAT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
+CAT_OSS_DIR = "cat"
+CAT_MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
 
 def now() -> int:
@@ -229,6 +234,56 @@ def init_db():
               created_at INTEGER NOT NULL,
               expires_at INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS cat_users (
+              id TEXT PRIMARY KEY,
+              username TEXT NOT NULL UNIQUE,
+              password_hash TEXT NOT NULL,
+              nickname TEXT NOT NULL,
+              avatar_url TEXT NOT NULL DEFAULT '',
+              role TEXT NOT NULL DEFAULT 'member',
+              status TEXT NOT NULL DEFAULT 'active',
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS cat_sessions (
+              token_hash TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              expires_at INTEGER NOT NULL,
+              FOREIGN KEY (user_id) REFERENCES cat_users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS cat_images (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              oss_key TEXT NOT NULL UNIQUE,
+              image_url TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              FOREIGN KEY (user_id) REFERENCES cat_users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS cat_posts (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              title TEXT NOT NULL,
+              content TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'published',
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL,
+              FOREIGN KEY (user_id) REFERENCES cat_users(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS cat_post_images (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              post_id TEXT NOT NULL,
+              image_id TEXT,
+              image_url TEXT NOT NULL,
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              FOREIGN KEY (post_id) REFERENCES cat_posts(id) ON DELETE CASCADE,
+              FOREIGN KEY (image_id) REFERENCES cat_images(id) ON DELETE SET NULL
+            );
             """
         )
 
@@ -351,6 +406,113 @@ def favorite_row(row):
         "content": row["content"],
         "message_created_at": row["message_created_at"],
         "created_at": row["created_at"],
+    }
+
+
+def cat_user_public(row):
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "nickname": row["nickname"],
+        "avatar_url": row["avatar_url"],
+        "role": row["role"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+    }
+
+
+def cat_post_card(row):
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "content": row["content"],
+        "cover_url": row["cover_url"] or "",
+        "image_count": int(row["image_count"] or 0),
+        "created_at": row["created_at"],
+        "author": {
+            "id": row["user_id"],
+            "username": row["username"],
+            "nickname": row["nickname"],
+            "avatar_url": row["avatar_url"],
+        },
+    }
+
+
+def cat_oss_config(secrets_data):
+    config = secrets_data.get("cat_oss") or {}
+
+    def read(name, key, default=""):
+        return str(os.environ.get(name) or config.get(key) or default).strip()
+
+    bucket = read("CAT_OSS_BUCKET", "bucket")
+    region = read("CAT_OSS_REGION", "region")
+    endpoint = read("CAT_OSS_ENDPOINT", "endpoint")
+    access_key_id = read("CAT_OSS_ACCESS_KEY_ID", "access_key_id")
+    access_key_secret = read("CAT_OSS_ACCESS_KEY_SECRET", "access_key_secret")
+    public_base = read("CAT_OSS_PUBLIC_BASE", "public_base")
+    directory = read("CAT_OSS_DIR", "dir", CAT_OSS_DIR).strip("/") or CAT_OSS_DIR
+
+    if endpoint and not endpoint.startswith(("http://", "https://")):
+        endpoint = "https://" + endpoint
+    if not endpoint and bucket and region:
+        endpoint = f"https://{bucket}.oss-{region}.aliyuncs.com"
+    if public_base and not public_base.startswith(("http://", "https://")):
+        public_base = "https://" + public_base
+    if not public_base:
+        public_base = endpoint
+
+    return {
+        "bucket": bucket,
+        "region": region,
+        "endpoint": endpoint.rstrip("/") if endpoint else "",
+        "public_base": public_base.rstrip("/") if public_base else "",
+        "access_key_id": access_key_id,
+        "access_key_secret": access_key_secret,
+        "directory": directory,
+        "max_size": CAT_MAX_IMAGE_BYTES,
+        "configured": bool(bucket and access_key_id and access_key_secret and endpoint),
+    }
+
+
+def cat_oss_prefix(config, user_id):
+    date_path = time.strftime("%Y/%m/%d", time.localtime())
+    return f"{config['directory'].strip('/')}/{user_id}/{date_path}/"
+
+
+def cat_oss_url(config, oss_key):
+    return config["public_base"].rstrip("/") + "/" + quote(oss_key, safe="/-_.~")
+
+
+def cat_upload_policy(config, user_id):
+    prefix = cat_oss_prefix(config, user_id)
+    expiration = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now() + 600))
+    policy = {
+        "expiration": expiration,
+        "conditions": [
+            ["starts-with", "$key", prefix],
+            ["starts-with", "$Content-Type", "image/"],
+            ["content-length-range", 1, config["max_size"]],
+        ],
+    }
+    encoded_policy = base64.b64encode(
+        json.dumps(policy, separators=(",", ":")).encode()
+    ).decode()
+    signature = base64.b64encode(
+        hmac.new(
+            config["access_key_secret"].encode(),
+            encoded_policy.encode(),
+            hashlib.sha1,
+        ).digest()
+    ).decode()
+    return {
+        "host": config["endpoint"],
+        "access_key_id": config["access_key_id"],
+        "policy": encoded_policy,
+        "signature": signature,
+        "key_prefix": prefix,
+        "public_base": config["public_base"],
+        "max_size": config["max_size"],
+        "expires_at": now() + 600,
     }
 
 
@@ -645,10 +807,24 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.html(INDEX_HTML)
         if path in ("/xiaoji", "/xiaoji/"):
             return self.home_page()
+        if path in ("/cat", "/cat/"):
+            return self.cat_page()
         if path == "/favicon.ico":
             return self.static_file(RES_DIR / "favicon.ico")
         if path.startswith("/res/"):
             return self.handle_res_file(path)
+        if path == "/cat/api/me":
+            return self.handle_cat_me()
+        if path == "/cat/api/posts":
+            return self.require_cat_user(self.handle_cat_posts)
+        if path.startswith("/cat/api/posts/"):
+            return self.require_cat_user(self.handle_cat_post_item)
+        if path.startswith("/cat/api/users/"):
+            return self.require_cat_user(self.handle_cat_user_profile)
+        if path == "/cat/api/upload-policy":
+            return self.require_cat_user(self.handle_cat_upload_policy)
+        if path == "/cat/api/admin/users":
+            return self.require_cat_admin(self.handle_cat_admin_users)
         if path == "/api/health":
             return self.json({"status": "ok", "time": iso_now()})
         if path == "/api/me":
@@ -673,6 +849,16 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/cat/api/login":
+            return self.handle_cat_login()
+        if path == "/cat/api/logout":
+            return self.handle_cat_logout()
+        if path == "/cat/api/images":
+            return self.require_cat_user(self.handle_cat_images)
+        if path == "/cat/api/posts":
+            return self.require_cat_user(self.handle_cat_posts)
+        if path == "/cat/api/admin/users":
+            return self.require_cat_admin(self.handle_cat_admin_users)
         if path == "/api/login":
             return self.handle_login()
         if path == "/api/logout":
@@ -695,6 +881,8 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         path = urlparse(self.path).path
+        if path.startswith("/cat/api/admin/users/"):
+            return self.require_cat_admin(self.handle_cat_admin_user_item)
         if path.startswith("/api/admin/models/"):
             return self.require_admin(self.handle_admin_model_item)
         if path.startswith("/api/prompts/"):
@@ -745,6 +933,12 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.html(HOME_PAGE_PATH.read_text())
         except FileNotFoundError:
             return self.error(HTTPStatus.NOT_FOUND, "home page not found")
+
+    def cat_page(self):
+        try:
+            return self.html(CAT_PAGE_PATH.read_text())
+        except FileNotFoundError:
+            return self.error(HTTPStatus.NOT_FOUND, "cat page not found")
 
     def handle_res_file(self, path):
         name = unquote(path.removeprefix("/res/"))
@@ -819,6 +1013,46 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.UNAUTHORIZED, "admin unauthorized")
         return handler()
 
+    def cat_session_token(self):
+        cookie = SimpleCookie(self.headers.get("Cookie", ""))
+        if CAT_SESSION_COOKIE in cookie:
+            return cookie[CAT_SESSION_COOKIE].value
+        auth = self.headers.get("X-Cat-Token", "")
+        if auth:
+            return auth.strip()
+        return ""
+
+    def current_cat_user(self):
+        token = self.cat_session_token()
+        if not token:
+            return None
+        with db() as conn:
+            row = conn.execute(
+                """
+                SELECT u.*
+                FROM cat_sessions s
+                JOIN cat_users u ON u.id = s.user_id
+                WHERE s.token_hash=? AND s.expires_at>? AND u.status='active'
+                """,
+                (token_hash(token), now()),
+            ).fetchone()
+        return row
+
+    def require_cat_user(self, handler):
+        if not self.current_cat_user():
+            return self.error(HTTPStatus.UNAUTHORIZED, "请先登录槑槑相册")
+        return handler()
+
+    def require_cat_admin(self, handler):
+        got = self.headers.get("X-Admin-Key", "").strip()
+        expected = self.server.secrets["admin_key"]
+        if got and hmac.compare_digest(got, expected):
+            return handler()
+        user = self.current_cat_user()
+        if user and user["role"] == "admin":
+            return handler()
+        return self.error(HTTPStatus.UNAUTHORIZED, "需要管理员权限")
+
     def handle_login(self):
         try:
             data = self.read_body()
@@ -866,6 +1100,389 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def handle_me(self):
         return self.json({"authenticated": bool(self.current_user())})
+
+    def handle_cat_me(self):
+        user = self.current_cat_user()
+        config = cat_oss_config(self.server.secrets)
+        return self.json(
+            {
+                "authenticated": bool(user),
+                "user": cat_user_public(user) if user else None,
+                "oss_configured": config["configured"],
+            }
+        )
+
+    def handle_cat_login(self):
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "请输入正确的登录信息")
+        username = str(data.get("username") or "").strip().lower()
+        password = str(data.get("password") or "")
+        if not username or not password:
+            return self.error(HTTPStatus.BAD_REQUEST, "请输入账号和密码")
+
+        with db() as conn:
+            row = conn.execute(
+                "SELECT * FROM cat_users WHERE username=?", (username,)
+            ).fetchone()
+            if (
+                not row
+                or row["status"] != "active"
+                or not verify_password(password, row["password_hash"])
+            ):
+                return self.error(HTTPStatus.UNAUTHORIZED, "账号或密码不正确")
+
+            token = b64_token(32)
+            expires = now() + CAT_SESSION_TTL_SECONDS
+            conn.execute("DELETE FROM cat_sessions WHERE expires_at<=?", (now(),))
+            conn.execute(
+                """
+                INSERT INTO cat_sessions(token_hash, user_id, created_at, expires_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (token_hash(token), row["id"], now(), expires),
+            )
+
+        payload = json.dumps(
+            {"ok": True, "user": cat_user_public(row), "expires_at": expires},
+            ensure_ascii=False,
+        ).encode()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header(
+            "Set-Cookie",
+            f"{CAT_SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={CAT_SESSION_TTL_SECONDS}",
+        )
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def handle_cat_logout(self):
+        token = self.cat_session_token()
+        if token:
+            with db() as conn:
+                conn.execute("DELETE FROM cat_sessions WHERE token_hash=?", (token_hash(token),))
+        payload = b'{"ok":true}'
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header(
+            "Set-Cookie",
+            f"{CAT_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+        )
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def handle_cat_admin_users(self):
+        if self.command == "GET":
+            with db() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM cat_users ORDER BY created_at DESC LIMIT 200"
+                ).fetchall()
+            return self.json({"users": [cat_user_public(row) for row in rows]})
+
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "请填写正确的账号信息")
+
+        username = str(data.get("username") or "").strip().lower()
+        nickname = str(data.get("nickname") or "").strip()[:40]
+        password = str(data.get("password") or "")
+        avatar_url = str(data.get("avatar_url") or "").strip()[:800]
+        role = str(data.get("role") or "member").strip().lower()
+        status = str(data.get("status") or "active").strip().lower()
+
+        if not re.fullmatch(r"[a-z0-9_][a-z0-9_.-]{1,31}", username or ""):
+            return self.error(HTTPStatus.BAD_REQUEST, "账号只能使用小写字母、数字、点、横线和下划线")
+        if len(password) < 6:
+            return self.error(HTTPStatus.BAD_REQUEST, "密码至少 6 位")
+        if role not in ("member", "admin"):
+            role = "member"
+        if status not in ("active", "disabled"):
+            status = "active"
+        if not nickname:
+            nickname = username
+
+        user_id = b64_token(10)
+        ts = now()
+        try:
+            with db() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO cat_users
+                    (id, username, password_hash, nickname, avatar_url, role, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        username,
+                        password_hash(password),
+                        nickname,
+                        avatar_url,
+                        role,
+                        status,
+                        ts,
+                        ts,
+                    ),
+                )
+                row = conn.execute("SELECT * FROM cat_users WHERE id=?", (user_id,)).fetchone()
+        except sqlite3.IntegrityError:
+            return self.error(HTTPStatus.CONFLICT, "这个账号已经存在")
+        return self.json({"user": cat_user_public(row)}, HTTPStatus.CREATED)
+
+    def handle_cat_admin_user_item(self):
+        user_id = urlparse(self.path).path.rstrip("/").rsplit("/", 1)[-1]
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "请填写正确的账号信息")
+        with db() as conn:
+            row = conn.execute("SELECT * FROM cat_users WHERE id=?", (user_id,)).fetchone()
+            if not row:
+                return self.error(HTTPStatus.NOT_FOUND, "账号不存在")
+            nickname = str(data.get("nickname", row["nickname"]) or "").strip()[:40] or row["nickname"]
+            avatar_url = str(data.get("avatar_url", row["avatar_url"]) or "").strip()[:800]
+            role = str(data.get("role", row["role"]) or "member").strip().lower()
+            status = str(data.get("status", row["status"]) or "active").strip().lower()
+            password = str(data.get("password") or "")
+            if role not in ("member", "admin"):
+                role = row["role"]
+            if status not in ("active", "disabled"):
+                status = row["status"]
+            if password:
+                if len(password) < 6:
+                    return self.error(HTTPStatus.BAD_REQUEST, "密码至少 6 位")
+                conn.execute(
+                    """
+                    UPDATE cat_users
+                    SET nickname=?, avatar_url=?, role=?, status=?, password_hash=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (nickname, avatar_url, role, status, password_hash(password), now(), user_id),
+                )
+                conn.execute("DELETE FROM cat_sessions WHERE user_id=?", (user_id,))
+            else:
+                conn.execute(
+                    """
+                    UPDATE cat_users
+                    SET nickname=?, avatar_url=?, role=?, status=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (nickname, avatar_url, role, status, now(), user_id),
+                )
+            row = conn.execute("SELECT * FROM cat_users WHERE id=?", (user_id,)).fetchone()
+        return self.json({"user": cat_user_public(row)})
+
+    def handle_cat_upload_policy(self):
+        user = self.current_cat_user()
+        config = cat_oss_config(self.server.secrets)
+        if not config["configured"]:
+            return self.error(HTTPStatus.BAD_REQUEST, "OSS 还没有配置好，暂时不能上传图片")
+        return self.json({"policy": cat_upload_policy(config, user["id"])})
+
+    def handle_cat_images(self):
+        user = self.current_cat_user()
+        config = cat_oss_config(self.server.secrets)
+        if not config["configured"]:
+            return self.error(HTTPStatus.BAD_REQUEST, "OSS 还没有配置好，暂时不能上传图片")
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "图片信息保存失败")
+        oss_key = str(data.get("oss_key") or "").strip()
+        expected_prefix = f"{config['directory'].strip('/')}/{user['id']}/"
+        if (
+            not oss_key
+            or oss_key.startswith("/")
+            or ".." in oss_key.split("/")
+            or not oss_key.startswith(expected_prefix)
+        ):
+            return self.error(HTTPStatus.BAD_REQUEST, "图片路径不正确")
+        image_url = cat_oss_url(config, oss_key)
+        image_id = b64_token(10)
+        ts = now()
+        with db() as conn:
+            existing = conn.execute(
+                "SELECT * FROM cat_images WHERE oss_key=?", (oss_key,)
+            ).fetchone()
+            if existing:
+                return self.json(
+                    {
+                        "image": {
+                            "id": existing["id"],
+                            "oss_key": existing["oss_key"],
+                            "image_url": existing["image_url"],
+                            "created_at": existing["created_at"],
+                        }
+                    }
+                )
+            conn.execute(
+                """
+                INSERT INTO cat_images(id, user_id, oss_key, image_url, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (image_id, user["id"], oss_key, image_url, ts),
+            )
+        return self.json(
+            {
+                "image": {
+                    "id": image_id,
+                    "oss_key": oss_key,
+                    "image_url": image_url,
+                    "created_at": ts,
+                }
+            },
+            HTTPStatus.CREATED,
+        )
+
+    def load_cat_post(self, conn, post_id):
+        row = conn.execute(
+            """
+            SELECT p.*, u.username, u.nickname, u.avatar_url,
+                   (SELECT image_url FROM cat_post_images WHERE post_id=p.id ORDER BY sort_order ASC, id ASC LIMIT 1) AS cover_url,
+                   (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count
+            FROM cat_posts p
+            JOIN cat_users u ON u.id = p.user_id
+            WHERE p.id=? AND p.status='published'
+            """,
+            (post_id,),
+        ).fetchone()
+        if not row:
+            return None
+        images = conn.execute(
+            """
+            SELECT image_url, sort_order
+            FROM cat_post_images
+            WHERE post_id=?
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (post_id,),
+        ).fetchall()
+        post = cat_post_card(row)
+        post["content"] = row["content"]
+        post["images"] = [
+            {"image_url": image["image_url"], "sort_order": image["sort_order"]}
+            for image in images
+        ]
+        return post
+
+    def handle_cat_posts(self):
+        if self.command == "GET":
+            params = parse_qs(urlparse(self.path).query)
+            limit = clamp_int((params.get("limit") or ["20"])[0], 20, 1, 30)
+            before = clamp_int((params.get("before") or ["0"])[0], 0, 0, 10**12)
+            where = "p.status='published'"
+            values = []
+            if before:
+                where += " AND p.created_at<?"
+                values.append(before)
+            with db() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT p.*, u.username, u.nickname, u.avatar_url,
+                           (SELECT image_url FROM cat_post_images WHERE post_id=p.id ORDER BY sort_order ASC, id ASC LIMIT 1) AS cover_url,
+                           (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count
+                    FROM cat_posts p
+                    JOIN cat_users u ON u.id = p.user_id
+                    WHERE {where}
+                    ORDER BY p.created_at DESC, p.id DESC
+                    LIMIT ?
+                    """,
+                    (*values, limit + 1),
+                ).fetchall()
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            next_cursor = rows[-1]["created_at"] if has_more and rows else None
+            return self.json(
+                {
+                    "posts": [cat_post_card(row) for row in rows],
+                    "next_cursor": next_cursor,
+                }
+            )
+
+        user = self.current_cat_user()
+        try:
+            data = self.read_body(limit=128 * 1024)
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "发布内容格式不正确")
+        title = str(data.get("title") or "").strip()[:80]
+        content = str(data.get("content") or "").strip()[:4000]
+        image_ids = data.get("image_ids") or []
+        if not isinstance(image_ids, list):
+            image_ids = []
+        image_ids = [str(item).strip() for item in image_ids if str(item).strip()][:9]
+        if not title:
+            return self.error(HTTPStatus.BAD_REQUEST, "请填写标题")
+        if not image_ids:
+            return self.error(HTTPStatus.BAD_REQUEST, "请至少上传一张猫咪照片")
+
+        post_id = b64_token(12)
+        ts = now()
+        with db() as conn:
+            placeholders = ",".join("?" for _ in image_ids)
+            image_rows = conn.execute(
+                f"""
+                SELECT *
+                FROM cat_images
+                WHERE id IN ({placeholders}) AND user_id=?
+                """,
+                (*image_ids, user["id"]),
+            ).fetchall()
+            image_by_id = {row["id"]: row for row in image_rows}
+            ordered_images = [image_by_id.get(image_id) for image_id in image_ids]
+            if any(row is None for row in ordered_images):
+                return self.error(HTTPStatus.BAD_REQUEST, "有图片还没有上传完成")
+
+            conn.execute(
+                """
+                INSERT INTO cat_posts(id, user_id, title, content, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'published', ?, ?)
+                """,
+                (post_id, user["id"], title, content, ts, ts),
+            )
+            for index, image in enumerate(ordered_images):
+                conn.execute(
+                    """
+                    INSERT INTO cat_post_images(post_id, image_id, image_url, sort_order)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (post_id, image["id"], image["image_url"], index),
+                )
+            post = self.load_cat_post(conn, post_id)
+        return self.json({"post": post}, HTTPStatus.CREATED)
+
+    def handle_cat_post_item(self):
+        post_id = urlparse(self.path).path.rstrip("/").rsplit("/", 1)[-1]
+        with db() as conn:
+            post = self.load_cat_post(conn, post_id)
+        if not post:
+            return self.error(HTTPStatus.NOT_FOUND, "这条动态不存在")
+        return self.json({"post": post})
+
+    def handle_cat_user_profile(self):
+        user_id = urlparse(self.path).path.rstrip("/").rsplit("/", 1)[-1]
+        with db() as conn:
+            user = conn.execute(
+                "SELECT * FROM cat_users WHERE id=? AND status='active'", (user_id,)
+            ).fetchone()
+            if not user:
+                return self.error(HTTPStatus.NOT_FOUND, "这个主页不存在")
+            rows = conn.execute(
+                """
+                SELECT p.*, u.username, u.nickname, u.avatar_url,
+                       (SELECT image_url FROM cat_post_images WHERE post_id=p.id ORDER BY sort_order ASC, id ASC LIMIT 1) AS cover_url,
+                       (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count
+                FROM cat_posts p
+                JOIN cat_users u ON u.id = p.user_id
+                WHERE p.status='published' AND p.user_id=?
+                ORDER BY p.created_at DESC, p.id DESC
+                LIMIT 120
+                """,
+                (user_id,),
+            ).fetchall()
+        return self.json({"user": cat_user_public(user), "posts": [cat_post_card(row) for row in rows]})
 
     def handle_models(self):
         with db() as conn:
@@ -4315,7 +4932,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.21</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.3.0</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>

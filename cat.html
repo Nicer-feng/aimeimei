@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>槑槑相册</title>
+  <meta name="description" content="槑槑相册，熟人小圈子的猫咪照片分享站。">
+  <link rel="icon" href="/favicon.ico">
+  <script>
+    tailwind = {
+      config: {
+        theme: {
+          extend: {
+            colors: {
+              cream: "#FAF8F4",
+              milk: "#FFFDF9",
+              rose: "#E9AFC0",
+              roseDark: "#D98FA8",
+              ink: "#27211F",
+              muted: "#8F7A70"
+            },
+            boxShadow: {
+              soft: "0 18px 50px rgba(91, 67, 55, .10)"
+            },
+            borderRadius: {
+              app: "16px"
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html { scroll-behavior: smooth; }
+    body { background: #FAF8F4; color: #27211F; }
+    .safe-bottom { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+    .cat-card { break-inside: avoid; }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { scrollbar-width: none; }
+    .soft-focus:focus { outline: none; box-shadow: 0 0 0 4px rgba(233, 175, 192, .28); border-color: #E9AFC0; }
+  </style>
+</head>
+<body class="min-h-screen antialiased">
+  <div id="toast" class="fixed left-1/2 top-4 z-[80] hidden max-w-[calc(100vw-32px)] -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-sm text-white shadow-soft"></div>
+
+  <section id="loginView" class="hidden min-h-screen px-5 py-10">
+    <div class="mx-auto flex min-h-[calc(100vh-80px)] w-full max-w-md flex-col justify-center">
+      <div class="mb-8 text-center">
+        <div class="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[24px] bg-white shadow-soft">
+          <span class="text-4xl">🐱</span>
+        </div>
+        <p class="mb-2 text-sm font-medium text-roseDark">熟人猫咪小圈子</p>
+        <h1 class="text-4xl font-semibold tracking-tight">槑槑相册</h1>
+        <p class="mt-3 text-base leading-7 text-muted">只给朋友之间分享自家猫咪照片，不开放注册。</p>
+      </div>
+
+      <form id="loginForm" class="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-soft backdrop-blur">
+        <label class="mb-3 block text-sm font-medium text-muted">账号</label>
+        <input id="loginUsername" autocomplete="username" class="soft-focus mb-4 h-12 w-full rounded-app border border-[#E7D8CC] bg-milk px-4 text-base" placeholder="请输入账号">
+        <label class="mb-3 block text-sm font-medium text-muted">密码</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" class="soft-focus mb-5 h-12 w-full rounded-app border border-[#E7D8CC] bg-milk px-4 text-base" placeholder="请输入密码">
+        <button class="h-12 w-full rounded-app bg-roseDark text-base font-semibold text-white shadow-soft transition active:scale-[.98]">进入相册</button>
+      </form>
+
+      <details class="mt-5 rounded-[24px] border border-[#ECDDD2] bg-white/70 p-4">
+        <summary class="cursor-pointer text-sm font-semibold text-muted">管理员创建账号</summary>
+        <form id="bootstrapUserForm" class="mt-4 grid gap-3">
+          <input id="bootstrapAdminKey" type="password" class="soft-focus h-11 rounded-app border border-[#E7D8CC] bg-milk px-3 text-sm" placeholder="平台管理员密钥">
+          <input id="bootstrapUsername" class="soft-focus h-11 rounded-app border border-[#E7D8CC] bg-milk px-3 text-sm" placeholder="账号，例如 maomao">
+          <input id="bootstrapNickname" class="soft-focus h-11 rounded-app border border-[#E7D8CC] bg-milk px-3 text-sm" placeholder="昵称">
+          <input id="bootstrapPassword" type="password" class="soft-focus h-11 rounded-app border border-[#E7D8CC] bg-milk px-3 text-sm" placeholder="初始密码，至少 6 位">
+          <select id="bootstrapRole" class="soft-focus h-11 rounded-app border border-[#E7D8CC] bg-milk px-3 text-sm">
+            <option value="member">普通成员</option>
+            <option value="admin">管理员</option>
+          </select>
+          <button class="h-11 rounded-app border border-rose/70 bg-white font-semibold text-roseDark">创建账号</button>
+        </form>
+      </details>
+    </div>
+  </section>
+
+  <section id="mainView" class="hidden min-h-screen pb-24">
+    <header class="sticky top-0 z-30 border-b border-[#EFE3D8]/80 bg-cream/88 backdrop-blur-xl">
+      <div class="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
+        <button id="refreshBtn" class="flex min-w-0 flex-1 items-center gap-3 text-left">
+          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] bg-white shadow-soft">🐱</div>
+          <div class="min-w-0">
+            <h1 class="truncate text-xl font-semibold tracking-tight">槑槑相册</h1>
+            <p id="userLine" class="truncate text-xs text-muted">朋友家的猫都在这里</p>
+          </div>
+        </button>
+        <button id="adminOpenBtn" class="hidden h-10 rounded-full border border-[#EADBCF] bg-white px-3 text-sm font-medium text-muted">账号</button>
+        <button id="logoutBtn" class="h-10 rounded-full border border-[#EADBCF] bg-white px-3 text-sm font-medium text-muted">退出</button>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-5xl px-4 pt-5">
+      <section class="mb-5 rounded-[28px] bg-white p-5 shadow-soft">
+        <p class="text-sm font-medium text-roseDark">今日猫咪</p>
+        <h2 class="mt-2 text-3xl font-semibold tracking-tight">分享一张猫猫近况</h2>
+        <p class="mt-3 text-base leading-7 text-muted">单图、多图都可以。这里不做公开社区，只安静地放朋友们的猫。</p>
+        <button id="publishOpenBtn" class="mt-5 h-12 w-full rounded-app bg-ink text-base font-semibold text-white transition active:scale-[.98] sm:w-auto sm:px-6">发布猫咪动态</button>
+      </section>
+
+      <section id="emptyFeed" class="hidden rounded-[28px] border border-dashed border-[#E2D2C5] bg-white/70 p-8 text-center">
+        <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-[22px] bg-white shadow-soft">🐾</div>
+        <h3 class="text-xl font-semibold">还没有猫咪动态</h3>
+        <p class="mt-2 text-sm text-muted">先发布第一张猫咪照片吧。</p>
+      </section>
+
+      <section id="feed" class="columns-2 gap-3 sm:columns-3 lg:columns-4"></section>
+      <button id="loadMoreBtn" class="mx-auto mt-5 hidden h-11 rounded-full border border-[#EADBCF] bg-white px-5 text-sm font-semibold text-muted">加载更多</button>
+      <div id="feedSentinel" class="h-8"></div>
+    </main>
+  </section>
+
+  <div id="publishModal" class="fixed inset-0 z-50 hidden bg-black/28 p-3 backdrop-blur-sm">
+    <div class="safe-bottom mx-auto flex h-full max-w-2xl items-end sm:items-center">
+      <form id="publishForm" class="max-h-[92vh] w-full overflow-y-auto rounded-[28px] bg-white p-5 shadow-soft">
+        <div class="mb-4 flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-roseDark">发布动态</p>
+            <h2 class="text-2xl font-semibold">新的猫咪照片</h2>
+          </div>
+          <button type="button" data-close="publishModal" class="h-10 w-10 rounded-full bg-cream text-xl">×</button>
+        </div>
+        <input id="postTitle" class="soft-focus mb-3 h-12 w-full rounded-app border border-[#E7D8CC] bg-milk px-4 text-base" maxlength="80" placeholder="标题，例如 今天又睡成一团">
+        <textarea id="postContent" class="soft-focus mb-4 min-h-28 w-full resize-none rounded-app border border-[#E7D8CC] bg-milk p-4 text-base leading-7" maxlength="4000" placeholder="写一点猫咪近况..."></textarea>
+        <label class="mb-3 flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-[24px] border border-dashed border-rose bg-[#FFF7FA] p-5 text-center">
+          <span class="text-3xl">＋</span>
+          <span class="mt-2 font-semibold">选择照片</span>
+          <span class="mt-1 text-sm text-muted">最多 9 张，每张建议不超过 12MB</span>
+          <input id="imageInput" type="file" class="hidden" accept="image/*" multiple>
+        </label>
+        <div id="uploadHint" class="mb-3 hidden rounded-app bg-cream px-3 py-2 text-sm text-muted"></div>
+        <div id="selectedImages" class="mb-5 grid grid-cols-3 gap-2"></div>
+        <button id="publishSubmitBtn" class="h-12 w-full rounded-app bg-roseDark text-base font-semibold text-white transition active:scale-[.98]">发布</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="detailModal" class="fixed inset-0 z-50 hidden bg-black/36 p-3 backdrop-blur-sm">
+    <div class="safe-bottom mx-auto flex h-full max-w-3xl items-end sm:items-center">
+      <article class="max-h-[94vh] w-full overflow-y-auto rounded-[28px] bg-white shadow-soft">
+        <div class="sticky top-0 z-10 flex justify-end bg-white/80 p-3 backdrop-blur">
+          <button type="button" data-close="detailModal" class="h-10 w-10 rounded-full bg-cream text-xl">×</button>
+        </div>
+        <div id="detailBody"></div>
+      </article>
+    </div>
+  </div>
+
+  <div id="profileModal" class="fixed inset-0 z-50 hidden bg-black/28 p-3 backdrop-blur-sm">
+    <div class="safe-bottom mx-auto flex h-full max-w-3xl items-end sm:items-center">
+      <article class="max-h-[94vh] w-full overflow-y-auto rounded-[28px] bg-white p-5 shadow-soft">
+        <div class="mb-4 flex justify-end">
+          <button type="button" data-close="profileModal" class="h-10 w-10 rounded-full bg-cream text-xl">×</button>
+        </div>
+        <div id="profileBody"></div>
+      </article>
+    </div>
+  </div>
+
+  <div id="adminModal" class="fixed inset-0 z-50 hidden bg-black/28 p-3 backdrop-blur-sm">
+    <div class="safe-bottom mx-auto flex h-full max-w-3xl items-end sm:items-center">
+      <article class="max-h-[94vh] w-full overflow-y-auto rounded-[28px] bg-white p-5 shadow-soft">
+        <div class="mb-4 flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-roseDark">后台账号</p>
+            <h2 class="text-2xl font-semibold">手动创建成员</h2>
+          </div>
+          <button type="button" data-close="adminModal" class="h-10 w-10 rounded-full bg-cream text-xl">×</button>
+        </div>
+        <input id="adminKey" type="password" class="soft-focus mb-3 h-11 w-full rounded-app border border-[#E7D8CC] bg-milk px-3 text-sm" placeholder="平台管理员密钥；猫相册管理员可留空">
+        <form id="adminCreateForm" class="mb-5 grid gap-3 sm:grid-cols-2">
+          <input id="adminUsername" class="soft-focus h-11 rounded-app border border-[#E7D8CC] bg-milk px-3 text-sm" placeholder="账号">
+          <input id="adminNickname" class="soft-focus h-11 rounded-app border border-[#E7D8CC] bg-milk px-3 text-sm" placeholder="昵称">
+          <input id="adminPassword" type="password" class="soft-focus h-11 rounded-app border border-[#E7D8CC] bg-milk px-3 text-sm" placeholder="密码，至少 6 位">
+          <select id="adminRole" class="soft-focus h-11 rounded-app border border-[#E7D8CC] bg-milk px-3 text-sm">
+            <option value="member">普通成员</option>
+            <option value="admin">管理员</option>
+          </select>
+          <button class="h-11 rounded-app bg-ink font-semibold text-white sm:col-span-2">创建账号</button>
+        </form>
+        <div id="adminUsers" class="grid gap-2"></div>
+      </article>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      user: null,
+      posts: [],
+      cursor: null,
+      loading: false,
+      selectedImages: [],
+      currentDetail: null,
+      currentSlide: 0,
+      observer: null
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const cnDate = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    function showToast(message) {
+      const box = $("toast");
+      box.textContent = message;
+      box.classList.remove("hidden");
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => box.classList.add("hidden"), 2600);
+    }
+
+    async function request(path, options = {}) {
+      const headers = options.headers || {};
+      if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+      const res = await fetch(path, { credentials: "include", ...options, headers });
+      const text = await res.text();
+      let data = {};
+      if (text) {
+        try { data = JSON.parse(text); } catch { data = {}; }
+      }
+      if (!res.ok) throw new Error(data.error || "操作失败，请稍后再试");
+      return data;
+    }
+
+    function adminHeaders(source = "adminKey") {
+      const key = $(source)?.value.trim();
+      return key ? { "X-Admin-Key": key } : {};
+    }
+
+    function timeText(ts) {
+      if (!ts) return "";
+      return cnDate.format(new Date(ts * 1000));
+    }
+
+    function avatar(author) {
+      if (author?.avatar_url) {
+        return `<img src="${esc(author.avatar_url)}" alt="" class="h-7 w-7 rounded-full object-cover">`;
+      }
+      return `<div class="flex h-7 w-7 items-center justify-center rounded-full bg-cream text-sm">🐱</div>`;
+    }
+
+    function setView(name) {
+      $("loginView").classList.toggle("hidden", name !== "login");
+      $("mainView").classList.toggle("hidden", name !== "main");
+    }
+
+    function renderFeed(reset = false) {
+      const feed = $("feed");
+      $("emptyFeed").classList.toggle("hidden", state.posts.length > 0);
+      feed.innerHTML = state.posts.map((post) => `
+        <article class="cat-card mb-3 overflow-hidden rounded-app bg-white shadow-soft transition duration-200 active:scale-[.99]" data-post-id="${esc(post.id)}">
+          <div class="cursor-pointer" data-open-post="${esc(post.id)}">
+            <img src="${esc(post.cover_url)}" alt="${esc(post.title)}" class="w-full bg-cream object-cover" loading="lazy">
+            <div class="px-3 pt-3">
+              <h3 class="line-clamp-2 text-[15px] font-semibold leading-6">${esc(post.title)}</h3>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 px-3 pb-3 pt-3 text-xs text-muted">
+            <button class="flex min-w-0 items-center gap-2" data-open-profile="${esc(post.author.id)}" type="button">
+              ${avatar(post.author)}
+              <span class="truncate">${esc(post.author.nickname)}</span>
+            </button>
+            <span class="ml-auto shrink-0">${timeText(post.created_at)}</span>
+          </div>
+        </article>
+      `).join("");
+      $("loadMoreBtn").classList.toggle("hidden", !state.cursor);
+      if (reset) window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    async function loadFeed(reset = false) {
+      if (state.loading) return;
+      state.loading = true;
+      try {
+        const qs = reset || !state.cursor ? "?limit=20" : `?limit=20&before=${state.cursor}`;
+        const data = await request("/cat/api/posts" + qs);
+        state.posts = reset ? data.posts : state.posts.concat(data.posts);
+        state.cursor = data.next_cursor;
+        renderFeed(reset);
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        state.loading = false;
+      }
+    }
+
+    function openModal(id) {
+      $(id).classList.remove("hidden");
+      document.body.classList.add("overflow-hidden");
+    }
+
+    function closeModal(id) {
+      $(id).classList.add("hidden");
+      if (![...document.querySelectorAll(".fixed.z-50")].some((node) => !node.classList.contains("hidden"))) {
+        document.body.classList.remove("overflow-hidden");
+      }
+    }
+
+    function renderSelectedImages() {
+      $("selectedImages").innerHTML = state.selectedImages.map((image, index) => `
+        <div class="relative aspect-square overflow-hidden rounded-app bg-cream">
+          <img src="${esc(image.image_url)}" class="h-full w-full object-cover" alt="">
+          <button type="button" class="absolute right-1 top-1 h-7 w-7 rounded-full bg-white/90 text-sm shadow" data-remove-image="${index}">×</button>
+        </div>
+      `).join("");
+    }
+
+    async function uploadFiles(files) {
+      const list = [...files].slice(0, 9 - state.selectedImages.length);
+      if (!list.length) return;
+      $("uploadHint").classList.remove("hidden");
+      for (const file of list) {
+        if (!file.type.startsWith("image/")) {
+          showToast("只能上传图片");
+          continue;
+        }
+        if (file.size > 12 * 1024 * 1024) {
+          showToast("单张图片不要超过 12MB");
+          continue;
+        }
+        $("uploadHint").textContent = `正在上传：${file.name}`;
+        const { policy } = await request("/cat/api/upload-policy");
+        const suffix = (file.name.match(/\.[a-zA-Z0-9]+$/)?.[0] || ".jpg").toLowerCase();
+        const key = `${policy.key_prefix}${Date.now()}-${Math.random().toString(16).slice(2)}${suffix}`;
+        const form = new FormData();
+        form.append("key", key);
+        form.append("policy", policy.policy);
+        form.append("OSSAccessKeyId", policy.access_key_id);
+        form.append("Signature", policy.signature);
+        form.append("success_action_status", "200");
+        form.append("Content-Type", file.type);
+        form.append("file", file);
+        const uploadRes = await fetch(policy.host, { method: "POST", body: form });
+        if (!uploadRes.ok) throw new Error("图片上传失败，请检查 OSS 配置");
+        const saved = await request("/cat/api/images", {
+          method: "POST",
+          body: JSON.stringify({ oss_key: key })
+        });
+        state.selectedImages.push(saved.image);
+        renderSelectedImages();
+      }
+      $("uploadHint").textContent = "图片上传完成";
+      setTimeout(() => $("uploadHint").classList.add("hidden"), 1500);
+    }
+
+    async function openPost(id) {
+      try {
+        const data = await request(`/cat/api/posts/${id}`);
+        state.currentDetail = data.post;
+        state.currentSlide = 0;
+        renderDetail();
+        openModal("detailModal");
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    function renderDetail() {
+      const post = state.currentDetail;
+      if (!post) return;
+      const image = post.images[state.currentSlide] || post.images[0];
+      $("detailBody").innerHTML = `
+        <div class="px-4 pb-5">
+          <div class="relative overflow-hidden rounded-[24px] bg-cream">
+            <img src="${esc(image?.image_url || post.cover_url)}" class="max-h-[70vh] w-full object-contain" alt="${esc(post.title)}">
+            ${post.images.length > 1 ? `
+              <button class="absolute left-3 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full bg-white/82 text-xl shadow" data-slide="-1">‹</button>
+              <button class="absolute right-3 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full bg-white/82 text-xl shadow" data-slide="1">›</button>
+              <div class="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/38 px-3 py-1 text-xs text-white">${state.currentSlide + 1} / ${post.images.length}</div>
+            ` : ""}
+          </div>
+          <div class="mt-5 flex items-center gap-2 text-sm text-muted">
+            <button class="flex items-center gap-2" data-open-profile="${esc(post.author.id)}" type="button">${avatar(post.author)}<span>${esc(post.author.nickname)}</span></button>
+            <span class="ml-auto">${timeText(post.created_at)}</span>
+          </div>
+          <h2 class="mt-4 text-2xl font-semibold leading-tight">${esc(post.title)}</h2>
+          <p class="mt-3 whitespace-pre-wrap text-base leading-8 text-[#5E4B43]">${esc(post.content || "没有写正文。")}</p>
+        </div>
+      `;
+    }
+
+    async function openProfile(id) {
+      try {
+        const data = await request(`/cat/api/users/${id}`);
+        $("profileBody").innerHTML = `
+          <div class="mb-6 flex items-center gap-4">
+            ${data.user.avatar_url ? `<img src="${esc(data.user.avatar_url)}" class="h-20 w-20 rounded-[24px] object-cover" alt="">` : `<div class="flex h-20 w-20 items-center justify-center rounded-[24px] bg-cream text-4xl">🐱</div>`}
+            <div>
+              <h2 class="text-2xl font-semibold">${esc(data.user.nickname)}</h2>
+              <p class="mt-1 text-sm text-muted">@${esc(data.user.username)} · ${data.posts.length} 条动态</p>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            ${data.posts.map((post) => `
+              <button class="overflow-hidden rounded-app bg-cream text-left" data-open-post="${esc(post.id)}">
+                <img src="${esc(post.cover_url)}" class="aspect-square w-full object-cover" alt="">
+                <div class="p-2 text-sm font-semibold line-clamp-2">${esc(post.title)}</div>
+              </button>
+            `).join("") || `<p class="col-span-full rounded-app bg-cream p-4 text-center text-muted">还没有发布动态</p>`}
+          </div>
+        `;
+        openModal("profileModal");
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    async function refreshAdminUsers() {
+      try {
+        const data = await request("/cat/api/admin/users", { headers: adminHeaders() });
+        $("adminUsers").innerHTML = data.users.map((user) => `
+          <div class="flex items-center gap-3 rounded-app border border-[#EADBCF] bg-milk p-3">
+            ${user.avatar_url ? `<img src="${esc(user.avatar_url)}" class="h-10 w-10 rounded-full object-cover" alt="">` : `<div class="flex h-10 w-10 items-center justify-center rounded-full bg-white">🐱</div>`}
+            <div class="min-w-0 flex-1">
+              <p class="truncate font-semibold">${esc(user.nickname)} <span class="text-xs font-normal text-muted">@${esc(user.username)}</span></p>
+              <p class="text-xs text-muted">${user.role === "admin" ? "管理员" : "普通成员"} · ${user.status === "active" ? "正常" : "停用"}</p>
+            </div>
+          </div>
+        `).join("");
+      } catch (error) {
+        $("adminUsers").innerHTML = `<p class="rounded-app bg-cream p-4 text-sm text-muted">${esc(error.message)}</p>`;
+      }
+    }
+
+    async function bootstrap() {
+      try {
+        const data = await request("/cat/api/me");
+        state.user = data.user;
+        if (!data.authenticated) {
+          setView("login");
+          return;
+        }
+        $("userLine").textContent = `${state.user.nickname} · ${data.oss_configured ? "可以上传照片" : "等待配置 OSS"}`;
+        $("adminOpenBtn").classList.toggle("hidden", state.user.role !== "admin");
+        setView("main");
+        await loadFeed(true);
+      } catch (error) {
+        showToast(error.message);
+        setView("login");
+      }
+    }
+
+    $("loginForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        await request("/cat/api/login", {
+          method: "POST",
+          body: JSON.stringify({ username: $("loginUsername").value, password: $("loginPassword").value })
+        });
+        await bootstrap();
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+
+    $("bootstrapUserForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        await request("/cat/api/admin/users", {
+          method: "POST",
+          headers: adminHeaders("bootstrapAdminKey"),
+          body: JSON.stringify({
+            username: $("bootstrapUsername").value,
+            nickname: $("bootstrapNickname").value,
+            password: $("bootstrapPassword").value,
+            role: $("bootstrapRole").value
+          })
+        });
+        showToast("账号已创建，可以登录了");
+        event.target.reset();
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+
+    $("logoutBtn").addEventListener("click", async () => {
+      await request("/cat/api/logout", { method: "POST" });
+      state.user = null;
+      state.posts = [];
+      setView("login");
+    });
+
+    $("refreshBtn").addEventListener("click", () => loadFeed(true));
+    $("loadMoreBtn").addEventListener("click", () => loadFeed(false));
+    $("publishOpenBtn").addEventListener("click", () => {
+      state.selectedImages = [];
+      $("publishForm").reset();
+      renderSelectedImages();
+      openModal("publishModal");
+    });
+    $("adminOpenBtn").addEventListener("click", async () => {
+      openModal("adminModal");
+      await refreshAdminUsers();
+    });
+
+    $("imageInput").addEventListener("change", async (event) => {
+      try {
+        await uploadFiles(event.target.files);
+        event.target.value = "";
+      } catch (error) {
+        $("uploadHint").classList.add("hidden");
+        showToast(error.message);
+      }
+    });
+
+    $("publishForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        $("publishSubmitBtn").disabled = true;
+        const data = await request("/cat/api/posts", {
+          method: "POST",
+          body: JSON.stringify({
+            title: $("postTitle").value,
+            content: $("postContent").value,
+            image_ids: state.selectedImages.map((image) => image.id)
+          })
+        });
+        state.posts.unshift(data.post);
+        renderFeed(true);
+        closeModal("publishModal");
+        showToast("发布成功");
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        $("publishSubmitBtn").disabled = false;
+      }
+    });
+
+    $("adminCreateForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        await request("/cat/api/admin/users", {
+          method: "POST",
+          headers: adminHeaders(),
+          body: JSON.stringify({
+            username: $("adminUsername").value,
+            nickname: $("adminNickname").value,
+            password: $("adminPassword").value,
+            role: $("adminRole").value
+          })
+        });
+        showToast("账号已创建");
+        event.target.reset();
+        await refreshAdminUsers();
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+
+    document.addEventListener("click", (event) => {
+      const closeId = event.target.closest("[data-close]")?.dataset.close;
+      if (closeId) closeModal(closeId);
+      const postId = event.target.closest("[data-open-post]")?.dataset.openPost;
+      if (postId) openPost(postId);
+      const profileId = event.target.closest("[data-open-profile]")?.dataset.openProfile;
+      if (profileId) {
+        event.stopPropagation();
+        openProfile(profileId);
+      }
+      const removeIndex = event.target.closest("[data-remove-image]")?.dataset.removeImage;
+      if (removeIndex !== undefined) {
+        state.selectedImages.splice(Number(removeIndex), 1);
+        renderSelectedImages();
+      }
+      const slide = event.target.closest("[data-slide]")?.dataset.slide;
+      if (slide && state.currentDetail?.images?.length) {
+        const total = state.currentDetail.images.length;
+        state.currentSlide = (state.currentSlide + Number(slide) + total) % total;
+        renderDetail();
+      }
+    });
+
+    state.observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting) && state.cursor) loadFeed(false);
+    }, { rootMargin: "600px 0px" });
+    state.observer.observe($("feedSentinel"));
+
+    bootstrap();
+  </script>
+</body>
+</html>
