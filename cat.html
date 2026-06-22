@@ -6,31 +6,29 @@
   <title>槑槑相册</title>
   <meta name="description" content="槑槑相册，熟人小圈子的猫咪照片分享站。">
   <link rel="icon" href="/favicon.ico">
+  <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind = {
-      config: {
-        theme: {
-          extend: {
-            colors: {
-              cream: "#FAF8F4",
-              milk: "#FFFDF9",
-              rose: "#E9AFC0",
-              roseDark: "#D98FA8",
-              ink: "#27211F",
-              muted: "#8F7A70"
-            },
-            boxShadow: {
-              soft: "0 18px 50px rgba(91, 67, 55, .10)"
-            },
-            borderRadius: {
-              app: "16px"
-            }
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: "#FAF8F4",
+            milk: "#FFFDF9",
+            rose: "#E9AFC0",
+            roseDark: "#D98FA8",
+            ink: "#27211F",
+            muted: "#8F7A70"
+          },
+          boxShadow: {
+            soft: "0 18px 50px rgba(91, 67, 55, .10)"
+          },
+          borderRadius: {
+            app: "16px"
           }
         }
       }
     };
   </script>
-  <script src="https://cdn.tailwindcss.com"></script>
   <style>
     html { scroll-behavior: smooth; }
     body { background: #FAF8F4; color: #27211F; }
@@ -39,6 +37,17 @@
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { scrollbar-width: none; }
     .soft-focus:focus { outline: none; box-shadow: 0 0 0 4px rgba(233, 175, 192, .28); border-color: #E9AFC0; }
+    .bg-cream { background-color: #FAF8F4; }
+    .bg-milk { background-color: #FFFDF9; }
+    .bg-rose { background-color: #E9AFC0; }
+    .bg-roseDark { background-color: #D98FA8; }
+    .bg-ink { background-color: #27211F; }
+    .text-muted { color: #8F7A70; }
+    .text-roseDark { color: #D98FA8; }
+    .text-ink { color: #27211F; }
+    .border-rose { border-color: #E9AFC0; }
+    .rounded-app { border-radius: 16px; }
+    .shadow-soft { box-shadow: 0 18px 50px rgba(91, 67, 55, .10); }
   </style>
 </head>
 <body class="min-h-screen antialiased">
