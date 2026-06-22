@@ -167,7 +167,7 @@
 
   <section id="mainView" class="hidden min-h-screen pb-24">
     <header class="cat-header sticky top-0 z-30 border-b">
-      <div class="cat-shell flex items-center gap-3 py-3">
+      <div class="cat-shell flex flex-wrap items-center gap-3 py-3">
         <button id="refreshBtn" class="flex min-w-0 flex-1 items-center gap-3 text-left">
           <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-white/82 shadow-soft">🐱</div>
           <div class="min-w-0">
@@ -178,38 +178,59 @@
             <p id="userLine" class="truncate text-xs text-muted">朋友家的猫都在这里</p>
           </div>
         </button>
-        <button id="adminOpenBtn" class="cat-pill hidden rounded-full px-3 text-sm font-semibold text-muted">账号</button>
-        <button id="logoutBtn" class="cat-pill rounded-full px-3 text-sm font-semibold text-muted">退出</button>
+        <nav class="order-3 flex w-full gap-2 overflow-x-auto pb-1 text-sm sm:order-none sm:w-auto sm:pb-0">
+          <button id="homeNavBtn" class="cat-pill shrink-0 rounded-full px-3 font-semibold text-muted" type="button">首页</button>
+          <button id="myCatsNavBtn" class="cat-pill shrink-0 rounded-full px-3 font-semibold text-muted" type="button">我的猫咪</button>
+          <button id="publishNavBtn" class="cat-pill shrink-0 rounded-full px-3 font-semibold text-muted" type="button">发布动态</button>
+          <button id="adminOpenBtn" class="cat-pill hidden shrink-0 rounded-full px-3 font-semibold text-muted" type="button">账号</button>
+          <button id="logoutBtn" class="cat-pill shrink-0 rounded-full px-3 font-semibold text-muted" type="button">退出</button>
+        </nav>
       </div>
     </header>
 
     <main class="cat-shell pt-4 sm:pt-5">
-      <section class="cat-hero mb-5 rounded-[24px] p-4 shadow-soft sm:flex sm:items-center sm:justify-between sm:gap-5 sm:p-5">
-        <div class="min-w-0">
-          <p class="text-xs font-semibold uppercase tracking-[.18em] text-roseDark">Meimei Cat Album</p>
-          <h2 class="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">分享一张猫猫近况</h2>
-          <p class="mt-2 max-w-2xl text-sm leading-6 text-muted sm:text-[15px]">单图、多图都可以。这里只给熟人小圈子，安静地放朋友们的猫。</p>
+      <section id="homePage">
+        <section class="cat-hero mb-5 rounded-[24px] p-4 shadow-soft sm:flex sm:items-center sm:justify-between sm:gap-5 sm:p-5">
+          <div class="min-w-0">
+            <p class="text-xs font-semibold uppercase tracking-[.18em] text-roseDark">Meimei Cat Album</p>
+            <h2 class="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">今天想看哪只猫？</h2>
+            <p class="mt-2 max-w-2xl text-sm leading-6 text-muted sm:text-[15px]">这里按猫咪来逛。主人只是记录者，猫猫才是主角。</p>
+          </div>
+          <button id="publishOpenBtn" class="cat-primary mt-4 w-full rounded-[16px] px-5 text-base font-semibold sm:mt-0 sm:w-auto sm:shrink-0">发布猫咪动态</button>
+        </section>
+
+        <div id="catFilterBar" class="mb-5 flex gap-2 overflow-x-auto pb-1"></div>
+
+        <div class="mb-3 flex items-end justify-between">
+          <div>
+            <p class="text-xs font-semibold text-roseDark">Latest</p>
+            <h3 id="feedTitle" class="text-xl font-semibold tracking-tight">最近猫咪动态</h3>
+          </div>
+          <span id="feedCount" class="text-xs text-muted"></span>
         </div>
-        <button id="publishOpenBtn" class="cat-primary mt-4 w-full rounded-[16px] px-5 text-base font-semibold sm:mt-0 sm:w-auto sm:shrink-0">发布猫咪动态</button>
+
+        <section id="emptyFeed" class="hidden rounded-[24px] border border-dashed border-[rgba(80,60,50,.12)] bg-white/72 p-8 text-center shadow-soft">
+          <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-[22px] bg-white shadow-soft">🐾</div>
+          <h3 class="text-xl font-semibold">还没有猫咪动态</h3>
+          <p class="mt-2 text-sm text-muted">还没有猫猫动态，发第一张吧。</p>
+        </section>
+
+        <section id="feed" class="album-feed"></section>
+        <button id="loadMoreBtn" class="cat-pill mx-auto mt-5 hidden rounded-full px-5 text-sm font-semibold text-muted">加载更多</button>
+        <div id="feedSentinel" class="h-8"></div>
       </section>
 
-      <div class="mb-3 flex items-end justify-between">
-        <div>
-          <p class="text-xs font-semibold text-roseDark">Latest</p>
-          <h3 class="text-xl font-semibold tracking-tight">最近猫咪动态</h3>
-        </div>
-        <span id="feedCount" class="text-xs text-muted"></span>
-      </div>
-
-      <section id="emptyFeed" class="hidden rounded-[24px] border border-dashed border-[rgba(80,60,50,.12)] bg-white/72 p-8 text-center shadow-soft">
-        <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-[22px] bg-white shadow-soft">🐾</div>
-        <h3 class="text-xl font-semibold">还没有猫咪动态</h3>
-        <p class="mt-2 text-sm text-muted">还没有猫猫动态，发第一张吧。</p>
+      <section id="myCatsPage" class="hidden">
+        <section class="mb-5 rounded-[24px] border border-[rgba(80,60,50,.08)] bg-white/82 p-4 shadow-soft sm:flex sm:items-center sm:justify-between sm:gap-5 sm:p-5">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[.18em] text-roseDark">My Cats</p>
+            <h2 class="mt-1.5 text-2xl font-semibold tracking-tight">我的猫咪</h2>
+            <p class="mt-2 text-sm leading-6 text-muted">先给猫咪建档，再把每条动态归到它名下。</p>
+          </div>
+          <button id="createCatBtn" class="cat-primary mt-4 w-full rounded-[16px] px-5 text-base font-semibold sm:mt-0 sm:w-auto">创建猫咪</button>
+        </section>
+        <div id="myCatsList" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
       </section>
-
-      <section id="feed" class="album-feed"></section>
-      <button id="loadMoreBtn" class="cat-pill mx-auto mt-5 hidden rounded-full px-5 text-sm font-semibold text-muted">加载更多</button>
-      <div id="feedSentinel" class="h-8"></div>
     </main>
   </section>
 
@@ -223,6 +244,10 @@
           </div>
           <button type="button" data-close="publishModal" class="cat-close h-10 w-10 shrink-0 rounded-full bg-cream text-xl">×</button>
         </div>
+        <label class="mb-2 block text-sm font-semibold text-muted">这是谁的动态？</label>
+        <select id="postCatId" class="soft-focus mb-3 h-11 w-full rounded-app border border-[rgba(80,60,50,.10)] bg-milk px-4 text-base">
+          <option value="">请选择猫咪</option>
+        </select>
         <input id="postTitle" class="soft-focus mb-3 h-11 w-full rounded-app border border-[rgba(80,60,50,.10)] bg-milk px-4 text-base" maxlength="80" placeholder="标题，例如 今天又睡成一团">
         <textarea id="postContent" class="soft-focus mb-3 min-h-24 w-full resize-none rounded-app border border-[rgba(80,60,50,.10)] bg-milk p-4 text-base leading-7" maxlength="4000" placeholder="写一点猫咪近况..."></textarea>
         <label class="upload-zone mb-3 flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-[20px] border border-dashed border-[rgba(216,138,166,.38)] bg-[#fff7fa] p-4 text-center">
@@ -234,6 +259,34 @@
         <div id="uploadHint" class="mb-3 hidden rounded-app bg-cream px-3 py-2 text-sm text-muted"></div>
         <div id="selectedImages" class="mb-5 grid grid-cols-3 gap-2"></div>
         <button id="publishSubmitBtn" class="cat-primary h-12 w-full rounded-[16px] text-base font-semibold">发布</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="catModal" class="fixed inset-0 z-50 hidden bg-black/28 p-3 backdrop-blur-sm">
+    <div class="safe-bottom mx-auto flex h-full items-end sm:items-center sm:justify-center">
+      <form id="catForm" class="cat-modal-panel max-h-[92vh] w-full max-w-[560px] overflow-y-auto rounded-[28px] border border-[rgba(80,60,50,.08)] bg-white p-4 shadow-soft sm:p-5">
+        <div class="mb-3 flex items-start justify-between gap-4">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[.18em] text-roseDark">Cat Profile</p>
+            <h2 id="catFormTitle" class="mt-1 text-xl font-semibold">创建猫咪档案</h2>
+          </div>
+          <button type="button" data-close="catModal" class="cat-close h-10 w-10 shrink-0 rounded-full bg-cream text-xl">×</button>
+        </div>
+        <input id="catName" class="soft-focus mb-3 h-11 w-full rounded-app border border-[rgba(80,60,50,.10)] bg-milk px-4 text-base" maxlength="40" placeholder="猫咪名字">
+        <input id="catAvatarUrl" class="soft-focus mb-3 h-11 w-full rounded-app border border-[rgba(80,60,50,.10)] bg-milk px-4 text-base" placeholder="头像图片链接，可留空">
+        <div class="grid gap-3 sm:grid-cols-3">
+          <input id="catBreed" class="soft-focus h-11 rounded-app border border-[rgba(80,60,50,.10)] bg-milk px-4 text-base" maxlength="40" placeholder="品种">
+          <select id="catGender" class="soft-focus h-11 rounded-app border border-[rgba(80,60,50,.10)] bg-milk px-4 text-base">
+            <option value="">性别</option>
+            <option value="公猫">公猫</option>
+            <option value="母猫">母猫</option>
+            <option value="未知">未知</option>
+          </select>
+          <input id="catBirthday" type="date" class="soft-focus h-11 rounded-app border border-[rgba(80,60,50,.10)] bg-milk px-4 text-base">
+        </div>
+        <textarea id="catDescription" class="soft-focus my-3 min-h-24 w-full resize-none rounded-app border border-[rgba(80,60,50,.10)] bg-milk p-4 text-base leading-7" maxlength="500" placeholder="写一点这只猫的性格、爱好、故事..."></textarea>
+        <button id="catSubmitBtn" class="cat-primary h-12 w-full rounded-[16px] text-base font-semibold">保存猫咪档案</button>
       </form>
     </div>
   </div>
@@ -292,6 +345,11 @@
       isGuest: false,
       guestId: "",
       guestName: "",
+      cats: [],
+      myCats: [],
+      selectedCatId: "",
+      activePage: "home",
+      editingCatId: "",
       posts: [],
       cursor: null,
       loading: false,
@@ -353,9 +411,61 @@
       return `<div class="flex h-6 w-6 items-center justify-center rounded-full bg-cream text-xs">🐱</div>`;
     }
 
+    function catAvatar(cat, size = "h-9 w-9", text = "text-lg") {
+      if (cat?.avatar_url) {
+        return `<img src="${esc(cat.avatar_url)}" alt="" class="${size} rounded-[14px] object-cover">`;
+      }
+      return `<div class="flex ${size} items-center justify-center rounded-[14px] bg-cream ${text}">🐱</div>`;
+    }
+
+    function catAgeText(birthday) {
+      if (!birthday) return "";
+      const birth = new Date(`${birthday}T00:00:00`);
+      if (Number.isNaN(birth.getTime())) return "";
+      const today = new Date();
+      let months = (today.getFullYear() - birth.getFullYear()) * 12 + today.getMonth() - birth.getMonth();
+      if (today.getDate() < birth.getDate()) months -= 1;
+      if (months < 0) return "";
+      if (months < 12) return `${months || 1}个月`;
+      const years = Math.floor(months / 12);
+      const rest = months % 12;
+      return rest ? `${years}岁${rest}个月` : `${years}岁`;
+    }
+
     function setView(name) {
       $("loginView").classList.toggle("hidden", name !== "login");
       $("mainView").classList.toggle("hidden", name !== "main");
+    }
+
+    function renderNav() {
+      const activeClass = "bg-white text-ink shadow-soft";
+      const normalClass = "text-muted";
+      for (const [id, page] of [["homeNavBtn", "home"], ["myCatsNavBtn", "cats"]]) {
+        const button = $(id);
+        const active = state.activePage === page;
+        button.classList.toggle("bg-white", active);
+        button.classList.toggle("text-ink", active);
+        button.classList.toggle("shadow-soft", active);
+        button.classList.toggle("text-muted", !active);
+      }
+    }
+
+    async function showCatPage(page) {
+      state.activePage = page;
+      $("homePage").classList.toggle("hidden", page !== "home");
+      $("myCatsPage").classList.toggle("hidden", page !== "cats");
+      renderNav();
+      if (page === "home") {
+        await loadPublicCats();
+        await loadFeed(true);
+      } else {
+        if (state.isGuest) {
+          showToast("游客可以浏览猫咪，管理猫咪需要登录。");
+          await showCatPage("home");
+          return;
+        }
+        await loadMyCats();
+      }
     }
 
     function ensureGuestIdentity() {
@@ -376,12 +486,19 @@
       localStorage.setItem("catGuestMode", "1");
       state.user = null;
       state.isGuest = true;
+      state.activePage = "home";
       $("userLine").textContent = `${state.guestName} · 只能浏览、点赞和评论`;
       $("adminOpenBtn").classList.add("hidden");
+      $("myCatsNavBtn").classList.add("hidden");
+      $("publishNavBtn").classList.add("hidden");
       $("publishOpenBtn").classList.add("hidden");
       $("logoutBtn").textContent = "离开游客";
       setView("main");
-      if (load) await loadFeed(true);
+      renderNav();
+      if (load) {
+        await loadPublicCats();
+        await loadFeed(true);
+      }
     }
 
     function leaveGuestMode() {
@@ -389,12 +506,92 @@
       state.isGuest = false;
       state.guestId = "";
       state.guestName = "";
+      $("myCatsNavBtn").classList.remove("hidden");
+      $("publishNavBtn").classList.remove("hidden");
       $("logoutBtn").textContent = "退出";
     }
 
     function ensureInteractionIdentity() {
       if (!state.user && !state.guestId) ensureGuestIdentity();
       return Boolean(state.user || state.guestId);
+    }
+
+    async function loadPublicCats() {
+      try {
+        const data = await request("/cat/api/cats");
+        state.cats = data.cats || [];
+        if (state.selectedCatId && !state.cats.some((cat) => cat.id === state.selectedCatId)) {
+          state.selectedCatId = "";
+        }
+        renderCatFilter();
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    async function loadMyCats() {
+      if (!state.user) return;
+      try {
+        const data = await request("/cat/api/cats?scope=mine");
+        state.myCats = data.cats || [];
+        renderMyCats();
+        renderPostCatOptions();
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    function renderCatFilter() {
+      const cats = state.cats || [];
+      const allActive = !state.selectedCatId;
+      $("catFilterBar").innerHTML = `
+        <button class="cat-pill shrink-0 rounded-full px-4 text-sm font-semibold ${allActive ? "bg-white text-ink shadow-soft" : "text-muted"}" data-cat-filter="" type="button">全部</button>
+        ${cats.map((cat) => `
+          <button class="cat-pill flex shrink-0 items-center gap-2 rounded-full px-3 text-sm font-semibold ${state.selectedCatId === cat.id ? "bg-white text-ink shadow-soft" : "text-muted"}" data-cat-filter="${esc(cat.id)}" type="button">
+            ${catAvatar(cat, "h-7 w-7", "text-sm")}
+            <span>${esc(cat.name)}</span>
+          </button>
+        `).join("")}
+      `;
+      const selected = cats.find((cat) => cat.id === state.selectedCatId);
+      $("feedTitle").textContent = selected ? `${selected.name} 的动态` : "最近猫咪动态";
+    }
+
+    function renderPostCatOptions() {
+      const options = [`<option value="">请选择猫咪</option>`].concat((state.myCats || []).map((cat) => `
+        <option value="${esc(cat.id)}">${esc(cat.name)}${cat.breed ? ` · ${esc(cat.breed)}` : ""}</option>
+      `));
+      $("postCatId").innerHTML = options.join("");
+    }
+
+    function renderMyCats() {
+      const cats = state.myCats || [];
+      $("myCatsList").innerHTML = cats.map((cat) => {
+        const age = catAgeText(cat.birthday);
+        return `
+          <article class="cat-card overflow-hidden bg-white p-4">
+            <button class="flex w-full items-start gap-3 text-left" data-open-cat="${esc(cat.id)}" type="button">
+              ${catAvatar(cat, "h-16 w-16", "text-3xl")}
+              <div class="min-w-0 flex-1">
+                <h3 class="truncate text-xl font-semibold">${esc(cat.name)}</h3>
+                <p class="mt-1 text-sm text-muted">${esc(cat.breed || "未知品种")}${age ? ` · ${esc(age)}` : ""}</p>
+                <p class="mt-1 text-xs text-muted">${cat.post_count || 0} 条动态</p>
+              </div>
+            </button>
+            <p class="mt-3 line-clamp-2 min-h-[40px] text-sm leading-5 text-[#6b5f59]">${esc(cat.description || "还没有简介。")}</p>
+            <div class="mt-4 flex gap-2">
+              <button class="cat-pill flex-1 rounded-full px-3 text-sm font-semibold text-muted" data-edit-cat="${esc(cat.id)}" type="button">编辑</button>
+              <button class="cat-pill flex-1 rounded-full px-3 text-sm font-semibold text-roseDark" data-delete-cat="${esc(cat.id)}" type="button">删除</button>
+            </div>
+          </article>
+        `;
+      }).join("") || `
+        <section class="rounded-[24px] border border-dashed border-[rgba(80,60,50,.12)] bg-white/72 p-8 text-center shadow-soft sm:col-span-2 lg:col-span-3">
+          <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-[22px] bg-white shadow-soft">🐱</div>
+          <h3 class="text-xl font-semibold">还没有猫咪档案</h3>
+          <p class="mt-2 text-sm text-muted">先创建一只猫咪，再发布它的照片动态。</p>
+        </section>
+      `;
     }
 
     function renderFeed(reset = false) {
@@ -404,6 +601,13 @@
       $("emptyFeed").classList.toggle("hidden", state.posts.length > 0);
       feed.innerHTML = state.posts.map((post) => `
         <article class="cat-card mb-[10px] overflow-hidden bg-white active:scale-[.99] sm:mb-3" data-post-id="${esc(post.id)}">
+          <button class="flex w-full items-center gap-2 px-3 py-2.5 text-left" ${post.cat ? `data-open-cat="${esc(post.cat.id)}"` : ""} type="button">
+            ${catAvatar(post.cat, "h-9 w-9", "text-lg")}
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-sm font-semibold text-ink">${esc(post.cat?.name || "未关联猫咪")}</span>
+              <span class="block truncate text-xs text-muted">${post.cat?.breed ? esc(post.cat.breed) : "猫咪动态"}</span>
+            </span>
+          </button>
           <div class="cursor-pointer" data-open-post="${esc(post.id)}">
             <div class="skeleton-img overflow-hidden rounded-t-[18px]">
               <img src="${esc(post.cover_url)}" alt="${esc(post.title)}" class="w-full rounded-t-[18px] bg-cream object-cover" loading="lazy" onload="this.parentElement.classList.remove('skeleton-img')">
@@ -415,7 +619,7 @@
           <div class="flex items-center gap-2 px-3 pb-3 pt-2.5 text-xs text-muted">
             <button class="flex min-w-0 items-center gap-2" data-open-profile="${esc(post.author.id)}" type="button">
               ${avatar(post.author)}
-              <span class="truncate text-[#9a8f89]">${esc(post.author.nickname)}</span>
+              <span class="truncate text-[#9a8f89]">主人 ${esc(post.author.nickname)}</span>
             </button>
             <span class="ml-auto shrink-0 text-[#aaa09a]">${timeText(post.created_at)}</span>
           </div>
@@ -433,7 +637,10 @@
       if (state.loading) return;
       state.loading = true;
       try {
-        const qs = reset || !state.cursor ? "?limit=20" : `?limit=20&before=${state.cursor}`;
+        const params = new URLSearchParams({ limit: "20" });
+        if (!reset && state.cursor) params.set("before", state.cursor);
+        if (state.selectedCatId) params.set("cat_id", state.selectedCatId);
+        const qs = `?${params.toString()}`;
         const data = await request("/cat/api/posts" + qs);
         state.posts = reset ? data.posts : state.posts.concat(data.posts);
         state.cursor = data.next_cursor;
@@ -544,9 +751,16 @@
             ` : ""}
           </div>
           <div class="mt-5 flex items-center gap-2 text-sm text-muted">
-            <button class="flex items-center gap-2" data-open-profile="${esc(post.author.id)}" type="button">${avatar(post.author)}<span>${esc(post.author.nickname)}</span></button>
+            <button class="flex min-w-0 items-center gap-2 rounded-[18px] bg-cream px-2.5 py-2 text-left" ${post.cat ? `data-open-cat="${esc(post.cat.id)}"` : ""} type="button">
+              ${catAvatar(post.cat, "h-10 w-10", "text-xl")}
+              <span class="min-w-0">
+                <span class="block truncate font-semibold text-ink">${esc(post.cat?.name || "未关联猫咪")}</span>
+                <span class="block truncate text-xs text-muted">${post.cat?.breed ? esc(post.cat.breed) : "猫咪动态"}</span>
+              </span>
+            </button>
             <span class="ml-auto">${timeText(post.created_at)}</span>
           </div>
+          <button class="mt-3 flex items-center gap-2 text-sm text-muted" data-open-profile="${esc(post.author.id)}" type="button">${avatar(post.author)}<span>主人 ${esc(post.author.nickname)}</span></button>
           <h2 class="mt-4 text-2xl font-semibold leading-tight">${esc(post.title)}</h2>
           <p class="mt-3 whitespace-pre-wrap text-base leading-8 text-[#5E4B43]">${esc(post.content || "没有写正文。")}</p>
           <div class="mt-5 flex items-center gap-2 border-y border-[rgba(80,60,50,.08)] py-3 text-sm text-muted">
@@ -615,6 +829,94 @@
       }
     }
 
+    function openCatForm(cat = null) {
+      state.editingCatId = cat?.id || "";
+      $("catFormTitle").textContent = cat ? "编辑猫咪档案" : "创建猫咪档案";
+      $("catName").value = cat?.name || "";
+      $("catAvatarUrl").value = cat?.avatar_url || "";
+      $("catBreed").value = cat?.breed || "";
+      $("catGender").value = cat?.gender || "";
+      $("catBirthday").value = cat?.birthday || "";
+      $("catDescription").value = cat?.description || "";
+      openModal("catModal");
+    }
+
+    async function saveCat(event) {
+      event.preventDefault();
+      const body = {
+        name: $("catName").value,
+        avatar_url: $("catAvatarUrl").value,
+        breed: $("catBreed").value,
+        gender: $("catGender").value,
+        birthday: $("catBirthday").value,
+        description: $("catDescription").value
+      };
+      try {
+        $("catSubmitBtn").disabled = true;
+        const path = state.editingCatId ? `/cat/api/cats/${state.editingCatId}` : "/cat/api/cats";
+        await request(path, {
+          method: state.editingCatId ? "PUT" : "POST",
+          body: JSON.stringify(body)
+        });
+        closeModal("catModal");
+        showToast(state.editingCatId ? "猫咪档案已更新" : "猫咪档案已创建");
+        state.editingCatId = "";
+        await loadMyCats();
+        await loadPublicCats();
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        $("catSubmitBtn").disabled = false;
+      }
+    }
+
+    async function deleteCat(catId) {
+      const cat = state.myCats.find((item) => item.id === catId);
+      if (!cat) return;
+      if (!confirm(`确定删除 ${cat.name} 的档案吗？旧动态不会删除，但会变成未关联猫咪。`)) return;
+      try {
+        await request(`/cat/api/cats/${catId}`, { method: "DELETE" });
+        if (state.selectedCatId === catId) state.selectedCatId = "";
+        showToast("猫咪档案已删除");
+        await loadMyCats();
+        await loadPublicCats();
+        if (state.activePage === "home") await loadFeed(true);
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    async function openCatProfile(id) {
+      if (!id) return;
+      try {
+        const data = await request(`/cat/api/cats/${id}`);
+        const cat = data.cat;
+        const age = catAgeText(cat.birthday);
+        $("profileBody").innerHTML = `
+          <div class="mb-6 flex items-center gap-4">
+            ${catAvatar(cat, "h-24 w-24", "text-5xl")}
+            <div class="min-w-0">
+              <h2 class="truncate text-3xl font-semibold">${esc(cat.name)}</h2>
+              <p class="mt-1 text-sm text-muted">${esc(cat.breed || "未知品种")}${age ? ` · ${esc(age)}` : ""}${cat.gender ? ` · ${esc(cat.gender)}` : ""}</p>
+              <p class="mt-1 text-xs text-muted">主人 ${esc(cat.owner?.nickname || "未知")} · ${cat.post_count || 0} 条动态</p>
+            </div>
+          </div>
+          <p class="mb-5 rounded-[20px] bg-cream p-4 text-sm leading-7 text-[#5E4B43]">${esc(cat.description || "这只猫咪还没有简介。")}</p>
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            ${(data.posts || []).map((post) => `
+              <button class="overflow-hidden rounded-app bg-cream text-left" data-open-post="${esc(post.id)}">
+                <img src="${esc(post.cover_url)}" class="aspect-square w-full object-cover" alt="">
+                <div class="p-2 text-sm font-semibold line-clamp-2">${esc(post.title)}</div>
+              </button>
+            `).join("") || `<p class="col-span-full rounded-app bg-cream p-4 text-center text-muted">这只猫咪还没有动态</p>`}
+          </div>
+        `;
+        openModal("profileModal");
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
     async function openProfile(id) {
       try {
         const data = await request(`/cat/api/users/${id}`);
@@ -673,9 +975,12 @@
         leaveGuestMode();
         $("userLine").textContent = `${state.user.nickname} · ${data.oss_configured ? "可以上传照片" : "等待配置 OSS"}`;
         $("adminOpenBtn").classList.toggle("hidden", state.user.role !== "admin");
+        $("myCatsNavBtn").classList.remove("hidden");
+        $("publishNavBtn").classList.remove("hidden");
         $("publishOpenBtn").classList.remove("hidden");
         setView("main");
-        await loadFeed(true);
+        await loadMyCats();
+        await showCatPage("home");
       } catch (error) {
         showToast(error.message);
         setView("login");
@@ -732,17 +1037,30 @@
     });
 
     $("refreshBtn").addEventListener("click", () => loadFeed(true));
+    $("homeNavBtn").addEventListener("click", () => showCatPage("home"));
+    $("myCatsNavBtn").addEventListener("click", () => showCatPage("cats"));
+    $("publishNavBtn").addEventListener("click", () => openPublishModal());
     $("loadMoreBtn").addEventListener("click", () => loadFeed(false));
-    $("publishOpenBtn").addEventListener("click", () => {
+    async function openPublishModal() {
       if (state.isGuest) {
         showToast("游客可以看、点赞和评论，发布照片需要登录。");
         return;
       }
+      await loadMyCats();
+      if (!state.myCats.length) {
+        showToast("先创建一只猫咪档案，再发布动态。");
+        await showCatPage("cats");
+        return;
+      }
       state.selectedImages = [];
       $("publishForm").reset();
+      renderPostCatOptions();
       renderSelectedImages();
       openModal("publishModal");
-    });
+    }
+    $("publishOpenBtn").addEventListener("click", () => openPublishModal());
+    $("createCatBtn").addEventListener("click", () => openCatForm());
+    $("catForm").addEventListener("submit", saveCat);
     $("adminOpenBtn").addEventListener("click", async () => {
       openModal("adminModal");
       await refreshAdminUsers();
@@ -765,6 +1083,7 @@
         const data = await request("/cat/api/posts", {
           method: "POST",
           body: JSON.stringify({
+            cat_id: $("postCatId").value,
             title: $("postTitle").value,
             content: $("postContent").value,
             image_ids: state.selectedImages.map((image) => image.id)
@@ -772,6 +1091,8 @@
         });
         state.posts.unshift(data.post);
         renderFeed(true);
+        await loadPublicCats();
+        await loadMyCats();
         closeModal("publishModal");
         showToast("发布成功");
       } catch (error) {
@@ -810,6 +1131,31 @@
         event.preventDefault();
         event.stopPropagation();
         toggleLike(likeId);
+        return;
+      }
+      const filterCatId = event.target.closest("[data-cat-filter]")?.dataset.catFilter;
+      if (filterCatId !== undefined) {
+        state.selectedCatId = filterCatId;
+        state.cursor = null;
+        renderCatFilter();
+        loadFeed(true);
+        return;
+      }
+      const editCatId = event.target.closest("[data-edit-cat]")?.dataset.editCat;
+      if (editCatId) {
+        const cat = state.myCats.find((item) => item.id === editCatId);
+        if (cat) openCatForm(cat);
+        return;
+      }
+      const deleteCatId = event.target.closest("[data-delete-cat]")?.dataset.deleteCat;
+      if (deleteCatId) {
+        deleteCat(deleteCatId);
+        return;
+      }
+      const catId = event.target.closest("[data-open-cat]")?.dataset.openCat;
+      if (catId) {
+        event.stopPropagation();
+        openCatProfile(catId);
         return;
       }
       const postId = event.target.closest("[data-open-post]")?.dataset.openPost;

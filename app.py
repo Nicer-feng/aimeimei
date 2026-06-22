@@ -265,9 +265,24 @@ def init_db():
               FOREIGN KEY (user_id) REFERENCES cat_users(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS cats (
+              id TEXT PRIMARY KEY,
+              owner_user_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              avatar_url TEXT NOT NULL DEFAULT '',
+              breed TEXT NOT NULL DEFAULT '',
+              gender TEXT NOT NULL DEFAULT '',
+              birthday TEXT NOT NULL DEFAULT '',
+              description TEXT NOT NULL DEFAULT '',
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL,
+              FOREIGN KEY (owner_user_id) REFERENCES cat_users(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS cat_posts (
               id TEXT PRIMARY KEY,
               user_id TEXT NOT NULL,
+              cat_id TEXT NOT NULL DEFAULT '',
               title TEXT NOT NULL,
               content TEXT NOT NULL,
               status TEXT NOT NULL DEFAULT 'published',
@@ -322,6 +337,11 @@ def init_db():
                 conn.execute(
                     f"ALTER TABLE messages ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
                 )
+        cat_post_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(cat_posts)").fetchall()
+        }
+        if "cat_id" not in cat_post_columns:
+            conn.execute("ALTER TABLE cat_posts ADD COLUMN cat_id TEXT NOT NULL DEFAULT ''")
 
         count = conn.execute("SELECT COUNT(*) AS n FROM models").fetchone()["n"]
         if count == 0:
@@ -444,10 +464,48 @@ def cat_user_public(row):
     }
 
 
-def cat_post_card(row):
+def cat_public(row):
     keys = set(row.keys())
     return {
         "id": row["id"],
+        "owner_user_id": row["owner_user_id"],
+        "name": row["name"],
+        "avatar_url": row["avatar_url"],
+        "breed": row["breed"],
+        "gender": row["gender"],
+        "birthday": row["birthday"],
+        "description": row["description"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "post_count": int(row["post_count"] or 0) if "post_count" in keys else 0,
+        "owner": {
+            "id": row["owner_user_id"],
+            "username": row["owner_username"],
+            "nickname": row["owner_nickname"],
+            "avatar_url": row["owner_avatar_url"],
+        }
+        if "owner_username" in keys
+        else None,
+    }
+
+
+def cat_post_card(row):
+    keys = set(row.keys())
+    cat = None
+    if "cat_id" in keys and row["cat_id"] and "cat_name" in keys and row["cat_name"]:
+        cat = {
+            "id": row["cat_id"],
+            "name": row["cat_name"] or "",
+            "avatar_url": row["cat_avatar_url"] or "",
+            "breed": row["cat_breed"] or "",
+            "gender": row["cat_gender"] or "",
+            "birthday": row["cat_birthday"] or "",
+            "description": row["cat_description"] or "",
+        }
+    return {
+        "id": row["id"],
+        "cat_id": row["cat_id"] if "cat_id" in keys else "",
+        "cat": cat,
         "title": row["title"],
         "content": row["content"],
         "cover_url": row["cover_url"] or "",
@@ -853,6 +911,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.handle_res_file(path)
         if path == "/cat/api/me":
             return self.handle_cat_me()
+        if path == "/cat/api/cats":
+            return self.handle_cat_cats()
+        if path.startswith("/cat/api/cats/"):
+            return self.handle_cat_item()
         if path == "/cat/api/posts":
             return self.handle_cat_posts()
         if path.startswith("/cat/api/posts/"):
@@ -893,6 +955,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.handle_cat_logout()
         if path == "/cat/api/images":
             return self.require_cat_user(self.handle_cat_images)
+        if path == "/cat/api/cats":
+            return self.require_cat_user(self.handle_cat_cats)
         if path == "/cat/api/posts":
             return self.require_cat_user(self.handle_cat_posts)
         if path.startswith("/cat/api/posts/"):
@@ -921,6 +985,8 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         path = urlparse(self.path).path
+        if path.startswith("/cat/api/cats/"):
+            return self.require_cat_user(self.handle_cat_item)
         if path.startswith("/cat/api/admin/users/"):
             return self.require_cat_admin(self.handle_cat_admin_user_item)
         if path.startswith("/api/admin/models/"):
@@ -937,6 +1003,8 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = urlparse(self.path).path
+        if path.startswith("/cat/api/cats/"):
+            return self.require_cat_user(self.handle_cat_item)
         if path.startswith("/api/admin/models/"):
             return self.require_admin(self.handle_admin_model_item)
         if path.startswith("/api/prompts/"):
@@ -1344,6 +1412,193 @@ class AppHandler(BaseHTTPRequestHandler):
             row = conn.execute("SELECT * FROM cat_users WHERE id=?", (user_id,)).fetchone()
         return self.json({"user": cat_user_public(row)})
 
+    def clean_cat_payload(self, data):
+        name = str(data.get("name") or "").strip()[:40]
+        avatar_url = str(data.get("avatar_url") or "").strip()[:1000]
+        breed = str(data.get("breed") or "").strip()[:40]
+        gender = str(data.get("gender") or "").strip()[:12]
+        birthday = str(data.get("birthday") or "").strip()[:10]
+        description = str(data.get("description") or "").strip()[:500]
+        if avatar_url and not re.match(r"^https?://", avatar_url):
+            avatar_url = ""
+        if birthday and not re.match(r"^\d{4}-\d{2}-\d{2}$", birthday):
+            birthday = ""
+        return {
+            "name": name,
+            "avatar_url": avatar_url,
+            "breed": breed,
+            "gender": gender,
+            "birthday": birthday,
+            "description": description,
+        }
+
+    def cat_owner_allowed(self, cat_row, user):
+        return bool(cat_row and user and (cat_row["owner_user_id"] == user["id"] or user["role"] == "admin"))
+
+    def handle_cat_cats(self):
+        params = parse_qs(urlparse(self.path).query)
+        scope = (params.get("scope") or ["public"])[0]
+        if self.command == "GET":
+            current = self.current_cat_user()
+            values = []
+            where = "EXISTS (SELECT 1 FROM cat_posts p WHERE p.cat_id=c.id AND p.status='published')"
+            if scope == "mine":
+                if not current:
+                    return self.error(HTTPStatus.UNAUTHORIZED, "请先登录槑槑相册")
+                where = "c.owner_user_id=?"
+                values.append(current["id"])
+            with db() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT c.*, u.username AS owner_username, u.nickname AS owner_nickname,
+                           u.avatar_url AS owner_avatar_url,
+                           (SELECT COUNT(*) FROM cat_posts p WHERE p.cat_id=c.id AND p.status='published') AS post_count
+                    FROM cats c
+                    JOIN cat_users u ON u.id = c.owner_user_id
+                    WHERE {where}
+                    ORDER BY post_count DESC, c.updated_at DESC
+                    LIMIT 200
+                    """,
+                    tuple(values),
+                ).fetchall()
+            return self.json({"cats": [cat_public(row) for row in rows]})
+
+        user = self.current_cat_user()
+        try:
+            data = self.read_body(limit=32 * 1024)
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "猫咪资料格式不正确")
+        payload = self.clean_cat_payload(data)
+        if not payload["name"]:
+            return self.error(HTTPStatus.BAD_REQUEST, "请填写猫咪名字")
+        cat_id = b64_token(12)
+        ts = now()
+        with db() as conn:
+            conn.execute(
+                """
+                INSERT INTO cats
+                (id, owner_user_id, name, avatar_url, breed, gender, birthday, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    cat_id,
+                    user["id"],
+                    payload["name"],
+                    payload["avatar_url"],
+                    payload["breed"],
+                    payload["gender"],
+                    payload["birthday"],
+                    payload["description"],
+                    ts,
+                    ts,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT c.*, u.username AS owner_username, u.nickname AS owner_nickname,
+                       u.avatar_url AS owner_avatar_url,
+                       0 AS post_count
+                FROM cats c
+                JOIN cat_users u ON u.id = c.owner_user_id
+                WHERE c.id=?
+                """,
+                (cat_id,),
+            ).fetchone()
+        return self.json({"cat": cat_public(row)}, HTTPStatus.CREATED)
+
+    def handle_cat_item(self):
+        parts = urlparse(self.path).path.strip("/").split("/")
+        cat_id = parts[3] if len(parts) >= 4 else ""
+        if len(parts) != 4:
+            return self.error(HTTPStatus.NOT_FOUND, "not found")
+        if self.command == "GET":
+            actor = self.cat_actor()
+            actor_key = actor["key"] if actor else ""
+            with db() as conn:
+                cat = conn.execute(
+                    """
+                    SELECT c.*, u.username AS owner_username, u.nickname AS owner_nickname,
+                           u.avatar_url AS owner_avatar_url,
+                           (SELECT COUNT(*) FROM cat_posts p WHERE p.cat_id=c.id AND p.status='published') AS post_count
+                    FROM cats c
+                    JOIN cat_users u ON u.id = c.owner_user_id
+                    WHERE c.id=?
+                    """,
+                    (cat_id,),
+                ).fetchone()
+                if not cat:
+                    return self.error(HTTPStatus.NOT_FOUND, "这只猫咪不存在")
+                rows = conn.execute(
+                    """
+                    SELECT p.*, u.username, u.nickname, u.avatar_url,
+                           c.id AS cat_id, c.name AS cat_name, c.avatar_url AS cat_avatar_url,
+                           c.breed AS cat_breed, c.gender AS cat_gender, c.birthday AS cat_birthday,
+                           c.description AS cat_description,
+                           (SELECT image_url FROM cat_post_images WHERE post_id=p.id ORDER BY sort_order ASC, id ASC LIMIT 1) AS cover_url,
+                           (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count,
+                           (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id) AS like_count,
+                           (SELECT COUNT(*) FROM cat_comments WHERE post_id=p.id) AS comment_count,
+                           (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id AND actor_key=?) AS liked_by_me
+                    FROM cat_posts p
+                    JOIN cat_users u ON u.id = p.user_id
+                    LEFT JOIN cats c ON c.id = p.cat_id
+                    WHERE p.status='published' AND p.cat_id=?
+                    ORDER BY p.created_at DESC, p.id DESC
+                    LIMIT 120
+                    """,
+                    (actor_key, cat_id),
+                ).fetchall()
+            return self.json({"cat": cat_public(cat), "posts": [cat_post_card(row) for row in rows]})
+
+        user = self.current_cat_user()
+        with db() as conn:
+            cat = conn.execute("SELECT * FROM cats WHERE id=?", (cat_id,)).fetchone()
+            if not cat:
+                return self.error(HTTPStatus.NOT_FOUND, "这只猫咪不存在")
+            if not self.cat_owner_allowed(cat, user):
+                return self.error(HTTPStatus.FORBIDDEN, "只能管理自己的猫咪")
+            if self.command == "DELETE":
+                conn.execute("UPDATE cat_posts SET cat_id='' WHERE cat_id=?", (cat_id,))
+                conn.execute("DELETE FROM cats WHERE id=?", (cat_id,))
+                return self.json({"ok": True})
+            try:
+                data = self.read_body(limit=32 * 1024)
+            except Exception:
+                return self.error(HTTPStatus.BAD_REQUEST, "猫咪资料格式不正确")
+            payload = self.clean_cat_payload(data)
+            if not payload["name"]:
+                return self.error(HTTPStatus.BAD_REQUEST, "请填写猫咪名字")
+            ts = now()
+            conn.execute(
+                """
+                UPDATE cats
+                SET name=?, avatar_url=?, breed=?, gender=?, birthday=?, description=?, updated_at=?
+                WHERE id=?
+                """,
+                (
+                    payload["name"],
+                    payload["avatar_url"],
+                    payload["breed"],
+                    payload["gender"],
+                    payload["birthday"],
+                    payload["description"],
+                    ts,
+                    cat_id,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT c.*, u.username AS owner_username, u.nickname AS owner_nickname,
+                       u.avatar_url AS owner_avatar_url,
+                       (SELECT COUNT(*) FROM cat_posts p WHERE p.cat_id=c.id AND p.status='published') AS post_count
+                FROM cats c
+                JOIN cat_users u ON u.id = c.owner_user_id
+                WHERE c.id=?
+                """,
+                (cat_id,),
+            ).fetchone()
+        return self.json({"cat": cat_public(row)})
+
     def handle_cat_upload_policy(self):
         user = self.current_cat_user()
         config = cat_oss_config(self.server.secrets)
@@ -1410,6 +1665,9 @@ class AppHandler(BaseHTTPRequestHandler):
         row = conn.execute(
             """
             SELECT p.*, u.username, u.nickname, u.avatar_url,
+                   c.name AS cat_name, c.avatar_url AS cat_avatar_url,
+                   c.breed AS cat_breed, c.gender AS cat_gender, c.birthday AS cat_birthday,
+                   c.description AS cat_description,
                    (SELECT image_url FROM cat_post_images WHERE post_id=p.id ORDER BY sort_order ASC, id ASC LIMIT 1) AS cover_url,
                    (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count,
                    (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id) AS like_count,
@@ -1417,6 +1675,7 @@ class AppHandler(BaseHTTPRequestHandler):
                    (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id AND actor_key=?) AS liked_by_me
             FROM cat_posts p
             JOIN cat_users u ON u.id = p.user_id
+            LEFT JOIN cats c ON c.id = p.cat_id
             WHERE p.id=? AND p.status='published'
             """,
             (actor_key or "", post_id),
@@ -1458,8 +1717,12 @@ class AppHandler(BaseHTTPRequestHandler):
             params = parse_qs(urlparse(self.path).query)
             limit = clamp_int((params.get("limit") or ["20"])[0], 20, 1, 30)
             before = clamp_int((params.get("before") or ["0"])[0], 0, 0, 10**12)
+            cat_id = str((params.get("cat_id") or [""])[0]).strip()
             where = "p.status='published'"
             values = []
+            if cat_id:
+                where += " AND p.cat_id=?"
+                values.append(cat_id)
             if before:
                 where += " AND p.created_at<?"
                 values.append(before)
@@ -1467,6 +1730,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 rows = conn.execute(
                     f"""
                     SELECT p.*, u.username, u.nickname, u.avatar_url,
+                           c.name AS cat_name, c.avatar_url AS cat_avatar_url,
+                           c.breed AS cat_breed, c.gender AS cat_gender, c.birthday AS cat_birthday,
+                           c.description AS cat_description,
                            (SELECT image_url FROM cat_post_images WHERE post_id=p.id ORDER BY sort_order ASC, id ASC LIMIT 1) AS cover_url,
                            (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count,
                            (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id) AS like_count,
@@ -1474,6 +1740,7 @@ class AppHandler(BaseHTTPRequestHandler):
                            (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id AND actor_key=?) AS liked_by_me
                     FROM cat_posts p
                     JOIN cat_users u ON u.id = p.user_id
+                    LEFT JOIN cats c ON c.id = p.cat_id
                     WHERE {where}
                     ORDER BY p.created_at DESC, p.id DESC
                     LIMIT ?
@@ -1497,10 +1764,13 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "发布内容格式不正确")
         title = str(data.get("title") or "").strip()[:80]
         content = str(data.get("content") or "").strip()[:4000]
+        cat_id = str(data.get("cat_id") or "").strip()
         image_ids = data.get("image_ids") or []
         if not isinstance(image_ids, list):
             image_ids = []
         image_ids = [str(item).strip() for item in image_ids if str(item).strip()][:9]
+        if not cat_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "请选择这条动态属于哪只猫咪")
         if not title:
             return self.error(HTTPStatus.BAD_REQUEST, "请填写标题")
         if not image_ids:
@@ -1509,6 +1779,12 @@ class AppHandler(BaseHTTPRequestHandler):
         post_id = b64_token(12)
         ts = now()
         with db() as conn:
+            cat = conn.execute(
+                "SELECT * FROM cats WHERE id=? AND owner_user_id=?",
+                (cat_id, user["id"]),
+            ).fetchone()
+            if not cat:
+                return self.error(HTTPStatus.BAD_REQUEST, "请选择自己创建的猫咪")
             placeholders = ",".join("?" for _ in image_ids)
             image_rows = conn.execute(
                 f"""
@@ -1525,10 +1801,10 @@ class AppHandler(BaseHTTPRequestHandler):
 
             conn.execute(
                 """
-                INSERT INTO cat_posts(id, user_id, title, content, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, 'published', ?, ?)
+                INSERT INTO cat_posts(id, user_id, cat_id, title, content, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'published', ?, ?)
                 """,
-                (post_id, user["id"], title, content, ts, ts),
+                (post_id, user["id"], cat_id, title, content, ts, ts),
             )
             for index, image in enumerate(ordered_images):
                 conn.execute(
@@ -1655,6 +1931,9 @@ class AppHandler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 """
                 SELECT p.*, u.username, u.nickname, u.avatar_url,
+                       c.name AS cat_name, c.avatar_url AS cat_avatar_url,
+                       c.breed AS cat_breed, c.gender AS cat_gender, c.birthday AS cat_birthday,
+                       c.description AS cat_description,
                        (SELECT image_url FROM cat_post_images WHERE post_id=p.id ORDER BY sort_order ASC, id ASC LIMIT 1) AS cover_url,
                        (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count,
                        (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id) AS like_count,
@@ -1662,6 +1941,7 @@ class AppHandler(BaseHTTPRequestHandler):
                        (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id AND actor_key=?) AS liked_by_me
                 FROM cat_posts p
                 JOIN cat_users u ON u.id = p.user_id
+                LEFT JOIN cats c ON c.id = p.cat_id
                 WHERE p.status='published' AND p.user_id=?
                 ORDER BY p.created_at DESC, p.id DESC
                 LIMIT 120
@@ -5118,7 +5398,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.3.3</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.3.4</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
