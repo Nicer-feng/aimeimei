@@ -196,7 +196,10 @@
             <h2 class="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">今天想看哪只猫？</h2>
             <p class="mt-2 max-w-2xl text-sm leading-6 text-muted sm:text-[15px]">这里按猫咪来逛。主人只是记录者，猫猫才是主角。</p>
           </div>
-          <button id="publishOpenBtn" class="cat-primary mt-4 w-full rounded-[16px] px-5 text-base font-semibold sm:mt-0 sm:w-auto sm:shrink-0">发布猫咪动态</button>
+          <div class="mt-4 flex w-full flex-col gap-2 sm:mt-0 sm:w-auto sm:shrink-0">
+            <button id="dailyReportBtn" class="cat-pill hidden rounded-[16px] px-5 text-sm font-semibold text-muted" type="button">今日猫猫日报</button>
+            <button id="publishOpenBtn" class="cat-primary w-full rounded-[16px] px-5 text-base font-semibold sm:w-auto">发布猫咪动态</button>
+          </div>
         </section>
 
         <div id="catFilterBar" class="mb-5 flex gap-2 overflow-x-auto pb-1"></div>
@@ -350,6 +353,7 @@
       selectedCatId: "",
       activePage: "home",
       editingCatId: "",
+      initialPostHandled: false,
       posts: [],
       cursor: null,
       loading: false,
@@ -378,6 +382,46 @@
       box.classList.remove("hidden");
       clearTimeout(showToast.timer);
       showToast.timer = setTimeout(() => box.classList.add("hidden"), 2600);
+    }
+
+    function plainText(value, max = 80) {
+      const text = String(value || "").replace(/\s+/g, " ").trim();
+      if (!text) return "";
+      return text.length > max ? `${text.slice(0, max)}...` : text;
+    }
+
+    async function copyText(text) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch {}
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      let ok = false;
+      try {
+        ok = document.execCommand("copy");
+      } catch {
+        ok = false;
+      }
+      textarea.remove();
+      return ok;
+    }
+
+    async function copyShareText(text) {
+      if (await copyText(text)) {
+        showToast("已复制，可以发到群里啦");
+      } else {
+        showToast("复制失败，可以长按选择文字手动复制。");
+      }
     }
 
     async function request(path, options = {}) {
@@ -430,6 +474,51 @@
       const years = Math.floor(months / 12);
       const rest = months % 12;
       return rest ? `${years}岁${rest}个月` : `${years}岁`;
+    }
+
+    function catHomeUrl() {
+      return `${window.location.origin}/cat/`;
+    }
+
+    function postShareUrl(post) {
+      const url = new URL("/cat/", window.location.origin);
+      url.searchParams.set("post", post.id);
+      url.searchParams.set("guest", "1");
+      return url.toString();
+    }
+
+    function buildPostShareText(post) {
+      const catName = post.cat?.name || "猫猫";
+      const imageCount = post.images?.length || post.image_count || 0;
+      const summary = plainText(post.content || "快来看这条猫猫动态。", 72);
+      return [
+        `【槑槑相册】${catName} 更新了 ${imageCount} 张照片`,
+        post.title,
+        summary,
+        `点击查看：${postShareUrl(post)}`
+      ].filter(Boolean).join("\n");
+    }
+
+    function buildDailyReportText(report) {
+      const homeUrl = catHomeUrl();
+      if (!report.post_count) {
+        return [
+          "今日猫猫日报 🐾",
+          "",
+          "今天还没有猫猫动态，快来发第一张吧：",
+          homeUrl
+        ].join("\n");
+      }
+      const lines = (report.items || []).map((item) => `- ${item.cat_name || "猫猫"}：${item.title}`);
+      return [
+        "今日猫猫日报 🐾",
+        "",
+        `今天共有 ${report.cat_count || 0} 只猫更新，新增 ${report.post_count || 0} 条动态：`,
+        "",
+        ...lines,
+        "",
+        `查看全部：${homeUrl}`
+      ].join("\n");
     }
 
     function setView(name) {
@@ -491,6 +580,7 @@
       $("adminOpenBtn").classList.add("hidden");
       $("myCatsNavBtn").classList.add("hidden");
       $("publishNavBtn").classList.add("hidden");
+      $("dailyReportBtn").classList.add("hidden");
       $("publishOpenBtn").classList.add("hidden");
       $("logoutBtn").textContent = "离开游客";
       setView("main");
@@ -498,6 +588,7 @@
       if (load) {
         await loadPublicCats();
         await loadFeed(true);
+        await handleInitialPostLink();
       }
     }
 
@@ -508,12 +599,22 @@
       state.guestName = "";
       $("myCatsNavBtn").classList.remove("hidden");
       $("publishNavBtn").classList.remove("hidden");
+      $("dailyReportBtn").classList.add("hidden");
       $("logoutBtn").textContent = "退出";
     }
 
     function ensureInteractionIdentity() {
       if (!state.user && !state.guestId) ensureGuestIdentity();
       return Boolean(state.user || state.guestId);
+    }
+
+    async function handleInitialPostLink() {
+      if (state.initialPostHandled) return;
+      const params = new URLSearchParams(window.location.search);
+      const postId = params.get("post");
+      if (!postId) return;
+      state.initialPostHandled = true;
+      await openPost(postId);
     }
 
     async function loadPublicCats() {
@@ -766,6 +867,7 @@
           <div class="mt-5 flex items-center gap-2 border-y border-[rgba(80,60,50,.08)] py-3 text-sm text-muted">
             <button class="rounded-full px-3 py-2 font-semibold transition ${post.liked_by_me ? "bg-[#fff1f6] text-roseDark" : "bg-cream"}" data-like-post="${esc(post.id)}" type="button">${post.liked_by_me ? "♥ 已喜欢" : "♡ 喜欢"} · ${post.like_count || 0}</button>
             <span class="rounded-full bg-cream px-3 py-2">💬 评论 · ${post.comment_count || 0}</span>
+            <button class="ml-auto rounded-full bg-cream px-3 py-2 font-semibold text-muted" data-copy-post-share="${esc(post.id)}" type="button">复制分享文案</button>
           </div>
           <section class="mt-5">
             <div class="mb-3 flex items-center justify-between">
@@ -824,6 +926,24 @@
         syncPostStats(postId, changes);
         renderFeed(false);
         if (state.currentDetail?.id === postId) renderDetail();
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    async function copyPostShare(postId) {
+      const post = state.currentDetail?.id === postId ? state.currentDetail : state.posts.find((item) => item.id === postId);
+      if (!post) {
+        showToast("这条动态还没有加载好");
+        return;
+      }
+      await copyShareText(buildPostShareText(post));
+    }
+
+    async function copyDailyReport() {
+      try {
+        const report = await request("/cat/api/daily-report");
+        await copyShareText(buildDailyReportText(report));
       } catch (error) {
         showToast(error.message);
       }
@@ -965,7 +1085,8 @@
         const data = await request("/cat/api/me");
         state.user = data.user;
         if (!data.authenticated) {
-          if (localStorage.getItem("catGuestMode") === "1") {
+          const params = new URLSearchParams(window.location.search);
+          if (localStorage.getItem("catGuestMode") === "1" || params.get("guest") === "1") {
             await enterGuestMode(true);
             return;
           }
@@ -977,10 +1098,12 @@
         $("adminOpenBtn").classList.toggle("hidden", state.user.role !== "admin");
         $("myCatsNavBtn").classList.remove("hidden");
         $("publishNavBtn").classList.remove("hidden");
+        $("dailyReportBtn").classList.toggle("hidden", state.user.role !== "admin");
         $("publishOpenBtn").classList.remove("hidden");
         setView("main");
         await loadMyCats();
         await showCatPage("home");
+        await handleInitialPostLink();
       } catch (error) {
         showToast(error.message);
         setView("login");
@@ -1040,6 +1163,7 @@
     $("homeNavBtn").addEventListener("click", () => showCatPage("home"));
     $("myCatsNavBtn").addEventListener("click", () => showCatPage("cats"));
     $("publishNavBtn").addEventListener("click", () => openPublishModal());
+    $("dailyReportBtn").addEventListener("click", copyDailyReport);
     $("loadMoreBtn").addEventListener("click", () => loadFeed(false));
     async function openPublishModal() {
       if (state.isGuest) {
@@ -1131,6 +1255,13 @@
         event.preventDefault();
         event.stopPropagation();
         toggleLike(likeId);
+        return;
+      }
+      const sharePostId = event.target.closest("[data-copy-post-share]")?.dataset.copyPostShare;
+      if (sharePostId) {
+        event.preventDefault();
+        event.stopPropagation();
+        copyPostShare(sharePostId);
         return;
       }
       const filterCatId = event.target.closest("[data-cat-filter]")?.dataset.catFilter;

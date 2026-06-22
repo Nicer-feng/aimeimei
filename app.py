@@ -915,6 +915,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.handle_cat_cats()
         if path.startswith("/cat/api/cats/"):
             return self.handle_cat_item()
+        if path == "/cat/api/daily-report":
+            return self.require_cat_admin(self.handle_cat_daily_report)
         if path == "/cat/api/posts":
             return self.handle_cat_posts()
         if path.startswith("/cat/api/posts/"):
@@ -1598,6 +1600,43 @@ class AppHandler(BaseHTTPRequestHandler):
                 (cat_id,),
             ).fetchone()
         return self.json({"cat": cat_public(row)})
+
+    def handle_cat_daily_report(self):
+        today_start = int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1)))
+        tomorrow_start = today_start + 86400
+        with db() as conn:
+            rows = conn.execute(
+                """
+                SELECT p.id, p.title, p.content, p.created_at,
+                       p.cat_id, c.name AS cat_name
+                FROM cat_posts p
+                LEFT JOIN cats c ON c.id = p.cat_id
+                WHERE p.status='published' AND p.created_at>=? AND p.created_at<?
+                ORDER BY p.created_at DESC, p.id DESC
+                LIMIT 200
+                """,
+                (today_start, tomorrow_start),
+            ).fetchall()
+        cat_ids = {row["cat_id"] for row in rows if row["cat_id"]}
+        items = [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "content": row["content"],
+                "created_at": row["created_at"],
+                "cat_id": row["cat_id"],
+                "cat_name": row["cat_name"] or "未关联猫咪",
+            }
+            for row in rows
+        ]
+        return self.json(
+            {
+                "date": today_text(),
+                "cat_count": len(cat_ids),
+                "post_count": len(rows),
+                "items": items,
+            }
+        )
 
     def handle_cat_upload_policy(self):
         user = self.current_cat_user()
@@ -5398,7 +5437,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.3.4</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.3.5</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
