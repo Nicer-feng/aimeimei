@@ -36,6 +36,7 @@ CAT_SESSION_COOKIE = "cat_session"
 CAT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
 CAT_OSS_DIR = "cat"
 CAT_MAX_IMAGE_BYTES = 12 * 1024 * 1024
+CAT_GUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 
 
 def now() -> int:
@@ -284,6 +285,28 @@ def init_db():
               FOREIGN KEY (post_id) REFERENCES cat_posts(id) ON DELETE CASCADE,
               FOREIGN KEY (image_id) REFERENCES cat_images(id) ON DELETE SET NULL
             );
+
+            CREATE TABLE IF NOT EXISTS cat_post_likes (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              post_id TEXT NOT NULL,
+              actor_key TEXT NOT NULL,
+              actor_type TEXT NOT NULL,
+              actor_name TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              UNIQUE(post_id, actor_key),
+              FOREIGN KEY (post_id) REFERENCES cat_posts(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS cat_comments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              post_id TEXT NOT NULL,
+              actor_key TEXT NOT NULL,
+              actor_type TEXT NOT NULL,
+              actor_name TEXT NOT NULL,
+              content TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              FOREIGN KEY (post_id) REFERENCES cat_posts(id) ON DELETE CASCADE
+            );
             """
         )
 
@@ -422,12 +445,16 @@ def cat_user_public(row):
 
 
 def cat_post_card(row):
+    keys = set(row.keys())
     return {
         "id": row["id"],
         "title": row["title"],
         "content": row["content"],
         "cover_url": row["cover_url"] or "",
         "image_count": int(row["image_count"] or 0),
+        "like_count": int(row["like_count"] or 0) if "like_count" in keys else 0,
+        "comment_count": int(row["comment_count"] or 0) if "comment_count" in keys else 0,
+        "liked_by_me": bool(row["liked_by_me"]) if "liked_by_me" in keys else False,
         "created_at": row["created_at"],
         "author": {
             "id": row["user_id"],
@@ -435,6 +462,17 @@ def cat_post_card(row):
             "nickname": row["nickname"],
             "avatar_url": row["avatar_url"],
         },
+    }
+
+
+def cat_comment_public(row):
+    return {
+        "id": row["id"],
+        "post_id": row["post_id"],
+        "author_type": row["actor_type"],
+        "author_name": row["actor_name"],
+        "content": row["content"],
+        "created_at": row["created_at"],
     }
 
 
@@ -816,11 +854,11 @@ class AppHandler(BaseHTTPRequestHandler):
         if path == "/cat/api/me":
             return self.handle_cat_me()
         if path == "/cat/api/posts":
-            return self.require_cat_user(self.handle_cat_posts)
+            return self.handle_cat_posts()
         if path.startswith("/cat/api/posts/"):
-            return self.require_cat_user(self.handle_cat_post_item)
+            return self.handle_cat_post_item()
         if path.startswith("/cat/api/users/"):
-            return self.require_cat_user(self.handle_cat_user_profile)
+            return self.handle_cat_user_profile()
         if path == "/cat/api/upload-policy":
             return self.require_cat_user(self.handle_cat_upload_policy)
         if path == "/cat/api/admin/users":
@@ -857,6 +895,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_cat_user(self.handle_cat_images)
         if path == "/cat/api/posts":
             return self.require_cat_user(self.handle_cat_posts)
+        if path.startswith("/cat/api/posts/"):
+            return self.handle_cat_post_action()
         if path == "/cat/api/admin/users":
             return self.require_cat_admin(self.handle_cat_admin_users)
         if path == "/api/login":
@@ -1037,6 +1077,35 @@ class AppHandler(BaseHTTPRequestHandler):
                 (token_hash(token), now()),
             ).fetchone()
         return row
+
+    def cat_guest_id(self):
+        guest_id = self.headers.get("X-Cat-Guest-Id", "").strip()
+        if guest_id and CAT_GUEST_ID_RE.match(guest_id):
+            return guest_id
+        return ""
+
+    def cat_actor(self, require_guest=False):
+        user = self.current_cat_user()
+        if user:
+            return {
+                "key": f"user:{user['id']}",
+                "type": "user",
+                "name": user["nickname"],
+                "user": user,
+            }
+        guest_id = self.cat_guest_id()
+        if not guest_id:
+            if require_guest:
+                raise ValueError("请先以游客身份进入相册")
+            return None
+        suffix = re.sub(r"[^A-Za-z0-9]", "", guest_id)[-4:].upper() or "0000"
+        guest_name = f"游客{suffix}"
+        return {
+            "key": f"guest:{guest_id}",
+            "type": "guest",
+            "name": guest_name,
+            "user": None,
+        }
 
     def require_cat_user(self, handler):
         if not self.current_cat_user():
@@ -1337,17 +1406,20 @@ class AppHandler(BaseHTTPRequestHandler):
             HTTPStatus.CREATED,
         )
 
-    def load_cat_post(self, conn, post_id):
+    def load_cat_post(self, conn, post_id, actor_key=""):
         row = conn.execute(
             """
             SELECT p.*, u.username, u.nickname, u.avatar_url,
                    (SELECT image_url FROM cat_post_images WHERE post_id=p.id ORDER BY sort_order ASC, id ASC LIMIT 1) AS cover_url,
-                   (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count
+                   (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count,
+                   (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id) AS like_count,
+                   (SELECT COUNT(*) FROM cat_comments WHERE post_id=p.id) AS comment_count,
+                   (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id AND actor_key=?) AS liked_by_me
             FROM cat_posts p
             JOIN cat_users u ON u.id = p.user_id
             WHERE p.id=? AND p.status='published'
             """,
-            (post_id,),
+            (actor_key or "", post_id),
         ).fetchone()
         if not row:
             return None
@@ -1366,10 +1438,23 @@ class AppHandler(BaseHTTPRequestHandler):
             {"image_url": image["image_url"], "sort_order": image["sort_order"]}
             for image in images
         ]
+        comments = conn.execute(
+            """
+            SELECT id, post_id, actor_type, actor_name, content, created_at
+            FROM cat_comments
+            WHERE post_id=?
+            ORDER BY created_at ASC, id ASC
+            LIMIT 200
+            """,
+            (post_id,),
+        ).fetchall()
+        post["comments"] = [cat_comment_public(comment) for comment in comments]
         return post
 
     def handle_cat_posts(self):
         if self.command == "GET":
+            actor = self.cat_actor()
+            actor_key = actor["key"] if actor else ""
             params = parse_qs(urlparse(self.path).query)
             limit = clamp_int((params.get("limit") or ["20"])[0], 20, 1, 30)
             before = clamp_int((params.get("before") or ["0"])[0], 0, 0, 10**12)
@@ -1383,14 +1468,17 @@ class AppHandler(BaseHTTPRequestHandler):
                     f"""
                     SELECT p.*, u.username, u.nickname, u.avatar_url,
                            (SELECT image_url FROM cat_post_images WHERE post_id=p.id ORDER BY sort_order ASC, id ASC LIMIT 1) AS cover_url,
-                           (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count
+                           (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count,
+                           (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id) AS like_count,
+                           (SELECT COUNT(*) FROM cat_comments WHERE post_id=p.id) AS comment_count,
+                           (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id AND actor_key=?) AS liked_by_me
                     FROM cat_posts p
                     JOIN cat_users u ON u.id = p.user_id
                     WHERE {where}
                     ORDER BY p.created_at DESC, p.id DESC
                     LIMIT ?
                     """,
-                    (*values, limit + 1),
+                    (actor_key, *values, limit + 1),
                 ).fetchall()
             has_more = len(rows) > limit
             rows = rows[:limit]
@@ -1450,18 +1538,113 @@ class AppHandler(BaseHTTPRequestHandler):
                     """,
                     (post_id, image["id"], image["image_url"], index),
                 )
-            post = self.load_cat_post(conn, post_id)
+            post = self.load_cat_post(conn, post_id, f"user:{user['id']}")
         return self.json({"post": post}, HTTPStatus.CREATED)
 
     def handle_cat_post_item(self):
-        post_id = urlparse(self.path).path.rstrip("/").rsplit("/", 1)[-1]
+        parts = urlparse(self.path).path.strip("/").split("/")
+        post_id = parts[3] if len(parts) >= 4 else ""
+        if len(parts) != 4:
+            return self.error(HTTPStatus.NOT_FOUND, "not found")
+        actor = self.cat_actor()
+        actor_key = actor["key"] if actor else ""
         with db() as conn:
-            post = self.load_cat_post(conn, post_id)
+            post = self.load_cat_post(conn, post_id, actor_key)
         if not post:
             return self.error(HTTPStatus.NOT_FOUND, "这条动态不存在")
         return self.json({"post": post})
 
+    def handle_cat_post_action(self):
+        parts = urlparse(self.path).path.strip("/").split("/")
+        if len(parts) != 5 or parts[:3] != ["cat", "api", "posts"]:
+            return self.error(HTTPStatus.NOT_FOUND, "not found")
+        post_id, action = parts[3], parts[4]
+        if action == "like":
+            return self.handle_cat_post_like(post_id)
+        if action == "comments":
+            return self.handle_cat_post_comment(post_id)
+        return self.error(HTTPStatus.NOT_FOUND, "not found")
+
+    def handle_cat_post_like(self, post_id):
+        try:
+            actor = self.cat_actor(require_guest=True)
+        except ValueError as exc:
+            return self.error(HTTPStatus.UNAUTHORIZED, str(exc))
+        with db() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM cat_posts WHERE id=? AND status='published'", (post_id,)
+            ).fetchone()
+            if not exists:
+                return self.error(HTTPStatus.NOT_FOUND, "这条动态不存在")
+            liked = conn.execute(
+                "SELECT id FROM cat_post_likes WHERE post_id=? AND actor_key=?",
+                (post_id, actor["key"]),
+            ).fetchone()
+            if liked:
+                conn.execute("DELETE FROM cat_post_likes WHERE id=?", (liked["id"],))
+                is_liked = False
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO cat_post_likes(post_id, actor_key, actor_type, actor_name, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (post_id, actor["key"], actor["type"], actor["name"], now()),
+                )
+                is_liked = True
+            like_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM cat_post_likes WHERE post_id=?", (post_id,)
+            ).fetchone()["n"]
+        return self.json({"liked": is_liked, "like_count": int(like_count)})
+
+    def handle_cat_post_comment(self, post_id):
+        try:
+            actor = self.cat_actor(require_guest=True)
+        except ValueError as exc:
+            return self.error(HTTPStatus.UNAUTHORIZED, str(exc))
+        try:
+            data = self.read_body(limit=16 * 1024)
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "评论内容格式不正确")
+        content = str(data.get("content") or "").strip()
+        content = re.sub(r"\s+\n", "\n", content)
+        if not content:
+            return self.error(HTTPStatus.BAD_REQUEST, "写点评论再发送吧")
+        if len(content) > 500:
+            return self.error(HTTPStatus.BAD_REQUEST, "评论太长啦，控制在 500 字以内")
+        ts = now()
+        with db() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM cat_posts WHERE id=? AND status='published'", (post_id,)
+            ).fetchone()
+            if not exists:
+                return self.error(HTTPStatus.NOT_FOUND, "这条动态不存在")
+            cursor = conn.execute(
+                """
+                INSERT INTO cat_comments(post_id, actor_key, actor_type, actor_name, content, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (post_id, actor["key"], actor["type"], actor["name"], content, ts),
+            )
+            row = conn.execute(
+                """
+                SELECT id, post_id, actor_type, actor_name, content, created_at
+                FROM cat_comments
+                WHERE id=?
+                """,
+                (cursor.lastrowid,),
+            ).fetchone()
+            comment_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM cat_comments WHERE post_id=?", (post_id,)
+            ).fetchone()["n"]
+        return self.json(
+            {"comment": cat_comment_public(row), "comment_count": int(comment_count)},
+            HTTPStatus.CREATED,
+        )
+
     def handle_cat_user_profile(self):
+        actor = self.cat_actor()
+        actor_key = actor["key"] if actor else ""
         user_id = urlparse(self.path).path.rstrip("/").rsplit("/", 1)[-1]
         with db() as conn:
             user = conn.execute(
@@ -1473,14 +1656,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 """
                 SELECT p.*, u.username, u.nickname, u.avatar_url,
                        (SELECT image_url FROM cat_post_images WHERE post_id=p.id ORDER BY sort_order ASC, id ASC LIMIT 1) AS cover_url,
-                       (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count
+                       (SELECT COUNT(*) FROM cat_post_images WHERE post_id=p.id) AS image_count,
+                       (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id) AS like_count,
+                       (SELECT COUNT(*) FROM cat_comments WHERE post_id=p.id) AS comment_count,
+                       (SELECT COUNT(*) FROM cat_post_likes WHERE post_id=p.id AND actor_key=?) AS liked_by_me
                 FROM cat_posts p
                 JOIN cat_users u ON u.id = p.user_id
                 WHERE p.status='published' AND p.user_id=?
                 ORDER BY p.created_at DESC, p.id DESC
                 LIMIT 120
                 """,
-                (user_id,),
+                (actor_key, user_id),
             ).fetchall()
         return self.json({"user": cat_user_public(user), "posts": [cat_post_card(row) for row in rows]})
 
@@ -4932,7 +5118,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.3.2</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.3.3</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>

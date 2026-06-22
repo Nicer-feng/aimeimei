@@ -144,6 +144,8 @@
         <label class="mb-3 block text-sm font-medium text-muted">密码</label>
         <input id="loginPassword" type="password" autocomplete="current-password" class="soft-focus mb-5 h-12 w-full rounded-app border border-[#E7D8CC] bg-milk px-4 text-base" placeholder="请输入密码">
         <button class="h-12 w-full rounded-app bg-roseDark text-base font-semibold text-white shadow-soft transition active:scale-[.98]">进入相册</button>
+        <button id="guestEnterBtn" type="button" class="mt-3 h-12 w-full rounded-app border border-[rgba(80,60,50,.08)] bg-white text-base font-semibold text-muted transition active:scale-[.98]">不登录，先看看</button>
+        <p class="mt-3 text-center text-xs leading-5 text-muted">游客只能浏览、点赞和评论，发布照片需要登录。</p>
       </form>
 
       <details class="mt-5 rounded-[24px] border border-[#ECDDD2] bg-white/70 p-4">
@@ -287,6 +289,9 @@
   <script>
     const state = {
       user: null,
+      isGuest: false,
+      guestId: "",
+      guestName: "",
       posts: [],
       cursor: null,
       loading: false,
@@ -320,6 +325,7 @@
     async function request(path, options = {}) {
       const headers = options.headers || {};
       if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+      if (state.guestId && !headers["X-Cat-Guest-Id"]) headers["X-Cat-Guest-Id"] = state.guestId;
       const res = await fetch(path, { credentials: "include", ...options, headers });
       const text = await res.text();
       let data = {};
@@ -352,6 +358,45 @@
       $("mainView").classList.toggle("hidden", name !== "main");
     }
 
+    function ensureGuestIdentity() {
+      let guestId = localStorage.getItem("catGuestId") || "";
+      if (!/^[A-Za-z0-9_-]{8,80}$/.test(guestId)) {
+        const raw = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        guestId = raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 48);
+        localStorage.setItem("catGuestId", guestId);
+      }
+      const suffix = guestId.replace(/[^A-Za-z0-9]/g, "").slice(-4).toUpperCase() || "0000";
+      state.guestId = guestId;
+      state.guestName = `游客${suffix}`;
+      return state.guestName;
+    }
+
+    async function enterGuestMode(load = true) {
+      ensureGuestIdentity();
+      localStorage.setItem("catGuestMode", "1");
+      state.user = null;
+      state.isGuest = true;
+      $("userLine").textContent = `${state.guestName} · 只能浏览、点赞和评论`;
+      $("adminOpenBtn").classList.add("hidden");
+      $("publishOpenBtn").classList.add("hidden");
+      $("logoutBtn").textContent = "离开游客";
+      setView("main");
+      if (load) await loadFeed(true);
+    }
+
+    function leaveGuestMode() {
+      localStorage.removeItem("catGuestMode");
+      state.isGuest = false;
+      state.guestId = "";
+      state.guestName = "";
+      $("logoutBtn").textContent = "退出";
+    }
+
+    function ensureInteractionIdentity() {
+      if (!state.user && !state.guestId) ensureGuestIdentity();
+      return Boolean(state.user || state.guestId);
+    }
+
     function renderFeed(reset = false) {
       const feed = $("feed");
       feed.classList.toggle("feed-few", state.posts.length > 0 && state.posts.length <= 2);
@@ -373,6 +418,10 @@
               <span class="truncate text-[#9a8f89]">${esc(post.author.nickname)}</span>
             </button>
             <span class="ml-auto shrink-0 text-[#aaa09a]">${timeText(post.created_at)}</span>
+          </div>
+          <div class="flex items-center gap-2 border-t border-[rgba(80,60,50,.06)] px-3 py-2 text-xs text-muted">
+            <button class="rounded-full px-2.5 py-1 transition ${post.liked_by_me ? "bg-[#fff1f6] text-roseDark" : "bg-cream"}" data-like-post="${esc(post.id)}" type="button">${post.liked_by_me ? "♥" : "♡"} ${post.like_count || 0}</button>
+            <button class="rounded-full bg-cream px-2.5 py-1 transition" data-open-post="${esc(post.id)}" type="button">💬 ${post.comment_count || 0}</button>
           </div>
         </article>
       `).join("");
@@ -467,6 +516,19 @@
       }
     }
 
+    function renderComment(comment) {
+      return `
+        <div class="rounded-[18px] bg-cream px-3 py-2.5">
+          <div class="mb-1 flex items-center gap-2 text-xs text-muted">
+            <span class="flex h-6 w-6 items-center justify-center rounded-full bg-white">${comment.author_type === "guest" ? "🐾" : "🐱"}</span>
+            <span class="font-semibold text-[#6f625c]">${esc(comment.author_name)}</span>
+            <span class="ml-auto">${timeText(comment.created_at)}</span>
+          </div>
+          <p class="whitespace-pre-wrap text-sm leading-6 text-[#4f443f]">${esc(comment.content)}</p>
+        </div>
+      `;
+    }
+
     function renderDetail() {
       const post = state.currentDetail;
       if (!post) return;
@@ -487,8 +549,70 @@
           </div>
           <h2 class="mt-4 text-2xl font-semibold leading-tight">${esc(post.title)}</h2>
           <p class="mt-3 whitespace-pre-wrap text-base leading-8 text-[#5E4B43]">${esc(post.content || "没有写正文。")}</p>
+          <div class="mt-5 flex items-center gap-2 border-y border-[rgba(80,60,50,.08)] py-3 text-sm text-muted">
+            <button class="rounded-full px-3 py-2 font-semibold transition ${post.liked_by_me ? "bg-[#fff1f6] text-roseDark" : "bg-cream"}" data-like-post="${esc(post.id)}" type="button">${post.liked_by_me ? "♥ 已喜欢" : "♡ 喜欢"} · ${post.like_count || 0}</button>
+            <span class="rounded-full bg-cream px-3 py-2">💬 评论 · ${post.comment_count || 0}</span>
+          </div>
+          <section class="mt-5">
+            <div class="mb-3 flex items-center justify-between">
+              <h3 class="text-base font-semibold">猫友留言</h3>
+              <span class="text-xs text-muted">${state.user ? "以成员身份评论" : `以 ${esc(state.guestName || ensureGuestIdentity())} 评论`}</span>
+            </div>
+            <div class="grid gap-2.5">
+              ${(post.comments || []).map(renderComment).join("") || `<p class="rounded-[18px] bg-cream px-4 py-4 text-center text-sm text-muted">还没有评论，来留第一句吧。</p>`}
+            </div>
+            <form class="mt-3 flex gap-2" data-comment-form="${esc(post.id)}">
+              <input name="content" class="soft-focus h-11 min-w-0 flex-1 rounded-[16px] border border-[rgba(80,60,50,.10)] bg-milk px-4 text-sm" maxlength="500" placeholder="写一句轻轻的评论...">
+              <button class="cat-primary h-11 shrink-0 rounded-[16px] px-4 text-sm font-semibold" type="submit">发送</button>
+            </form>
+          </section>
         </div>
       `;
+    }
+
+    function syncPostStats(postId, changes) {
+      state.posts = state.posts.map((post) => post.id === postId ? { ...post, ...changes } : post);
+      if (state.currentDetail?.id === postId) {
+        state.currentDetail = { ...state.currentDetail, ...changes };
+      }
+    }
+
+    async function toggleLike(postId) {
+      try {
+        ensureInteractionIdentity();
+        const data = await request(`/cat/api/posts/${postId}/like`, { method: "POST" });
+        syncPostStats(postId, { liked_by_me: data.liked, like_count: data.like_count });
+        renderFeed(false);
+        if (state.currentDetail?.id === postId) renderDetail();
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    async function submitComment(form) {
+      const postId = form.dataset.commentForm;
+      const input = form.elements.content;
+      const content = input.value.trim();
+      if (!content) {
+        showToast("写点评论再发送吧");
+        return;
+      }
+      try {
+        ensureInteractionIdentity();
+        const data = await request(`/cat/api/posts/${postId}/comments`, {
+          method: "POST",
+          body: JSON.stringify({ content })
+        });
+        input.value = "";
+        const comments = state.currentDetail?.id === postId ? [...(state.currentDetail.comments || []), data.comment] : undefined;
+        const changes = { comment_count: data.comment_count };
+        if (comments) changes.comments = comments;
+        syncPostStats(postId, changes);
+        renderFeed(false);
+        if (state.currentDetail?.id === postId) renderDetail();
+      } catch (error) {
+        showToast(error.message);
+      }
     }
 
     async function openProfile(id) {
@@ -539,11 +663,17 @@
         const data = await request("/cat/api/me");
         state.user = data.user;
         if (!data.authenticated) {
+          if (localStorage.getItem("catGuestMode") === "1") {
+            await enterGuestMode(true);
+            return;
+          }
           setView("login");
           return;
         }
+        leaveGuestMode();
         $("userLine").textContent = `${state.user.nickname} · ${data.oss_configured ? "可以上传照片" : "等待配置 OSS"}`;
         $("adminOpenBtn").classList.toggle("hidden", state.user.role !== "admin");
+        $("publishOpenBtn").classList.remove("hidden");
         setView("main");
         await loadFeed(true);
       } catch (error) {
@@ -559,10 +689,17 @@
           method: "POST",
           body: JSON.stringify({ username: $("loginUsername").value, password: $("loginPassword").value })
         });
+        leaveGuestMode();
         await bootstrap();
       } catch (error) {
         showToast(error.message);
       }
+    });
+
+    $("guestEnterBtn").addEventListener("click", async () => {
+      state.posts = [];
+      state.cursor = null;
+      await enterGuestMode(true);
     });
 
     $("bootstrapUserForm").addEventListener("submit", async (event) => {
@@ -586,15 +723,21 @@
     });
 
     $("logoutBtn").addEventListener("click", async () => {
-      await request("/cat/api/logout", { method: "POST" });
+      if (!state.isGuest) await request("/cat/api/logout", { method: "POST" });
+      leaveGuestMode();
       state.user = null;
       state.posts = [];
+      state.cursor = null;
       setView("login");
     });
 
     $("refreshBtn").addEventListener("click", () => loadFeed(true));
     $("loadMoreBtn").addEventListener("click", () => loadFeed(false));
     $("publishOpenBtn").addEventListener("click", () => {
+      if (state.isGuest) {
+        showToast("游客可以看、点赞和评论，发布照片需要登录。");
+        return;
+      }
       state.selectedImages = [];
       $("publishForm").reset();
       renderSelectedImages();
@@ -662,6 +805,13 @@
     document.addEventListener("click", (event) => {
       const closeId = event.target.closest("[data-close]")?.dataset.close;
       if (closeId) closeModal(closeId);
+      const likeId = event.target.closest("[data-like-post]")?.dataset.likePost;
+      if (likeId) {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleLike(likeId);
+        return;
+      }
       const postId = event.target.closest("[data-open-post]")?.dataset.openPost;
       if (postId) openPost(postId);
       const profileId = event.target.closest("[data-open-profile]")?.dataset.openProfile;
@@ -680,6 +830,13 @@
         state.currentSlide = (state.currentSlide + Number(slide) + total) % total;
         renderDetail();
       }
+    });
+
+    document.addEventListener("submit", (event) => {
+      const form = event.target.closest("[data-comment-form]");
+      if (!form) return;
+      event.preventDefault();
+      submitComment(form);
     });
 
     state.observer = new IntersectionObserver((entries) => {
