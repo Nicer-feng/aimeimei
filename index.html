@@ -343,6 +343,21 @@
       color: var(--muted);
       font-size: 14px;
       text-align: center;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 8px 14px;
+    }
+    footer a {
+      color: inherit;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(217, 143, 168, .42);
+      transition: color .2s ease, border-color .2s ease;
+    }
+    footer a:hover {
+      color: var(--accent);
+      border-color: currentColor;
     }
     @keyframes floatCat {
       0%, 100% { transform: translateY(0) rotate(-1deg); }
@@ -502,7 +517,8 @@
     </main>
 
     <footer>
-      © 2026 槑槑小记 · 个人非经营性网站
+      <span>© 2026 槑槑小记 · 个人非经营性网站</span>
+      <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
     </footer>
   </div>
 

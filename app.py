@@ -4315,7 +4315,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.2.17</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.2.18</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
