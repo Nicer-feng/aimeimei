@@ -304,8 +304,11 @@ def init_db(secrets_data=None):
               transcript_text TEXT NOT NULL DEFAULT '',
               summary_text TEXT NOT NULL DEFAULT '',
               outline_text TEXT NOT NULL DEFAULT '',
+              enhanced_summary TEXT NOT NULL DEFAULT '',
+              key_points TEXT NOT NULL DEFAULT '',
               mindmap_text TEXT NOT NULL DEFAULT '',
               copywriting_text TEXT NOT NULL DEFAULT '',
+              ai_outputs_json TEXT NOT NULL DEFAULT '',
               conversation_id TEXT NOT NULL DEFAULT '',
               error_message TEXT NOT NULL DEFAULT '',
               created_at INTEGER NOT NULL,
@@ -445,6 +448,9 @@ def init_db(secrets_data=None):
         media_columns = table_columns(conn, "media_analysis_tasks")
         if "conversation_id" not in media_columns:
             conn.execute("ALTER TABLE media_analysis_tasks ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''")
+        for column in ("enhanced_summary", "key_points", "ai_outputs_json"):
+            if column not in media_columns:
+                conn.execute(f"ALTER TABLE media_analysis_tasks ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
 
         conn.execute("UPDATE conversations SET user_id=? WHERE user_id='' OR user_id IS NULL", (default_user_id,))
         conn.execute(
@@ -627,8 +633,11 @@ def media_task_public(row):
         "transcript_text": row["transcript_text"],
         "summary_text": row["summary_text"],
         "outline_text": row["outline_text"],
+        "enhanced_summary": row["enhanced_summary"],
+        "key_points": row["key_points"],
         "mindmap_text": row["mindmap_text"],
         "copywriting_text": row["copywriting_text"],
+        "ai_outputs_json": row["ai_outputs_json"],
         "conversation_id": row["conversation_id"],
         "error_message": row["error_message"],
         "created_at": row["created_at"],
@@ -646,7 +655,7 @@ def clip_context_text(text, limit):
 def media_analysis_has_context(row):
     return any(
         str(row[key] or "").strip()
-        for key in ("summary_text", "outline_text", "transcript_text", "mindmap_text", "copywriting_text")
+        for key in ("summary_text", "outline_text", "transcript_text", "enhanced_summary", "key_points", "mindmap_text", "copywriting_text")
     )
 
 
@@ -659,6 +668,8 @@ def media_analysis_context(row):
         f"文件名：{filename}",
     ]
     section_specs = [
+        ("AI深度总结", row["enhanced_summary"], 16000),
+        ("核心观点", row["key_points"], 12000),
         ("智能摘要", row["summary_text"], 12000),
         ("章节要点", row["outline_text"], 20000),
         ("转写全文", row["transcript_text"], 60000),
@@ -674,6 +685,53 @@ def media_analysis_context(row):
 
 def media_context_marker(task_id):
     return f"<!-- ai-meimei-media-task:{task_id} -->"
+
+
+def media_ai_source_context(row):
+    sections = [
+        f"文件名：{row['filename'] or '音视频文件'}",
+    ]
+    for title, key, limit in (
+        ("听悟智能摘要", "summary_text", 8000),
+        ("听悟章节/关键词", "outline_text", 12000),
+        ("听悟转写全文", "transcript_text", 36000),
+    ):
+        value = clip_context_text(row[key], limit)
+        if value:
+            sections.append(f"\n## {title}\n{value}")
+    return "\n".join(sections).strip()
+
+
+def extract_json_object(text):
+    value = str(text or "").strip()
+    if value.startswith("```"):
+        value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.I)
+        value = re.sub(r"\s*```$", "", value)
+    try:
+        data = json.loads(value)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        pass
+    start = value.find("{")
+    end = value.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            data = json.loads(value[start:end + 1])
+            return data if isinstance(data, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def normalize_mermaid_mindmap(value):
+    text = str(value or "").strip()
+    text = re.sub(r"^```(?:mermaid)?\s*", "", text, flags=re.I)
+    text = re.sub(r"\s*```$", "", text).strip()
+    if not text:
+        return ""
+    if not text.lower().startswith("mindmap"):
+        text = "mindmap\n  " + text.replace("\n", "\n  ")
+    return text.strip()
 
 
 def cat_user_public(row):
@@ -1098,28 +1156,146 @@ def collect_text_values(value, keys=("Text", "text", "Sentence", "sentence", "Co
     return parts
 
 
+def join_transcription_words(words):
+    text = "".join(
+        str(item.get("Text") or item.get("text") or "")
+        for item in words
+        if isinstance(item, dict)
+    ).strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def parse_transcription_payload(payload):
+    data = payload.get("Transcription") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        data = payload if isinstance(payload, dict) else {}
+    paragraphs = data.get("Paragraphs") or data.get("paragraphs") or []
+    lines = []
+    if isinstance(paragraphs, list):
+        for item in paragraphs:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("Text") or item.get("text") or "").strip()
+            if not text and isinstance(item.get("Words"), list):
+                text = join_transcription_words(item.get("Words") or [])
+            if text:
+                speaker = str(item.get("SpeakerName") or item.get("SpeakerId") or "").strip()
+                lines.append((f"发言人{speaker}：" if speaker and not speaker.startswith("发言") else (speaker + "：" if speaker else "")) + text)
+    if lines:
+        return "\n\n".join(lines)
+    return "\n".join(dict.fromkeys(collect_text_values(payload))).strip()
+
+
+def parse_auto_chapters_payload(payload):
+    chapters = payload.get("AutoChapters") if isinstance(payload, dict) else []
+    if isinstance(chapters, dict):
+        chapters = chapters.get("Chapters") or chapters.get("chapters") or []
+    lines = []
+    if isinstance(chapters, list):
+        for index, item in enumerate(chapters, 1):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("Headline") or item.get("Title") or item.get("title") or f"章节 {index}").strip()
+            summary = str(item.get("Summary") or item.get("summary") or "").strip()
+            if title or summary:
+                lines.append(f"{index}. {title}" + (f"\n   {summary}" if summary else ""))
+    if lines:
+        return "\n".join(lines)
+    return "\n".join(dict.fromkeys(collect_text_values(payload))).strip()
+
+
+def parse_meeting_assistance_payload(payload):
+    data = payload.get("MeetingAssistance") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        data = payload if isinstance(payload, dict) else {}
+    lines = []
+    keywords = data.get("Keywords") or data.get("keywords") or []
+    if isinstance(keywords, list):
+        words = [str(item).strip() for item in keywords if str(item).strip()]
+        if words:
+            lines.append("关键词：" + "、".join(words[:40]))
+    key_sentences = data.get("KeySentences") or data.get("keySentences") or []
+    if isinstance(key_sentences, list) and key_sentences:
+        lines.append("关键句：")
+        for item in key_sentences[:12]:
+            if isinstance(item, dict):
+                text = str(item.get("Text") or item.get("text") or "").strip()
+            else:
+                text = str(item).strip()
+            if text:
+                lines.append("- " + text)
+    actions = data.get("Actions") or data.get("actions") or []
+    if isinstance(actions, list) and actions:
+        lines.append("待办/行动：")
+        for item in actions[:12]:
+            text = str(item.get("Text") if isinstance(item, dict) else item).strip()
+            if text:
+                lines.append("- " + text)
+    return "\n".join(lines).strip()
+
+
+def parse_summarization_payload(payload):
+    data = payload.get("Summarization") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        data = payload if isinstance(payload, dict) else {}
+    lines = []
+    title = str(data.get("ParagraphTitle") or data.get("Title") or "").strip()
+    summary = str(data.get("ParagraphSummary") or data.get("Summary") or "").strip()
+    if title:
+        lines.append("## " + title)
+    if summary:
+        lines.append(summary)
+    conversational = data.get("ConversationalSummary") or []
+    if isinstance(conversational, list) and conversational:
+        lines.append("## 发言总结")
+        for item in conversational:
+            if not isinstance(item, dict):
+                continue
+            speaker = str(item.get("SpeakerName") or item.get("SpeakerId") or "发言人").strip()
+            text = str(item.get("Summary") or item.get("summary") or "").strip()
+            if text:
+                lines.append(f"- {speaker}：{text}")
+    qa = data.get("QuestionsAnswering") or data.get("QuestionsAnsweringSummary") or []
+    if isinstance(qa, list) and qa:
+        lines.append("## 问答摘要")
+        for item in qa[:12]:
+            if isinstance(item, dict):
+                question = str(item.get("Question") or item.get("question") or "").strip()
+                answer = str(item.get("Answer") or item.get("answer") or item.get("Summary") or "").strip()
+                if question or answer:
+                    lines.append(f"- {question}" + (f"：{answer}" if answer else ""))
+    if lines:
+        return "\n\n".join(lines).strip()
+    return "\n".join(dict.fromkeys(collect_text_values(payload))).strip()
+
+
 def parse_tingwu_results(result_payloads):
-    transcript = []
-    summary = []
-    outline = []
-    mindmap = []
+    transcript_text = ""
+    summary_parts = []
+    outline_parts = []
     for name, payload in result_payloads.items():
-        values = collect_text_values(payload)
         if name == "Transcription":
-            transcript.extend(values)
+            transcript_text = parse_transcription_payload(payload)
         elif name == "AutoChapters":
-            outline.extend(values)
+            value = parse_auto_chapters_payload(payload)
+            if value:
+                outline_parts.append("## 章节速览\n" + value)
         elif name == "Summarization":
-            summary.extend(values)
-            mind_values = collect_text_values(payload, ("MindMap", "mindMap", "mindmap", "Markdown", "markdown"))
-            mindmap.extend(mind_values)
-        elif name in ("MeetingAssistance", "TextPolish"):
-            outline.extend(values)
+            value = parse_summarization_payload(payload)
+            if value:
+                summary_parts.append(value)
+        elif name == "MeetingAssistance":
+            value = parse_meeting_assistance_payload(payload)
+            if value:
+                outline_parts.append("## 关键词与关键句\n" + value)
+        elif name == "TextPolish":
+            values = collect_text_values(payload)
+            if values:
+                outline_parts.append("## 润色/整理\n" + "\n".join(dict.fromkeys(values[:20])))
     return {
-        "transcript_text": "\n".join(dict.fromkeys(part for part in transcript if part)).strip(),
-        "summary_text": "\n".join(dict.fromkeys(part for part in summary if part)).strip(),
-        "outline_text": "\n".join(dict.fromkeys(part for part in outline if part)).strip(),
-        "mindmap_text": "\n".join(dict.fromkeys(part for part in mindmap if part)).strip(),
+        "transcript_text": transcript_text.strip(),
+        "summary_text": "\n\n".join(part for part in summary_parts if part).strip(),
+        "outline_text": "\n\n".join(part for part in outline_parts if part).strip(),
     }
 
 
@@ -1511,6 +1687,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_media_tasks)
         if path.startswith("/api/media/tasks/") and path.endswith("/refresh"):
             return self.require_user(self.handle_media_task_refresh)
+        if path.startswith("/api/media/tasks/") and path.endswith("/enhance"):
+            return self.require_user(self.handle_media_task_enhance)
         if path.startswith("/api/media/tasks/") and path.endswith("/conversation"):
             return self.require_user(self.handle_media_task_conversation)
         if path == "/api/conversations":
@@ -3399,6 +3577,157 @@ class AppHandler(BaseHTTPRequestHandler):
             "task": media_task_public(updated),
         })
 
+    def pick_media_ai_model(self, conn, model_id):
+        model = None
+        if model_id:
+            model = conn.execute(
+                "SELECT * FROM models WHERE id=? AND enabled=1",
+                (model_id,),
+            ).fetchone()
+        if not model:
+            model = conn.execute(
+                "SELECT * FROM models WHERE enabled=1 ORDER BY updated_at DESC, created_at DESC LIMIT 1"
+            ).fetchone()
+        return model
+
+    def call_media_ai_model(self, model, row):
+        if not model:
+            raise ValueError("还没有可用模型，请先配置模型")
+        if not str(model["api_key"] or "").strip():
+            raise ValueError("模型 API Key 还没有配置")
+        context = media_ai_source_context(row)
+        if not context:
+            raise ValueError("听悟结果还不完整，暂时无法生成 AI 增强分析")
+        system_prompt = (
+            "你是 AI槑槑 的音视频内容分析助手。"
+            "你会基于通义听悟返回的转写、摘要和章节，生成适合家庭用户直接复制使用的二次加工结果。"
+            "必须输出严格 JSON，不要使用 Markdown 代码围栏，不要输出解释文字。"
+        )
+        user_prompt = f"""
+请基于下面音视频分析材料，生成 AI 增强分析。
+
+输出严格 JSON 对象，字段必须包含：
+- enhanced_summary：深度总结，分层次说明内容价值
+- key_points：核心观点，用 Markdown 列表
+- copywriting_text：适合复制的综合文案
+- short_video：短视频文案，包含标题、开头钩子、正文、结尾引导
+- speech_script：口播稿
+- wechat_article：公众号文章
+- xiaohongshu_note：小红书笔记
+- moments_copy：朋友圈文案，给 3 个版本
+- selling_points：提取卖点/爆点
+- titles：生成 8 个标题
+- mindmap_text：Mermaid mindmap 代码
+
+mindmap_text 要求：
+- 只放 Mermaid mindmap 内容
+- 使用 mindmap 语法
+- 中文节点
+- 层级不超过 4 层
+- 节点不要太长
+- 不要解释
+
+音视频分析材料：
+{context}
+""".strip()
+        payload = {
+            "model": model["model"],
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+            "temperature": 0.4,
+        }
+        request = urllib.request.Request(
+            model["base_url"].rstrip("/") + "/chat/completions",
+            data=json.dumps(payload, ensure_ascii=False).encode(),
+            headers={
+                "Authorization": "Bearer " + str(model["api_key"]).strip(),
+                "Content-Type": "application/json",
+                "User-Agent": "ai-platform/2.0",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=180) as response:
+            raw = response.read().decode()
+        data = json.loads(raw or "{}")
+        choice = (data.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        content = message.get("content") or choice.get("text") or ""
+        parsed = extract_json_object(content)
+        if not parsed:
+            raise ValueError("AI 增强分析没有返回可解析结果")
+        return parsed
+
+    def save_media_ai_outputs(self, conn, row, outputs):
+        normalized = {}
+        for key in (
+            "enhanced_summary", "key_points", "copywriting_text", "short_video",
+            "speech_script", "wechat_article", "xiaohongshu_note", "moments_copy",
+            "selling_points", "titles",
+        ):
+            normalized[key] = str(outputs.get(key) or "").strip()
+        normalized["mindmap_text"] = normalize_mermaid_mindmap(outputs.get("mindmap_text") or outputs.get("mindmap") or "")
+        conn.execute(
+            """
+            UPDATE media_analysis_tasks
+            SET enhanced_summary=?, key_points=?, mindmap_text=?, copywriting_text=?,
+                ai_outputs_json=?, updated_at=?
+            WHERE id=? AND user_id=?
+            """,
+            (
+                normalized["enhanced_summary"],
+                normalized["key_points"],
+                normalized["mindmap_text"],
+                normalized["copywriting_text"],
+                json.dumps(normalized, ensure_ascii=False),
+                now(),
+                row["id"],
+                row["user_id"],
+            ),
+        )
+
+    def handle_media_task_enhance(self):
+        user_id = self.current_user()["id"]
+        task_id = self.media_task_id_from_path()
+        try:
+            data = self.read_body()
+        except Exception:
+            data = {}
+        model_id = str(data.get("model_id") or "").strip()
+        force = bool(data.get("force"))
+        with db() as conn:
+            row = conn.execute(
+                "SELECT * FROM media_analysis_tasks WHERE id=? AND user_id=?",
+                (task_id, user_id),
+            ).fetchone()
+            if not row:
+                return self.error(HTTPStatus.NOT_FOUND, "media task not found")
+            row = self.refresh_media_task(conn, row)
+            if row["status"] != "completed" or not (row["summary_text"] or row["outline_text"] or row["transcript_text"]):
+                return self.error(HTTPStatus.BAD_REQUEST, "分析完成后才能生成 AI 增强分析")
+            if not force and (row["enhanced_summary"] or row["key_points"] or row["ai_outputs_json"]):
+                return self.json({"task": media_task_public(row), "cached": True})
+            model = self.pick_media_ai_model(conn, model_id)
+            try:
+                outputs = self.call_media_ai_model(model, row)
+            except urllib.error.HTTPError as exc:
+                detail = exc.read(4096).decode(errors="replace")
+                return self.error(HTTPStatus.BAD_GATEWAY, f"AI 增强分析失败：HTTP {exc.code}", detail[:1000])
+            except Exception as exc:
+                return self.error(HTTPStatus.BAD_GATEWAY, "AI 增强分析失败", str(exc)[:1000])
+            self.save_media_ai_outputs(conn, row, outputs)
+            updated = conn.execute(
+                "SELECT * FROM media_analysis_tasks WHERE id=? AND user_id=?",
+                (task_id, user_id),
+            ).fetchone()
+            if updated["conversation_id"]:
+                conversation = self.media_task_conversation_row(conn, updated["conversation_id"], user_id)
+                if conversation:
+                    self.upsert_media_context_message(conn, updated, conversation["id"], user_id)
+        return self.json({"task": media_task_public(updated), "cached": False})
+
     def handle_conversations(self):
         user = self.current_user()
         user_id = user["id"]
@@ -5229,6 +5558,32 @@ INDEX_HTML = r'''<!doctype html>
 	      gap: 12px;
 	      align-content: start;
 	    }
+	    .media-task-head {
+	      display: flex;
+	      justify-content: space-between;
+	      gap: 12px;
+	      align-items: flex-start;
+	      flex-wrap: wrap;
+	      border-bottom: 1px solid var(--line);
+	      padding-bottom: 10px;
+	    }
+	    .media-task-head strong {
+	      display: block;
+	      color: var(--text);
+	      font-size: 16px;
+	      margin-bottom: 2px;
+	    }
+	    .media-task-badge {
+	      display: inline-flex;
+	      align-items: center;
+	      min-height: 30px;
+	      border-radius: 999px;
+	      padding: 0 10px;
+	      background: var(--accent-soft);
+	      color: var(--accent-strong);
+	      font-size: 12px;
+	      font-weight: 700;
+	    }
 	    .media-result {
 	      max-height: min(56vh, 620px);
 	      overflow: auto;
@@ -6711,14 +7066,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.5.2</p>
+        <p class="app-version">v2.5.3</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.5.2</span>
+        <span>v2.5.3</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -6730,7 +7085,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.5.2</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.5.3</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -6749,7 +7104,7 @@ INDEX_HTML = r'''<!doctype html>
 	        <button id="openSettings">模型管理</button>
 	        <button id="logout">退出</button>
         <footer class="site-icp side-icp">
-          <span>v2.5.2</span>
+          <span>v2.5.3</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -8268,14 +8623,57 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
 	    function mediaTabContent(task) {
+	      const outputs = mediaAIOutputs(task);
+	      const enhanced = [
+	        task.enhanced_summary ? "## 深度总结\n" + task.enhanced_summary : "",
+	        task.key_points ? "## 核心观点\n" + task.key_points : "",
+	        outputs.selling_points ? "## 卖点/爆点\n" + outputs.selling_points : "",
+	        outputs.titles ? "## 标题方向\n" + outputs.titles : ""
+	      ].filter(Boolean).join("\n\n");
+	      const copywriting = [
+	        task.copywriting_text ? "## 综合文案\n" + task.copywriting_text : "",
+	        outputs.short_video ? "## 短视频文案\n" + outputs.short_video : "",
+	        outputs.speech_script ? "## 口播稿\n" + outputs.speech_script : "",
+	        outputs.wechat_article ? "## 公众号文章\n" + outputs.wechat_article : "",
+	        outputs.xiaohongshu_note ? "## 小红书笔记\n" + outputs.xiaohongshu_note : "",
+	        outputs.moments_copy ? "## 朋友圈文案\n" + outputs.moments_copy : ""
+	      ].filter(Boolean).join("\n\n");
 	      const fields = {
 	        summary: task.summary_text || "",
 	        outline: task.outline_text || "",
 	        transcript: task.transcript_text || "",
-	        mindmap: task.mindmap_text || "",
-	        copywriting: task.copywriting_text || ""
+	        enhanced,
+	        mindmap: task.mindmap_text ? "```mermaid\n" + task.mindmap_text + "\n```" : "",
+	        copywriting
 	      };
 	      return fields[state.mediaTab] || "";
+	    }
+
+	    function mediaAIOutputs(task) {
+	      if (!task?.ai_outputs_json) return {};
+	      try {
+	        const data = JSON.parse(task.ai_outputs_json);
+	        return data && typeof data === "object" ? data : {};
+	      } catch {
+	        return {};
+	      }
+	    }
+
+	    function mediaHasEnhanced(task) {
+	      return Boolean(task?.enhanced_summary || task?.key_points || task?.ai_outputs_json);
+	    }
+
+	    function mediaHasCopywriting(task) {
+	      const outputs = mediaAIOutputs(task);
+	      return Boolean(
+	        task?.copywriting_text ||
+	        outputs.short_video ||
+	        outputs.speech_script ||
+	        outputs.wechat_article ||
+	        outputs.xiaohongshu_note ||
+	        outputs.moments_copy ||
+	        outputs.copywriting_text
+	      );
 	    }
 
 	    function mediaTaskReadyForAI(task) {
@@ -8294,7 +8692,9 @@ INDEX_HTML = r'''<!doctype html>
 	        article: `请基于《${filename}》的音视频分析结果，生成一篇公众号文章。要求：标题、导语、小标题结构、正文、结尾总结都完整，表达清楚，有阅读层次。`,
 	        xiaohongshu: `请基于《${filename}》的音视频分析结果，生成一篇小红书笔记。要求：给出标题、正文、分点内容、适合的表情符号和话题标签，语气真诚自然。`,
 	        moments: `请基于《${filename}》的音视频分析结果，生成3版朋友圈文案。要求：分别是自然分享版、简短有梗版、正式一点版。`,
-	        mindmap: `请基于《${filename}》的音视频分析结果，生成一份 Markdown 思维导图大纲。要求：层级清晰，适合复制到思维导图工具里继续整理。`
+	        mindmap: `请基于《${filename}》的音视频分析结果，生成一份 Mermaid mindmap。要求：只输出 Mermaid，使用 mindmap 语法，中文节点，层级不超过4层，节点不要太长，不要输出解释文字。`,
+	        sellingPoints: `请基于《${filename}》的音视频分析结果，提取最适合传播的卖点/爆点。要求：分为核心卖点、情绪卖点、标题爆点、可延展选题。`,
+	        titles: `请基于《${filename}》的音视频分析结果，生成12个标题。要求：分别覆盖短视频、小红书、公众号和朋友圈语境，标题自然不夸张。`
 	      };
 	      return prompts[type] || prompts.shortVideo;
 	    }
@@ -8344,6 +8744,29 @@ INDEX_HTML = r'''<!doctype html>
 	      await sendMessage(mediaCreativePrompt(type, task), { statusText: "正在基于音视频分析生成内容..." });
 	    }
 
+	    async function enhanceMediaTask(task, force = false) {
+	      if (!mediaTaskReadyForAI(task)) {
+	        setStatus("mediaStatus", "分析完成后才能生成 AI 增强分析。", "err");
+	        return;
+	      }
+	      const modelId = $("modelSelect").value || state.currentConversation?.model_id || state.models[0]?.id || "";
+	      setStatus("mediaStatus", force ? "正在重新生成 AI 增强分析..." : "正在生成 AI 增强分析...", "");
+	      const res = await api(`/api/media/tasks/${task.id}/enhance`, {
+	        method: "POST",
+	        body: JSON.stringify({ model_id: modelId, force })
+	      });
+	      if (!res.ok) {
+	        setStatus("mediaStatus", await readError(res, "AI 增强分析失败。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      upsertMediaTask(data.task);
+	      state.mediaTab = data.task?.mindmap_text ? "mindmap" : "enhanced";
+	      renderMediaTasks();
+	      renderMediaDetail();
+	      setStatus("mediaStatus", data.cached ? "已加载缓存的 AI 增强分析。" : "AI 增强分析已生成。", "ok");
+	    }
+
 	    function createMediaAIButtons(task) {
 	      const panel = document.createElement("section");
 	      panel.className = "media-ai-panel";
@@ -8356,9 +8779,15 @@ INDEX_HTML = r'''<!doctype html>
 	        : "分析完成后，可以一键创建 AI 加工会话，无需重复上传。";
 	      const mainActions = document.createElement("div");
 	      mainActions.className = "media-ai-actions";
+	      const enhance = document.createElement("button");
+	      enhance.type = "button";
+	      enhance.className = mediaHasEnhanced(task) ? "" : "primary";
+	      enhance.textContent = mediaHasEnhanced(task) ? "重新生成AI增强" : "生成AI增强分析";
+	      enhance.disabled = !mediaTaskReadyForAI(task);
+	      enhance.addEventListener("click", () => enhanceMediaTask(task, mediaHasEnhanced(task)).catch((err) => setStatus("mediaStatus", friendlyError(err, "AI 增强分析失败。"), "err")));
 	      const send = document.createElement("button");
 	      send.type = "button";
-	      send.className = "primary";
+	      send.className = mediaHasEnhanced(task) ? "primary" : "";
 	      send.textContent = "发送到AI对话";
 	      send.disabled = !mediaTaskReadyForAI(task);
 	      send.addEventListener("click", () => ensureMediaConversation(task, { open: true }).catch((err) => setStatus("mediaStatus", friendlyError(err, "创建分析会话失败。"), "err")));
@@ -8367,7 +8796,7 @@ INDEX_HTML = r'''<!doctype html>
 	      create.textContent = task.conversation_id ? "进入分析会话" : "创建分析会话";
 	      create.disabled = !mediaTaskReadyForAI(task);
 	      create.addEventListener("click", () => ensureMediaConversation(task, { open: Boolean(task.conversation_id) }).catch((err) => setStatus("mediaStatus", friendlyError(err, "创建分析会话失败。"), "err")));
-	      mainActions.append(send, create);
+	      mainActions.append(enhance, send, create);
 	      const creativeActions = document.createElement("div");
 	      creativeActions.className = "media-ai-actions";
 	      const items = [
@@ -8376,7 +8805,9 @@ INDEX_HTML = r'''<!doctype html>
 	        ["article", "公众号文章"],
 	        ["xiaohongshu", "小红书笔记"],
 	        ["moments", "朋友圈文案"],
-	        ["mindmap", "思维导图"]
+	        ["mindmap", "思维导图"],
+	        ["sellingPoints", "提取卖点"],
+	        ["titles", "生成标题"]
 	      ];
 	      for (const [type, label] of items) {
 	        const button = document.createElement("button");
@@ -8402,13 +8833,27 @@ INDEX_HTML = r'''<!doctype html>
 	        ["summary", "智能摘要"],
 	        ["outline", "章节要点"],
 	        ["transcript", "转写全文"],
-	        ["mindmap", "思维导图"],
-	        ["copywriting", "可复制文案"]
+	        ["enhanced", "AI增强"]
 	      ];
+	      if (task.mindmap_text) tabs.push(["mindmap", "思维导图"]);
+	      if (mediaHasCopywriting(task)) tabs.push(["copywriting", "可复制文案"]);
+	      if (!tabs.some(([key]) => key === state.mediaTab)) {
+	        state.mediaTab = mediaHasEnhanced(task) ? "enhanced" : "summary";
+	      }
 	      detail.innerHTML = "";
 	      const head = document.createElement("div");
-	      head.className = "library-card-meta";
-	      head.textContent = mediaStatusText(task.status) + " · " + (task.filename || "音视频文件") + " · " + formatTime(task.created_at);
+	      head.className = "media-task-head";
+	      const headText = document.createElement("div");
+	      const headTitle = document.createElement("strong");
+	      headTitle.textContent = task.filename || "音视频文件";
+	      const headMeta = document.createElement("div");
+	      headMeta.className = "library-card-meta";
+	      headMeta.textContent = "创建 " + formatTime(task.created_at) + (task.updated_at ? " · 更新 " + formatTime(task.updated_at) : "");
+	      headText.append(headTitle, headMeta);
+	      const badge = document.createElement("span");
+	      badge.className = "media-task-badge";
+	      badge.textContent = mediaStatusText(task.status);
+	      head.append(headText, badge);
 	      const tabBar = document.createElement("div");
 	      tabBar.className = "media-tabs";
 	      for (const [key, label] of tabs) {
@@ -8425,7 +8870,11 @@ INDEX_HTML = r'''<!doctype html>
 	      const aiPanel = createMediaAIButtons(task);
 	      const content = document.createElement("div");
 	      content.className = "media-result markdown";
-	      const text = task.error_message || mediaTabContent(task) || (task.status === "completed" ? "暂时没有这个结果。" : "任务处理中，稍后刷新看看。");
+	      const text = task.error_message || mediaTabContent(task) || (
+	        state.mediaTab === "enhanced"
+	          ? "还没有生成 AI 增强分析。点上方“生成AI增强分析”，槑槑会基于转写、摘要和章节生成深度总结、观点、文案和思维导图。"
+	          : (task.status === "completed" ? "这个部分暂时没有结果，可以刷新状态或生成 AI 增强分析。" : "任务处理中，稍后刷新看看。")
+	      );
 	      content.innerHTML = renderMarkdown(text);
 	      const actions = document.createElement("div");
 	      actions.className = "library-actions";
