@@ -36,6 +36,11 @@ CAT_SESSION_COOKIE = "cat_session"
 CAT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
 CAT_OSS_DIR = "cat"
 CAT_MAX_IMAGE_BYTES = 12 * 1024 * 1024
+CHAT_IMAGE_OSS_DIR = "chat-images"
+CHAT_IMAGE_MAX_BYTES = 20 * 1024 * 1024
+CHAT_IMAGE_MAX_COUNT = 5
+CHAT_IMAGE_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+CHAT_IMAGE_ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MEDIA_OSS_DIR = "tingwu"
 MEDIA_MAX_UPLOAD_BYTES = int(os.environ.get("MEDIA_MAX_UPLOAD_MB", "500") or "500") * 1024 * 1024
 MEDIA_ALLOWED_EXTENSIONS = {".mp3", ".mp4", ".m4a", ".wav", ".aac", ".flac", ".mov", ".avi", ".mkv", ".webm"}
@@ -213,6 +218,7 @@ def init_db(secrets_data=None):
               api_key TEXT NOT NULL,
               model TEXT NOT NULL,
               system_prompt TEXT NOT NULL DEFAULT '',
+              supports_vision INTEGER NOT NULL DEFAULT 0,
               enabled INTEGER NOT NULL DEFAULT 1,
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL
@@ -263,6 +269,19 @@ def init_db(secrets_data=None):
               position INTEGER NOT NULL,
               created_at INTEGER NOT NULL,
               FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS chat_message_images (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              session_id TEXT NOT NULL DEFAULT '',
+              message_id INTEGER NOT NULL DEFAULT 0,
+              filename TEXT NOT NULL,
+              mime_type TEXT NOT NULL DEFAULT '',
+              file_size INTEGER NOT NULL DEFAULT 0,
+              oss_key TEXT NOT NULL UNIQUE,
+              oss_url TEXT NOT NULL DEFAULT '',
+              created_at INTEGER NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS prompt_templates (
@@ -413,6 +432,9 @@ def init_db(secrets_data=None):
 
         default_user_id = ensure_default_ai_user(conn, secrets_data)
 
+        model_columns = table_columns(conn, "models")
+        if "supports_vision" not in model_columns:
+            conn.execute("ALTER TABLE models ADD COLUMN supports_vision INTEGER NOT NULL DEFAULT 0")
         conversation_columns = table_columns(conn, "conversations")
         if "user_id" not in conversation_columns:
             conn.execute(
@@ -489,6 +511,7 @@ def init_db(secrets_data=None):
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations(user_id, archived, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_conversation ON messages(user_id, conversation_id, id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_images_user_session ON chat_message_images(user_id, session_id, message_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_favorites_user_created ON favorite_messages(user_id, created_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_user_updated ON media_analysis_tasks(user_id, updated_at DESC)")
@@ -509,8 +532,8 @@ def init_db(secrets_data=None):
             conn.execute(
                 """
                 INSERT INTO models
-                (id, name, provider, base_url, api_key, model, system_prompt, enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                (id, name, provider, base_url, api_key, model, system_prompt, supports_vision, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)
                 """,
                 (
                     b64_token(12),
@@ -546,6 +569,7 @@ def public_model(row):
         "base_url": row["base_url"],
         "model": row["model"],
         "system_prompt": row["system_prompt"],
+        "supports_vision": bool(row["supports_vision"]) if "supports_vision" in row.keys() else False,
         "enabled": bool(row["enabled"]),
         "has_api_key": bool(row["api_key"].strip()),
         "created_at": row["created_at"],
@@ -576,6 +600,7 @@ def conversation_row(row):
         "model_id": row["model_id"],
         "model_name": row["model_name"],
         "model": row["model"],
+        "supports_vision": bool(row["supports_vision"]) if "supports_vision" in row.keys() else False,
         "updated_at": row["updated_at"],
         "created_at": row["created_at"],
     }
@@ -859,6 +884,69 @@ def cat_oss_prefix(config, user_id):
 
 def cat_oss_url(config, oss_key):
     return config["public_base"].rstrip("/") + "/" + quote(oss_key, safe="/-_.~")
+
+
+def chat_image_oss_config(secrets_data):
+    base = cat_oss_config(secrets_data)
+    config = secrets_data.get("chat_image_oss") or {}
+
+    def read(name, key, default=""):
+        return str(os.environ.get(name) or config.get(key) or default).strip()
+
+    directory = read("CHAT_IMAGE_OSS_DIR", "dir", CHAT_IMAGE_OSS_DIR).strip("/") or CHAT_IMAGE_OSS_DIR
+    return {
+        **base,
+        "directory": directory,
+        "max_size": CHAT_IMAGE_MAX_BYTES,
+        "configured": bool(base["bucket"] and base["access_key_id"] and base["access_key_secret"] and base["endpoint"]),
+    }
+
+
+def chat_image_prefix(config, user_id):
+    date_path = time.strftime("%Y/%m/%d", time.localtime())
+    return f"{config['directory'].strip('/')}/{user_id}/{date_path}/"
+
+
+def chat_image_upload_policy(config, user_id):
+    prefix = chat_image_prefix(config, user_id)
+    expiration = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now() + 600))
+    policy = {
+        "expiration": expiration,
+        "conditions": [
+            ["starts-with", "$key", prefix],
+            ["starts-with", "$Content-Type", "image/"],
+            ["content-length-range", 1, config["max_size"]],
+        ],
+    }
+    encoded_policy = base64.b64encode(
+        json.dumps(policy, separators=(",", ":")).encode()
+    ).decode()
+    signature = base64.b64encode(
+        hmac.new(config["access_key_secret"].encode(), encoded_policy.encode(), hashlib.sha1).digest()
+    ).decode()
+    return {
+        "host": config["endpoint"],
+        "access_key_id": config["access_key_id"],
+        "policy": encoded_policy,
+        "signature": signature,
+        "key_prefix": prefix,
+        "max_size": config["max_size"],
+        "max_count": CHAT_IMAGE_MAX_COUNT,
+        "allowed_extensions": sorted(CHAT_IMAGE_ALLOWED_EXTENSIONS),
+        "allowed_mime_types": sorted(CHAT_IMAGE_ALLOWED_MIME_TYPES),
+        "expires_at": now() + 600,
+    }
+
+
+def chat_image_public(row):
+    return {
+        "id": row["id"],
+        "filename": row["filename"],
+        "mime_type": row["mime_type"],
+        "file_size": row["file_size"],
+        "view_url": f"/api/chat-images/{row['id']}/view",
+        "created_at": row["created_at"],
+    }
 
 
 def cat_upload_policy(config, user_id):
@@ -1626,6 +1714,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_prompts)
         if path == "/api/favorites":
             return self.require_user(self.handle_favorites)
+        if path.startswith("/api/chat-images/") and path.endswith("/view"):
+            return self.require_user(self.handle_chat_image_view)
         if path == "/api/media/tasks":
             return self.require_user(self.handle_media_tasks)
         if path.startswith("/api/media/tasks/"):
@@ -1681,6 +1771,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_prompts)
         if path == "/api/favorites":
             return self.require_user(self.handle_favorites)
+        if path == "/api/chat-images/upload-policy":
+            return self.require_user(self.handle_chat_image_upload_policy)
+        if path == "/api/chat-images":
+            return self.require_user(self.handle_chat_images)
         if path == "/api/media/upload-policy":
             return self.require_user(self.handle_media_upload_policy)
         if path == "/api/media/tasks":
@@ -2830,6 +2924,7 @@ class AppHandler(BaseHTTPRequestHandler):
         model = str(data.get("model") or "").strip()
         provider = str(data.get("provider") or "").strip()
         system_prompt = str(data.get("system_prompt") or "").strip()
+        supports_vision = 1 if data.get("supports_vision") else 0
         enabled = 1 if data.get("enabled", True) else 0
 
         if not name or not base_url or not model:
@@ -2841,10 +2936,10 @@ class AppHandler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO models
-                (id, name, provider, base_url, api_key, model, system_prompt, enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, name, provider, base_url, api_key, model, system_prompt, supports_vision, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (model_id, name, provider, base_url, api_key, model, system_prompt, enabled, ts, ts),
+                (model_id, name, provider, base_url, api_key, model, system_prompt, supports_vision, enabled, ts, ts),
             )
             row = conn.execute("SELECT * FROM models WHERE id=?", (model_id,)).fetchone()
         return self.json({"model": private_model(row)}, HTTPStatus.CREATED)
@@ -2880,6 +2975,7 @@ class AppHandler(BaseHTTPRequestHandler):
             base_url = str(data.get("base_url", row["base_url"])).strip().rstrip("/")
             model = str(data.get("model", row["model"])).strip()
             system_prompt = str(data.get("system_prompt", row["system_prompt"])).strip()
+            supports_vision = 1 if data.get("supports_vision", bool(row["supports_vision"])) else 0
             enabled = 1 if data.get("enabled", bool(row["enabled"])) else 0
             api_key = row["api_key"]
             if data.get("clear_api_key"):
@@ -2893,10 +2989,10 @@ class AppHandler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 UPDATE models
-                SET name=?, provider=?, base_url=?, api_key=?, model=?, system_prompt=?, enabled=?, updated_at=?
+                SET name=?, provider=?, base_url=?, api_key=?, model=?, system_prompt=?, supports_vision=?, enabled=?, updated_at=?
                 WHERE id=?
                 """,
-                (name, provider, base_url, api_key, model, system_prompt, enabled, now(), model_id),
+                (name, provider, base_url, api_key, model, system_prompt, supports_vision, enabled, now(), model_id),
             )
             row = conn.execute("SELECT * FROM models WHERE id=?", (model_id,)).fetchone()
         return self.json({"model": private_model(row)})
@@ -3225,6 +3321,93 @@ class AppHandler(BaseHTTPRequestHandler):
             )
         return self.json({"ok": True})
 
+    def chat_image_id_from_path(self):
+        parts = urlparse(self.path).path.strip("/").split("/")
+        if len(parts) >= 3:
+            return parts[2]
+        return ""
+
+    def handle_chat_image_upload_policy(self):
+        user = self.current_user()
+        config = chat_image_oss_config(self.server.secrets)
+        if not config["configured"]:
+            return self.error(HTTPStatus.BAD_REQUEST, "图片 OSS 还没有配置好")
+        return self.json({"policy": chat_image_upload_policy(config, user["id"])})
+
+    def handle_chat_images(self):
+        user = self.current_user()
+        user_id = user["id"]
+        config = chat_image_oss_config(self.server.secrets)
+        if not config["configured"]:
+            return self.error(HTTPStatus.BAD_REQUEST, "图片 OSS 还没有配置好")
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+        filename = str(data.get("filename") or "").strip()[:180]
+        mime_type = str(data.get("mime_type") or "").strip().lower()[:120]
+        oss_key = str(data.get("oss_key") or "").strip()
+        try:
+            file_size = max(0, int(data.get("file_size") or 0))
+        except (TypeError, ValueError):
+            file_size = 0
+
+        expected_prefix = chat_image_prefix(config, user_id)
+        suffix = Path(filename or oss_key).suffix.lower()
+        if not filename or not oss_key:
+            return self.error(HTTPStatus.BAD_REQUEST, "请先上传图片")
+        if suffix not in CHAT_IMAGE_ALLOWED_EXTENSIONS:
+            return self.error(HTTPStatus.BAD_REQUEST, "暂不支持这个图片格式")
+        if mime_type and mime_type not in CHAT_IMAGE_ALLOWED_MIME_TYPES:
+            return self.error(HTTPStatus.BAD_REQUEST, "暂不支持这个图片格式")
+        if file_size <= 0 or file_size > config["max_size"]:
+            return self.error(HTTPStatus.BAD_REQUEST, "图片大小超出限制")
+        if oss_key.startswith("/") or ".." in oss_key.split("/") or not oss_key.startswith(expected_prefix):
+            return self.error(HTTPStatus.BAD_REQUEST, "图片路径不合法")
+
+        ts = now()
+        oss_url = cat_oss_url(config, oss_key)
+        image_id = b64_token(12)
+        with db() as conn:
+            existing = conn.execute(
+                "SELECT * FROM chat_message_images WHERE oss_key=? AND user_id=?",
+                (oss_key, user_id),
+            ).fetchone()
+            if existing:
+                return self.json({"image": chat_image_public(existing)})
+            conn.execute(
+                """
+                INSERT INTO chat_message_images
+                (id, user_id, session_id, message_id, filename, mime_type, file_size, oss_key, oss_url, created_at)
+                VALUES (?, ?, '', 0, ?, ?, ?, ?, ?, ?)
+                """,
+                (image_id, user_id, filename, mime_type, file_size, oss_key, oss_url, ts),
+            )
+            row = conn.execute(
+                "SELECT * FROM chat_message_images WHERE id=? AND user_id=?",
+                (image_id, user_id),
+            ).fetchone()
+        return self.json({"image": chat_image_public(row)}, HTTPStatus.CREATED)
+
+    def handle_chat_image_view(self):
+        user_id = self.current_user()["id"]
+        image_id = self.chat_image_id_from_path()
+        with db() as conn:
+            row = conn.execute(
+                "SELECT * FROM chat_message_images WHERE id=? AND user_id=?",
+                (image_id, user_id),
+            ).fetchone()
+        if not row:
+            return self.error(HTTPStatus.NOT_FOUND, "image not found")
+        config = chat_image_oss_config(self.server.secrets)
+        if not config["configured"]:
+            return self.error(HTTPStatus.BAD_REQUEST, "图片 OSS 还没有配置好")
+        signed_url, _ = oss_signed_get_url(config, row["oss_key"], 900)
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", signed_url)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def media_task_id_from_path(self):
         parts = urlparse(self.path).path.strip("/").split("/")
         if len(parts) >= 4:
@@ -3468,7 +3651,7 @@ class AppHandler(BaseHTTPRequestHandler):
             return None
         return conn.execute(
             """
-            SELECT c.*, m.name AS model_name, m.model AS model
+            SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision
             FROM conversations c
             JOIN models m ON m.id = c.model_id
             WHERE c.id=? AND c.user_id=? AND c.archived=0
@@ -3735,7 +3918,7 @@ mindmap_text 要求：
             with db() as conn:
                 rows = conn.execute(
                     """
-                    SELECT c.*, m.name AS model_name, m.model AS model
+                    SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision
                     FROM conversations c
                     JOIN models m ON m.id = c.model_id
                     WHERE c.archived=0 AND c.user_id=?
@@ -3770,7 +3953,7 @@ mindmap_text 要求：
             )
             row = conn.execute(
                 """
-                SELECT c.*, m.name AS model_name, m.model AS model
+                SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision
                 FROM conversations c JOIN models m ON m.id=c.model_id
                 WHERE c.id=? AND c.user_id=?
                 """,
@@ -3858,6 +4041,18 @@ mindmap_text 要求：
                 """,
                 (conversation_id, user_id),
             ).fetchall()
+            images = conn.execute(
+                """
+                SELECT *
+                FROM chat_message_images
+                WHERE user_id=? AND session_id=? AND message_id IN (
+                  SELECT id FROM messages WHERE conversation_id=? AND user_id=?
+                  AND role!='system'
+                )
+                ORDER BY created_at ASC, id ASC
+                """,
+                (user_id, conversation_id, conversation_id, user_id),
+            ).fetchall()
         sources_by_message = {}
         for source in sources:
             sources_by_message.setdefault(source["message_id"], []).append(
@@ -3869,6 +4064,9 @@ mindmap_text 要求：
                 }
             )
         favorite_by_message = {row["message_id"]: row["id"] for row in favorites}
+        images_by_message = {}
+        for image in images:
+            images_by_message.setdefault(image["message_id"], []).append(chat_image_public(image))
         return self.json(
             {
                 "messages": [
@@ -3881,6 +4079,7 @@ mindmap_text 要求：
                         "usage": message_token_usage(row),
                         "sources": sources_by_message.get(row["id"], []),
                         "favorite_id": favorite_by_message.get(row["id"]),
+                        "images": images_by_message.get(row["id"], []),
                     }
                     for row in messages
                 ]
@@ -3895,8 +4094,18 @@ mindmap_text 要求：
         except Exception:
             return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
         content = str(data.get("content") or "").strip()
+        raw_image_ids = data.get("image_ids") or []
+        if not isinstance(raw_image_ids, list):
+            raw_image_ids = []
+        image_ids = []
+        for item in raw_image_ids:
+            value = str(item or "").strip()
+            if value and value not in image_ids:
+                image_ids.append(value)
+        if len(image_ids) > CHAT_IMAGE_MAX_COUNT:
+            return self.error(HTTPStatus.BAD_REQUEST, "单次最多上传 5 张图片")
         requested_web_search = bool(data.get("web_search"))
-        if not content:
+        if not content and not image_ids:
             return self.error(HTTPStatus.BAD_REQUEST, "content required")
 
         search_results = []
@@ -3905,7 +4114,7 @@ mindmap_text 要求：
         with db() as conn:
             convo = conn.execute(
                 """
-                SELECT c.*, m.name AS model_name, m.base_url, m.api_key, m.model, m.system_prompt, m.enabled
+                SELECT c.*, m.name AS model_name, m.base_url, m.api_key, m.model, m.system_prompt, m.supports_vision, m.enabled
                 FROM conversations c JOIN models m ON m.id=c.model_id
                 WHERE c.id=? AND c.user_id=? AND c.archived=0
                 """,
@@ -3917,6 +4126,27 @@ mindmap_text 要求：
                 return self.error(HTTPStatus.BAD_REQUEST, "model disabled")
             if not convo["api_key"].strip():
                 return self.error(HTTPStatus.BAD_REQUEST, "model api key is not configured")
+            image_rows = []
+            if image_ids:
+                if not convo["supports_vision"]:
+                    return self.error(HTTPStatus.BAD_REQUEST, "当前模型不支持图片理解，请切换支持图片的模型。")
+                if not chat_image_oss_config(self.server.secrets)["configured"]:
+                    return self.error(HTTPStatus.BAD_REQUEST, "图片 OSS 还没有配置好")
+                placeholders = ",".join("?" for _ in image_ids)
+                rows = conn.execute(
+                    f"""
+                    SELECT *
+                    FROM chat_message_images
+                    WHERE id IN ({placeholders}) AND user_id=?
+                      AND message_id=0
+                      AND (session_id='' OR session_id=?)
+                    """,
+                    (*image_ids, user_id, conversation_id),
+                ).fetchall()
+                row_by_id = {row["id"]: row for row in rows}
+                image_rows = [row_by_id.get(image_id) for image_id in image_ids]
+                if any(row is None for row in image_rows):
+                    return self.error(HTTPStatus.BAD_REQUEST, "图片附件不存在或已被使用")
 
             if use_web_search:
                 if not search_config["enabled"] or not search_config["api_key"]:
@@ -3938,12 +4168,19 @@ mindmap_text 要求：
                     return self.error(HTTPStatus.BAD_GATEWAY, "web search returned no results")
 
             ts = now()
-            conn.execute(
+            user_message_content = content or "请分析这些图片。"
+            cursor = conn.execute(
                 "INSERT INTO messages(user_id, conversation_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)",
-                (user_id, conversation_id, content, ts),
+                (user_id, conversation_id, user_message_content, ts),
             )
+            user_message_id = cursor.lastrowid
+            if image_rows:
+                conn.executemany(
+                    "UPDATE chat_message_images SET session_id=?, message_id=? WHERE id=? AND user_id=?",
+                    [(conversation_id, user_message_id, row["id"], user_id) for row in image_rows],
+                )
             if convo["title"] == "新对话":
-                title = content.replace("\n", " ")[:28] or "新对话"
+                title = user_message_content.replace("\n", " ")[:28] or "图片理解"
                 conn.execute(
                     "UPDATE conversations SET title=?, updated_at=? WHERE id=? AND user_id=?",
                     (title, ts, conversation_id, user_id),
@@ -3955,7 +4192,7 @@ mindmap_text 要求：
                 )
             history = conn.execute(
                 """
-                SELECT role, content
+                SELECT id, role, content
                 FROM messages
                 WHERE conversation_id=? AND user_id=?
                 ORDER BY id ASC
@@ -3963,6 +4200,40 @@ mindmap_text 要求：
                 """,
                 (conversation_id, user_id),
             ).fetchall()
+            history_images = conn.execute(
+                """
+                SELECT *
+                FROM chat_message_images
+                WHERE user_id=? AND session_id=? AND message_id IN (
+                  SELECT id FROM messages WHERE conversation_id=? AND user_id=?
+                )
+                ORDER BY created_at ASC, id ASC
+                """,
+                (user_id, conversation_id, conversation_id, user_id),
+            ).fetchall()
+
+        images_by_history_message = {}
+        for image in history_images:
+            images_by_history_message.setdefault(image["message_id"], []).append(image)
+        chat_image_config = chat_image_oss_config(self.server.secrets)
+
+        def upstream_message_from_history(row):
+            images = images_by_history_message.get(row["id"], [])
+            if row["role"] == "user" and images and convo["supports_vision"]:
+                if not chat_image_config["configured"]:
+                    raise ValueError("图片 OSS 还没有配置好")
+                parts = []
+                text_content = str(row["content"] or "").strip()
+                if text_content:
+                    parts.append({"type": "text", "text": text_content})
+                for image in images[:CHAT_IMAGE_MAX_COUNT]:
+                    signed_url, _ = oss_signed_get_url(chat_image_config, image["oss_key"], 6 * 60 * 60)
+                    parts.append({"type": "image_url", "image_url": {"url": signed_url}})
+                return {"role": row["role"], "content": parts or row["content"]}
+            if row["role"] == "user" and images:
+                names = "、".join(image["filename"] for image in images)
+                return {"role": row["role"], "content": (row["content"] or "") + f"\n\n[图片附件：{names}]"}
+            return {"role": row["role"], "content": row["content"]}
 
         def make_payload(results, include_usage=True):
             upstream_messages = [
@@ -3976,9 +4247,7 @@ mindmap_text 要求：
                 upstream_messages.append(
                     {"role": "system", "content": build_search_context(results)}
                 )
-            upstream_messages.extend(
-                {"role": row["role"], "content": row["content"]} for row in history
-            )
+            upstream_messages.extend(upstream_message_from_history(row) for row in history)
             payload = {
                 "model": convo["model"],
                 "messages": upstream_messages,
@@ -4018,6 +4287,17 @@ mindmap_text 要求：
         payload = make_payload(search_results)
         search_fallback_notice = ""
 
+        def upstream_error_message(code, detail):
+            if image_ids and (
+                "Unexpected item type in content" in detail
+                or "support image input" in detail
+                or "image input" in detail
+            ):
+                return "当前模型接口暂时不接受 image_url 图片消息，请换用支持图片理解的模型。"
+            if "data_inspection_failed" in detail:
+                return "upstream content rejected"
+            return f"upstream status {code}"
+
         try:
             response = open_upstream_with_usage_fallback(search_results)
         except urllib.error.HTTPError as exc:
@@ -4030,22 +4310,14 @@ mindmap_text 要求：
                     response = open_upstream_with_usage_fallback(search_results)
                 except urllib.error.HTTPError as retry_exc:
                     retry_detail = retry_exc.read(65536).decode(errors="replace")
-                    message = (
-                        "upstream content rejected"
-                        if "data_inspection_failed" in retry_detail
-                        else f"upstream status {retry_exc.code}"
-                    )
+                    message = upstream_error_message(retry_exc.code, retry_detail)
                     return self.error(HTTPStatus.BAD_GATEWAY, message, retry_detail)
                 except Exception as retry_exc:
                     return self.error(
                         HTTPStatus.BAD_GATEWAY, "upstream request failed", str(retry_exc)
                     )
             else:
-                message = (
-                    "upstream content rejected"
-                    if "data_inspection_failed" in detail
-                    else f"upstream status {exc.code}"
-                )
+                message = upstream_error_message(exc.code, detail)
                 return self.error(HTTPStatus.BAD_GATEWAY, message, detail)
         except Exception as exc:
             return self.error(HTTPStatus.BAD_GATEWAY, "upstream request failed", str(exc))
@@ -5212,7 +5484,7 @@ INDEX_HTML = r'''<!doctype html>
     }
     .input-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 42px auto;
+      grid-template-columns: 42px minmax(0, 1fr) 42px 42px auto;
       gap: 8px;
       align-items: end;
     }
@@ -5247,6 +5519,10 @@ INDEX_HTML = r'''<!doctype html>
       color: var(--accent-strong);
       border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
       background: color-mix(in srgb, var(--accent-soft) 66%, transparent);
+    }
+    .composer-action[disabled] {
+      cursor: not-allowed;
+      opacity: .45;
     }
     #send {
       width: 40px;
@@ -5719,7 +5995,7 @@ INDEX_HTML = r'''<!doctype html>
       .model-select { width: 100%; }
       .search-toggle { width: fit-content; }
       .scroll-latest { bottom: 152px; }
-      .input-row { grid-template-columns: 1fr auto; }
+      .input-row { grid-template-columns: 38px minmax(0, 1fr) 38px 38px 44px; }
       .bubble-shell { max-width: 100%; }
       .bubble.user,
       .bubble.assistant { justify-items: stretch; }
@@ -6310,8 +6586,99 @@ INDEX_HTML = r'''<!doctype html>
       border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
       background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
     }
+    .attachment-preview-row,
+    .message-images {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .attachment-preview-row {
+      padding: 0 2px;
+    }
+    .attachment-preview {
+      width: 72px;
+      height: 72px;
+      border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
+      border-radius: 16px;
+      overflow: hidden;
+      background: var(--surface-soft);
+      position: relative;
+      box-shadow: var(--soft-shadow);
+    }
+    .attachment-preview img,
+    .message-image-btn img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .attachment-remove {
+      position: absolute;
+      right: 4px;
+      top: 4px;
+      width: 22px;
+      min-width: 22px;
+      height: 22px;
+      min-height: 22px;
+      padding: 0;
+      border-radius: 999px;
+      background: rgba(43, 37, 35, .72);
+      color: #fff;
+      border: 0;
+      font-size: 14px;
+      line-height: 1;
+    }
+    .attachment-progress {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 3px 4px;
+      background: rgba(43, 37, 35, .62);
+      color: #fff;
+      font-size: 11px;
+      text-align: center;
+    }
+    .message-images {
+      margin-bottom: 10px;
+    }
+    .message-image-btn {
+      width: min(180px, 42vw);
+      aspect-ratio: 4 / 3;
+      min-height: 0;
+      padding: 0;
+      border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+      border-radius: 16px;
+      overflow: hidden;
+      background: var(--surface-soft);
+      box-shadow: var(--soft-shadow);
+    }
+    .image-preview-dialog {
+      position: fixed;
+      inset: 0;
+      z-index: 45;
+      display: none;
+      place-items: center;
+      padding: 18px;
+      background: rgba(15, 23, 42, .72);
+    }
+    .image-preview-dialog.show { display: grid; }
+    .image-preview-panel {
+      max-width: min(960px, 96vw);
+      max-height: min(760px, 90vh);
+      display: grid;
+      gap: 10px;
+    }
+    .image-preview-panel img {
+      max-width: 100%;
+      max-height: calc(90vh - 56px);
+      border-radius: 18px;
+      object-fit: contain;
+      box-shadow: var(--shadow);
+      background: var(--surface);
+    }
     .input-row {
-      grid-template-columns: minmax(0, 1fr) 42px 42px 46px;
+      grid-template-columns: 42px minmax(0, 1fr) 42px 42px 46px;
       gap: 8px;
       align-items: end;
     }
@@ -6638,7 +7005,7 @@ INDEX_HTML = r'''<!doctype html>
         min-height: 58px;
       }
       .input-row {
-        grid-template-columns: minmax(0, 1fr) 42px 42px 46px;
+        grid-template-columns: 42px minmax(0, 1fr) 42px 42px 46px;
       }
       #send {
         width: 46px;
@@ -7066,14 +7433,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.5.3</p>
+        <p class="app-version">v2.5.4</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.5.3</span>
+        <span>v2.5.4</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7085,7 +7452,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.5.3</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.5.4</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7104,7 +7471,7 @@ INDEX_HTML = r'''<!doctype html>
 	        <button id="openSettings">模型管理</button>
 	        <button id="logout">退出</button>
         <footer class="site-icp side-icp">
-          <span>v2.5.3</span>
+          <span>v2.5.4</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -7136,10 +7503,13 @@ INDEX_HTML = r'''<!doctype html>
 	            <button class="prompt-chip" type="button" data-prompt-text="帮我润色下面这段文字，让它更自然、更清楚：">润色</button>
 	            <button class="prompt-chip" type="button" data-prompt-text="帮我深度改写下面这段内容，保留原意，但让表达更有条理：">改写</button>
 	            <button class="prompt-chip" type="button" data-prompt-text="帮我扩写下面这段内容，补充细节，让它更完整：">扩写</button>
-	            <button class="prompt-chip" type="button" data-prompt-text="帮我精简下面这段内容，保留重点，表达更利落：">精简</button>
+		            <button class="prompt-chip" type="button" data-prompt-text="帮我精简下面这段内容，保留重点，表达更利落：">精简</button>
 	            <button class="prompt-chip" id="openPrompts" type="button">更多</button>
 	          </div>
+	          <div class="attachment-preview-row" id="attachmentPreviewRow" hidden></div>
 		          <div class="input-row">
+		            <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+		            <button class="composer-action" id="attachImage" type="button" title="上传图片" aria-label="上传图片">＋</button>
 		            <textarea id="prompt" placeholder="和 AI槑槑聊点什么..."></textarea>
 		            <button class="composer-action" id="insertNewline" type="button" title="换行（Shift+Enter）" aria-label="换行">↵</button>
 		            <button class="composer-action" id="openInterfaceSettings" type="button" title="界面设置" aria-label="界面设置">⚙</button>
@@ -7206,6 +7576,12 @@ INDEX_HTML = r'''<!doctype html>
 	        <button id="selectManualCopy">全选</button>
 	        <button class="primary" id="retryManualCopy">再试一次复制</button>
 	      </div>
+	    </div>
+	  </section>
+	  <section class="image-preview-dialog" id="imagePreviewDialog">
+	    <div class="image-preview-panel">
+	      <button class="icon" id="closeImagePreview" type="button" title="关闭" style="justify-self:end;background:rgba(255,255,255,.86)">×</button>
+	      <img id="imagePreviewFull" alt="图片预览">
 	    </div>
 	  </section>
 	  <section class="confirm-dialog" id="confirmDialog">
@@ -7398,10 +7774,11 @@ INDEX_HTML = r'''<!doctype html>
         <label>System Prompt<textarea id="systemPrompt" rows="4"></textarea></label>
         <div class="grid2">
           <label>启用<select id="enabled"><option value="1">启用</option><option value="0">停用</option></select></label>
-          <div style="display:flex;align-items:end;gap:8px">
-            <button class="primary" id="saveModel">保存模型</button>
-            <button id="resetModelForm">清空</button>
-          </div>
+          <label>图片理解<select id="supportsVision"><option value="0">不支持</option><option value="1">支持图片理解</option></select></label>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button class="primary" id="saveModel">保存模型</button>
+          <button id="resetModelForm">清空</button>
         </div>
         <div class="status" id="modelStatus"></div>
       </section>
@@ -7430,6 +7807,8 @@ INDEX_HTML = r'''<!doctype html>
 	      conversations: [],
 	      currentConversation: null,
 	      messages: [],
+	      attachments: [],
+	      uploadingImages: false,
 	      sending: false,
 	      editingConversationId: null,
 	      streamMessage: null,
@@ -8146,6 +8525,7 @@ INDEX_HTML = r'''<!doctype html>
 	      applyCurrentUser(null);
 	      state.currentConversation = null;
       state.messages = [];
+      clearAttachments();
       showLogin();
     }
 
@@ -8218,12 +8598,32 @@ INDEX_HTML = r'''<!doctype html>
       for (const model of state.models) {
         const opt = document.createElement("option");
         opt.value = model.id;
-        opt.textContent = model.name + " · " + model.model;
+        opt.textContent = model.name + (model.supports_vision ? " · 可看图" : "") + " · " + model.model;
         select.appendChild(opt);
       }
       if (state.currentConversation) {
         select.value = state.currentConversation.model_id;
       }
+      updateVisionUI();
+    }
+
+    function selectedModel() {
+      const id = $("modelSelect")?.value || state.currentConversation?.model_id || "";
+      return state.models.find((model) => model.id === id) || null;
+    }
+
+    function selectedModelSupportsVision() {
+      return Boolean(selectedModel()?.supports_vision);
+    }
+
+    function updateVisionUI() {
+      const button = $("attachImage");
+      if (!button) return;
+      const model = selectedModel();
+      const supported = Boolean(model?.supports_vision);
+      button.disabled = !supported || state.uploadingImages || state.sending;
+      button.title = supported ? "上传图片" : "当前模型不支持图片理解，请切换支持图片的模型。";
+      button.setAttribute("aria-label", button.title);
     }
 
 	    async function loadPrompts() {
@@ -9304,7 +9704,7 @@ INDEX_HTML = r'''<!doctype html>
     function updateChatHeader() {
       const conv = state.currentConversation;
       $("chatTitle").textContent = conv ? conv.title : "新对话";
-      $("chatModel").textContent = conv ? (conv.model_name + " · " + conv.model) : "请选择模型";
+      $("chatModel").textContent = conv ? (conv.model_name + (conv.supports_vision ? " · 可看图" : "") + " · " + conv.model) : "请选择模型";
       updateChatUsage();
       renderModelSelect();
     }
@@ -9736,6 +10136,9 @@ INDEX_HTML = r'''<!doctype html>
 	      const reasoningPanel = document.createElement("div");
 	      reasoningPanel.className = "reasoning-panel";
 	      reasoningPanel.hidden = true;
+	      const imagePanel = document.createElement("div");
+	      imagePanel.className = "message-images";
+	      imagePanel.hidden = true;
 	      const copy = document.createElement("button");
 	      copy.className = "copy-btn";
 	      copy.type = "button";
@@ -9771,7 +10174,7 @@ INDEX_HTML = r'''<!doctype html>
 	      reason.addEventListener("click", () => toggleReasoning(message));
 	      actions.append(favorite, regenerate, continueWrite, copyAction);
 
-	      shell.append(reasoningPanel, text, copy);
+	      shell.append(reasoningPanel, imagePanel, text, copy);
 	      wrap.append(role, shell, sourcesPanel, time, actions);
 	      updateMessageElement(wrap, message);
 	      return wrap;
@@ -9792,6 +10195,7 @@ INDEX_HTML = r'''<!doctype html>
 	      const continueWrite = wrap.querySelector(".continue-action");
 	      const reason = wrap.querySelector(".reason-action");
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
+	      const imagePanel = wrap.querySelector(".message-images");
 	      role.replaceChildren();
 	      if (message.role === "user") {
 	        role.textContent = "你";
@@ -9811,6 +10215,7 @@ INDEX_HTML = r'''<!doctype html>
 	      const displayContent = visibleMessageContent(message);
 	      const reasoningContent = messageReasoningContent(message);
 	      renderReasoningPanel(reasoningPanel, message, reasoningContent);
+	      renderMessageImages(imagePanel, messageImages(message));
 
 	      if (message.role === "assistant" && message.thinking && !displayContent) {
 	        text.className = "message-content";
@@ -9820,6 +10225,7 @@ INDEX_HTML = r'''<!doctype html>
 	            <span class="thinking-dots"><span></span><span></span><span></span></span>
 	            <span><strong>槑槑</strong>正在整理思路...</span>
 	          </div>`;
+	        if (imagePanel) imagePanel.hidden = true;
 	        copy.hidden = true;
 	        if (actions) actions.hidden = true;
 	        return;
@@ -9957,6 +10363,201 @@ INDEX_HTML = r'''<!doctype html>
 	      }, 900);
 	    }
 
+	    function safeImageFilename(name) {
+	      return String(name || "image").replace(/[\\/]+/g, "_").replace(/[^\w.\-\u4e00-\u9fa5]+/g, "_").slice(0, 120);
+	    }
+
+	    function attachmentClientId() {
+	      if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+	      return "img_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+	    }
+
+	    function imageDisplayUrl(image) {
+	      return image?.preview_url || image?.view_url || image?.oss_url || image?.image_url || "";
+	    }
+
+	    function messageImages(message) {
+	      return Array.isArray(message?.images) ? message.images : [];
+	    }
+
+	    function renderMessageImages(container, images = []) {
+	      if (!container) return;
+	      container.replaceChildren();
+	      container.hidden = !images.length;
+	      for (const image of images) {
+	        const url = imageDisplayUrl(image);
+	        if (!url) continue;
+	        const button = document.createElement("button");
+	        button.className = "message-image-btn";
+	        button.type = "button";
+	        button.title = image.filename || "查看图片";
+	        const img = document.createElement("img");
+	        img.src = url;
+	        img.alt = image.filename || "聊天图片";
+	        img.loading = "lazy";
+	        button.appendChild(img);
+	        button.addEventListener("click", () => openImagePreview(url));
+	        container.appendChild(button);
+	      }
+	      container.hidden = !container.children.length;
+	    }
+
+	    function renderAttachmentPreviews() {
+	      const row = $("attachmentPreviewRow");
+	      if (!row) return;
+	      row.replaceChildren();
+	      row.hidden = !state.attachments.length;
+	      for (const item of state.attachments) {
+	        const card = document.createElement("div");
+	        card.className = "attachment-preview";
+	        card.title = item.filename || "图片";
+	        const img = document.createElement("img");
+	        img.src = item.preview_url || item.view_url || "";
+	        img.alt = item.filename || "待发送图片";
+	        card.appendChild(img);
+	        const remove = document.createElement("button");
+	        remove.className = "attachment-remove";
+	        remove.type = "button";
+	        remove.title = "移除图片";
+	        remove.textContent = "×";
+	        remove.addEventListener("click", () => removeAttachment(item.client_id));
+	        card.appendChild(remove);
+	        if (item.status !== "ready") {
+	          const status = document.createElement("div");
+	          status.className = "attachment-progress";
+	          status.textContent = item.status === "error" ? "失败" : "上传中";
+	          card.appendChild(status);
+	        }
+	        row.appendChild(card);
+	      }
+	    }
+
+	    function removeAttachment(clientId) {
+	      const item = state.attachments.find((entry) => entry.client_id === clientId);
+	      if (item?.preview_url) URL.revokeObjectURL(item.preview_url);
+	      state.attachments = state.attachments.filter((entry) => entry.client_id !== clientId);
+	      renderAttachmentPreviews();
+	      updateVisionUI();
+	    }
+
+	    function clearAttachments() {
+	      for (const item of state.attachments) {
+	        if (item.preview_url) URL.revokeObjectURL(item.preview_url);
+	      }
+	      state.attachments = [];
+	      renderAttachmentPreviews();
+	      updateVisionUI();
+	    }
+
+	    function openImagePreview(url) {
+	      if (!url) return;
+	      $("imagePreviewFull").src = url;
+	      $("imagePreviewDialog").classList.add("show");
+	      setDialogOpenState();
+	    }
+
+	    function closeImagePreview() {
+	      $("imagePreviewDialog").classList.remove("show");
+	      $("imagePreviewFull").src = "";
+	      setDialogOpenState();
+	    }
+
+	    async function uploadChatImageAttachment(item) {
+	      const policyRes = await api("/api/chat-images/upload-policy", { method: "POST" });
+	      if (!policyRes.ok) throw new Error(await readError(policyRes, "图片上传配置不可用。"));
+	      const { policy } = await policyRes.json();
+	      if (item.file.size > policy.max_size) throw new Error("单张图片不能超过 20MB");
+	      const key = policy.key_prefix + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + "-" + safeImageFilename(item.file.name);
+	      const form = new FormData();
+	      form.append("key", key);
+	      form.append("OSSAccessKeyId", policy.access_key_id);
+	      form.append("policy", policy.policy);
+	      form.append("Signature", policy.signature);
+	      form.append("success_action_status", "200");
+	      form.append("Content-Type", item.file.type || "application/octet-stream");
+	      form.append("file", item.file);
+	      const uploadRes = await fetch(policy.host, { method: "POST", body: form });
+	      if (!uploadRes.ok) throw new Error("图片上传 OSS 失败");
+	      const saveRes = await api("/api/chat-images", {
+	        method: "POST",
+	        body: JSON.stringify({
+	          filename: item.file.name,
+	          mime_type: item.file.type || "",
+	          file_size: item.file.size,
+	          oss_key: key
+	        })
+	      });
+	      if (!saveRes.ok) throw new Error(await readError(saveRes, "图片信息保存失败。"));
+	      const data = await saveRes.json();
+	      return data.image;
+	    }
+
+	    async function handleImageFiles(fileList) {
+	      const input = $("imageInput");
+	      if (input) input.value = "";
+	      const files = Array.from(fileList || []);
+	      if (!files.length) return;
+	      if (!selectedModelSupportsVision()) {
+	        setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
+	        return;
+	      }
+	      if (state.attachments.length + files.length > 5) {
+	        setStatus("chatStatus", "单次最多上传 5 张图片。", "err");
+	        return;
+	      }
+	      const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+	      const allowedExts = [".jpg", ".jpeg", ".png", ".webp"];
+	      const items = [];
+	      for (const file of files) {
+	        const lowerName = file.name.toLowerCase();
+	        const extOk = allowedExts.some((ext) => lowerName.endsWith(ext));
+	        if (!allowedTypes.has(file.type) && !extOk) {
+	          setStatus("chatStatus", "只支持 jpg、jpeg、png、webp 图片。", "err");
+	          return;
+	        }
+	        if (file.size > 20 * 1024 * 1024) {
+	          setStatus("chatStatus", "单张图片不能超过 20MB。", "err");
+	          return;
+	        }
+	        items.push({
+	          client_id: attachmentClientId(),
+	          file,
+	          filename: file.name,
+	          preview_url: URL.createObjectURL(file),
+	          status: "uploading"
+	        });
+	      }
+	      state.attachments.push(...items);
+	      state.uploadingImages = true;
+	      updateVisionUI();
+	      renderAttachmentPreviews();
+	      setStatus("chatStatus", "正在上传图片...", "");
+	      try {
+	        for (const item of items) {
+	          try {
+	            const image = await uploadChatImageAttachment(item);
+	            item.id = image.id;
+	            item.view_url = image.view_url;
+	            item.filename = image.filename || item.filename;
+	            item.status = "ready";
+	          } catch (err) {
+	            item.status = "error";
+	            item.error = friendlyError(err, "图片上传失败。");
+	          }
+	          renderAttachmentPreviews();
+	        }
+	        const failed = items.filter((item) => item.status === "error");
+	        if (failed.length) {
+	          setStatus("chatStatus", failed[0].error || "有图片上传失败，请移除后重试。", "err");
+	        } else {
+	          setStatus("chatStatus", "图片已添加，输入问题后发送。", "ok");
+	        }
+	      } finally {
+	        state.uploadingImages = false;
+	        updateVisionUI();
+	      }
+	    }
+
 	    function openManualCopy(text) {
 	      $("manualCopyText").value = text;
 	      $("copyDialog").classList.add("show");
@@ -10025,6 +10626,7 @@ INDEX_HTML = r'''<!doctype html>
 	      send.classList.toggle("is-stop", state.sending);
 	      send.title = state.sending ? "停止生成" : "发送";
 	      if (state.sending) $("webSearchToggle").disabled = true;
+	      updateVisionUI();
 	    }
 
 	    function stopGeneration() {
@@ -10097,31 +10699,55 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
 	    async function sendMessage(contentOverride = "", options = {}) {
-      const hasOverride = typeof contentOverride === "string" && contentOverride.trim();
-      const content = (hasOverride ? contentOverride : $("prompt").value).trim();
-      if (!content || state.sending) return;
-      let selectedModelId = $("modelSelect").value;
-      if (!selectedModelId) return setStatus("chatStatus", "先选择模型", "err");
-      if (state.newConversationPromise) {
-        setStatus("chatStatus", "正在准备新对话...", "");
-        try {
-          await state.newConversationPromise;
-          selectedModelId = $("modelSelect").value || selectedModelId;
-        } catch (err) {
-          setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err");
-          return;
-        }
-      }
+	      const hasOverride = typeof contentOverride === "string" && contentOverride.trim();
+	      const content = (hasOverride ? contentOverride : $("prompt").value).trim();
+	      const readyAttachments = hasOverride ? [] : state.attachments.filter((item) => item.status === "ready" && item.id);
+	      const failedAttachments = hasOverride ? [] : state.attachments.filter((item) => item.status === "error");
+	      const uploadingAttachments = hasOverride ? [] : state.attachments.filter((item) => item.status === "uploading");
+	      if (state.sending) return;
+	      if (!content && !readyAttachments.length) {
+	        if (state.uploadingImages || uploadingAttachments.length) setStatus("chatStatus", "图片还在上传，稍等一下再发送。", "err");
+	        else if (failedAttachments.length) setStatus("chatStatus", "有图片上传失败，请移除后重试。", "err");
+	        return;
+	      }
+	      if (state.uploadingImages || uploadingAttachments.length) {
+	        setStatus("chatStatus", "图片还在上传，稍等一下再发送。", "err");
+	        return;
+	      }
+	      if (failedAttachments.length) {
+	        setStatus("chatStatus", "有图片上传失败，请移除后重试。", "err");
+	        return;
+	      }
+	      if (readyAttachments.length && !selectedModelSupportsVision()) {
+	        setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
+	        return;
+	      }
+	      let selectedModelId = $("modelSelect").value;
+	      if (!selectedModelId) return setStatus("chatStatus", "先选择模型", "err");
+	      if (state.newConversationPromise) {
+	        setStatus("chatStatus", "正在准备新对话...", "");
+	        try {
+	          await state.newConversationPromise;
+	          selectedModelId = $("modelSelect").value || selectedModelId;
+	        } catch (err) {
+	          setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err");
+	          return;
+	        }
+	      }
 
-      if (!state.currentConversation || state.currentConversation.model_id !== selectedModelId) {
-        try {
-          await newConversation(selectedModelId);
-        } catch (err) {
-          setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err");
-          return;
-        }
-      }
+	      if (!state.currentConversation || state.currentConversation.model_id !== selectedModelId) {
+	        try {
+	          await newConversation(selectedModelId);
+	        } catch (err) {
+	          setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err");
+	          return;
+	        }
+	      }
 	      if (!state.currentConversation) return;
+	      if (readyAttachments.length && !state.currentConversation.supports_vision) {
+	        setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
+	        return;
+	      }
 
 	      setStatus("chatStatus", "");
 	      resetStreamState();
@@ -10135,7 +10761,16 @@ INDEX_HTML = r'''<!doctype html>
 	        autosizePrompt();
 	      }
 	      const sentAt = Math.floor(Date.now() / 1000);
-	      state.messages.push({ role: "user", content, created_at: sentAt });
+	      const sentImages = readyAttachments.map((item) => ({
+	        id: item.id,
+	        filename: item.filename,
+	        view_url: item.view_url,
+	        mime_type: item.mime_type || item.file?.type || "",
+	        file_size: item.file_size || item.file?.size || 0
+	      }));
+	      if (!hasOverride) clearAttachments();
+	      const userContent = content || "请分析这些图片。";
+	      state.messages.push({ role: "user", content: userContent, images: sentImages, created_at: sentAt });
 	      const assistant = { role: "assistant", content: "", reasoning_content: "", sources: [], thinking: true, created_at: sentAt };
 	      state.messages.push(assistant);
 	      state.followOutput = true;
@@ -10151,7 +10786,7 @@ INDEX_HTML = r'''<!doctype html>
 	      try {
 	        const res = await api(`/api/conversations/${state.currentConversation.id}/messages`, {
 	          method: "POST",
-	          body: JSON.stringify({ content, web_search: useWebSearch }),
+	          body: JSON.stringify({ content, web_search: useWebSearch, image_ids: readyAttachments.map((item) => item.id) }),
 	          signal: state.abortController.signal
 	        });
         if (!res.ok) throw new Error(await readError(res, "发送失败，稍后再试一下。"));
@@ -10365,7 +11000,7 @@ INDEX_HTML = r'''<!doctype html>
         const info = document.createElement("div");
         info.innerHTML = `<strong></strong><span></span>`;
         info.querySelector("strong").textContent = model.name + (model.enabled ? "" : "（停用）");
-        info.querySelector("span").textContent = model.model + " · " + model.base_url + (model.has_api_key ? " · Key 已保存" : " · 未配置 Key");
+        info.querySelector("span").textContent = model.model + (model.supports_vision ? " · 支持图片理解" : "") + " · " + model.base_url + (model.has_api_key ? " · Key 已保存" : " · 未配置 Key");
         const actions = document.createElement("div");
         actions.style.display = "flex";
         actions.style.gap = "6px";
@@ -10392,12 +11027,14 @@ INDEX_HTML = r'''<!doctype html>
       $("apiKey").placeholder = model.has_api_key ? "已保存，留空保持原值" : "请输入 API Key";
       $("systemPrompt").value = model.system_prompt || "";
       $("enabled").value = model.enabled ? "1" : "0";
+      $("supportsVision").value = model.supports_vision ? "1" : "0";
       setStatus("modelStatus", "正在编辑：" + model.name, "");
     }
 
     function resetModelForm() {
       for (const id of ["editingModelId","modelName","provider","baseUrl","modelCode","apiKey","systemPrompt"]) $(id).value = "";
       $("enabled").value = "1";
+      $("supportsVision").value = "0";
       $("apiKey").placeholder = "留空则保持原值";
       setStatus("modelStatus", "");
     }
@@ -10411,7 +11048,8 @@ INDEX_HTML = r'''<!doctype html>
         model: $("modelCode").value.trim(),
         api_key: $("apiKey").value.trim(),
         system_prompt: $("systemPrompt").value.trim(),
-        enabled: $("enabled").value === "1"
+        enabled: $("enabled").value === "1",
+        supports_vision: $("supportsVision").value === "1"
       };
       const res = await adminApi(id ? `/api/admin/models/${id}` : "/api/admin/models", {
         method: id ? "PUT" : "POST",
@@ -10608,13 +11246,23 @@ INDEX_HTML = r'''<!doctype html>
 	    $("sidebarResizer").addEventListener("pointerdown", startSidebarResize);
 	    $("sidebarResizer").addEventListener("mousedown", startSidebarResize);
 	    $("sidebarResizer").addEventListener("dblclick", () => applySidebarWidth(sidebarWidthDefaults.value, true));
-	    $("send").addEventListener("click", () => {
-      if (state.sending) stopGeneration();
-      else sendMessage();
-    });
-    $("insertNewline").addEventListener("click", insertNewlineAtCursor);
-    $("deleteConversation").addEventListener("click", deleteCurrentConversation);
-    $("messages").addEventListener("scroll", handleMessagesScroll, { passive: true });
+		    $("send").addEventListener("click", () => {
+	      if (state.sending) stopGeneration();
+	      else sendMessage();
+	    });
+	    $("attachImage").addEventListener("click", () => {
+	      if (!selectedModelSupportsVision()) {
+	        setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
+	        return;
+	      }
+	      $("imageInput").click();
+	    });
+	    $("imageInput").addEventListener("change", (event) => {
+	      handleImageFiles(event.target.files).catch((err) => setStatus("chatStatus", friendlyError(err, "图片上传失败。"), "err"));
+	    });
+	    $("insertNewline").addEventListener("click", insertNewlineAtCursor);
+	    $("deleteConversation").addEventListener("click", deleteCurrentConversation);
+	    $("messages").addEventListener("scroll", handleMessagesScroll, { passive: true });
     $("scrollLatest").addEventListener("click", () => scrollToLatest("smooth"));
 	    $("prompt").addEventListener("input", autosizePrompt);
 	    $("prompt").addEventListener("focus", handlePromptFocus);
@@ -10636,7 +11284,10 @@ INDEX_HTML = r'''<!doctype html>
 	    $("resetInterfaceSettings").addEventListener("click", resetInterfaceSettings);
 	    document.addEventListener("click", handleInterfaceOutsideClick);
 	    document.addEventListener("keydown", (event) => {
-	      if (event.key === "Escape") closeInterfaceSettings();
+	      if (event.key === "Escape") {
+	        closeInterfaceSettings();
+	        closeImagePreview();
+	      }
 	    });
 	    $("prompt").addEventListener("compositionstart", () => {
 	      state.isComposing = true;
@@ -10657,8 +11308,14 @@ INDEX_HTML = r'''<!doctype html>
         if (!state.sending) sendMessage();
       }
     });
-    $("themeToggle").addEventListener("click", toggleTheme);
-    $("accentToggle").addEventListener("click", openAccentDialog);
+	    $("themeToggle").addEventListener("click", toggleTheme);
+	    $("modelSelect").addEventListener("change", () => {
+	      updateVisionUI();
+	      if (state.attachments.length && !selectedModelSupportsVision()) {
+	        setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
+	      }
+	    });
+	    $("accentToggle").addEventListener("click", openAccentDialog);
     $("fontSizeToggle").addEventListener("click", toggleFontSize);
     $("closeAccentDialog").addEventListener("click", closeAccentDialog);
     $("accentDialog").addEventListener("click", (event) => {
@@ -10688,9 +11345,13 @@ INDEX_HTML = r'''<!doctype html>
 	    });
 	    $("saveSearch").addEventListener("click", () => saveSearchConfig(false));
 	    $("clearSearchKey").addEventListener("click", () => saveSearchConfig(true));
-	    $("closeCopyDialog").addEventListener("click", closeManualCopy);
-	    $("copyDialog").addEventListener("click", (event) => {
-	      if (event.target === $("copyDialog")) closeManualCopy();
+		    $("closeCopyDialog").addEventListener("click", closeManualCopy);
+		    $("copyDialog").addEventListener("click", (event) => {
+		      if (event.target === $("copyDialog")) closeManualCopy();
+		    });
+	    $("closeImagePreview").addEventListener("click", closeImagePreview);
+	    $("imagePreviewDialog").addEventListener("click", (event) => {
+	      if (event.target === $("imagePreviewDialog")) closeImagePreview();
 	    });
 	    $("selectManualCopy").addEventListener("click", () => {
 	      $("manualCopyText").focus();
