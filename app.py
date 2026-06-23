@@ -36,6 +36,9 @@ CAT_SESSION_COOKIE = "cat_session"
 CAT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
 CAT_OSS_DIR = "cat"
 CAT_MAX_IMAGE_BYTES = 12 * 1024 * 1024
+MEDIA_OSS_DIR = "tingwu"
+MEDIA_MAX_UPLOAD_BYTES = int(os.environ.get("MEDIA_MAX_UPLOAD_MB", "500") or "500") * 1024 * 1024
+MEDIA_ALLOWED_EXTENSIONS = {".mp3", ".mp4", ".m4a", ".wav", ".aac", ".flac", ".mov", ".avi", ".mkv", ".webm"}
 CAT_GUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{2,32}$")
 DEFAULT_AI_USER_ID = "default"
@@ -284,6 +287,30 @@ def init_db(secrets_data=None):
               created_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS media_analysis_tasks (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              filename TEXT NOT NULL,
+              mime_type TEXT NOT NULL DEFAULT '',
+              file_size INTEGER NOT NULL DEFAULT 0,
+              oss_key TEXT NOT NULL,
+              file_url TEXT NOT NULL DEFAULT '',
+              file_url_expires_at INTEGER NOT NULL DEFAULT 0,
+              task_id TEXT NOT NULL DEFAULT '',
+              task_key TEXT NOT NULL DEFAULT '',
+              source_language TEXT NOT NULL DEFAULT 'cn',
+              status TEXT NOT NULL DEFAULT 'uploaded',
+              raw_result_json TEXT NOT NULL DEFAULT '',
+              transcript_text TEXT NOT NULL DEFAULT '',
+              summary_text TEXT NOT NULL DEFAULT '',
+              outline_text TEXT NOT NULL DEFAULT '',
+              mindmap_text TEXT NOT NULL DEFAULT '',
+              copywriting_text TEXT NOT NULL DEFAULT '',
+              error_message TEXT NOT NULL DEFAULT '',
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS sessions (
               token_hash TEXT PRIMARY KEY,
               user_id TEXT NOT NULL DEFAULT 'default',
@@ -454,6 +481,8 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_conversation ON messages(user_id, conversation_id, id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_favorites_user_created ON favorite_messages(user_id, created_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_user_updated ON media_analysis_tasks(user_id, updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_task_id ON media_analysis_tasks(task_id)")
 
         cat_post_columns = table_columns(conn, "cat_posts")
         if "cat_id" not in cat_post_columns:
@@ -577,6 +606,27 @@ def favorite_row(row):
         "content": row["content"],
         "message_created_at": row["message_created_at"],
         "created_at": row["created_at"],
+    }
+
+
+def media_task_public(row):
+    return {
+        "id": row["id"],
+        "filename": row["filename"],
+        "mime_type": row["mime_type"],
+        "file_size": row["file_size"],
+        "task_id": row["task_id"],
+        "task_key": row["task_key"],
+        "source_language": row["source_language"],
+        "status": row["status"],
+        "transcript_text": row["transcript_text"],
+        "summary_text": row["summary_text"],
+        "outline_text": row["outline_text"],
+        "mindmap_text": row["mindmap_text"],
+        "copywriting_text": row["copywriting_text"],
+        "error_message": row["error_message"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
     }
 
 
@@ -737,6 +787,293 @@ def cat_upload_policy(config, user_id):
         "public_base": config["public_base"],
         "max_size": config["max_size"],
         "expires_at": now() + 600,
+    }
+
+
+def media_oss_config(secrets_data):
+    cat_config = cat_oss_config(secrets_data)
+    config = secrets_data.get("media_oss") or {}
+
+    def read(name, key, fallback=""):
+        return str(os.environ.get(name) or config.get(key) or fallback).strip()
+
+    bucket = read("MEDIA_OSS_BUCKET", "bucket", cat_config["bucket"])
+    region = read("MEDIA_OSS_REGION", "region", cat_config["region"])
+    endpoint = read("MEDIA_OSS_ENDPOINT", "endpoint", cat_config["endpoint"])
+    access_key_id = read("MEDIA_OSS_ACCESS_KEY_ID", "access_key_id", cat_config["access_key_id"])
+    access_key_secret = read("MEDIA_OSS_ACCESS_KEY_SECRET", "access_key_secret", cat_config["access_key_secret"])
+    public_base = read("MEDIA_OSS_PUBLIC_BASE", "public_base", cat_config["public_base"])
+    directory = read("MEDIA_OSS_DIR", "dir", MEDIA_OSS_DIR).strip("/") or MEDIA_OSS_DIR
+    try:
+        max_size = int(read("MEDIA_MAX_UPLOAD_BYTES", "max_size", str(MEDIA_MAX_UPLOAD_BYTES)))
+    except ValueError:
+        max_size = MEDIA_MAX_UPLOAD_BYTES
+
+    if endpoint and not endpoint.startswith(("http://", "https://")):
+        endpoint = "https://" + endpoint
+    if not endpoint and bucket and region:
+        endpoint = f"https://{bucket}.oss-{region}.aliyuncs.com"
+    if public_base and not public_base.startswith(("http://", "https://")):
+        public_base = "https://" + public_base
+    if not public_base:
+        public_base = endpoint
+
+    return {
+        "bucket": bucket,
+        "region": region,
+        "endpoint": endpoint.rstrip("/") if endpoint else "",
+        "public_base": public_base.rstrip("/") if public_base else "",
+        "access_key_id": access_key_id,
+        "access_key_secret": access_key_secret,
+        "directory": directory,
+        "max_size": max(1024 * 1024, max_size),
+        "configured": bool(bucket and access_key_id and access_key_secret and endpoint),
+    }
+
+
+def media_oss_prefix(config, user_id):
+    date_path = time.strftime("%Y/%m/%d", time.localtime())
+    return f"{config['directory'].strip('/')}/{user_id}/{date_path}/"
+
+
+def media_upload_policy(config, user_id):
+    prefix = media_oss_prefix(config, user_id)
+    expiration = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now() + 600))
+    policy = {
+        "expiration": expiration,
+        "conditions": [
+            ["starts-with", "$key", prefix],
+            ["content-length-range", 1, config["max_size"]],
+        ],
+    }
+    encoded_policy = base64.b64encode(
+        json.dumps(policy, separators=(",", ":")).encode()
+    ).decode()
+    signature = base64.b64encode(
+        hmac.new(
+            config["access_key_secret"].encode(),
+            encoded_policy.encode(),
+            hashlib.sha1,
+        ).digest()
+    ).decode()
+    return {
+        "host": config["endpoint"],
+        "access_key_id": config["access_key_id"],
+        "policy": encoded_policy,
+        "signature": signature,
+        "key_prefix": prefix,
+        "public_base": config["public_base"],
+        "max_size": config["max_size"],
+        "allowed_extensions": sorted(MEDIA_ALLOWED_EXTENSIONS),
+        "expires_at": now() + 600,
+    }
+
+
+def oss_signed_get_url(config, oss_key, expires_seconds=21600):
+    expires = now() + max(600, int(expires_seconds))
+    canonical_resource = f"/{config['bucket']}/{oss_key}"
+    string_to_sign = "GET\n\n\n{}\n{}".format(expires, canonical_resource)
+    signature = base64.b64encode(
+        hmac.new(config["access_key_secret"].encode(), string_to_sign.encode(), hashlib.sha1).digest()
+    ).decode()
+    query = urlencode(
+        {
+            "OSSAccessKeyId": config["access_key_id"],
+            "Expires": str(expires),
+            "Signature": signature,
+        }
+    )
+    base = config["public_base"].rstrip("/")
+    return f"{base}/{quote(oss_key, safe='/-_.~')}?{query}", expires
+
+
+def tingwu_config(secrets_data):
+    config = secrets_data.get("tingwu") or {}
+
+    def read(name, key, default=""):
+        return str(os.environ.get(name) or config.get(key) or default).strip()
+
+    region = read("TINGWU_REGION", "region", "cn-beijing")
+    endpoint = read("TINGWU_ENDPOINT", "endpoint", f"https://tingwu.{region}.aliyuncs.com")
+    if endpoint and not endpoint.startswith(("http://", "https://")):
+        endpoint = "https://" + endpoint
+    return {
+        "app_key": read("TINGWU_APP_KEY", "app_key"),
+        "access_key_id": read("TINGWU_ACCESS_KEY_ID", "access_key_id"),
+        "access_key_secret": read("TINGWU_ACCESS_KEY_SECRET", "access_key_secret"),
+        "region": region,
+        "endpoint": endpoint.rstrip("/") if endpoint else "",
+        "version": read("TINGWU_VERSION", "version", "2023-09-30"),
+    }
+
+
+def tingwu_configured(config):
+    return bool(config["app_key"] and config["access_key_id"] and config["access_key_secret"] and config["endpoint"])
+
+
+def acs3_percent_encode(value):
+    return quote(str(value), safe="-_.~")
+
+
+def acs3_request(config, method, path, query, action, body=None):
+    parsed = urlparse(config["endpoint"])
+    host = parsed.netloc
+    body_bytes = json.dumps(body or {}, ensure_ascii=False, separators=(",", ":")).encode()
+    if method == "GET":
+        body_bytes = b""
+    body_hash = hashlib.sha256(body_bytes).hexdigest()
+    acs_date = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    nonce = b64_token(18)
+    headers = {
+        "host": host,
+        "x-acs-action": action,
+        "x-acs-version": config["version"],
+        "x-acs-date": acs_date,
+        "x-acs-signature-nonce": nonce,
+        "x-acs-content-sha256": body_hash,
+    }
+    if method != "GET":
+        headers["content-type"] = "application/json; charset=utf-8"
+    signed_keys = sorted(key for key in headers if key == "host" or key.startswith("x-acs-"))
+    canonical_headers = "".join(f"{key}:{' '.join(headers[key].strip().split())}\n" for key in signed_keys)
+    signed_headers = ";".join(signed_keys)
+    canonical_query = "&".join(
+        f"{acs3_percent_encode(key)}={acs3_percent_encode(value)}"
+        for key, value in sorted((query or {}).items())
+    )
+    canonical_request = "\n".join(
+        [method, path, canonical_query, canonical_headers, signed_headers, body_hash]
+    )
+    string_to_sign = "ACS3-HMAC-SHA256\n" + hashlib.sha256(canonical_request.encode()).hexdigest()
+    signature = hmac.new(
+        config["access_key_secret"].encode(),
+        string_to_sign.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    headers["Authorization"] = (
+        "ACS3-HMAC-SHA256 "
+        f"Credential={config['access_key_id']},"
+        f"SignedHeaders={signed_headers},"
+        f"Signature={signature}"
+    )
+    url = config["endpoint"] + path
+    if canonical_query:
+        url += "?" + canonical_query
+    request = urllib.request.Request(
+        url,
+        data=None if method == "GET" else body_bytes,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        raw = response.read().decode()
+    return json.loads(raw or "{}")
+
+
+def tingwu_create_task(config, file_url, task_key, source_language="cn"):
+    body = {
+        "AppKey": config["app_key"],
+        "Input": {
+            "FileUrl": file_url,
+            "SourceLanguage": source_language or "cn",
+            "TaskKey": task_key,
+        },
+        "Parameters": {
+            "Transcription": {
+                "DiarizationEnabled": True,
+                "Diarization": {"SpeakerCount": 0},
+            },
+            "AutoChaptersEnabled": True,
+            "MeetingAssistanceEnabled": True,
+            "MeetingAssistance": {"Types": ["Actions", "KeyInformation"]},
+            "SummarizationEnabled": True,
+            "Summarization": {
+                "Types": ["Paragraph", "Conversational", "QuestionsAnswering", "MindMap"],
+            },
+            "TextPolishEnabled": True,
+            "LlmOutputLanguage": "cn",
+        },
+    }
+    return acs3_request(config, "PUT", "/openapi/tingwu/v2/tasks", {"type": "offline"}, "CreateTask", body)
+
+
+def tingwu_get_task_info(config, task_id):
+    path = "/openapi/tingwu/v2/tasks/" + acs3_percent_encode(task_id)
+    return acs3_request(config, "GET", path, {}, "GetTaskInfo")
+
+
+def extract_tingwu_task_id(response):
+    data = response.get("Data") if isinstance(response, dict) else {}
+    if not isinstance(data, dict):
+        data = response if isinstance(response, dict) else {}
+    for key in ("TaskId", "TaskID", "TaskId".lower(), "task_id"):
+        if data.get(key):
+            return str(data[key])
+    return ""
+
+
+def tingwu_data(response):
+    data = response.get("Data") if isinstance(response, dict) else {}
+    return data if isinstance(data, dict) else {}
+
+
+def result_url(value):
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("Url", "URL", "url", "ResultUrl", "ResultURL"):
+            if value.get(key):
+                return str(value[key])
+    return ""
+
+
+def fetch_result_json(url):
+    request = urllib.request.Request(url, headers={"User-Agent": "ai-platform/2.0"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        raw = response.read().decode()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"text": raw}
+
+
+def collect_text_values(value, keys=("Text", "text", "Sentence", "sentence", "Content", "content", "Summary", "summary")):
+    parts = []
+    if isinstance(value, dict):
+        for key in keys:
+            item = value.get(key)
+            if isinstance(item, str) and item.strip():
+                parts.append(item.strip())
+        for item in value.values():
+            parts.extend(collect_text_values(item, keys))
+    elif isinstance(value, list):
+        for item in value:
+            parts.extend(collect_text_values(item, keys))
+    return parts
+
+
+def parse_tingwu_results(result_payloads):
+    transcript = []
+    summary = []
+    outline = []
+    mindmap = []
+    for name, payload in result_payloads.items():
+        values = collect_text_values(payload)
+        if name == "Transcription":
+            transcript.extend(values)
+        elif name == "AutoChapters":
+            outline.extend(values)
+        elif name == "Summarization":
+            summary.extend(values)
+            mind_values = collect_text_values(payload, ("MindMap", "mindMap", "mindmap", "Markdown", "markdown"))
+            mindmap.extend(mind_values)
+        elif name in ("MeetingAssistance", "TextPolish"):
+            outline.extend(values)
+    return {
+        "transcript_text": "\n".join(dict.fromkeys(part for part in transcript if part)).strip(),
+        "summary_text": "\n".join(dict.fromkeys(part for part in summary if part)).strip(),
+        "outline_text": "\n".join(dict.fromkeys(part for part in outline if part)).strip(),
+        "mindmap_text": "\n".join(dict.fromkeys(part for part in mindmap if part)).strip(),
     }
 
 
@@ -1067,6 +1404,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_prompts)
         if path == "/api/favorites":
             return self.require_user(self.handle_favorites)
+        if path == "/api/media/tasks":
+            return self.require_user(self.handle_media_tasks)
+        if path.startswith("/api/media/tasks/"):
+            return self.require_user(self.handle_media_task_item)
         if path == "/api/admin/models":
             return self.require_admin(self.handle_admin_models)
         if path == "/api/admin/search":
@@ -1118,6 +1459,12 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_prompts)
         if path == "/api/favorites":
             return self.require_user(self.handle_favorites)
+        if path == "/api/media/upload-policy":
+            return self.require_user(self.handle_media_upload_policy)
+        if path == "/api/media/tasks":
+            return self.require_user(self.handle_media_tasks)
+        if path.startswith("/api/media/tasks/") and path.endswith("/refresh"):
+            return self.require_user(self.handle_media_task_refresh)
         if path == "/api/conversations":
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
@@ -1158,6 +1505,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_favorite_by_message)
         if path.startswith("/api/favorites/"):
             return self.require_user(self.handle_favorite_item)
+        if path.startswith("/api/media/tasks/"):
+            return self.require_user(self.handle_media_task_item)
         if path.startswith("/api/conversations/"):
             return self.require_user(self.handle_conversation_item)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
@@ -2649,6 +2998,244 @@ class AppHandler(BaseHTTPRequestHandler):
                 (message_id, user_id),
             )
         return self.json({"ok": True})
+
+    def media_task_id_from_path(self):
+        parts = urlparse(self.path).path.strip("/").split("/")
+        if len(parts) >= 4:
+            return parts[3]
+        return ""
+
+    def handle_media_upload_policy(self):
+        user = self.current_user()
+        config = media_oss_config(self.server.secrets)
+        if not config["configured"]:
+            return self.error(HTTPStatus.BAD_REQUEST, "音视频 OSS 还没有配置好")
+        return self.json({"policy": media_upload_policy(config, user["id"])})
+
+    def handle_media_tasks(self):
+        user = self.current_user()
+        user_id = user["id"]
+        if self.command == "GET":
+            with db() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM media_analysis_tasks
+                    WHERE user_id=?
+                    ORDER BY updated_at DESC
+                    LIMIT 100
+                    """,
+                    (user_id,),
+                ).fetchall()
+            return self.json({"tasks": [media_task_public(row) for row in rows]})
+
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+
+        filename = str(data.get("filename") or "").strip()[:180]
+        mime_type = str(data.get("mime_type") or "").strip()[:120]
+        oss_key = str(data.get("oss_key") or "").strip()
+        source_language = str(data.get("source_language") or "cn").strip()[:20] or "cn"
+        try:
+            file_size = max(0, int(data.get("file_size") or 0))
+        except (TypeError, ValueError):
+            file_size = 0
+
+        config = media_oss_config(self.server.secrets)
+        tingwu = tingwu_config(self.server.secrets)
+        if not config["configured"]:
+            return self.error(HTTPStatus.BAD_REQUEST, "音视频 OSS 还没有配置好")
+        if not tingwu_configured(tingwu):
+            return self.error(HTTPStatus.BAD_REQUEST, "通义听悟还没有配置好")
+        expected_prefix = f"{config['directory'].strip('/')}/{user_id}/"
+        suffix = Path(filename or oss_key).suffix.lower()
+        if not filename or not oss_key:
+            return self.error(HTTPStatus.BAD_REQUEST, "请先上传音视频文件")
+        if suffix not in MEDIA_ALLOWED_EXTENSIONS:
+            return self.error(HTTPStatus.BAD_REQUEST, "暂不支持这个文件格式")
+        if file_size <= 0 or file_size > config["max_size"]:
+            return self.error(HTTPStatus.BAD_REQUEST, "文件大小超出限制")
+        if oss_key.startswith("/") or ".." in oss_key.split("/") or not oss_key.startswith(expected_prefix):
+            return self.error(HTTPStatus.BAD_REQUEST, "文件路径不合法")
+
+        task_row_id = b64_token(12)
+        task_key = "aimeimei-" + task_row_id
+        signed_url, expires_at = oss_signed_get_url(config, oss_key, 6 * 60 * 60)
+        ts = now()
+        status = "submitted"
+        task_id = ""
+        error_message = ""
+        raw_result = ""
+        try:
+            response = tingwu_create_task(tingwu, signed_url, task_key, source_language)
+            raw_result = json.dumps(response, ensure_ascii=False)
+            task_id = extract_tingwu_task_id(response)
+            if not task_id:
+                status = "failed"
+                error_message = "听悟没有返回任务 ID"
+        except urllib.error.HTTPError as exc:
+            status = "failed"
+            detail = exc.read(4096).decode(errors="replace")
+            error_message = f"听悟创建任务失败：HTTP {exc.code}"
+            raw_result = json.dumps({"error": error_message, "detail": detail[:1200]}, ensure_ascii=False)
+        except Exception as exc:
+            status = "failed"
+            error_message = "听悟创建任务失败"
+            raw_result = json.dumps({"error": error_message, "detail": str(exc)[:1200]}, ensure_ascii=False)
+
+        with db() as conn:
+            conn.execute(
+                """
+                INSERT INTO media_analysis_tasks
+                (id, user_id, filename, mime_type, file_size, oss_key, file_url, file_url_expires_at,
+                 task_id, task_key, source_language, status, raw_result_json, error_message, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_row_id,
+                    user_id,
+                    filename,
+                    mime_type,
+                    file_size,
+                    oss_key,
+                    signed_url,
+                    expires_at,
+                    task_id,
+                    task_key,
+                    source_language,
+                    status,
+                    raw_result,
+                    error_message,
+                    ts,
+                    ts,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM media_analysis_tasks WHERE id=? AND user_id=?",
+                (task_row_id, user_id),
+            ).fetchone()
+        return self.json({"task": media_task_public(row)}, HTTPStatus.CREATED)
+
+    def refresh_media_task(self, conn, row):
+        if not row or not row["task_id"]:
+            return row
+        if row["status"] in ("completed", "failed"):
+            return row
+        config = tingwu_config(self.server.secrets)
+        if not tingwu_configured(config):
+            conn.execute(
+                "UPDATE media_analysis_tasks SET status='failed', error_message=?, updated_at=? WHERE id=?",
+                ("通义听悟还没有配置好", now(), row["id"]),
+            )
+            return conn.execute("SELECT * FROM media_analysis_tasks WHERE id=?", (row["id"],)).fetchone()
+
+        try:
+            response = tingwu_get_task_info(config, row["task_id"])
+            data = tingwu_data(response)
+            task_status = str(data.get("TaskStatus") or data.get("Status") or "").upper()
+            result = data.get("Result") or {}
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except json.JSONDecodeError:
+                    result = {}
+            status = "processing"
+            error_message = ""
+            result_payloads = {}
+            parsed = {}
+            if task_status == "COMPLETED":
+                status = "completed"
+                if isinstance(result, dict):
+                    for name in ("Transcription", "AutoChapters", "MeetingAssistance", "Summarization", "TextPolish"):
+                        url = result_url(result.get(name))
+                        if not url:
+                            continue
+                        try:
+                            result_payloads[name] = fetch_result_json(url)
+                        except Exception as exc:
+                            result_payloads[name] = {"error": "结果文件读取失败", "detail": str(exc)[:500]}
+                parsed = parse_tingwu_results(result_payloads)
+            elif task_status in ("FAILED", "INVALID"):
+                status = "failed"
+                error_message = str(data.get("ErrorMessage") or data.get("Message") or "听悟任务失败")[:1000]
+            elif task_status:
+                status = "processing"
+
+            raw = {
+                "task_info": response,
+                "result_payloads": result_payloads,
+            }
+            conn.execute(
+                """
+                UPDATE media_analysis_tasks
+                SET status=?, raw_result_json=?, transcript_text=?, summary_text=?,
+                    outline_text=?, mindmap_text=?, error_message=?, updated_at=?
+                WHERE id=?
+                """,
+                (
+                    status,
+                    json.dumps(raw, ensure_ascii=False),
+                    parsed.get("transcript_text", row["transcript_text"]),
+                    parsed.get("summary_text", row["summary_text"]),
+                    parsed.get("outline_text", row["outline_text"]),
+                    parsed.get("mindmap_text", row["mindmap_text"]),
+                    error_message,
+                    now(),
+                    row["id"],
+                ),
+            )
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(4096).decode(errors="replace")
+            conn.execute(
+                "UPDATE media_analysis_tasks SET error_message=?, updated_at=? WHERE id=?",
+                (f"听悟查询失败：HTTP {exc.code} {detail[:600]}", now(), row["id"]),
+            )
+        except Exception as exc:
+            conn.execute(
+                "UPDATE media_analysis_tasks SET error_message=?, updated_at=? WHERE id=?",
+                ("听悟查询失败：" + str(exc)[:600], now(), row["id"]),
+            )
+        return conn.execute("SELECT * FROM media_analysis_tasks WHERE id=?", (row["id"],)).fetchone()
+
+    def handle_media_task_item(self):
+        user_id = self.current_user()["id"]
+        task_id = self.media_task_id_from_path()
+        with db() as conn:
+            row = conn.execute(
+                "SELECT * FROM media_analysis_tasks WHERE id=? AND user_id=?",
+                (task_id, user_id),
+            ).fetchone()
+            if not row:
+                return self.error(HTTPStatus.NOT_FOUND, "media task not found")
+            if self.command == "DELETE":
+                conn.execute(
+                    "DELETE FROM media_analysis_tasks WHERE id=? AND user_id=?",
+                    (task_id, user_id),
+                )
+                return self.json({"ok": True})
+            row = self.refresh_media_task(conn, row)
+        return self.json({"task": media_task_public(row)})
+
+    def handle_media_task_refresh(self):
+        user_id = self.current_user()["id"]
+        task_id = self.media_task_id_from_path()
+        with db() as conn:
+            row = conn.execute(
+                "SELECT * FROM media_analysis_tasks WHERE id=? AND user_id=?",
+                (task_id, user_id),
+            ).fetchone()
+            if not row:
+                return self.error(HTTPStatus.NOT_FOUND, "media task not found")
+            if row["status"] in ("completed", "failed") and row["task_id"]:
+                conn.execute(
+                    "UPDATE media_analysis_tasks SET status='processing', error_message='', updated_at=? WHERE id=?",
+                    (now(), task_id),
+                )
+                row = conn.execute("SELECT * FROM media_analysis_tasks WHERE id=?", (task_id,)).fetchone()
+            row = self.refresh_media_task(conn, row)
+        return self.json({"task": media_task_public(row)})
 
     def handle_conversations(self):
         user = self.current_user()
@@ -4214,9 +4801,10 @@ INDEX_HTML = r'''<!doctype html>
     }
     .copy-dialog,
     .confirm-dialog,
-    .theme-dialog,
-    .prompt-dialog,
-    .favorite-dialog {
+	    .theme-dialog,
+	    .prompt-dialog,
+	    .favorite-dialog,
+	    .media-dialog {
       position: fixed;
       inset: 0;
       z-index: 30;
@@ -4227,9 +4815,10 @@ INDEX_HTML = r'''<!doctype html>
     }
     .copy-dialog.show,
     .confirm-dialog.show,
-    .theme-dialog.show,
-    .prompt-dialog.show,
-    .favorite-dialog.show { display: grid; }
+	    .theme-dialog.show,
+	    .prompt-dialog.show,
+	    .favorite-dialog.show,
+	    .media-dialog.show { display: grid; }
     .confirm-dialog { z-index: 40; }
     .copy-panel,
     .confirm-panel,
@@ -4376,13 +4965,83 @@ INDEX_HTML = r'''<!doctype html>
       font-size: 15px;
       letter-spacing: 0;
     }
-    .favorite-layout {
-      display: grid;
-      grid-template-columns: minmax(280px, .9fr) minmax(0, 1.1fr);
-      gap: 14px;
-      align-items: start;
-    }
-    .favorite-detail {
+	    .favorite-layout {
+	      display: grid;
+	      grid-template-columns: minmax(280px, .9fr) minmax(0, 1.1fr);
+	      gap: 14px;
+	      align-items: start;
+	    }
+	    .media-layout {
+	      display: grid;
+	      grid-template-columns: minmax(260px, .85fr) minmax(0, 1.15fr);
+	      gap: 14px;
+	      align-items: start;
+	    }
+	    .media-upload {
+	      margin-bottom: 14px;
+	      border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+	      border-radius: 14px;
+	      background: color-mix(in srgb, var(--accent-soft) 38%, var(--surface));
+	      padding: 14px;
+	      display: grid;
+	      gap: 10px;
+	    }
+	    .media-upload-row {
+	      display: grid;
+	      grid-template-columns: minmax(0, 1fr) auto;
+	      gap: 10px;
+	      align-items: end;
+	    }
+	    .media-tabs {
+	      display: flex;
+	      gap: 8px;
+	      flex-wrap: wrap;
+	      margin-bottom: 12px;
+	    }
+	    .media-tab {
+	      min-height: 34px;
+	      padding: 0 12px;
+	      border-radius: 999px;
+	    }
+	    .media-tab.active {
+	      border-color: color-mix(in srgb, var(--accent) 54%, var(--line));
+	      background: var(--accent-soft);
+	      color: var(--accent-strong);
+	    }
+	    .media-detail {
+	      min-height: 360px;
+	      border: 1px solid var(--line);
+	      border-radius: 12px;
+	      background: var(--surface);
+	      padding: 14px;
+	      box-shadow: var(--soft-shadow);
+	      display: grid;
+	      gap: 12px;
+	      align-content: start;
+	    }
+	    .media-result {
+	      max-height: min(56vh, 620px);
+	      overflow: auto;
+	      border: 1px solid var(--line);
+	      border-radius: 12px;
+	      background: var(--surface-soft);
+	      padding: 14px;
+	    }
+	    .media-result pre {
+	      margin: 0;
+	      white-space: pre-wrap;
+	      word-break: break-word;
+	      font: inherit;
+	      line-height: 1.7;
+	    }
+	    .media-empty {
+	      min-height: 260px;
+	      display: grid;
+	      place-items: center;
+	      color: var(--muted);
+	      text-align: center;
+	    }
+	    .favorite-detail {
       min-height: 260px;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -4507,8 +5166,9 @@ INDEX_HTML = r'''<!doctype html>
       .accent-panel,
       .library-panel { max-height: 92vh; }
       .accent-grid { grid-template-columns: 1fr; }
-      .library-grid,
-      .favorite-layout { grid-template-columns: 1fr; }
+	      .library-grid,
+	      .favorite-layout,
+	      .media-layout { grid-template-columns: 1fr; }
       .side-foot { grid-template-columns: 1fr 1fr; }
     }
 
@@ -5800,16 +6460,17 @@ INDEX_HTML = r'''<!doctype html>
       .side-foot {
         padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
       }
-      .prompt-dialog,
-      .favorite-dialog,
-      .theme-dialog,
+	      .prompt-dialog,
+	      .favorite-dialog,
+	      .media-dialog,
+	      .theme-dialog,
       .copy-dialog,
       .confirm-dialog {
         place-items: end center;
         padding: 0;
       }
-      .library-panel,
-      .accent-panel,
+	      .library-panel,
+	      .accent-panel,
       .copy-panel,
       .confirm-panel {
         width: 100%;
@@ -5835,14 +6496,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.4.1</p>
+        <p class="app-version">v2.5.0</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.4.1</span>
+        <span>v2.5.0</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -5854,7 +6515,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.4.1</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.5.0</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -5867,12 +6528,13 @@ INDEX_HTML = r'''<!doctype html>
       <div class="side-section-title">最近对话</div>
       <div class="conversation-list" id="conversationList"></div>
       <div class="side-foot">
-        <button id="openPromptLibrary">提示词库</button>
-        <button id="openFavorites">我的收藏 <span class="nav-count" id="favoriteCount">0</span></button>
-        <button id="openSettings">模型管理</button>
-        <button id="logout">退出</button>
+	        <button id="openPromptLibrary">提示词库</button>
+	        <button id="openFavorites">我的收藏 <span class="nav-count" id="favoriteCount">0</span></button>
+	        <button id="openMediaAnalysis">音视频分析</button>
+	        <button id="openSettings">模型管理</button>
+	        <button id="logout">退出</button>
         <footer class="site-icp side-icp">
-          <span>v2.4.1</span>
+          <span>v2.5.0</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -6044,6 +6706,31 @@ INDEX_HTML = r'''<!doctype html>
 	      </div>
 	    </div>
 	  </section>
+	  <section class="media-dialog" id="mediaDialog">
+	    <div class="library-panel" role="dialog" aria-modal="true" aria-labelledby="mediaDialogTitle">
+	      <div class="dialog-head">
+	        <strong id="mediaDialogTitle">音视频分析</strong>
+	        <button class="icon" id="closeMediaDialog" title="关闭">×</button>
+	      </div>
+	      <div class="dialog-body">
+	        <section class="media-upload">
+	          <div>
+	            <strong>上传音频/视频</strong>
+	            <p class="library-card-meta">支持 mp3、mp4、m4a、wav 等格式，文件会上传到 OSS 后交给通义听悟处理。</p>
+	          </div>
+	          <div class="media-upload-row">
+	            <label>选择文件<input id="mediaFile" type="file" accept=".mp3,.mp4,.m4a,.wav,.aac,.flac,.mov,.avi,.mkv,.webm,audio/*,video/*"></label>
+	            <button class="primary" id="uploadMediaTask" type="button">开始分析</button>
+	          </div>
+	          <div class="status" id="mediaStatus"></div>
+	        </section>
+	        <div class="media-layout">
+	          <div class="item-list" id="mediaTaskList"></div>
+	          <section class="media-detail" id="mediaTaskDetail"></section>
+	        </div>
+	      </div>
+	    </div>
+	  </section>
 	  <section class="drawer" id="settingsDrawer">
     <div class="drawer-head">
       <strong>模型管理</strong>
@@ -6165,6 +6852,11 @@ INDEX_HTML = r'''<!doctype html>
 	      prompts: [],
 	      favorites: [],
 	      selectedFavoriteId: null,
+	      mediaTasks: [],
+	      selectedMediaTaskId: null,
+	      mediaTab: "summary",
+	      mediaUploading: false,
+	      mediaPollTimer: null,
 	      conversations: [],
 	      currentConversation: null,
 	      messages: [],
@@ -6675,8 +7367,12 @@ INDEX_HTML = r'''<!doctype html>
       if (/model not found|先选择模型|暂无可用模型/i.test(text)) return "还没有可用模型，请先在模型管理里配置。";
       if (/title and content are required/i.test(text)) return "标题和内容都要填写。";
       if (/content too long/i.test(text)) return "内容太长了，稍微精简一下再保存。";
-      if (/only assistant messages can be favorited/i.test(text)) return "只能收藏 AI 的回答。";
-      if (/favorite not found|prompt not found|message not found/i.test(text)) return "这条内容已经不存在了，刷新后再看看。";
+	      if (/only assistant messages can be favorited/i.test(text)) return "只能收藏 AI 的回答。";
+	      if (/音视频 OSS|OSS 还没有配置/i.test(text)) return "音视频上传存储还没配置好。";
+	      if (/通义听悟还没有配置/i.test(text)) return "通义听悟还没配置好。";
+	      if (/文件大小超出限制/i.test(text)) return "文件太大了，换个小一点的文件试试。";
+	      if (/暂不支持这个文件格式/i.test(text)) return "这个格式暂时不支持，换 mp3、mp4、m4a 或 wav 试试。";
+	      if (/favorite not found|prompt not found|message not found/i.test(text)) return "这条内容已经不存在了，刷新后再看看。";
       if (/upstream content rejected|data_inspection_failed|inappropriate content/i.test(text)) return "上游模型的安全策略拒绝了这次内容，换个问法试试。";
       if (/upstream status 400/i.test(text)) return "上游模型拒绝了这次请求，换个问法或关闭联网搜索试试。";
       if (/Failed to fetch|NetworkError|Load failed|网络/i.test(text)) return "网络连接不太顺，稍后再试一下。";
@@ -6745,7 +7441,7 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     function setDialogOpenState() {
-      const open = ["promptDialog", "favoriteDialog", "accentDialog", "copyDialog", "confirmDialog"].some((id) => {
+	      const open = ["promptDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "confirmDialog"].some((id) => {
         const el = $(id);
         return el && el.classList.contains("show");
       });
@@ -7221,8 +7917,8 @@ INDEX_HTML = r'''<!doctype html>
 	      await loadFavorites();
 	    }
 
-	    async function toggleFavoriteMessage(message, button) {
-	      if (!message || message.role !== "assistant" || !message.id) return;
+		    async function toggleFavoriteMessage(message, button) {
+		      if (!message || message.role !== "assistant" || !message.id) return;
 	      button.disabled = true;
 	      try {
 	        if (message.favorite_id) {
@@ -7247,11 +7943,300 @@ INDEX_HTML = r'''<!doctype html>
 	      } catch (err) {
 	        setStatus("chatStatus", friendlyError(err, "收藏操作失败，稍后再试一下。"), "err");
 	      } finally {
-	        button.disabled = false;
+		        button.disabled = false;
+		      }
+		    }
+
+	    function formatFileSize(value) {
+	      const size = Number(value || 0);
+	      if (size >= 1024 * 1024 * 1024) return (size / 1024 / 1024 / 1024).toFixed(1) + " GB";
+	      if (size >= 1024 * 1024) return (size / 1024 / 1024).toFixed(1) + " MB";
+	      if (size >= 1024) return (size / 1024).toFixed(1) + " KB";
+	      return size + " B";
+	    }
+
+	    function mediaStatusText(status) {
+	      const map = {
+	        uploaded: "已上传",
+	        submitted: "已提交",
+	        processing: "转写中",
+	        completed: "已完成",
+	        failed: "失败"
+	      };
+	      return map[status] || status || "处理中";
+	    }
+
+	    function openMediaAnalysis() {
+	      $("mediaDialog").classList.add("show");
+	      setDialogOpenState();
+	      loadMediaTasks();
+	    }
+
+	    function closeMediaAnalysis() {
+	      $("mediaDialog").classList.remove("show");
+	      setDialogOpenState();
+	      if (state.mediaPollTimer) clearTimeout(state.mediaPollTimer);
+	      state.mediaPollTimer = null;
+	    }
+
+	    async function loadMediaTasks() {
+	      try {
+	        const res = await api("/api/media/tasks");
+	        const data = await res.json();
+	        state.mediaTasks = data.tasks || [];
+	        if (!state.selectedMediaTaskId && state.mediaTasks[0]) state.selectedMediaTaskId = state.mediaTasks[0].id;
+	        renderMediaTasks();
+	        renderMediaDetail();
+	        scheduleMediaPolling();
+	      } catch (err) {
+	        state.mediaTasks = [];
+	        renderMediaTasks();
+	        setStatus("mediaStatus", friendlyError(err, "音视频任务加载失败。"), "err");
 	      }
 	    }
 
-	    function toggleReasoning(message) {
+	    function scheduleMediaPolling() {
+	      if (state.mediaPollTimer) clearTimeout(state.mediaPollTimer);
+	      state.mediaPollTimer = null;
+	      if (!$("mediaDialog").classList.contains("show")) return;
+	      const active = state.mediaTasks.some((task) => ["uploaded", "submitted", "processing"].includes(task.status));
+	      if (!active) return;
+	      state.mediaPollTimer = setTimeout(() => {
+	        refreshSelectedMediaTask(true).catch(() => loadMediaTasks());
+	      }, 30000);
+	    }
+
+	    function renderMediaTasks() {
+	      const list = $("mediaTaskList");
+	      list.innerHTML = "";
+	      if (!state.mediaTasks.length) {
+	        list.innerHTML = '<div class="library-card"><strong>还没有任务</strong><p>上传一段音频或视频，槑槑会帮你转写和整理。</p></div>';
+	        return;
+	      }
+	      for (const task of state.mediaTasks) {
+	        const card = document.createElement("article");
+	        card.className = "library-card" + (task.id === state.selectedMediaTaskId ? " active" : "");
+	        const title = document.createElement("strong");
+	        title.textContent = task.filename || "音视频文件";
+	        const meta = document.createElement("div");
+	        meta.className = "library-card-meta";
+	        meta.textContent = mediaStatusText(task.status) + " · " + formatFileSize(task.file_size) + " · " + formatTime(task.updated_at);
+	        const summary = document.createElement("p");
+	        summary.textContent = task.error_message || task.summary_text || task.outline_text || task.transcript_text || "等待通义听悟处理结果";
+	        const actions = document.createElement("div");
+	        actions.className = "library-actions";
+	        const view = document.createElement("button");
+	        view.type = "button";
+	        view.className = task.id === state.selectedMediaTaskId ? "primary" : "";
+	        view.textContent = "查看";
+	        view.addEventListener("click", () => selectMediaTask(task.id));
+	        const refresh = document.createElement("button");
+	        refresh.type = "button";
+	        refresh.textContent = "刷新";
+	        refresh.addEventListener("click", () => refreshMediaTask(task.id));
+	        actions.append(view, refresh);
+	        card.append(title, meta, summary, actions);
+	        list.appendChild(card);
+	      }
+	    }
+
+	    function selectMediaTask(id) {
+	      state.selectedMediaTaskId = id;
+	      state.mediaTab = "summary";
+	      renderMediaTasks();
+	      renderMediaDetail();
+	      refreshSelectedMediaTask(false).catch(() => {});
+	    }
+
+	    function currentMediaTask() {
+	      return state.mediaTasks.find((item) => item.id === state.selectedMediaTaskId) || state.mediaTasks[0] || null;
+	    }
+
+	    function mediaTabContent(task) {
+	      const fields = {
+	        summary: task.summary_text || "",
+	        outline: task.outline_text || "",
+	        transcript: task.transcript_text || "",
+	        mindmap: task.mindmap_text || "",
+	        copywriting: task.copywriting_text || ""
+	      };
+	      return fields[state.mediaTab] || "";
+	    }
+
+	    function renderMediaDetail() {
+	      const detail = $("mediaTaskDetail");
+	      const task = currentMediaTask();
+	      if (!task) {
+	        detail.innerHTML = '<div class="media-empty">选择或上传一个音视频任务</div>';
+	        return;
+	      }
+	      state.selectedMediaTaskId = task.id;
+	      const tabs = [
+	        ["summary", "智能摘要"],
+	        ["outline", "章节要点"],
+	        ["transcript", "转写全文"],
+	        ["mindmap", "思维导图"],
+	        ["copywriting", "可复制文案"]
+	      ];
+	      detail.innerHTML = "";
+	      const head = document.createElement("div");
+	      head.className = "library-card-meta";
+	      head.textContent = mediaStatusText(task.status) + " · " + (task.filename || "音视频文件") + " · " + formatTime(task.created_at);
+	      const tabBar = document.createElement("div");
+	      tabBar.className = "media-tabs";
+	      for (const [key, label] of tabs) {
+	        const button = document.createElement("button");
+	        button.type = "button";
+	        button.className = "media-tab" + (state.mediaTab === key ? " active" : "");
+	        button.textContent = label;
+	        button.addEventListener("click", () => {
+	          state.mediaTab = key;
+	          renderMediaDetail();
+	        });
+	        tabBar.appendChild(button);
+	      }
+	      const content = document.createElement("div");
+	      content.className = "media-result markdown";
+	      const text = task.error_message || mediaTabContent(task) || (task.status === "completed" ? "暂时没有这个结果。" : "任务处理中，稍后刷新看看。");
+	      content.innerHTML = renderMarkdown(text);
+	      const actions = document.createElement("div");
+	      actions.className = "library-actions";
+	      const copy = document.createElement("button");
+	      copy.type = "button";
+	      copy.textContent = "复制当前内容";
+	      copy.addEventListener("click", () => copyText(text, copy));
+	      const refresh = document.createElement("button");
+	      refresh.type = "button";
+	      refresh.textContent = "刷新状态";
+	      refresh.addEventListener("click", () => refreshMediaTask(task.id));
+	      const del = document.createElement("button");
+	      del.type = "button";
+	      del.className = "danger";
+	      del.textContent = "删除任务";
+	      del.addEventListener("click", () => deleteMediaTask(task.id));
+	      actions.append(copy, refresh, del);
+	      detail.append(head, tabBar, content, actions);
+	      queueMarkdownOverflowRefresh(content);
+	    }
+
+	    function upsertMediaTask(task) {
+	      if (!task) return;
+	      const index = state.mediaTasks.findIndex((item) => item.id === task.id);
+	      if (index >= 0) state.mediaTasks.splice(index, 1, task);
+	      else state.mediaTasks.unshift(task);
+	      state.selectedMediaTaskId = task.id;
+	    }
+
+	    async function refreshMediaTask(id) {
+	      const res = await api(`/api/media/tasks/${id}/refresh`, { method: "POST" });
+	      if (!res.ok) {
+	        setStatus("mediaStatus", await readError(res, "刷新任务失败。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      upsertMediaTask(data.task);
+	      renderMediaTasks();
+	      renderMediaDetail();
+	      scheduleMediaPolling();
+	    }
+
+	    async function refreshSelectedMediaTask(silent = false) {
+	      const task = currentMediaTask();
+	      if (!task) return;
+	      const res = await api(`/api/media/tasks/${task.id}`);
+	      if (!res.ok) {
+	        if (!silent) setStatus("mediaStatus", await readError(res, "刷新任务失败。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      upsertMediaTask(data.task);
+	      renderMediaTasks();
+	      renderMediaDetail();
+	      scheduleMediaPolling();
+	    }
+
+	    async function deleteMediaTask(id) {
+	      const ok = await confirmAction({
+	        title: "删除音视频任务",
+	        message: "确定删除这个分析任务吗？不会删除 OSS 里的原始文件。",
+	        confirmText: "删除",
+	        danger: true
+	      });
+	      if (!ok) return;
+	      const res = await api(`/api/media/tasks/${id}`, { method: "DELETE" });
+	      if (!res.ok) {
+	        setStatus("mediaStatus", await readError(res, "删除任务失败。"), "err");
+	        return;
+	      }
+	      state.mediaTasks = state.mediaTasks.filter((item) => item.id !== id);
+	      if (state.selectedMediaTaskId === id) state.selectedMediaTaskId = state.mediaTasks[0]?.id || null;
+	      renderMediaTasks();
+	      renderMediaDetail();
+	    }
+
+	    function safeMediaFilename(name) {
+	      return String(name || "media").replace(/[\\/]+/g, "_").replace(/[^\w.\-\u4e00-\u9fa5]+/g, "_").slice(0, 120);
+	    }
+
+	    async function uploadMediaTask() {
+	      if (state.mediaUploading) return;
+	      const file = $("mediaFile").files?.[0];
+	      if (!file) {
+	        setStatus("mediaStatus", "先选择一个音频或视频文件。", "err");
+	        return;
+	      }
+	      state.mediaUploading = true;
+	      $("uploadMediaTask").disabled = true;
+	      setStatus("mediaStatus", "正在获取上传凭证...", "");
+	      try {
+	        const policyRes = await api("/api/media/upload-policy", { method: "POST" });
+	        if (!policyRes.ok) throw new Error(await readError(policyRes, "上传配置不可用。"));
+	        const { policy } = await policyRes.json();
+	        if (file.size > policy.max_size) throw new Error("文件大小超出限制");
+	        const key = policy.key_prefix + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + "-" + safeMediaFilename(file.name);
+	        const form = new FormData();
+	        form.append("key", key);
+	        form.append("OSSAccessKeyId", policy.access_key_id);
+	        form.append("policy", policy.policy);
+	        form.append("Signature", policy.signature);
+	        form.append("success_action_status", "200");
+	        form.append("Content-Type", file.type || "application/octet-stream");
+	        form.append("file", file);
+	        setStatus("mediaStatus", "正在上传到 OSS...", "");
+	        const uploadRes = await fetch(policy.host, { method: "POST", body: form });
+	        if (!uploadRes.ok) throw new Error("上传 OSS 失败");
+	        setStatus("mediaStatus", "上传完成，正在创建听悟任务...", "");
+	        const createRes = await api("/api/media/tasks", {
+	          method: "POST",
+	          body: JSON.stringify({
+	            filename: file.name,
+	            mime_type: file.type || "",
+	            file_size: file.size,
+	            oss_key: key,
+	            source_language: "cn"
+	          })
+	        });
+	        if (!createRes.ok) throw new Error(await readError(createRes, "创建听悟任务失败。"));
+	        const data = await createRes.json();
+	        upsertMediaTask(data.task);
+	        $("mediaFile").value = "";
+	        renderMediaTasks();
+	        renderMediaDetail();
+	        scheduleMediaPolling();
+	        setStatus(
+	          "mediaStatus",
+	          data.task?.status === "failed" ? "任务创建失败，请查看详情。" : "已提交听悟，稍后刷新查看结果。",
+	          data.task?.status === "failed" ? "err" : "ok"
+	        );
+	      } catch (err) {
+	        setStatus("mediaStatus", friendlyError(err, "上传或创建任务失败。"), "err");
+	      } finally {
+	        state.mediaUploading = false;
+	        $("uploadMediaTask").disabled = false;
+	      }
+	    }
+
+		    function toggleReasoning(message) {
 	      if (!message) return;
 	      message.reasoning_open = !message.reasoning_open;
 	      updateStreamingMessage(message);
@@ -8819,12 +9804,18 @@ INDEX_HTML = r'''<!doctype html>
     });
     $("savePromptTemplate").addEventListener("click", savePromptTemplate);
     $("resetPromptTemplate").addEventListener("click", resetPromptForm);
-    $("openFavorites").addEventListener("click", openFavorites);
-    $("closeFavoriteDialog").addEventListener("click", closeFavorites);
-    $("favoriteDialog").addEventListener("click", (event) => {
-      if (event.target === $("favoriteDialog")) closeFavorites();
-    });
-	    $("refreshConversations").addEventListener("click", loadConversations);
+	    $("openFavorites").addEventListener("click", openFavorites);
+	    $("closeFavoriteDialog").addEventListener("click", closeFavorites);
+	    $("favoriteDialog").addEventListener("click", (event) => {
+	      if (event.target === $("favoriteDialog")) closeFavorites();
+	    });
+	    $("openMediaAnalysis").addEventListener("click", openMediaAnalysis);
+	    $("closeMediaDialog").addEventListener("click", closeMediaAnalysis);
+	    $("mediaDialog").addEventListener("click", (event) => {
+	      if (event.target === $("mediaDialog")) closeMediaAnalysis();
+	    });
+	    $("uploadMediaTask").addEventListener("click", uploadMediaTask);
+		    $("refreshConversations").addEventListener("click", loadConversations);
 	    $("sidebarResizer").addEventListener("pointerdown", startSidebarResize);
 	    $("sidebarResizer").addEventListener("mousedown", startSidebarResize);
 	    $("sidebarResizer").addEventListener("dblclick", () => applySidebarWidth(sidebarWidthDefaults.value, true));
