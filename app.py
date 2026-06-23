@@ -3060,6 +3060,23 @@ INDEX_HTML = r'''<!doctype html>
       font-weight: 680;
       color: var(--muted);
     }
+    .site-icp {
+      color: var(--muted-2);
+      font-size: 12px;
+      line-height: 1.5;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 6px 10px;
+      text-align: center;
+    }
+    .site-icp a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .site-icp a:hover {
+      color: var(--accent-strong);
+    }
     .app {
       height: 100vh;
       min-height: 100vh;
@@ -4360,6 +4377,10 @@ INDEX_HTML = r'''<!doctype html>
       color: var(--muted);
       font-weight: 620;
     }
+    .side-icp {
+      grid-column: 1 / -1;
+      padding-top: 4px;
+    }
     .sidebar-resizer {
       display: none;
       position: absolute;
@@ -5444,11 +5465,15 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.3.6</p>
+        <p class="app-version">v2.3.7</p>
       </div>
       <label>请输入家庭密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入家庭密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
+      <footer class="site-icp">
+        <span>v2.3.7</span>
+        <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
+      </footer>
     </form>
   </div>
 
@@ -5458,7 +5483,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.3.6</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.3.7</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>
@@ -5475,6 +5500,10 @@ INDEX_HTML = r'''<!doctype html>
         <button id="openFavorites">我的收藏 <span class="nav-count" id="favoriteCount">0</span></button>
         <button id="openSettings">模型管理</button>
         <button id="logout">退出</button>
+        <footer class="site-icp side-icp">
+          <span>v2.3.7</span>
+          <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
+        </footer>
       </div>
       <button class="sidebar-resizer" id="sidebarResizer" type="button" aria-label="调整侧边栏宽度" title="拖动调整侧边栏宽度"></button>
     </aside>
