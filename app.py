@@ -949,6 +949,13 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_messages)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
 
+    def do_HEAD(self):
+        self._head_only = True
+        try:
+            return self.do_GET()
+        finally:
+            self._head_only = False
+
     def do_POST(self):
         path = urlparse(self.path).path
         if path == "/cat/api/login":
@@ -1037,8 +1044,11 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store, max-age=0, must-revalidate")
+        self.send_header("Pragma", "no-cache")
         self.end_headers()
-        self.wfile.write(data)
+        if not getattr(self, "_head_only", False):
+            self.wfile.write(data)
 
     def home_page(self):
         try:
@@ -1073,15 +1083,18 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "public, max-age=86400")
         self.end_headers()
-        self.wfile.write(data)
+        if not getattr(self, "_head_only", False):
+            self.wfile.write(data)
 
     def json(self, data, status=HTTPStatus.OK):
         raw = json.dumps(data, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(raw)
+        if not getattr(self, "_head_only", False):
+            self.wfile.write(raw)
 
     def error(self, status, message, detail=None):
         payload = {"error": message}
