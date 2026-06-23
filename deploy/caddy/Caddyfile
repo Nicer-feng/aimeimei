@@ -37,3 +37,10 @@ feng.asia, www.feng.asia {
 		file_server
 	}
 }
+
+# 兼容旧的直连入口：http://118.31.114.165:8080/
+# 后端已经改为只监听 127.0.0.1:8000，由 Caddy 接管公网 8080。
+:8080 {
+	encode gzip
+	reverse_proxy 127.0.0.1:8000
+}
