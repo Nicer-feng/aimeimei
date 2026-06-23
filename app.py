@@ -3835,14 +3835,19 @@ INDEX_HTML = r'''<!doctype html>
     }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
-    html, body { height: 100%; }
+    html, body {
+      height: 100%;
+      min-height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
     body {
       margin: 0;
       background: var(--bg);
       color: var(--text);
       font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
       -webkit-font-smoothing: antialiased;
-      overflow-x: hidden;
+      overflow: hidden;
     }
     button, input, textarea, select { font: inherit; }
     button, select {
@@ -3908,10 +3913,13 @@ INDEX_HTML = r'''<!doctype html>
       outline: none;
     }
     .login {
+      height: 100%;
       min-height: 100%;
       display: grid;
       place-items: center;
       padding: 20px;
+      overflow: auto;
+      overscroll-behavior: contain;
       background:
         radial-gradient(circle at 50% 8%, color-mix(in srgb, var(--accent-soft) 70%, transparent), transparent 34%),
         linear-gradient(180deg, var(--bg-elevated), var(--bg));
@@ -3964,8 +3972,8 @@ INDEX_HTML = r'''<!doctype html>
       color: var(--accent-strong);
     }
     .app {
-      height: 100vh;
-      min-height: 100vh;
+      height: var(--app-height, 100vh);
+      min-height: 0;
       display: grid;
       grid-template-columns: var(--sidebar-width, 304px) minmax(0, 1fr);
       overflow: hidden;
@@ -3976,7 +3984,7 @@ INDEX_HTML = r'''<!doctype html>
       background: var(--sidebar);
       display: grid;
       grid-template-rows: auto auto auto 1fr auto;
-      height: 100vh;
+      height: var(--app-height, 100vh);
       min-height: 0;
       min-width: 0;
       overflow: hidden;
@@ -4178,10 +4186,12 @@ INDEX_HTML = r'''<!doctype html>
     }
     .main {
       min-width: 0;
+      min-height: 0;
       position: relative;
       display: grid;
       grid-template-rows: auto 1fr auto;
-      height: 100vh;
+      height: var(--app-height, 100vh);
+      overflow: hidden;
       background: var(--bg);
     }
     .topbar {
@@ -4230,12 +4240,16 @@ INDEX_HTML = r'''<!doctype html>
     #openSide { grid-column: 1; justify-self: start; }
     .mobile-only { display: none !important; }
     .messages {
-      overflow: auto;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
       padding: 32px clamp(14px, 4vw, 48px) 26px;
       display: flex;
       flex-direction: column;
       gap: 20px;
       scroll-behavior: smooth;
+      overscroll-behavior-y: contain;
+      -webkit-overflow-scrolling: touch;
       background: linear-gradient(180deg, var(--bg-elevated), var(--bg) 220px);
     }
     .scroll-latest {
@@ -5939,7 +5953,12 @@ INDEX_HTML = r'''<!doctype html>
         padding: 22px 14px 232px;
       }
       .composer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        z-index: 18;
         padding: 0 12px;
+        transform: translateZ(0);
       }
       .interface-popover {
         right: 12px;
@@ -6496,14 +6515,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.5.0</p>
+        <p class="app-version">v2.5.1</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.5.0</span>
+        <span>v2.5.1</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -6515,7 +6534,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.5.0</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.5.1</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -6534,7 +6553,7 @@ INDEX_HTML = r'''<!doctype html>
 	        <button id="openSettings">模型管理</button>
 	        <button id="logout">退出</button>
         <footer class="site-icp side-icp">
-          <span>v2.5.0</span>
+          <span>v2.5.1</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
