@@ -306,6 +306,7 @@ def init_db(secrets_data=None):
               outline_text TEXT NOT NULL DEFAULT '',
               mindmap_text TEXT NOT NULL DEFAULT '',
               copywriting_text TEXT NOT NULL DEFAULT '',
+              conversation_id TEXT NOT NULL DEFAULT '',
               error_message TEXT NOT NULL DEFAULT '',
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL
@@ -441,6 +442,9 @@ def init_db(secrets_data=None):
             conn.execute(
                 f"ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT '{DEFAULT_AI_USER_ID}'"
             )
+        media_columns = table_columns(conn, "media_analysis_tasks")
+        if "conversation_id" not in media_columns:
+            conn.execute("ALTER TABLE media_analysis_tasks ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''")
 
         conn.execute("UPDATE conversations SET user_id=? WHERE user_id='' OR user_id IS NULL", (default_user_id,))
         conn.execute(
@@ -483,6 +487,7 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_user_updated ON media_analysis_tasks(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_task_id ON media_analysis_tasks(task_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_conversation ON media_analysis_tasks(conversation_id)")
 
         cat_post_columns = table_columns(conn, "cat_posts")
         if "cat_id" not in cat_post_columns:
@@ -624,10 +629,51 @@ def media_task_public(row):
         "outline_text": row["outline_text"],
         "mindmap_text": row["mindmap_text"],
         "copywriting_text": row["copywriting_text"],
+        "conversation_id": row["conversation_id"],
         "error_message": row["error_message"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def clip_context_text(text, limit):
+    value = str(text or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[:limit].rstrip() + f"\n\n（以上内容较长，已截取前 {limit} 字用于本次 AI 加工上下文。）"
+
+
+def media_analysis_has_context(row):
+    return any(
+        str(row[key] or "").strip()
+        for key in ("summary_text", "outline_text", "transcript_text", "mindmap_text", "copywriting_text")
+    )
+
+
+def media_analysis_context(row):
+    filename = str(row["filename"] or "音视频文件").strip()
+    sections = [
+        "你正在协助用户基于一段音视频分析结果进行后续内容加工。",
+        "请优先依据下面的分析上下文回答用户问题，不要要求用户重复上传音视频。",
+        "如果用户要求二创，请直接基于上下文生成可用内容；如果信息不足，再简短说明需要补充什么。",
+        f"文件名：{filename}",
+    ]
+    section_specs = [
+        ("智能摘要", row["summary_text"], 12000),
+        ("章节要点", row["outline_text"], 20000),
+        ("转写全文", row["transcript_text"], 60000),
+        ("思维导图", row["mindmap_text"], 12000),
+        ("可复制文案", row["copywriting_text"], 12000),
+    ]
+    for title, value, limit in section_specs:
+        clipped = clip_context_text(value, limit)
+        if clipped:
+            sections.append(f"\n## {title}\n{clipped}")
+    return "\n".join(sections).strip()
+
+
+def media_context_marker(task_id):
+    return f"<!-- ai-meimei-media-task:{task_id} -->"
 
 
 def cat_user_public(row):
@@ -1465,6 +1511,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_media_tasks)
         if path.startswith("/api/media/tasks/") and path.endswith("/refresh"):
             return self.require_user(self.handle_media_task_refresh)
+        if path.startswith("/api/media/tasks/") and path.endswith("/conversation"):
+            return self.require_user(self.handle_media_task_conversation)
         if path == "/api/conversations":
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
@@ -3237,6 +3285,120 @@ class AppHandler(BaseHTTPRequestHandler):
             row = self.refresh_media_task(conn, row)
         return self.json({"task": media_task_public(row)})
 
+    def media_task_conversation_row(self, conn, conversation_id, user_id):
+        if not conversation_id:
+            return None
+        return conn.execute(
+            """
+            SELECT c.*, m.name AS model_name, m.model AS model
+            FROM conversations c
+            JOIN models m ON m.id = c.model_id
+            WHERE c.id=? AND c.user_id=? AND c.archived=0
+            """,
+            (conversation_id, user_id),
+        ).fetchone()
+
+    def upsert_media_context_message(self, conn, row, conversation_id, user_id):
+        marker = media_context_marker(row["id"])
+        content = marker + "\n" + media_analysis_context(row)
+        ts = now()
+        existing = conn.execute(
+            """
+            SELECT id FROM messages
+            WHERE conversation_id=? AND user_id=? AND role='system' AND content LIKE ?
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (conversation_id, user_id, marker + "%"),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE messages SET content=?, created_at=? WHERE id=? AND user_id=?",
+                (content, ts, existing["id"], user_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO messages(user_id, conversation_id, role, content, created_at) VALUES (?, ?, 'system', ?, ?)",
+                (user_id, conversation_id, content, ts),
+            )
+
+    def create_media_conversation(self, conn, row, user_id, model_id):
+        if row["status"] != "completed" or not media_analysis_has_context(row):
+            return None, "分析完成后才能发送到 AI 对话"
+
+        conversation = self.media_task_conversation_row(conn, row["conversation_id"], user_id)
+        if conversation:
+            self.upsert_media_context_message(conn, row, conversation["id"], user_id)
+            return conversation, ""
+
+        model = None
+        if model_id:
+            model = conn.execute(
+                "SELECT * FROM models WHERE id=? AND enabled=1",
+                (model_id,),
+            ).fetchone()
+        if not model:
+            model = conn.execute(
+                "SELECT * FROM models WHERE enabled=1 ORDER BY updated_at DESC, created_at DESC LIMIT 1"
+            ).fetchone()
+        if not model:
+            return None, "还没有可用模型，请先配置模型"
+
+        conversation_id = b64_token(12)
+        stem = Path(str(row["filename"] or "音视频分析")).stem or "音视频分析"
+        title = ("音视频分析：" + stem)[:80]
+        ts = now()
+        conn.execute(
+            """
+            INSERT INTO conversations(id, user_id, title, model_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (conversation_id, user_id, title, model["id"], ts, ts),
+        )
+        self.upsert_media_context_message(conn, row, conversation_id, user_id)
+        intro = (
+            f"我已经把《{row['filename'] or '这段音视频'}》的转写、摘要和章节要点放进这个分析会话了。\n\n"
+            "你可以直接让我生成短视频文案、口播稿、公众号文章、小红书笔记、朋友圈文案或思维导图，也可以继续追问细节。"
+        )
+        conn.execute(
+            "INSERT INTO messages(user_id, conversation_id, role, content, created_at) VALUES (?, ?, 'assistant', ?, ?)",
+            (user_id, conversation_id, intro, ts),
+        )
+        conn.execute(
+            "UPDATE media_analysis_tasks SET conversation_id=?, updated_at=? WHERE id=? AND user_id=?",
+            (conversation_id, ts, row["id"], user_id),
+        )
+        conversation = self.media_task_conversation_row(conn, conversation_id, user_id)
+        return conversation, ""
+
+    def handle_media_task_conversation(self):
+        user_id = self.current_user()["id"]
+        task_id = self.media_task_id_from_path()
+        try:
+            data = self.read_body()
+        except Exception:
+            data = {}
+        model_id = str(data.get("model_id") or "").strip()
+        with db() as conn:
+            row = conn.execute(
+                "SELECT * FROM media_analysis_tasks WHERE id=? AND user_id=?",
+                (task_id, user_id),
+            ).fetchone()
+            if not row:
+                return self.error(HTTPStatus.NOT_FOUND, "media task not found")
+            row = self.refresh_media_task(conn, row)
+            conversation, error_message = self.create_media_conversation(conn, row, user_id, model_id)
+            if not conversation:
+                return self.error(HTTPStatus.BAD_REQUEST, error_message or "创建分析会话失败")
+            updated = conn.execute(
+                "SELECT * FROM media_analysis_tasks WHERE id=? AND user_id=?",
+                (task_id, user_id),
+            ).fetchone()
+        return self.json({
+            "conversation": conversation_row(conversation),
+            "task": media_task_public(updated),
+        })
+
     def handle_conversations(self):
         user = self.current_user()
         user_id = user["id"]
@@ -3339,6 +3501,7 @@ class AppHandler(BaseHTTPRequestHandler):
                        created_at
                 FROM messages
                 WHERE conversation_id=? AND user_id=?
+                  AND role!='system'
                 ORDER BY id ASC
                 """,
                 (conversation_id, user_id),
@@ -3349,6 +3512,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 FROM message_sources
                 WHERE message_id IN (
                   SELECT id FROM messages WHERE conversation_id=? AND user_id=?
+                  AND role!='system'
                 )
                 ORDER BY message_id ASC, position ASC
                 """,
@@ -3360,6 +3524,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 FROM favorite_messages
                 WHERE message_id IN (
                   SELECT id FROM messages WHERE conversation_id=? AND user_id=?
+                  AND role!='system'
                 )
                 """,
                 (conversation_id, user_id),
@@ -5012,6 +5177,37 @@ INDEX_HTML = r'''<!doctype html>
 	      flex-wrap: wrap;
 	      margin-bottom: 12px;
 	    }
+	    .media-ai-panel {
+	      border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+	      border-radius: 16px;
+	      background:
+	        radial-gradient(circle at 12% 8%, color-mix(in srgb, var(--accent-soft) 70%, transparent), transparent 36%),
+	        color-mix(in srgb, var(--accent-soft) 24%, var(--surface));
+	      padding: 12px;
+	      display: grid;
+	      gap: 10px;
+	    }
+	    .media-ai-panel strong {
+	      font-size: 15px;
+	    }
+	    .media-ai-actions {
+	      display: flex;
+	      flex-wrap: wrap;
+	      gap: 8px;
+	    }
+	    .media-ai-actions button {
+	      min-height: 36px;
+	      border-radius: 999px;
+	      padding: 0 12px;
+	    }
+	    .media-ai-actions .primary {
+	      box-shadow: 0 10px 24px var(--accent-shadow);
+	    }
+	    .media-ai-hint {
+	      color: var(--muted);
+	      font-size: 12px;
+	      line-height: 1.6;
+	    }
 	    .media-tab {
 	      min-height: 34px;
 	      padding: 0 12px;
@@ -6515,14 +6711,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.5.1</p>
+        <p class="app-version">v2.5.2</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.5.1</span>
+        <span>v2.5.2</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -6534,7 +6730,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.5.1</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.5.2</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -6553,7 +6749,7 @@ INDEX_HTML = r'''<!doctype html>
 	        <button id="openSettings">模型管理</button>
 	        <button id="logout">退出</button>
         <footer class="site-icp side-icp">
-          <span>v2.5.1</span>
+          <span>v2.5.2</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -8039,7 +8235,7 @@ INDEX_HTML = r'''<!doctype html>
 	        title.textContent = task.filename || "音视频文件";
 	        const meta = document.createElement("div");
 	        meta.className = "library-card-meta";
-	        meta.textContent = mediaStatusText(task.status) + " · " + formatFileSize(task.file_size) + " · " + formatTime(task.updated_at);
+	        meta.textContent = mediaStatusText(task.status) + " · " + formatFileSize(task.file_size) + " · " + formatTime(task.updated_at) + (task.conversation_id ? " · 已建会话" : "");
 	        const summary = document.createElement("p");
 	        summary.textContent = task.error_message || task.summary_text || task.outline_text || task.transcript_text || "等待通义听悟处理结果";
 	        const actions = document.createElement("div");
@@ -8082,6 +8278,118 @@ INDEX_HTML = r'''<!doctype html>
 	      return fields[state.mediaTab] || "";
 	    }
 
+	    function mediaTaskReadyForAI(task) {
+	      return Boolean(
+	        task &&
+	        task.status === "completed" &&
+	        (task.summary_text || task.outline_text || task.transcript_text || task.mindmap_text || task.copywriting_text)
+	      );
+	    }
+
+	    function mediaCreativePrompt(type, task) {
+	      const filename = task?.filename || "这段音视频";
+	      const prompts = {
+	        shortVideo: `请基于《${filename}》的音视频分析结果，生成一版适合短视频发布的文案。要求：给出3个标题方向、1段开头钩子、正文分镜/画面建议、结尾引导，语气自然有吸引力。`,
+	        speech: `请基于《${filename}》的音视频分析结果，生成一版口播稿。要求：适合真人口播，开头抓人，中间逻辑清楚，结尾有行动引导，语言口语化。`,
+	        article: `请基于《${filename}》的音视频分析结果，生成一篇公众号文章。要求：标题、导语、小标题结构、正文、结尾总结都完整，表达清楚，有阅读层次。`,
+	        xiaohongshu: `请基于《${filename}》的音视频分析结果，生成一篇小红书笔记。要求：给出标题、正文、分点内容、适合的表情符号和话题标签，语气真诚自然。`,
+	        moments: `请基于《${filename}》的音视频分析结果，生成3版朋友圈文案。要求：分别是自然分享版、简短有梗版、正式一点版。`,
+	        mindmap: `请基于《${filename}》的音视频分析结果，生成一份 Markdown 思维导图大纲。要求：层级清晰，适合复制到思维导图工具里继续整理。`
+	      };
+	      return prompts[type] || prompts.shortVideo;
+	    }
+
+	    function upsertMediaConversationTask(task, conversation) {
+	      if (!task) return;
+	      if (conversation?.id) task.conversation_id = conversation.id;
+	      upsertMediaTask(task);
+	      renderMediaTasks();
+	      renderMediaDetail();
+	    }
+
+	    async function ensureMediaConversation(task, options = {}) {
+	      if (!mediaTaskReadyForAI(task)) {
+	        setStatus("mediaStatus", "分析完成后才能发送到 AI 对话。", "err");
+	        return null;
+	      }
+	      const modelId = $("modelSelect").value || state.currentConversation?.model_id || state.models[0]?.id || "";
+	      const res = await api(`/api/media/tasks/${task.id}/conversation`, {
+	        method: "POST",
+	        body: JSON.stringify({ model_id: modelId })
+	      });
+	      if (!res.ok) {
+	        setStatus("mediaStatus", await readError(res, "创建分析会话失败。"), "err");
+	        return null;
+	      }
+	      const data = await res.json();
+	      upsertConversation(data.conversation);
+	      upsertMediaConversationTask(data.task, data.conversation);
+	      if (options.open) {
+	        closeMediaAnalysis();
+	        await selectConversation(data.conversation.id);
+	        setStatus("chatStatus", "已进入音视频分析会话，可以继续加工内容。", "ok");
+	      } else {
+	        setStatus("mediaStatus", "分析会话已创建，可以随时进入继续加工。", "ok");
+	      }
+	      return data.conversation;
+	    }
+
+	    async function sendMediaPromptToAI(task, type) {
+	      if (state.sending) {
+	        setStatus("mediaStatus", "上一条还在生成，先等它完成。", "err");
+	        return;
+	      }
+	      const conversation = await ensureMediaConversation(task, { open: true });
+	      if (!conversation) return;
+	      await sendMessage(mediaCreativePrompt(type, task), { statusText: "正在基于音视频分析生成内容..." });
+	    }
+
+	    function createMediaAIButtons(task) {
+	      const panel = document.createElement("section");
+	      panel.className = "media-ai-panel";
+	      const title = document.createElement("strong");
+	      title.textContent = "AI 持续加工";
+	      const hint = document.createElement("div");
+	      hint.className = "media-ai-hint";
+	      hint.textContent = mediaTaskReadyForAI(task)
+	        ? "已可把摘要、章节和转写作为上下文，进入专属 AI 会话继续加工。"
+	        : "分析完成后，可以一键创建 AI 加工会话，无需重复上传。";
+	      const mainActions = document.createElement("div");
+	      mainActions.className = "media-ai-actions";
+	      const send = document.createElement("button");
+	      send.type = "button";
+	      send.className = "primary";
+	      send.textContent = "发送到AI对话";
+	      send.disabled = !mediaTaskReadyForAI(task);
+	      send.addEventListener("click", () => ensureMediaConversation(task, { open: true }).catch((err) => setStatus("mediaStatus", friendlyError(err, "创建分析会话失败。"), "err")));
+	      const create = document.createElement("button");
+	      create.type = "button";
+	      create.textContent = task.conversation_id ? "进入分析会话" : "创建分析会话";
+	      create.disabled = !mediaTaskReadyForAI(task);
+	      create.addEventListener("click", () => ensureMediaConversation(task, { open: Boolean(task.conversation_id) }).catch((err) => setStatus("mediaStatus", friendlyError(err, "创建分析会话失败。"), "err")));
+	      mainActions.append(send, create);
+	      const creativeActions = document.createElement("div");
+	      creativeActions.className = "media-ai-actions";
+	      const items = [
+	        ["shortVideo", "短视频文案"],
+	        ["speech", "口播稿"],
+	        ["article", "公众号文章"],
+	        ["xiaohongshu", "小红书笔记"],
+	        ["moments", "朋友圈文案"],
+	        ["mindmap", "思维导图"]
+	      ];
+	      for (const [type, label] of items) {
+	        const button = document.createElement("button");
+	        button.type = "button";
+	        button.textContent = label;
+	        button.disabled = !mediaTaskReadyForAI(task);
+	        button.addEventListener("click", () => sendMediaPromptToAI(task, type).catch((err) => setStatus("mediaStatus", friendlyError(err, "发送到 AI 对话失败。"), "err")));
+	        creativeActions.appendChild(button);
+	      }
+	      panel.append(title, hint, mainActions, creativeActions);
+	      return panel;
+	    }
+
 	    function renderMediaDetail() {
 	      const detail = $("mediaTaskDetail");
 	      const task = currentMediaTask();
@@ -8114,6 +8422,7 @@ INDEX_HTML = r'''<!doctype html>
 	        });
 	        tabBar.appendChild(button);
 	      }
+	      const aiPanel = createMediaAIButtons(task);
 	      const content = document.createElement("div");
 	      content.className = "media-result markdown";
 	      const text = task.error_message || mediaTabContent(task) || (task.status === "completed" ? "暂时没有这个结果。" : "任务处理中，稍后刷新看看。");
@@ -8134,7 +8443,7 @@ INDEX_HTML = r'''<!doctype html>
 	      del.textContent = "删除任务";
 	      del.addEventListener("click", () => deleteMediaTask(task.id));
 	      actions.append(copy, refresh, del);
-	      detail.append(head, tabBar, content, actions);
+	      detail.append(head, aiPanel, tabBar, content, actions);
 	      queueMarkdownOverflowRefresh(content);
 	    }
 
@@ -8474,6 +8783,18 @@ INDEX_HTML = r'''<!doctype html>
       if (!ts) return "";
       const d = new Date(ts * 1000);
       return d.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function upsertConversation(conversation) {
+      if (!conversation) return;
+      const index = state.conversations.findIndex((item) => item.id === conversation.id);
+      if (index >= 0) {
+        state.conversations.splice(index, 1, conversation);
+      } else {
+        state.conversations.unshift(conversation);
+      }
+      state.conversations.sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+      renderConversations();
     }
 
     async function newConversation(modelId = $("modelSelect").value) {
