@@ -6605,6 +6605,16 @@ INDEX_HTML = r'''<!doctype html>
       position: relative;
       box-shadow: var(--soft-shadow);
     }
+    .attachment-preview img {
+      transition: filter .18s ease, opacity .18s ease;
+    }
+    .attachment-preview.is-uploading img {
+      filter: brightness(.48) saturate(.72);
+      opacity: .92;
+    }
+    .attachment-preview.is-error img {
+      filter: brightness(.58) grayscale(.18);
+    }
     .attachment-preview img,
     .message-image-btn img {
       width: 100%;
@@ -6627,6 +6637,25 @@ INDEX_HTML = r'''<!doctype html>
       border: 0;
       font-size: 14px;
       line-height: 1;
+    }
+    .attachment-ring {
+      --progress: 0;
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 42px;
+      height: 42px;
+      transform: translate(-50%, -50%);
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at center, rgba(43,37,35,.72) 0 48%, transparent 49%),
+        conic-gradient(var(--accent) calc(var(--progress) * 1%), rgba(255,255,255,.36) 0);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      box-shadow: 0 8px 18px rgba(43,37,35,.16);
     }
     .attachment-progress {
       position: absolute;
@@ -7433,14 +7462,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.5.4</p>
+        <p class="app-version">v2.5.5</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.5.4</span>
+        <span>v2.5.5</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7452,7 +7481,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.5.4</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.5.5</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7471,7 +7500,7 @@ INDEX_HTML = r'''<!doctype html>
 	        <button id="openSettings">模型管理</button>
 	        <button id="logout">退出</button>
         <footer class="site-icp side-icp">
-          <span>v2.5.4</span>
+          <span>v2.5.5</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -10409,12 +10438,19 @@ INDEX_HTML = r'''<!doctype html>
 	      row.hidden = !state.attachments.length;
 	      for (const item of state.attachments) {
 	        const card = document.createElement("div");
-	        card.className = "attachment-preview";
+	        card.className = "attachment-preview" + (item.status === "uploading" ? " is-uploading" : "") + (item.status === "error" ? " is-error" : "");
 	        card.title = item.filename || "图片";
 	        const img = document.createElement("img");
 	        img.src = item.preview_url || item.view_url || "";
 	        img.alt = item.filename || "待发送图片";
 	        card.appendChild(img);
+	        if (item.status === "uploading" || item.status === "error" || item.justUploaded) {
+	          const ring = document.createElement("div");
+	          ring.className = "attachment-ring";
+	          ring.style.setProperty("--progress", String(item.status === "error" ? 100 : Math.max(0, Math.min(100, Number(item.progress || 0)))));
+	          ring.textContent = item.status === "error" ? "!" : (item.progress >= 100 ? "✓" : Math.round(item.progress || 0) + "%");
+	          card.appendChild(ring);
+	        }
 	        const remove = document.createElement("button");
 	        remove.className = "attachment-remove";
 	        remove.type = "button";
@@ -10425,7 +10461,7 @@ INDEX_HTML = r'''<!doctype html>
 	        if (item.status !== "ready") {
 	          const status = document.createElement("div");
 	          status.className = "attachment-progress";
-	          status.textContent = item.status === "error" ? "失败" : "上传中";
+	          status.textContent = item.status === "error" ? "上传失败" : "上传中";
 	          card.appendChild(status);
 	        }
 	        row.appendChild(card);
@@ -10462,6 +10498,30 @@ INDEX_HTML = r'''<!doctype html>
 	      setDialogOpenState();
 	    }
 
+	    function uploadFormWithProgress(url, form, onProgress) {
+	      return new Promise((resolve, reject) => {
+	        const xhr = new XMLHttpRequest();
+	        xhr.open("POST", url);
+	        xhr.upload.onprogress = (event) => {
+	          if (!event.lengthComputable) return;
+	          const percent = Math.max(1, Math.min(96, Math.round((event.loaded / event.total) * 96)));
+	          onProgress(percent);
+	        };
+	        xhr.onload = () => {
+	          if (xhr.status >= 200 && xhr.status < 300) {
+	            onProgress(98);
+	            resolve(xhr);
+	          } else {
+	            reject(new Error("图片上传 OSS 失败"));
+	          }
+	        };
+	        xhr.onerror = () => reject(new Error("图片上传 OSS 失败"));
+	        xhr.ontimeout = () => reject(new Error("图片上传超时"));
+	        xhr.timeout = 120000;
+	        xhr.send(form);
+	      });
+	    }
+
 	    async function uploadChatImageAttachment(item) {
 	      const policyRes = await api("/api/chat-images/upload-policy", { method: "POST" });
 	      if (!policyRes.ok) throw new Error(await readError(policyRes, "图片上传配置不可用。"));
@@ -10476,8 +10536,10 @@ INDEX_HTML = r'''<!doctype html>
 	      form.append("success_action_status", "200");
 	      form.append("Content-Type", item.file.type || "application/octet-stream");
 	      form.append("file", item.file);
-	      const uploadRes = await fetch(policy.host, { method: "POST", body: form });
-	      if (!uploadRes.ok) throw new Error("图片上传 OSS 失败");
+	      await uploadFormWithProgress(policy.host, form, (progress) => {
+	        item.progress = progress;
+	        renderAttachmentPreviews();
+	      });
 	      const saveRes = await api("/api/chat-images", {
 	        method: "POST",
 	        body: JSON.stringify({
@@ -10489,13 +10551,14 @@ INDEX_HTML = r'''<!doctype html>
 	      });
 	      if (!saveRes.ok) throw new Error(await readError(saveRes, "图片信息保存失败。"));
 	      const data = await saveRes.json();
+	      item.progress = 100;
 	      return data.image;
 	    }
 
 	    async function handleImageFiles(fileList) {
 	      const input = $("imageInput");
-	      if (input) input.value = "";
 	      const files = Array.from(fileList || []);
+	      if (input) input.value = "";
 	      if (!files.length) return;
 	      if (!selectedModelSupportsVision()) {
 	        setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
@@ -10524,6 +10587,7 @@ INDEX_HTML = r'''<!doctype html>
 	          file,
 	          filename: file.name,
 	          preview_url: URL.createObjectURL(file),
+	          progress: 1,
 	          status: "uploading"
 	        });
 	      }
@@ -10539,9 +10603,16 @@ INDEX_HTML = r'''<!doctype html>
 	            item.id = image.id;
 	            item.view_url = image.view_url;
 	            item.filename = image.filename || item.filename;
+	            item.progress = 100;
 	            item.status = "ready";
+	            item.justUploaded = true;
+	            setTimeout(() => {
+	              item.justUploaded = false;
+	              renderAttachmentPreviews();
+	            }, 650);
 	          } catch (err) {
 	            item.status = "error";
+	            item.progress = 100;
 	            item.error = friendlyError(err, "图片上传失败。");
 	          }
 	          renderAttachmentPreviews();
