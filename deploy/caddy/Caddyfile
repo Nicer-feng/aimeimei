@@ -8,7 +8,7 @@ feng.asia, www.feng.asia {
 	root * /var/www/aimeimei
 
 	handle /cat {
-		redir /cat/ 308
+		reverse_proxy 127.0.0.1:8000
 	}
 
 	# /cat/ 保留原始路径前缀，后端按 /cat/ 路由处理。
@@ -17,7 +17,8 @@ feng.asia, www.feng.asia {
 	}
 
 	handle /ai {
-		redir /ai/ 308
+		rewrite * /
+		reverse_proxy 127.0.0.1:8000
 	}
 
 	# AI 主应用在 Python 进程里挂载在 /，这里去掉 /ai/ 前缀。
@@ -47,7 +48,8 @@ feng.asia, www.feng.asia {
 # 后端已经改为只监听 127.0.0.1:8000，由 Caddy 接管公网 8080。
 :8080 {
 	handle /ai {
-		redir /ai/ 308
+		rewrite * /
+		reverse_proxy 127.0.0.1:8000
 	}
 
 	handle_path /ai/* {
@@ -62,7 +64,8 @@ feng.asia, www.feng.asia {
 # 兼容直接输入 IP 的入口，避免被自动跳到没有可信证书的 https://118.31.114.165/。
 http://118.31.114.165 {
 	handle /ai {
-		redir /ai/ 308
+		rewrite * /
+		reverse_proxy 127.0.0.1:8000
 	}
 
 	handle_path /ai/* {
