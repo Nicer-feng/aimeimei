@@ -3090,29 +3090,6 @@ INDEX_HTML = r'''<!doctype html>
     .site-icp a:hover {
       color: var(--accent-strong);
     }
-    .compat-fallback {
-      display: none;
-      position: fixed;
-      left: 18px;
-      right: 18px;
-      bottom: 18px;
-      z-index: 9999;
-      max-width: 520px;
-      margin: 0 auto;
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      background: var(--surface);
-      box-shadow: var(--shadow);
-      padding: 14px 16px;
-      color: var(--text);
-      font-size: 14px;
-      line-height: 1.7;
-    }
-    .compat-fallback strong {
-      display: block;
-      margin-bottom: 4px;
-      font-size: 16px;
-    }
     .app {
       height: 100vh;
       min-height: 100vh;
@@ -5495,30 +5472,6 @@ INDEX_HTML = r'''<!doctype html>
   </style>
 </head>
 <body>
-  <div class="compat-fallback" id="compatFallback">
-    <strong>AI槑槑正在进入兼容模式</strong>
-    <span>如果这里一直不消失，说明当前浏览器没有正常启动页面脚本。请优先使用最新版 Chrome/Edge，或打开 <a href="http://118.31.114.165:8080/">旧版直连入口</a>。</span>
-  </div>
-  <script>
-    (function () {
-      window.__aiBootOk = false;
-      function showCompatFallback(message) {
-        var box = document.getElementById("compatFallback");
-        if (!box || window.__aiBootOk) return;
-        if (message) {
-          var text = box.getElementsByTagName("span")[0];
-          if (text) text.textContent = message;
-        }
-        box.style.display = "block";
-      }
-      window.addEventListener("error", function () {
-        showCompatFallback("当前浏览器启动 AI 页面脚本失败，建议使用最新版 Chrome/Edge，或清理浏览器缓存后重试。");
-      });
-      setTimeout(function () {
-        showCompatFallback("");
-      }, 1800);
-    })();
-  </script>
   <div class="login" id="loginView">
     <form class="login-panel" id="loginForm">
       <img class="login-mascot" src="/res/meimei-login.png" alt="槑槑猫咪">
@@ -5827,19 +5780,6 @@ INDEX_HTML = r'''<!doctype html>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    function storageGet(key, fallback = "") {
-      try {
-        const value = window.localStorage ? localStorage.getItem(key) : "";
-        return value || fallback;
-      } catch (err) {
-        return fallback;
-      }
-    }
-    function storageSet(key, value) {
-      try {
-        if (window.localStorage) localStorage.setItem(key, value);
-      } catch (err) {}
-    }
     const state = {
       authed: false,
       models: [],
@@ -5867,13 +5807,13 @@ INDEX_HTML = r'''<!doctype html>
 	      lastCompositionEndAt: 0,
 	      messageSeq: 0,
 	      searchConfig: null,
-		      adminKey: storageGet("aiPlatformAdminKey", ""),
-		      theme: storageGet("aiPlatformTheme", ""),
-		      accent: storageGet("aiPlatformAccent", "pink"),
-		      fontSize: storageGet("aiPlatformFontSize", "medium"),
-		      composerOpacity: storageGet("aiPlatformComposerOpacity", "80"),
-		      composerBlur: storageGet("aiPlatformComposerBlur", "18"),
-		      sidebarWidth: storageGet("aiPlatformSidebarWidth", "322")
+		      adminKey: localStorage.getItem("aiPlatformAdminKey") || "",
+		      theme: localStorage.getItem("aiPlatformTheme") || "",
+		      accent: localStorage.getItem("aiPlatformAccent") || "pink",
+		      fontSize: localStorage.getItem("aiPlatformFontSize") || "medium",
+		      composerOpacity: localStorage.getItem("aiPlatformComposerOpacity") || "80",
+		      composerBlur: localStorage.getItem("aiPlatformComposerBlur") || "18",
+		      sidebarWidth: localStorage.getItem("aiPlatformSidebarWidth") || "322"
 		    };
     $("adminKey").value = state.adminKey;
 
@@ -6043,8 +5983,7 @@ INDEX_HTML = r'''<!doctype html>
 
     function accentBaseColor(value = state.accent) {
       const accent = normalizeAccent(value);
-      const preset = accentPresets[accent];
-      return (preset && preset.light && preset.light.accent) || accent;
+      return accentPresets[accent]?.light.accent || accent;
     }
 
     function buildCustomAccent(hex, theme) {
@@ -6075,14 +6014,13 @@ INDEX_HTML = r'''<!doctype html>
 
     function accentValues(value = state.accent, theme = preferredTheme()) {
       const accent = normalizeAccent(value);
-      const preset = accentPresets[accent];
-      return (preset && preset[theme]) || buildCustomAccent(accent, theme);
+      return accentPresets[accent]?.[theme] || buildCustomAccent(accent, theme);
     }
 
     function applyAccent(value = state.accent || "pink") {
       const accent = normalizeAccent(value);
       state.accent = accent;
-      storageSet("aiPlatformAccent", accent);
+      localStorage.setItem("aiPlatformAccent", accent);
       const values = accentValues(accent, preferredTheme());
       const root = document.documentElement;
       root.style.setProperty("--accent", values.accent);
@@ -6097,7 +6035,7 @@ INDEX_HTML = r'''<!doctype html>
       const button = $("accentToggle");
       if (button) {
         button.style.color = color;
-        button.title = "主色调：" + ((accentPresets[accent] && accentPresets[accent].label) || "自定义");
+        button.title = "主色调：" + (accentPresets[accent]?.label || "自定义");
       }
       const picker = $("customAccentColor");
       if (picker) picker.value = color;
@@ -6107,7 +6045,7 @@ INDEX_HTML = r'''<!doctype html>
     function applyTheme(theme = preferredTheme()) {
       state.theme = theme;
       document.documentElement.dataset.theme = theme;
-      storageSet("aiPlatformTheme", theme);
+      localStorage.setItem("aiPlatformTheme", theme);
       const button = $("themeToggle");
       if (button) {
         button.textContent = theme === "dark" ? "☀" : "◐";
@@ -6140,7 +6078,7 @@ INDEX_HTML = r'''<!doctype html>
       const size = normalizeFontSize(value);
       state.fontSize = size;
       document.documentElement.dataset.fontSize = size;
-      storageSet("aiPlatformFontSize", size);
+      localStorage.setItem("aiPlatformFontSize", size);
       const button = $("fontSizeToggle");
       if (button) {
         button.textContent = fontSizeLabels[size];
@@ -6178,13 +6116,13 @@ INDEX_HTML = r'''<!doctype html>
 
 	    function applyInterfaceSettings(options = {}) {
 	      const opacity = Math.round(clampNumber(
-	        options.opacity != null ? options.opacity : state.composerOpacity,
+	        options.opacity ?? state.composerOpacity,
 	        0,
 	        100,
 	        interfaceDefaults.composerOpacity
 	      ));
 	      const blur = Math.round(clampNumber(
-	        options.blur != null ? options.blur : state.composerBlur,
+	        options.blur ?? state.composerBlur,
 	        0,
 	        30,
 	        interfaceDefaults.composerBlur
@@ -6200,8 +6138,8 @@ INDEX_HTML = r'''<!doctype html>
 	      root.style.setProperty("--composer-glass-blur", blur + "px");
 	      root.style.setProperty("--composer-field-blur", Math.round(blur * .67) + "px");
 	      if (options.save !== false) {
-	        storageSet("aiPlatformComposerOpacity", String(opacity));
-	        storageSet("aiPlatformComposerBlur", String(blur));
+	        localStorage.setItem("aiPlatformComposerOpacity", String(opacity));
+	        localStorage.setItem("aiPlatformComposerBlur", String(blur));
 	      }
 	      updateInterfaceControls(opacity, blur);
 	    }
@@ -6219,7 +6157,7 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
 	    function toggleInterfaceSettings(event) {
-	      if (event && event.stopPropagation) event.stopPropagation();
+	      event?.stopPropagation();
 	      if ($("interfacePopover").classList.contains("show")) closeInterfaceSettings();
 	      else openInterfaceSettings();
 	    }
@@ -6313,7 +6251,7 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     function friendlyError(value, fallback = "刚刚没处理成功，可以稍后再试一次。") {
-      const text = String((value && value.message) || value || "").trim();
+      const text = String(value?.message || value || "").trim();
       if (!text) return fallback;
       if (/unauthorized|未登录|登录已过期/i.test(text)) return "登录状态过期了，请重新登录。";
       if (/password incorrect|密码不对/i.test(text)) return "密码不对，再检查一下。";
@@ -6361,7 +6299,7 @@ INDEX_HTML = r'''<!doctype html>
 
     async function adminApi(path, options = {}) {
       state.adminKey = $("adminKey").value.trim();
-      storageSet("aiPlatformAdminKey", state.adminKey);
+      localStorage.setItem("aiPlatformAdminKey", state.adminKey);
       const headers = new Headers(options.headers || {});
       headers.set("X-Admin-Key", state.adminKey);
       return request(path, { ...options, headers });
@@ -6380,8 +6318,7 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     function syncViewportHeight() {
-      const viewport = window.visualViewport;
-      const height = Math.round((viewport && viewport.height) || window.innerHeight || document.documentElement.clientHeight);
+      const height = Math.round(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight);
       if (height > 0) document.documentElement.style.setProperty("--app-height", height + "px");
     }
 
@@ -6419,7 +6356,7 @@ INDEX_HTML = r'''<!doctype html>
 	      const width = normalizeSidebarWidth(value);
 	      state.sidebarWidth = String(width);
 	      document.documentElement.style.setProperty("--sidebar-width", width + "px");
-	      if (save) storageSet("aiPlatformSidebarWidth", String(width));
+	      if (save) localStorage.setItem("aiPlatformSidebarWidth", String(width));
 	    }
 
 	    function startSidebarResize(event) {
@@ -6566,8 +6503,8 @@ INDEX_HTML = r'''<!doctype html>
 	        if (text) text.textContent = "自动联网";
 	        label.title = "时效性问题会自动搜索；勾选后可强制本条联网";
 	      } else {
-        const saved = storageGet("aiPlatformWebSearch", "__missing__");
-	        toggle.checked = saved === "__missing__" ? true : saved === "1";
+	        const saved = localStorage.getItem("aiPlatformWebSearch");
+	        toggle.checked = saved === null ? true : saved === "1";
 	        if (text) text.textContent = "联网搜索";
 	        label.title = "使用 " + config.provider + " 联网搜索";
 	      }
@@ -6673,7 +6610,7 @@ INDEX_HTML = r'''<!doctype html>
 	      $("editingPromptId").value = item.id || "";
 	      $("promptTitle").value = item.title || "";
 	      $("promptContent").value = item.content || "";
-	      $("promptSortOrder").value = item.sort_order != null ? item.sort_order : 100;
+	      $("promptSortOrder").value = item.sort_order ?? 100;
 	      setStatus("promptLibraryStatus", "正在编辑：" + (item.title || ""), "");
 	    }
 
@@ -6872,7 +6809,7 @@ INDEX_HTML = r'''<!doctype html>
 	          });
 	          if (!res.ok) throw new Error(await readError(res, "收藏失败，稍后再试一下。"));
 	          const data = await res.json();
-	          message.favorite_id = (data.favorite && data.favorite.id) || null;
+	          message.favorite_id = data.favorite?.id || null;
 	          setStatus("chatStatus", "已收藏", "ok");
 	        }
 	        updateStreamingMessage(message);
@@ -6898,7 +6835,7 @@ INDEX_HTML = r'''<!doctype html>
 	    function previousUserMessage(message) {
 	      const start = messageIndexOf(message);
 	      for (let i = start - 1; i >= 0; i--) {
-	        if (state.messages[i] && state.messages[i].role === "user") return state.messages[i];
+	        if (state.messages[i]?.role === "user") return state.messages[i];
 	      }
 	      return null;
 	    }
@@ -6975,7 +6912,7 @@ INDEX_HTML = r'''<!doctype html>
 	          lastGroup = group;
 	        }
 	        const row = document.createElement("div");
-	        const active = state.currentConversation && state.currentConversation.id === conv.id;
+	        const active = state.currentConversation?.id === conv.id;
 	        const editing = state.editingConversationId === conv.id;
 	        row.className = "conv" + (active ? " active" : "") + (editing ? " editing" : "");
 
@@ -7086,7 +7023,7 @@ INDEX_HTML = r'''<!doctype html>
 	        return;
 	      }
 	      state.editingConversationId = null;
-	      const currentId = state.currentConversation && state.currentConversation.id;
+	      const currentId = state.currentConversation?.id;
 	      await loadConversations();
 	      if (currentId) {
 	        const updated = state.conversations.find((item) => item.id === currentId);
@@ -7464,12 +7401,12 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
 	    function messageTotalTokens(message) {
-	      const usage = (message && message.usage) || {};
-	      const direct = Number((message && message.total_tokens) || 0);
+	      const usage = message?.usage || {};
+	      const direct = Number(message?.total_tokens || 0);
 	      const total = Number(usage.total_tokens || direct || 0);
 	      if (total > 0) return total;
-	      const prompt = Number(usage.prompt_tokens || (message && message.prompt_tokens) || 0);
-	      const completion = Number(usage.completion_tokens || (message && message.completion_tokens) || 0);
+	      const prompt = Number(usage.prompt_tokens || message?.prompt_tokens || 0);
+	      const completion = Number(usage.completion_tokens || message?.completion_tokens || 0);
 	      return prompt + completion;
 	    }
 
@@ -7959,7 +7896,7 @@ INDEX_HTML = r'''<!doctype html>
 	      resetStreamState();
 	      state.userStopped = false;
 	      state.abortController = new AbortController();
-	      const mode = (state.searchConfig && state.searchConfig.mode) || "auto";
+	      const mode = state.searchConfig?.mode || "auto";
 	      const useWebSearch = $("webSearchToggle").checked && !$("webSearchToggle").disabled;
 	      setSendingUI(true);
 	      if (!hasOverride) {
@@ -8019,17 +7956,15 @@ INDEX_HTML = r'''<!doctype html>
 	                updateStreamingMessage(assistant);
 	                continue;
 	              }
-	              const choice = (event.choices && event.choices[0]) || {};
-	              const delta = choice.delta || {};
-	              const choiceMessage = choice.message || {};
-	              const piece = delta.content || choiceMessage.content || "";
+	              const choice = event.choices?.[0] || {};
+	              const piece = choice.delta?.content || choice.message?.content || "";
 	              const reasoningPiece =
-	                delta.reasoning_content ||
-	                choiceMessage.reasoning_content ||
-	                delta.reasoning ||
-	                choiceMessage.reasoning ||
-	                delta.thinking ||
-	                choiceMessage.thinking ||
+	                choice.delta?.reasoning_content ||
+	                choice.message?.reasoning_content ||
+	                choice.delta?.reasoning ||
+	                choice.message?.reasoning ||
+	                choice.delta?.thinking ||
+	                choice.message?.thinking ||
 	                "";
 	              if (reasoningPiece) {
 	                assistant.reasoning_content = (assistant.reasoning_content || "") + reasoningPiece;
@@ -8051,7 +7986,7 @@ INDEX_HTML = r'''<!doctype html>
 	        setStatus("chatStatus", "");
 	      } catch (err) {
 	        assistant.thinking = false;
-	        if (state.userStopped || (err && err.name === "AbortError")) {
+	        if (state.userStopped || err?.name === "AbortError") {
 	          if (assistant.content) {
 	            enqueueAssistantText(assistant, "\n\n（已停止生成）");
 	            await drainAssistantQueue();
@@ -8101,7 +8036,7 @@ INDEX_HTML = r'''<!doctype html>
 	        return;
 	      }
 	      state.editingConversationId = null;
-	      if (state.currentConversation && state.currentConversation.id === id) {
+	      if (state.currentConversation?.id === id) {
 	        state.currentConversation = null;
 	        state.messages = [];
 	      }
@@ -8410,8 +8345,8 @@ INDEX_HTML = r'''<!doctype html>
 	    $("openSide").addEventListener("click", openSidebar);
 	    $("closeSide").addEventListener("click", closeSidebar);
 	    $("webSearchToggle").addEventListener("change", () => {
-	      if (((state.searchConfig && state.searchConfig.mode) || "auto") === "manual") {
-	        storageSet("aiPlatformWebSearch", $("webSearchToggle").checked ? "1" : "0");
+	      if ((state.searchConfig?.mode || "auto") === "manual") {
+	        localStorage.setItem("aiPlatformWebSearch", $("webSearchToggle").checked ? "1" : "0");
 	      }
 	    });
 	    $("saveSearch").addEventListener("click", () => saveSearchConfig(false));
@@ -8434,12 +8369,9 @@ INDEX_HTML = r'''<!doctype html>
 		    syncViewportHeight();
 		    window.addEventListener("resize", syncViewportHeight, { passive: true });
 		    window.addEventListener("resize", () => applySidebarWidth(state.sidebarWidth, true), { passive: true });
-	    if (window.visualViewport) {
-	      window.visualViewport.addEventListener("resize", syncViewportHeight, { passive: true });
-	      window.visualViewport.addEventListener("scroll", syncViewportHeight, { passive: true });
-	    }
+	    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
+	    window.visualViewport?.addEventListener("scroll", syncViewportHeight, { passive: true });
 
-	    window.__aiBootOk = true;
 	    bootstrap();
   </script>
 </body>
