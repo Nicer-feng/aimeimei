@@ -42,5 +42,33 @@ feng.asia, www.feng.asia {
 # 后端已经改为只监听 127.0.0.1:8000，由 Caddy 接管公网 8080。
 :8080 {
 	encode gzip
-	reverse_proxy 127.0.0.1:8000
+
+	handle /ai {
+		redir /ai/ 308
+	}
+
+	handle_path /ai/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8000
+	}
+}
+
+# 兼容直接输入 IP 的入口，避免被自动跳到没有可信证书的 https://118.31.114.165/。
+http://118.31.114.165 {
+	encode gzip
+
+	handle /ai {
+		redir /ai/ 308
+	}
+
+	handle_path /ai/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8000
+	}
 }
