@@ -37,6 +37,8 @@ CAT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
 CAT_OSS_DIR = "cat"
 CAT_MAX_IMAGE_BYTES = 12 * 1024 * 1024
 CAT_GUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{2,32}$")
+DEFAULT_AI_USER_ID = "default"
 
 
 def now() -> int:
@@ -158,7 +160,44 @@ def db():
     return conn
 
 
-def init_db():
+def table_columns(conn, table):
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def ensure_default_ai_user(conn, secrets_data):
+    count = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+    if count == 0:
+        ts = now()
+        conn.execute(
+            """
+            INSERT INTO users
+            (id, username, display_name, password_hash, role, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'admin', 1, ?, ?)
+            """,
+            (
+                DEFAULT_AI_USER_ID,
+                "admin",
+                "默认账号",
+                secrets_data.get("family_password_hash") or password_hash("admin-" + b64_token(8)),
+                ts,
+                ts,
+            ),
+        )
+        return DEFAULT_AI_USER_ID
+
+    row = conn.execute(
+        """
+        SELECT id
+        FROM users
+        ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, created_at ASC
+        LIMIT 1
+        """
+    ).fetchone()
+    return row["id"] if row else DEFAULT_AI_USER_ID
+
+
+def init_db(secrets_data=None):
+    secrets_data = secrets_data or read_json(SECRETS_PATH, {})
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with db() as conn:
         conn.executescript(
@@ -176,8 +215,20 @@ def init_db():
               updated_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS users (
+              id TEXT PRIMARY KEY,
+              username TEXT NOT NULL UNIQUE,
+              display_name TEXT NOT NULL,
+              password_hash TEXT NOT NULL,
+              role TEXT NOT NULL DEFAULT 'family',
+              is_active INTEGER NOT NULL DEFAULT 1,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS conversations (
               id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL DEFAULT 'default',
               title TEXT NOT NULL,
               model_id TEXT NOT NULL,
               archived INTEGER NOT NULL DEFAULT 0,
@@ -188,6 +239,7 @@ def init_db():
 
             CREATE TABLE IF NOT EXISTS messages (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id TEXT NOT NULL DEFAULT 'default',
               conversation_id TEXT NOT NULL,
               role TEXT NOT NULL,
               content TEXT NOT NULL,
@@ -212,6 +264,7 @@ def init_db():
 
             CREATE TABLE IF NOT EXISTS prompt_templates (
               id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL DEFAULT '',
               title TEXT NOT NULL,
               content TEXT NOT NULL,
               sort_order INTEGER NOT NULL DEFAULT 0,
@@ -221,6 +274,7 @@ def init_db():
 
             CREATE TABLE IF NOT EXISTS favorite_messages (
               id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL DEFAULT 'default',
               message_id INTEGER NOT NULL UNIQUE,
               conversation_id TEXT NOT NULL,
               conversation_title TEXT NOT NULL,
@@ -232,6 +286,7 @@ def init_db():
 
             CREATE TABLE IF NOT EXISTS sessions (
               token_hash TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL DEFAULT 'default',
               created_at INTEGER NOT NULL,
               expires_at INTEGER NOT NULL
             );
@@ -325,9 +380,18 @@ def init_db():
             """
         )
 
-        message_columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()
-        }
+        default_user_id = ensure_default_ai_user(conn, secrets_data)
+
+        conversation_columns = table_columns(conn, "conversations")
+        if "user_id" not in conversation_columns:
+            conn.execute(
+                f"ALTER TABLE conversations ADD COLUMN user_id TEXT NOT NULL DEFAULT '{DEFAULT_AI_USER_ID}'"
+            )
+        message_columns = table_columns(conn, "messages")
+        if "user_id" not in message_columns:
+            conn.execute(
+                f"ALTER TABLE messages ADD COLUMN user_id TEXT NOT NULL DEFAULT '{DEFAULT_AI_USER_ID}'"
+            )
         if "reasoning_content" not in message_columns:
             conn.execute(
                 "ALTER TABLE messages ADD COLUMN reasoning_content TEXT NOT NULL DEFAULT ''"
@@ -337,9 +401,61 @@ def init_db():
                 conn.execute(
                     f"ALTER TABLE messages ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
                 )
-        cat_post_columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info(cat_posts)").fetchall()
-        }
+        favorite_columns = table_columns(conn, "favorite_messages")
+        if "user_id" not in favorite_columns:
+            conn.execute(
+                f"ALTER TABLE favorite_messages ADD COLUMN user_id TEXT NOT NULL DEFAULT '{DEFAULT_AI_USER_ID}'"
+            )
+        prompt_columns = table_columns(conn, "prompt_templates")
+        if "user_id" not in prompt_columns:
+            conn.execute("ALTER TABLE prompt_templates ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
+        session_columns = table_columns(conn, "sessions")
+        if "user_id" not in session_columns:
+            conn.execute(
+                f"ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT '{DEFAULT_AI_USER_ID}'"
+            )
+
+        conn.execute("UPDATE conversations SET user_id=? WHERE user_id='' OR user_id IS NULL", (default_user_id,))
+        conn.execute(
+            """
+            UPDATE messages
+            SET user_id=COALESCE((SELECT user_id FROM conversations WHERE conversations.id=messages.conversation_id), ?)
+            WHERE user_id='' OR user_id IS NULL
+            """,
+            (default_user_id,),
+        )
+        conn.execute(
+            """
+            UPDATE favorite_messages
+            SET user_id=COALESCE((SELECT user_id FROM conversations WHERE conversations.id=favorite_messages.conversation_id), ?)
+            WHERE user_id='' OR user_id IS NULL
+            """,
+            (default_user_id,),
+        )
+        conn.execute("UPDATE sessions SET user_id=? WHERE user_id='' OR user_id IS NULL", (default_user_id,))
+        conn.execute(
+            "UPDATE conversations SET user_id=? WHERE user_id=? AND NOT EXISTS (SELECT 1 FROM users WHERE id=conversations.user_id)",
+            (default_user_id, DEFAULT_AI_USER_ID),
+        )
+        conn.execute(
+            "UPDATE messages SET user_id=? WHERE user_id=? AND NOT EXISTS (SELECT 1 FROM users WHERE id=messages.user_id)",
+            (default_user_id, DEFAULT_AI_USER_ID),
+        )
+        conn.execute(
+            "UPDATE favorite_messages SET user_id=? WHERE user_id=? AND NOT EXISTS (SELECT 1 FROM users WHERE id=favorite_messages.user_id)",
+            (default_user_id, DEFAULT_AI_USER_ID),
+        )
+        conn.execute(
+            "UPDATE sessions SET user_id=? WHERE user_id=? AND NOT EXISTS (SELECT 1 FROM users WHERE id=sessions.user_id)",
+            (default_user_id, DEFAULT_AI_USER_ID),
+        )
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations(user_id, archived, updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_conversation ON messages(user_id, conversation_id, id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_favorites_user_created ON favorite_messages(user_id, created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+
+        cat_post_columns = table_columns(conn, "cat_posts")
         if "cat_id" not in cat_post_columns:
             conn.execute("ALTER TABLE cat_posts ADD COLUMN cat_id TEXT NOT NULL DEFAULT ''")
 
@@ -375,8 +491,8 @@ def init_db():
             for index, (title, content) in enumerate(DEFAULT_PROMPT_TEMPLATES, 1):
                 conn.execute(
                     """
-                    INSERT INTO prompt_templates(id, title, content, sort_order, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO prompt_templates(id, user_id, title, content, sort_order, created_at, updated_at)
+                    VALUES (?, '', ?, ?, ?, ?, ?)
                     """,
                     (b64_token(10), title, content, index * 10, ts, ts),
                 )
@@ -399,6 +515,18 @@ def public_model(row):
 
 def private_model(row):
 	return public_model(row)
+
+
+def ai_user_public(row):
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "display_name": row["display_name"],
+        "role": row["role"],
+        "is_active": bool(row["is_active"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
 
 
 def conversation_row(row):
@@ -943,6 +1071,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_admin(self.handle_admin_models)
         if path == "/api/admin/search":
             return self.require_admin(self.handle_admin_search)
+        if path == "/api/admin/users":
+            return self.require_admin(self.handle_admin_users)
         if path == "/api/conversations":
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
@@ -982,6 +1112,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_admin(self.handle_admin_search)
         if path == "/api/admin/password":
             return self.require_admin(self.handle_admin_password)
+        if path == "/api/admin/users":
+            return self.require_admin(self.handle_admin_users)
         if path == "/api/prompts":
             return self.require_user(self.handle_prompts)
         if path == "/api/favorites":
@@ -1000,6 +1132,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_cat_admin(self.handle_cat_admin_user_item)
         if path.startswith("/api/admin/models/"):
             return self.require_admin(self.handle_admin_model_item)
+        if path.startswith("/api/admin/users/"):
+            return self.require_admin(self.handle_admin_user_item)
         if path.startswith("/api/prompts/"):
             return self.require_user(self.handle_prompt_item)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
@@ -1112,17 +1246,24 @@ class AppHandler(BaseHTTPRequestHandler):
         return ""
 
     def current_user(self):
+        if hasattr(self, "_current_user_cache"):
+            return self._current_user_cache
         token = self.session_token()
         if not token:
+            self._current_user_cache = None
             return None
         with db() as conn:
             row = conn.execute(
-                "SELECT * FROM sessions WHERE token_hash=? AND expires_at>?",
+                """
+                SELECT u.*
+                FROM sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.token_hash=? AND s.expires_at>? AND u.is_active=1
+                """,
                 (token_hash(token), now()),
             ).fetchone()
-            if not row:
-                return None
-        return {"role": "family"}
+        self._current_user_cache = row
+        return row
 
     def require_user(self, handler):
         if not self.current_user():
@@ -1131,12 +1272,13 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def require_admin(self, handler):
         got = self.headers.get("X-Admin-Key", "").strip()
-        if not got:
-            got = self.session_token()
         expected = self.server.secrets["admin_key"]
-        if not hmac.compare_digest(got, expected):
-            return self.error(HTTPStatus.UNAUTHORIZED, "admin unauthorized")
-        return handler()
+        if got and hmac.compare_digest(got, expected):
+            return handler()
+        user = self.current_user()
+        if user and user["role"] == "admin":
+            return handler()
+        return self.error(HTTPStatus.UNAUTHORIZED, "admin unauthorized")
 
     def cat_session_token(self):
         cookie = SimpleCookie(self.headers.get("Cookie", ""))
@@ -1212,8 +1354,17 @@ class AppHandler(BaseHTTPRequestHandler):
             data = self.read_body()
         except Exception:
             return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+        username = str(data.get("username") or "admin").strip().lower()
         password = str(data.get("password") or "")
-        if not verify_password(password, self.server.secrets["family_password_hash"]):
+        if not username or not password:
+            return self.error(HTTPStatus.BAD_REQUEST, "username and password are required")
+        with db() as conn:
+            user = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        if (
+            not user
+            or not user["is_active"]
+            or not verify_password(password, user["password_hash"])
+        ):
             return self.error(HTTPStatus.UNAUTHORIZED, "password incorrect")
 
         token = b64_token(32)
@@ -1221,8 +1372,8 @@ class AppHandler(BaseHTTPRequestHandler):
         with db() as conn:
             conn.execute("DELETE FROM sessions WHERE expires_at<=?", (now(),))
             conn.execute(
-                "INSERT INTO sessions(token_hash, created_at, expires_at) VALUES (?, ?, ?)",
-                (token_hash(token), now(), expires),
+                "INSERT INTO sessions(token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+                (token_hash(token), user["id"], now(), expires),
             )
 
         self.send_response(HTTPStatus.OK)
@@ -1231,7 +1382,10 @@ class AppHandler(BaseHTTPRequestHandler):
             "Set-Cookie",
             f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}",
         )
-        raw = json.dumps({"ok": True, "expires_at": expires}).encode()
+        raw = json.dumps(
+            {"ok": True, "expires_at": expires, "user": ai_user_public(user)},
+            ensure_ascii=False,
+        ).encode()
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
@@ -1253,7 +1407,10 @@ class AppHandler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def handle_me(self):
-        return self.json({"authenticated": bool(self.current_user())})
+        user = self.current_user()
+        return self.json(
+            {"authenticated": bool(user), "user": ai_user_public(user) if user else None}
+        )
 
     def handle_cat_me(self):
         user = self.current_cat_user()
@@ -2181,8 +2338,117 @@ class AppHandler(BaseHTTPRequestHandler):
         write_private(SECRETS_PATH, json.dumps(self.server.secrets, indent=2) + "\n")
         write_private(FAMILY_PASSWORD_PATH, password + "\n")
         with db() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash=?, updated_at=? WHERE id=?",
+                (self.server.secrets["family_password_hash"], now(), DEFAULT_AI_USER_ID),
+            )
             conn.execute("DELETE FROM sessions")
         return self.json({"ok": True})
+
+    def handle_admin_users(self):
+        if self.command == "GET":
+            with db() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM users ORDER BY created_at ASC"
+                ).fetchall()
+            return self.json({"users": [ai_user_public(row) for row in rows]})
+
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+
+        username = str(data.get("username") or "").strip().lower()
+        display_name = str(data.get("display_name") or username).strip()[:40]
+        password = str(data.get("password") or "")
+        role = str(data.get("role") or "family").strip().lower()
+        is_active = 1 if data.get("is_active", True) else 0
+
+        if not USERNAME_RE.match(username):
+            return self.error(HTTPStatus.BAD_REQUEST, "username invalid")
+        if role not in ("admin", "family"):
+            return self.error(HTTPStatus.BAD_REQUEST, "role invalid")
+        if len(password) < 6:
+            return self.error(HTTPStatus.BAD_REQUEST, "password must be at least 6 characters")
+        if not display_name:
+            display_name = username
+
+        user_id = b64_token(10)
+        ts = now()
+        try:
+            with db() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO users
+                    (id, username, display_name, password_hash, role, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        username,
+                        display_name,
+                        password_hash(password),
+                        role,
+                        is_active,
+                        ts,
+                        ts,
+                    ),
+                )
+                row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        except sqlite3.IntegrityError:
+            return self.error(HTTPStatus.CONFLICT, "username already exists")
+        return self.json({"user": ai_user_public(row)}, HTTPStatus.CREATED)
+
+    def admin_user_id_from_path(self):
+        return urlparse(self.path).path.rstrip("/").rsplit("/", 1)[-1]
+
+    def handle_admin_user_item(self):
+        user_id = self.admin_user_id_from_path()
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+
+        with db() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            if not row:
+                return self.error(HTTPStatus.NOT_FOUND, "user not found")
+
+            display_name = str(data.get("display_name", row["display_name"]) or "").strip()[:40] or row["display_name"]
+            role = str(data.get("role", row["role"]) or row["role"]).strip().lower()
+            if role not in ("admin", "family"):
+                return self.error(HTTPStatus.BAD_REQUEST, "role invalid")
+            is_active = 1 if data.get("is_active", bool(row["is_active"])) else 0
+            password = str(data.get("password") or "")
+
+            if (row["role"] == "admin" and (role != "admin" or not is_active)):
+                active_admins = conn.execute(
+                    "SELECT COUNT(*) AS n FROM users WHERE role='admin' AND is_active=1 AND id<>?",
+                    (user_id,),
+                ).fetchone()["n"]
+                if active_admins <= 0:
+                    return self.error(HTTPStatus.BAD_REQUEST, "at least one active admin is required")
+
+            password_clause = ""
+            params = [display_name, role, is_active, now()]
+            if password:
+                if len(password) < 6:
+                    return self.error(HTTPStatus.BAD_REQUEST, "password must be at least 6 characters")
+                password_clause = ", password_hash=?"
+                params.append(password_hash(password))
+            params.append(user_id)
+            conn.execute(
+                f"""
+                UPDATE users
+                SET display_name=?, role=?, is_active=?, updated_at=?{password_clause}
+                WHERE id=?
+                """,
+                tuple(params),
+            )
+            if not is_active:
+                conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        return self.json({"user": ai_user_public(row)})
 
     def handle_prompts(self):
         if self.command == "GET":
@@ -2260,6 +2526,8 @@ class AppHandler(BaseHTTPRequestHandler):
         return self.json({"prompt": prompt_template_row(row)})
 
     def handle_favorites(self):
+        user = self.current_user()
+        user_id = user["id"]
         if self.command == "GET":
             with db() as conn:
                 rows = conn.execute(
@@ -2269,9 +2537,11 @@ class AppHandler(BaseHTTPRequestHandler):
                            COALESCE(c.archived, 1) AS conversation_archived
                     FROM favorite_messages f
                     LEFT JOIN conversations c ON c.id = f.conversation_id
+                    WHERE f.user_id=?
                     ORDER BY f.created_at DESC
                     LIMIT 300
-                    """
+                    """,
+                    (user_id,),
                 ).fetchall()
             return self.json({"favorites": [favorite_row(row) for row in rows]})
 
@@ -2294,9 +2564,9 @@ class AppHandler(BaseHTTPRequestHandler):
                        COALESCE(c.archived, 1) AS conversation_archived
                 FROM favorite_messages f
                 LEFT JOIN conversations c ON c.id = f.conversation_id
-                WHERE f.message_id=?
+                WHERE f.message_id=? AND f.user_id=?
                 """,
-                (message_id,),
+                (message_id, user_id),
             ).fetchone()
             if existing:
                 return self.json({"favorite": favorite_row(existing)})
@@ -2307,9 +2577,9 @@ class AppHandler(BaseHTTPRequestHandler):
                        c.title AS conversation_title
                 FROM messages m
                 JOIN conversations c ON c.id = m.conversation_id
-                WHERE m.id=?
+                WHERE m.id=? AND c.user_id=?
                 """,
-                (message_id,),
+                (message_id, user_id),
             ).fetchone()
             if not message:
                 return self.error(HTTPStatus.NOT_FOUND, "message not found")
@@ -2321,11 +2591,12 @@ class AppHandler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO favorite_messages
-                (id, message_id, conversation_id, conversation_title, role, content, message_created_at, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, user_id, message_id, conversation_id, conversation_title, role, content, message_created_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     favorite_id,
+                    user_id,
                     message["id"],
                     message["conversation_id"],
                     message["conversation_title"],
@@ -2342,9 +2613,9 @@ class AppHandler(BaseHTTPRequestHandler):
                        COALESCE(c.archived, 1) AS conversation_archived
                 FROM favorite_messages f
                 LEFT JOIN conversations c ON c.id = f.conversation_id
-                WHERE f.id=?
+                WHERE f.id=? AND f.user_id=?
                 """,
-                (favorite_id,),
+                (favorite_id, user_id),
             ).fetchone()
         return self.json({"favorite": favorite_row(row)}, HTTPStatus.CREATED)
 
@@ -2353,11 +2624,15 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def handle_favorite_item(self):
         favorite_id = self.favorite_id_from_path()
+        user_id = self.current_user()["id"]
         with db() as conn:
-            row = conn.execute("SELECT id FROM favorite_messages WHERE id=?", (favorite_id,)).fetchone()
+            row = conn.execute(
+                "SELECT id FROM favorite_messages WHERE id=? AND user_id=?",
+                (favorite_id, user_id),
+            ).fetchone()
             if not row:
                 return self.error(HTTPStatus.NOT_FOUND, "favorite not found")
-            conn.execute("DELETE FROM favorite_messages WHERE id=?", (favorite_id,))
+            conn.execute("DELETE FROM favorite_messages WHERE id=? AND user_id=?", (favorite_id, user_id))
         return self.json({"ok": True})
 
     def handle_favorite_by_message(self):
@@ -2367,11 +2642,17 @@ class AppHandler(BaseHTTPRequestHandler):
             message_id = 0
         if message_id <= 0:
             return self.error(HTTPStatus.BAD_REQUEST, "message_id required")
+        user_id = self.current_user()["id"]
         with db() as conn:
-            conn.execute("DELETE FROM favorite_messages WHERE message_id=?", (message_id,))
+            conn.execute(
+                "DELETE FROM favorite_messages WHERE message_id=? AND user_id=?",
+                (message_id, user_id),
+            )
         return self.json({"ok": True})
 
     def handle_conversations(self):
+        user = self.current_user()
+        user_id = user["id"]
         if self.command == "GET":
             with db() as conn:
                 rows = conn.execute(
@@ -2379,10 +2660,11 @@ class AppHandler(BaseHTTPRequestHandler):
                     SELECT c.*, m.name AS model_name, m.model AS model
                     FROM conversations c
                     JOIN models m ON m.id = c.model_id
-                    WHERE c.archived=0
+                    WHERE c.archived=0 AND c.user_id=?
                     ORDER BY c.updated_at DESC
                     LIMIT 200
-                    """
+                    """,
+                    (user_id,),
                 ).fetchall()
             return self.json({"conversations": [conversation_row(row) for row in rows]})
 
@@ -2403,18 +2685,18 @@ class AppHandler(BaseHTTPRequestHandler):
             ts = now()
             conn.execute(
                 """
-                INSERT INTO conversations(id, title, model_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO conversations(id, user_id, title, model_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (conversation_id, title, model_id, ts, ts),
+                (conversation_id, user_id, title, model_id, ts, ts),
             )
             row = conn.execute(
                 """
                 SELECT c.*, m.name AS model_name, m.model AS model
                 FROM conversations c JOIN models m ON m.id=c.model_id
-                WHERE c.id=?
+                WHERE c.id=? AND c.user_id=?
                 """,
-                (conversation_id,),
+                (conversation_id, user_id),
             ).fetchone()
         return self.json({"conversation": conversation_row(row)}, HTTPStatus.CREATED)
 
@@ -2426,18 +2708,19 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def handle_conversation_item(self):
         conversation_id = self.conversation_id_from_path()
+        user_id = self.current_user()["id"]
         with db() as conn:
             row = conn.execute(
-                "SELECT * FROM conversations WHERE id=? AND archived=0",
-                (conversation_id,),
+                "SELECT * FROM conversations WHERE id=? AND user_id=? AND archived=0",
+                (conversation_id, user_id),
             ).fetchone()
             if not row:
                 return self.error(HTTPStatus.NOT_FOUND, "conversation not found")
 
             if self.command == "DELETE":
                 conn.execute(
-                    "UPDATE conversations SET archived=1, updated_at=? WHERE id=?",
-                    (now(), conversation_id),
+                    "UPDATE conversations SET archived=1, updated_at=? WHERE id=? AND user_id=?",
+                    (now(), conversation_id, user_id),
                 )
                 return self.json({"ok": True})
 
@@ -2447,17 +2730,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
             title = str(data.get("title") or row["title"]).strip()[:80] or row["title"]
             conn.execute(
-                "UPDATE conversations SET title=?, updated_at=? WHERE id=?",
-                (title, now(), conversation_id),
+                "UPDATE conversations SET title=?, updated_at=? WHERE id=? AND user_id=?",
+                (title, now(), conversation_id, user_id),
             )
         return self.json({"ok": True})
 
     def handle_messages(self):
         conversation_id = self.conversation_id_from_path()
+        user_id = self.current_user()["id"]
         with db() as conn:
             row = conn.execute(
-                "SELECT id FROM conversations WHERE id=? AND archived=0",
-                (conversation_id,),
+                "SELECT id FROM conversations WHERE id=? AND user_id=? AND archived=0",
+                (conversation_id, user_id),
             ).fetchone()
             if not row:
                 return self.error(HTTPStatus.NOT_FOUND, "conversation not found")
@@ -2467,31 +2751,31 @@ class AppHandler(BaseHTTPRequestHandler):
                        prompt_tokens, completion_tokens, total_tokens,
                        created_at
                 FROM messages
-                WHERE conversation_id=?
+                WHERE conversation_id=? AND user_id=?
                 ORDER BY id ASC
                 """,
-                (conversation_id,),
+                (conversation_id, user_id),
             ).fetchall()
             sources = conn.execute(
                 """
                 SELECT message_id, title, url, snippet, position
                 FROM message_sources
                 WHERE message_id IN (
-                  SELECT id FROM messages WHERE conversation_id=?
+                  SELECT id FROM messages WHERE conversation_id=? AND user_id=?
                 )
                 ORDER BY message_id ASC, position ASC
                 """,
-                (conversation_id,),
+                (conversation_id, user_id),
             ).fetchall()
             favorites = conn.execute(
                 """
                 SELECT id, message_id
                 FROM favorite_messages
                 WHERE message_id IN (
-                  SELECT id FROM messages WHERE conversation_id=?
+                  SELECT id FROM messages WHERE conversation_id=? AND user_id=?
                 )
                 """,
-                (conversation_id,),
+                (conversation_id, user_id),
             ).fetchall()
         sources_by_message = {}
         for source in sources:
@@ -2524,6 +2808,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def handle_send_message(self):
         conversation_id = self.conversation_id_from_path()
+        user_id = self.current_user()["id"]
         try:
             data = self.read_body(limit=2 * 1024 * 1024)
         except Exception:
@@ -2541,9 +2826,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 """
                 SELECT c.*, m.name AS model_name, m.base_url, m.api_key, m.model, m.system_prompt, m.enabled
                 FROM conversations c JOIN models m ON m.id=c.model_id
-                WHERE c.id=? AND c.archived=0
+                WHERE c.id=? AND c.user_id=? AND c.archived=0
                 """,
-                (conversation_id,),
+                (conversation_id, user_id),
             ).fetchone()
             if not convo:
                 return self.error(HTTPStatus.NOT_FOUND, "conversation not found")
@@ -2573,29 +2858,29 @@ class AppHandler(BaseHTTPRequestHandler):
 
             ts = now()
             conn.execute(
-                "INSERT INTO messages(conversation_id, role, content, created_at) VALUES (?, 'user', ?, ?)",
-                (conversation_id, content, ts),
+                "INSERT INTO messages(user_id, conversation_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)",
+                (user_id, conversation_id, content, ts),
             )
             if convo["title"] == "新对话":
                 title = content.replace("\n", " ")[:28] or "新对话"
                 conn.execute(
-                    "UPDATE conversations SET title=?, updated_at=? WHERE id=?",
-                    (title, ts, conversation_id),
+                    "UPDATE conversations SET title=?, updated_at=? WHERE id=? AND user_id=?",
+                    (title, ts, conversation_id, user_id),
                 )
             else:
                 conn.execute(
-                    "UPDATE conversations SET updated_at=? WHERE id=?",
-                    (ts, conversation_id),
+                    "UPDATE conversations SET updated_at=? WHERE id=? AND user_id=?",
+                    (ts, conversation_id, user_id),
                 )
             history = conn.execute(
                 """
                 SELECT role, content
                 FROM messages
-                WHERE conversation_id=?
+                WHERE conversation_id=? AND user_id=?
                 ORDER BY id ASC
                 LIMIT 80
                 """,
-                (conversation_id,),
+                (conversation_id, user_id),
             ).fetchall()
 
         def make_payload(results, include_usage=True):
@@ -2806,12 +3091,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 cursor = conn.execute(
                     """
                     INSERT INTO messages(
-                      conversation_id, role, content, reasoning_content,
+                      user_id, conversation_id, role, content, reasoning_content,
                       prompt_tokens, completion_tokens, total_tokens, created_at
                     )
-                    VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)
                     """,
                     (
+                        user_id,
                         conversation_id,
                         assistant_text,
                         reasoning_text,
@@ -2838,8 +3124,8 @@ class AppHandler(BaseHTTPRequestHandler):
                         ),
                     )
                 conn.execute(
-                    "UPDATE conversations SET updated_at=? WHERE id=?",
-                    (now(), conversation_id),
+                    "UPDATE conversations SET updated_at=? WHERE id=? AND user_id=?",
+                    (now(), conversation_id, user_id),
                 )
             saved_event = {
                 "type": "message_saved",
@@ -2877,7 +3163,7 @@ def parse_listen(value):
 
 def main():
     secrets_data = ensure_secrets()
-    init_db()
+    init_db(secrets_data)
     address = parse_listen(LISTEN)
     server = AIPlatformServer(address, AppHandler, secrets_data)
     print(f"ai-platform listening on {LISTEN}")
@@ -5478,13 +5764,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.3.7</p>
+        <p class="app-version">v2.4.0</p>
       </div>
-      <label>请输入家庭密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入家庭密码"></label>
+	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
+	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.3.7</span>
+        <span>v2.4.0</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -5496,8 +5783,8 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.3.7</span></h1>
-            <span id="health">连接中</span>
+            <h1>AI槑槑 <span class="app-version">v2.4.0</span></h1>
+	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
         <button class="icon mobile-only" id="closeSide" title="关闭">×</button>
@@ -5514,7 +5801,7 @@ INDEX_HTML = r'''<!doctype html>
         <button id="openSettings">模型管理</button>
         <button id="logout">退出</button>
         <footer class="site-icp side-icp">
-          <span>v2.3.7</span>
+          <span>v2.4.0</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -5692,7 +5979,7 @@ INDEX_HTML = r'''<!doctype html>
       <button class="icon" id="closeSettings" title="关闭">×</button>
     </div>
     <div class="drawer-body">
-	      <section class="panel">
+      <section class="panel">
 	        <h2>管理员</h2>
 	        <label>管理密钥<input id="adminKey" type="password" autocomplete="off"></label>
         <div class="grid2">
@@ -5700,6 +5987,26 @@ INDEX_HTML = r'''<!doctype html>
           <div style="display:flex;align-items:end"><button id="changePassword">修改登录密码</button></div>
         </div>
 	        <div class="status" id="adminStatus"></div>
+	      </section>
+
+	      <section class="panel" id="accountAdminPanel">
+	        <h2>账号管理</h2>
+	        <input id="editingUserId" type="hidden">
+	        <div class="grid2">
+	          <label>账号<input id="accountUsername" autocomplete="off" placeholder="只能用字母、数字、_、-"></label>
+	          <label>显示名<input id="accountDisplayName" placeholder="家人昵称"></label>
+	        </div>
+	        <div class="grid2">
+	          <label>角色<select id="accountRole"><option value="family">家庭成员</option><option value="admin">管理员</option></select></label>
+	          <label>状态<select id="accountActive"><option value="1">启用</option><option value="0">禁用</option></select></label>
+	        </div>
+	        <label>密码<input id="accountPassword" type="password" autocomplete="new-password" placeholder="新增账号必填，编辑时留空保持原密码"></label>
+	        <div class="library-actions">
+	          <button class="primary" id="saveAccount">保存账号</button>
+	          <button id="resetAccountForm">清空</button>
+	        </div>
+	        <div class="status" id="accountStatus"></div>
+	        <div id="accountList"></div>
 	      </section>
 
 	      <section class="panel">
@@ -5781,8 +6088,9 @@ INDEX_HTML = r'''<!doctype html>
   <script>
     const $ = (id) => document.getElementById(id);
     const state = {
-      authed: false,
-      models: [],
+	      authed: false,
+	      user: null,
+	      models: [],
 	      prompts: [],
 	      favorites: [],
 	      selectedFavoriteId: null,
@@ -5814,8 +6122,42 @@ INDEX_HTML = r'''<!doctype html>
 		      composerOpacity: localStorage.getItem("aiPlatformComposerOpacity") || "80",
 		      composerBlur: localStorage.getItem("aiPlatformComposerBlur") || "18",
 		      sidebarWidth: localStorage.getItem("aiPlatformSidebarWidth") || "322"
-		    };
-    $("adminKey").value = state.adminKey;
+	    };
+	    $("adminKey").value = state.adminKey;
+
+	    function userStorageKey(key) {
+	      return state.user?.id ? `aiPlatform:${state.user.id}:${key}` : key;
+	    }
+
+	    function getUserStorage(key, fallback = null) {
+	      const value = localStorage.getItem(userStorageKey(key));
+	      return value === null ? fallback : value;
+	    }
+
+	    function setUserStorage(key, value) {
+	      localStorage.setItem(userStorageKey(key), value);
+	    }
+
+	    function applyCurrentUser(user) {
+	      state.user = user || null;
+	      const label = $("currentUserLabel");
+	      if (label) {
+	        label.textContent = state.user ? (state.user.display_name || state.user.username) : "未登录";
+	      }
+	    }
+
+	    function loadUserPreferences() {
+	      state.theme = getUserStorage("aiPlatformTheme", localStorage.getItem("aiPlatformTheme") || "");
+	      state.accent = getUserStorage("aiPlatformAccent", localStorage.getItem("aiPlatformAccent") || "pink");
+	      state.fontSize = getUserStorage("aiPlatformFontSize", localStorage.getItem("aiPlatformFontSize") || "medium");
+	      state.composerOpacity = getUserStorage("aiPlatformComposerOpacity", localStorage.getItem("aiPlatformComposerOpacity") || "80");
+	      state.composerBlur = getUserStorage("aiPlatformComposerBlur", localStorage.getItem("aiPlatformComposerBlur") || "18");
+	      state.sidebarWidth = getUserStorage("aiPlatformSidebarWidth", localStorage.getItem("aiPlatformSidebarWidth") || "322");
+	      applyInterfaceSettings({ save: false });
+	      applyFontSize(state.fontSize);
+	      applyTheme(preferredTheme());
+	      applySidebarWidth(state.sidebarWidth, false);
+	    }
 
     const accentPresets = {
       pink: {
@@ -6018,9 +6360,9 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     function applyAccent(value = state.accent || "pink") {
-      const accent = normalizeAccent(value);
-      state.accent = accent;
-      localStorage.setItem("aiPlatformAccent", accent);
+	      const accent = normalizeAccent(value);
+	      state.accent = accent;
+	      setUserStorage("aiPlatformAccent", accent);
       const values = accentValues(accent, preferredTheme());
       const root = document.documentElement;
       root.style.setProperty("--accent", values.accent);
@@ -6043,9 +6385,9 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     function applyTheme(theme = preferredTheme()) {
-      state.theme = theme;
-      document.documentElement.dataset.theme = theme;
-      localStorage.setItem("aiPlatformTheme", theme);
+	      state.theme = theme;
+	      document.documentElement.dataset.theme = theme;
+	      setUserStorage("aiPlatformTheme", theme);
       const button = $("themeToggle");
       if (button) {
         button.textContent = theme === "dark" ? "☀" : "◐";
@@ -6075,10 +6417,10 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     function applyFontSize(value = state.fontSize || "medium") {
-      const size = normalizeFontSize(value);
-      state.fontSize = size;
-      document.documentElement.dataset.fontSize = size;
-      localStorage.setItem("aiPlatformFontSize", size);
+	      const size = normalizeFontSize(value);
+	      state.fontSize = size;
+	      document.documentElement.dataset.fontSize = size;
+	      setUserStorage("aiPlatformFontSize", size);
       const button = $("fontSizeToggle");
       if (button) {
         button.textContent = fontSizeLabels[size];
@@ -6138,8 +6480,8 @@ INDEX_HTML = r'''<!doctype html>
 	      root.style.setProperty("--composer-glass-blur", blur + "px");
 	      root.style.setProperty("--composer-field-blur", Math.round(blur * .67) + "px");
 	      if (options.save !== false) {
-	        localStorage.setItem("aiPlatformComposerOpacity", String(opacity));
-	        localStorage.setItem("aiPlatformComposerBlur", String(blur));
+		        setUserStorage("aiPlatformComposerOpacity", String(opacity));
+		        setUserStorage("aiPlatformComposerBlur", String(blur));
 	      }
 	      updateInterfaceControls(opacity, blur);
 	    }
@@ -6253,8 +6595,12 @@ INDEX_HTML = r'''<!doctype html>
     function friendlyError(value, fallback = "刚刚没处理成功，可以稍后再试一次。") {
       const text = String(value?.message || value || "").trim();
       if (!text) return fallback;
-      if (/unauthorized|未登录|登录已过期/i.test(text)) return "登录状态过期了，请重新登录。";
-      if (/password incorrect|密码不对/i.test(text)) return "密码不对，再检查一下。";
+	      if (/unauthorized|未登录|登录已过期/i.test(text)) return "登录状态过期了，请重新登录。";
+	      if (/password incorrect|密码不对/i.test(text)) return "密码不对，再检查一下。";
+	      if (/username and password/i.test(text)) return "请输入账号和密码。";
+	      if (/username already exists/i.test(text)) return "这个账号已经存在了。";
+	      if (/username invalid/i.test(text)) return "账号只能使用 2-32 位字母、数字、下划线或短横线。";
+	      if (/at least one active admin/i.test(text)) return "至少要保留一个可用的管理员账号。";
       if (/model not found|先选择模型|暂无可用模型/i.test(text)) return "还没有可用模型，请先在模型管理里配置。";
       if (/title and content are required/i.test(text)) return "标题和内容都要填写。";
       if (/content too long/i.test(text)) return "内容太长了，稍微精简一下再保存。";
@@ -6289,27 +6635,32 @@ INDEX_HTML = r'''<!doctype html>
 
     async function api(path, options = {}) {
       const res = await request(path, options);
-      if (res.status === 401) {
-        state.authed = false;
-        showLogin();
-        throw new Error("未登录或登录已过期");
-      }
+	      if (res.status === 401) {
+	        state.authed = false;
+	        applyCurrentUser(null);
+	        showLogin();
+	        throw new Error("未登录或登录已过期");
+	      }
       return res;
     }
 
-    async function adminApi(path, options = {}) {
-      state.adminKey = $("adminKey").value.trim();
-      localStorage.setItem("aiPlatformAdminKey", state.adminKey);
-      const headers = new Headers(options.headers || {});
-      headers.set("X-Admin-Key", state.adminKey);
-      return request(path, { ...options, headers });
-    }
+	    async function adminApi(path, options = {}) {
+	      state.adminKey = $("adminKey").value.trim();
+	      localStorage.setItem("aiPlatformAdminKey", state.adminKey);
+	      const headers = new Headers(options.headers || {});
+	      headers.set("X-Admin-Key", state.adminKey);
+	      return request(path, { ...options, headers });
+	    }
 
-    function showLogin() {
-      $("loginView").style.display = "grid";
-      $("appView").style.display = "none";
-      $("loginPassword").focus();
-    }
+	    function hasAdminAccess() {
+	      return state.user?.role === "admin" || Boolean($("adminKey").value.trim());
+	    }
+
+	    function showLogin() {
+	      $("loginView").style.display = "grid";
+	      $("appView").style.display = "none";
+	      $("loginUsername").focus();
+	    }
 
     function showApp() {
       $("loginView").style.display = "none";
@@ -6356,7 +6707,7 @@ INDEX_HTML = r'''<!doctype html>
 	      const width = normalizeSidebarWidth(value);
 	      state.sidebarWidth = String(width);
 	      document.documentElement.style.setProperty("--sidebar-width", width + "px");
-	      if (save) localStorage.setItem("aiPlatformSidebarWidth", String(width));
+		      if (save) setUserStorage("aiPlatformSidebarWidth", String(width));
 	    }
 
 	    function startSidebarResize(event) {
@@ -6403,14 +6754,16 @@ INDEX_HTML = r'''<!doctype html>
       return Date.now() - state.lastCompositionEndAt < 160;
     }
 
-    async function bootstrap() {
-      try {
-        const me = await request("/api/me");
-        const data = await me.json();
-        if (!data.authenticated) return showLogin();
-	        state.authed = true;
-	        showApp();
-	        await Promise.all([loadModels(), loadSearchConfig(), loadPrompts(), loadFavorites(), loadConversations(), health()]);
+	    async function bootstrap() {
+	      try {
+	        const me = await request("/api/me");
+	        const data = await me.json();
+	        if (!data.authenticated) return showLogin();
+	        applyCurrentUser(data.user || null);
+	        loadUserPreferences();
+		        state.authed = true;
+		        showApp();
+		        await Promise.all([loadModels(), loadSearchConfig(), loadPrompts(), loadFavorites(), loadConversations(), health()]);
 	      } catch {
 	        showLogin();
 	      }
@@ -6426,30 +6779,35 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     async function login(event) {
-      event.preventDefault();
-      setStatus("loginStatus", "");
-      const password = $("loginPassword").value;
-      let res;
-      try {
-        res = await request("/api/login", { method: "POST", body: JSON.stringify({ password }) });
+	      event.preventDefault();
+	      setStatus("loginStatus", "");
+	      const username = $("loginUsername").value.trim();
+	      const password = $("loginPassword").value;
+	      let res;
+	      try {
+	        res = await request("/api/login", { method: "POST", body: JSON.stringify({ username, password }) });
       } catch (err) {
         setStatus("loginStatus", friendlyError(err, "现在连不上服务，稍后再试一下。"), "err");
         return;
       }
-      if (!res.ok) {
-        setStatus("loginStatus", await readError(res, "密码不对，再检查一下。"), "err");
-        return;
-      }
-	      $("loginPassword").value = "";
-	      state.authed = true;
+	      if (!res.ok) {
+		setStatus("loginStatus", await readError(res, "密码不对，再检查一下。"), "err");
+		return;
+	      }
+	      const data = await res.json();
+		      $("loginPassword").value = "";
+		      applyCurrentUser(data.user || null);
+		      loadUserPreferences();
+		      state.authed = true;
 	      showApp();
 	      await Promise.all([loadModels(), loadSearchConfig(), loadPrompts(), loadFavorites(), loadConversations(), health()]);
 	    }
 
     async function logout() {
       await request("/api/logout", { method: "POST" });
-      state.authed = false;
-      state.currentConversation = null;
+	      state.authed = false;
+	      applyCurrentUser(null);
+	      state.currentConversation = null;
       state.messages = [];
       showLogin();
     }
@@ -6503,7 +6861,7 @@ INDEX_HTML = r'''<!doctype html>
 	        if (text) text.textContent = "自动联网";
 	        label.title = "时效性问题会自动搜索；勾选后可强制本条联网";
 	      } else {
-	        const saved = localStorage.getItem("aiPlatformWebSearch");
+		        const saved = getUserStorage("aiPlatformWebSearch", localStorage.getItem("aiPlatformWebSearch"));
 	        toggle.checked = saved === null ? true : saved === "1";
 	        if (text) text.textContent = "联网搜索";
 	        label.title = "使用 " + config.provider + " 联网搜索";
@@ -8044,13 +8402,14 @@ INDEX_HTML = r'''<!doctype html>
 	      if (!state.currentConversation) renderEmpty();
 	    }
 
-	    function openSettings() {
+		    function openSettings() {
 	      $("sidebar").classList.remove("show");
 	      document.body.classList.remove("sidebar-open");
 	      $("drawerMask").classList.add("show");
 	      $("settingsDrawer").classList.add("show");
 	      loadAdminModels();
 	      loadAdminSearch();
+	      loadAdminUsers();
 	    }
 
     function closeSettings() {
@@ -8058,11 +8417,12 @@ INDEX_HTML = r'''<!doctype html>
       $("settingsDrawer").classList.remove("show");
     }
 
-	    async function loadAdminModels() {
-	      if (!$("adminKey").value.trim()) {
-	        setStatus("adminStatus", "填入管理密钥后加载模型", "");
-	        return;
-      }
+		    async function loadAdminModels() {
+		      if (!hasAdminAccess()) {
+		        setStatus("adminStatus", "管理员账号或管理密钥可加载模型", "");
+		        $("adminModelList").innerHTML = "";
+		        return;
+	      }
       const res = await adminApi("/api/admin/models");
       if (!res.ok) {
         setStatus("adminStatus", "管理密钥无效", "err");
@@ -8073,10 +8433,10 @@ INDEX_HTML = r'''<!doctype html>
 	      renderAdminModels(data.models || []);
 	    }
 
-	    async function loadAdminSearch() {
-	      if (!$("adminKey").value.trim()) {
-	        setStatus("searchStatus", "填入管理密钥后加载搜索配置", "");
-	        return;
+		    async function loadAdminSearch() {
+		      if (!hasAdminAccess()) {
+		        setStatus("searchStatus", "管理员账号或管理密钥可加载搜索配置", "");
+		        return;
 	      }
 	      const res = await adminApi("/api/admin/search");
 	      if (!res.ok) {
@@ -8211,21 +8571,116 @@ INDEX_HTML = r'''<!doctype html>
       await loadModels();
     }
 
-    async function changePassword() {
-      const password = $("familyPassword").value;
-      const res = await adminApi("/api/admin/password", {
-        method: "POST",
-        body: JSON.stringify({ password })
+	    async function changePassword() {
+	      const password = $("familyPassword").value;
+	      const res = await adminApi("/api/admin/password", {
+	        method: "POST",
+	        body: JSON.stringify({ password })
       });
       if (!res.ok) {
         setStatus("adminStatus", await readError(res, "密码修改失败，请确认新密码至少 8 位。"), "err");
         return;
       }
-      $("familyPassword").value = "";
-      setStatus("adminStatus", "登录密码已修改，需要重新登录", "ok");
-    }
+	      $("familyPassword").value = "";
+	      setStatus("adminStatus", "登录密码已修改，需要重新登录", "ok");
+	    }
 
-    function openSidebar() {
+	    async function loadAdminUsers() {
+	      const box = $("accountList");
+	      if (!hasAdminAccess()) {
+	        box.innerHTML = '<div class="status">管理员账号或管理密钥可管理家庭账号。</div>';
+	        setStatus("accountStatus", "");
+	        return;
+	      }
+	      const res = await adminApi("/api/admin/users");
+	      if (!res.ok) {
+	        box.innerHTML = "";
+	        setStatus("accountStatus", await readError(res, "账号列表加载失败。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      renderAdminUsers(data.users || []);
+	      setStatus("accountStatus", "");
+	    }
+
+	    function renderAdminUsers(users) {
+	      const box = $("accountList");
+	      box.innerHTML = "";
+	      if (!users.length) {
+	        box.innerHTML = '<div class="status">暂无账号。</div>';
+	        return;
+	      }
+	      for (const user of users) {
+	        const row = document.createElement("div");
+	        row.className = "model-row";
+	        const info = document.createElement("div");
+	        info.innerHTML = `<strong></strong><span></span>`;
+	        info.querySelector("strong").textContent = (user.display_name || user.username) + (user.is_active ? "" : "（已禁用）");
+	        info.querySelector("span").textContent = user.username + " · " + (user.role === "admin" ? "管理员" : "家庭成员") + " · " + formatTime(user.created_at);
+	        const actions = document.createElement("div");
+	        actions.style.display = "flex";
+	        actions.style.gap = "6px";
+	        const edit = document.createElement("button");
+	        edit.type = "button";
+	        edit.textContent = "编辑";
+	        edit.addEventListener("click", () => fillAccountForm(user));
+	        actions.append(edit);
+	        row.append(info, actions);
+	        box.appendChild(row);
+	      }
+	    }
+
+	    function fillAccountForm(user) {
+	      $("editingUserId").value = user.id || "";
+	      $("accountUsername").value = user.username || "";
+	      $("accountUsername").disabled = true;
+	      $("accountDisplayName").value = user.display_name || "";
+	      $("accountRole").value = user.role || "family";
+	      $("accountActive").value = user.is_active ? "1" : "0";
+	      $("accountPassword").value = "";
+	      $("accountPassword").placeholder = "留空保持原密码";
+	      setStatus("accountStatus", "正在编辑：" + (user.display_name || user.username), "");
+	    }
+
+	    function resetAccountForm() {
+	      $("editingUserId").value = "";
+	      $("accountUsername").value = "";
+	      $("accountUsername").disabled = false;
+	      $("accountDisplayName").value = "";
+	      $("accountRole").value = "family";
+	      $("accountActive").value = "1";
+	      $("accountPassword").value = "";
+	      $("accountPassword").placeholder = "新增账号必填，编辑时留空保持原密码";
+	      setStatus("accountStatus", "");
+	    }
+
+	    async function saveAccount() {
+	      if (!hasAdminAccess()) {
+	        setStatus("accountStatus", "需要管理员账号或管理密钥。", "err");
+	        return;
+	      }
+	      const id = $("editingUserId").value;
+	      const body = {
+	        username: $("accountUsername").value.trim(),
+	        display_name: $("accountDisplayName").value.trim(),
+	        role: $("accountRole").value,
+	        is_active: $("accountActive").value === "1",
+	        password: $("accountPassword").value
+	      };
+	      const res = await adminApi(id ? `/api/admin/users/${id}` : "/api/admin/users", {
+	        method: id ? "PUT" : "POST",
+	        body: JSON.stringify(body)
+	      });
+	      if (!res.ok) {
+	        setStatus("accountStatus", await readError(res, "账号保存失败，请检查账号和密码。"), "err");
+	        return;
+	      }
+	      resetAccountForm();
+	      await loadAdminUsers();
+	      setStatus("accountStatus", "账号已保存", "ok");
+	    }
+
+	    function openSidebar() {
       $("sidebar").classList.add("show");
       $("drawerMask").classList.add("show");
       document.body.classList.add("sidebar-open");
@@ -8335,18 +8790,21 @@ INDEX_HTML = r'''<!doctype html>
     $("openSettings").addEventListener("click", openSettings);
     $("closeSettings").addEventListener("click", closeSettings);
     $("drawerMask").addEventListener("click", () => { closeSettings(); closeSidebar(); });
-    $("saveModel").addEventListener("click", saveModel);
-    $("resetModelForm").addEventListener("click", resetModelForm);
-	    $("changePassword").addEventListener("click", changePassword);
-	    $("adminKey").addEventListener("change", () => {
-	      loadAdminModels();
-	      loadAdminSearch();
-	    });
+	    $("saveModel").addEventListener("click", saveModel);
+	    $("resetModelForm").addEventListener("click", resetModelForm);
+		    $("changePassword").addEventListener("click", changePassword);
+		    $("saveAccount").addEventListener("click", saveAccount);
+		    $("resetAccountForm").addEventListener("click", resetAccountForm);
+		    $("adminKey").addEventListener("change", () => {
+		      loadAdminModels();
+		      loadAdminSearch();
+		      loadAdminUsers();
+		    });
 	    $("openSide").addEventListener("click", openSidebar);
 	    $("closeSide").addEventListener("click", closeSidebar);
 	    $("webSearchToggle").addEventListener("change", () => {
 	      if ((state.searchConfig?.mode || "auto") === "manual") {
-	        localStorage.setItem("aiPlatformWebSearch", $("webSearchToggle").checked ? "1" : "0");
+		        setUserStorage("aiPlatformWebSearch", $("webSearchToggle").checked ? "1" : "0");
 	      }
 	    });
 	    $("saveSearch").addEventListener("click", () => saveSearchConfig(false));
