@@ -68,6 +68,27 @@ CAT_OSS_PUBLIC_BASE
 CAT_OSS_DIR
 ```
 
+AI槑槑音视频分析可复用小猫书 OSS，默认上传到 `tingwu/` 目录；通义听悟配置通过环境变量或 `secrets.json` 的 `tingwu` / `media_oss` 节点提供：
+
+```text
+TINGWU_APP_KEY
+TINGWU_REGION
+TINGWU_ENDPOINT
+TINGWU_ACCESS_KEY_ID
+TINGWU_ACCESS_KEY_SECRET
+
+MEDIA_OSS_BUCKET
+MEDIA_OSS_REGION
+MEDIA_OSS_ENDPOINT
+MEDIA_OSS_ACCESS_KEY_ID
+MEDIA_OSS_ACCESS_KEY_SECRET
+MEDIA_OSS_PUBLIC_BASE
+MEDIA_OSS_DIR
+MEDIA_MAX_UPLOAD_MB
+```
+
+如果不单独设置 `MEDIA_OSS_*`，会优先复用 `CAT_OSS_*`，仅目录默认改为 `tingwu`。
+
 常用部署流程：
 
 ```bash
