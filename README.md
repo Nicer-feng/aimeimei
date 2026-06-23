@@ -2,16 +2,17 @@
 
 AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实现。项目保持单文件应用形态，无 Docker、无前端框架、无外部 Python 依赖。
 
-当前版本：`2.3.5`
+当前版本：`2.3.6`
 
 ## 目录说明
 
 - `app.py`：主应用文件，包含后端接口、SQLite 迁移逻辑和前端页面。
 - `index.html`：槑槑小记个人首页，当前可通过 `/xiaoji` 预览，备案通过后可作为主域名首页。
-- `cat.html`：槑槑相册前端页面，当前挂载在 `/cat`。
+- `cat.html`：小猫书前端页面，当前挂载在 `/cat`。
 - `app.server.py`：服务器旧版/备份应用文件，保留用于对照。
 - `ai-platform.service`：systemd 服务配置示例。
-- `deploy/nginx/aimeimei.conf`：域名访问用的 Nginx 配置示例，`feng.asia` 和 `www.feng.asia` 首页指向槑槑小记，AI 平台挂载在 `/ai`，槑槑相册挂载在 `/cat`。
+- `deploy/nginx/aimeimei.conf`：域名访问用的 Nginx 配置示例，`feng.asia` 和 `www.feng.asia` 首页指向槑槑小记，AI 平台挂载在 `/ai`，小猫书挂载在 `/cat`。
+- `deploy/caddy/Caddyfile`：Caddy HTTPS 配置示例，自动申请证书并将 `/cat/` 反向代理到本机应用。
 - `verify.sh`：线上健康检查和基础接口验证脚本。
 - `res/`：项目资源文件，包括无文字槑槑头像、登录插画、空状态插画、favicon 和原始猫咪照片。
 - `VERSION`：当前项目版本号。
@@ -55,7 +56,7 @@ ai-platform
 /var/www/aimeimei
 ```
 
-槑槑相册 OSS 上传配置通过环境变量或 `secrets.json` 的 `cat_oss` 节点提供：
+小猫书 OSS 上传配置通过环境变量或 `secrets.json` 的 `cat_oss` 节点提供：
 
 ```text
 CAT_OSS_BUCKET

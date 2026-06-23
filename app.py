@@ -1005,6 +1005,8 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = urlparse(self.path).path
+        if path.startswith("/cat/api/posts/"):
+            return self.require_cat_user(self.handle_cat_post_delete)
         if path.startswith("/cat/api/cats/"):
             return self.require_cat_user(self.handle_cat_item)
         if path.startswith("/api/admin/models/"):
@@ -1179,7 +1181,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def require_cat_user(self, handler):
         if not self.current_cat_user():
-            return self.error(HTTPStatus.UNAUTHORIZED, "请先登录槑槑相册")
+            return self.error(HTTPStatus.UNAUTHORIZED, "请先登录小猫书")
         return handler()
 
     def require_cat_admin(self, handler):
@@ -1446,7 +1448,7 @@ class AppHandler(BaseHTTPRequestHandler):
             where = "EXISTS (SELECT 1 FROM cat_posts p WHERE p.cat_id=c.id AND p.status='published')"
             if scope == "mine":
                 if not current:
-                    return self.error(HTTPStatus.UNAUTHORIZED, "请先登录槑槑相册")
+                    return self.error(HTTPStatus.UNAUTHORIZED, "请先登录小猫书")
                 where = "c.owner_user_id=?"
                 values.append(current["id"])
             with db() as conn:
@@ -1879,6 +1881,24 @@ class AppHandler(BaseHTTPRequestHandler):
         if action == "comments":
             return self.handle_cat_post_comment(post_id)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
+
+    def handle_cat_post_delete(self):
+        parts = urlparse(self.path).path.strip("/").split("/")
+        post_id = parts[3] if len(parts) >= 4 else ""
+        if len(parts) != 4:
+            return self.error(HTTPStatus.NOT_FOUND, "not found")
+        user = self.current_cat_user()
+        with db() as conn:
+            post = conn.execute(
+                "SELECT id, user_id, title FROM cat_posts WHERE id=? AND status='published'",
+                (post_id,),
+            ).fetchone()
+            if not post:
+                return self.error(HTTPStatus.NOT_FOUND, "这条动态不存在")
+            if user["role"] != "admin" and post["user_id"] != user["id"]:
+                return self.error(HTTPStatus.FORBIDDEN, "只能删除自己发布的动态")
+            conn.execute("DELETE FROM cat_posts WHERE id=?", (post_id,))
+        return self.json({"ok": True, "id": post_id})
 
     def handle_cat_post_like(self, post_id):
         try:
@@ -5424,6 +5444,7 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
+        <p class="app-version">v2.3.6</p>
       </div>
       <label>请输入家庭密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入家庭密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
@@ -5437,7 +5458,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.3.5</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.3.6</span></h1>
             <span id="health">连接中</span>
           </div>
         </div>

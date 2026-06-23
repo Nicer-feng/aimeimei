@@ -8,7 +8,7 @@ Type=simple
 User=ai-platform
 Group=ai-platform
 WorkingDirectory=/opt/ai-platform
-Environment=AI_PLATFORM_LISTEN=:8080
+Environment=AI_PLATFORM_LISTEN=127.0.0.1:8000
 Environment=AI_PLATFORM_DATA=/opt/ai-platform
 ExecStart=/usr/bin/python3 /opt/ai-platform/app.py
 Restart=always

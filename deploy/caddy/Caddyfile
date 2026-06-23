@@ -1,0 +1,39 @@
+feng.asia, www.feng.asia {
+	encode gzip
+	root * /var/www/aimeimei
+
+	handle /cat {
+		redir /cat/ 308
+	}
+
+	# /cat/ 保留原始路径前缀，后端按 /cat/ 路由处理。
+	handle /cat/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle /ai {
+		redir /ai/ 308
+	}
+
+	# AI 主应用在 Python 进程里挂载在 /，这里去掉 /ai/ 前缀。
+	handle_path /ai/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle /res/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle /favicon.ico {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}
