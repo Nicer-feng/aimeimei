@@ -3893,14 +3893,16 @@ INDEX_HTML = r'''<!doctype html>
       padding-left: 24px;
     }
     .markdown li { margin: 4px 0; }
-    .markdown blockquote {
-      margin: 10px 0;
-      padding: 10px 12px;
-      border-left: 3px solid var(--accent);
-      background: var(--surface-soft);
-      color: var(--muted);
-      border-radius: 0 8px 8px 0;
-    }
+	    .markdown blockquote {
+	      margin: 10px 0;
+	      padding: 10px 12px;
+	      border-left: 3px solid var(--accent);
+	      background: var(--surface-soft);
+	      color: var(--muted);
+	      border-radius: 0 8px 8px 0;
+	      overflow-x: auto;
+	      -webkit-overflow-scrolling: touch;
+	    }
     .markdown code {
       border: 1px solid var(--line);
       background: var(--surface-soft);
@@ -3908,14 +3910,33 @@ INDEX_HTML = r'''<!doctype html>
       padding: 1px 5px;
       font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
-    .code-block {
-      margin: 12px 0 14px;
-      overflow: hidden;
+	    .code-block {
+	      margin: 12px 0 14px;
+	      overflow: hidden;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--code-bg);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
-    }
+	      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+	    }
+	    .markdown-scroll,
+	    .table-wrapper,
+	    .media-wrapper {
+	      max-width: 100%;
+	      overflow-x: auto;
+	      overflow-y: hidden;
+	      -webkit-overflow-scrolling: touch;
+	      overscroll-behavior-x: contain;
+	    }
+	    .media-wrapper {
+	      display: block;
+	      margin: 12px 0 14px;
+	    }
+	    .markdown img {
+	      display: block;
+	      max-width: none;
+	      height: auto;
+	      border-radius: 12px;
+	    }
     .code-head {
       display: flex;
       justify-content: space-between;
@@ -3951,25 +3972,43 @@ INDEX_HTML = r'''<!doctype html>
       border-bottom: 1px solid var(--line-strong);
     }
     .markdown a:hover { border-bottom-color: currentColor; }
-    .markdown table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 10px 0 12px;
-      font-size: 14px;
-      display: block;
-      overflow-x: auto;
-    }
-    .markdown th,
-    .markdown td {
-      border: 1px solid var(--line);
-      padding: 8px 9px;
-      text-align: left;
-      vertical-align: top;
-    }
-    .markdown th {
-      background: var(--surface-soft);
-      font-weight: 650;
-    }
+	    .table-wrapper {
+	      position: relative;
+	      margin: 12px 0 14px;
+	      border: 1px solid var(--line);
+	      border-radius: 12px;
+	      background: var(--surface);
+	    }
+	    .table-wrapper table {
+	      width: max-content;
+	      min-width: max-content;
+	      max-width: none;
+	      border-collapse: separate;
+	      border-spacing: 0;
+	      margin: 0;
+	      font-size: 14px;
+	    }
+	    .table-wrapper th,
+	    .table-wrapper td {
+	      border: 0;
+	      border-right: 1px solid var(--line);
+	      border-bottom: 1px solid var(--line);
+	      padding: 8px 9px;
+	      text-align: left;
+	      vertical-align: top;
+	      white-space: nowrap;
+	      word-break: normal;
+	      overflow-wrap: normal;
+	    }
+	    .table-wrapper tr > :last-child { border-right: 0; }
+	    .table-wrapper tbody tr:last-child > td { border-bottom: 0; }
+	    .table-wrapper th {
+	      background: var(--surface-soft);
+	      font-weight: 650;
+	    }
+	    .table-scroll-hint {
+	      display: none;
+	    }
     .thinking {
       display: inline-flex;
       align-items: center;
@@ -4964,11 +5003,11 @@ INDEX_HTML = r'''<!doctype html>
     .markdown pre {
       padding: 18px;
     }
-    .markdown table {
-      border-radius: 12px;
-      border: 1px solid var(--line);
-      background: var(--surface);
-    }
+	    .table-wrapper {
+	      border-radius: 12px;
+	      border: 1px solid var(--line);
+	      background: var(--surface);
+	    }
     .composer {
       position: absolute;
       left: 0;
@@ -5294,12 +5333,44 @@ INDEX_HTML = r'''<!doctype html>
       .bubble.user .bubble-shell {
         max-width: 92%;
       }
-      .markdown {
-        font-size: 15px;
-      }
-      .composer-box {
-        border-radius: 24px;
-        padding: 10px;
+	      .markdown {
+	        font-size: 15px;
+	      }
+	      .table-wrapper.is-overflowing {
+	        padding-bottom: 30px;
+	      }
+	      .table-wrapper.is-overflowing::after {
+	        content: "";
+	        position: absolute;
+	        top: 0;
+	        right: 0;
+	        bottom: 30px;
+	        width: 42px;
+	        pointer-events: none;
+	        background: linear-gradient(90deg, transparent, var(--surface));
+	      }
+	      .table-wrapper.is-overflowing .table-scroll-hint {
+	        display: inline-flex;
+	        position: absolute;
+	        right: 9px;
+	        bottom: 6px;
+	        z-index: 1;
+	        padding: 3px 8px;
+	        border-radius: 999px;
+	        border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+	        background: color-mix(in srgb, var(--surface) 86%, transparent);
+	        color: var(--muted);
+	        font-size: 11px;
+	        line-height: 1.4;
+	        box-shadow: 0 6px 16px rgba(73, 54, 35, .08);
+	        transition: opacity .18s ease;
+	      }
+	      .table-wrapper.is-scrolled .table-scroll-hint {
+	        opacity: 0;
+	      }
+	      .composer-box {
+	        border-radius: 24px;
+	        padding: 10px;
       }
       .composer-chip-row {
         overflow-x: auto;
@@ -5764,14 +5835,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.4.0</p>
+        <p class="app-version">v2.4.1</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.4.0</span>
+        <span>v2.4.1</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -5783,7 +5854,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.4.0</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.4.1</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -5801,7 +5872,7 @@ INDEX_HTML = r'''<!doctype html>
         <button id="openSettings">模型管理</button>
         <button id="logout">退出</button>
         <footer class="site-icp side-icp">
-          <span>v2.4.0</span>
+          <span>v2.4.1</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -7113,6 +7184,7 @@ INDEX_HTML = r'''<!doctype html>
 	        content.className = "markdown";
 	        content.innerHTML = renderMarkdown(current.content || "");
 	        detail.append(meta, content);
+	        queueMarkdownOverflowRefresh(content);
 	      } else {
 	        state.selectedFavoriteId = null;
 	        detail.innerHTML = '<div class="favorite-detail-empty">选择一条收藏查看完整回答</div>';
@@ -7531,6 +7603,11 @@ INDEX_HTML = r'''<!doctype html>
 	        return token;
 	      });
 	      let html = escapeHTML(text);
+	      html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, href) => {
+	        const src = safeHref(href);
+	        if (src === "#") return escapeHTML(alt || "");
+	        return '<span class="media-wrapper"><img src="' + escapeHTML(src) + '" alt="' + alt + '" loading="lazy"></span>';
+	      });
 	      html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, href) => {
 	        return '<a href="' + escapeHTML(safeHref(href)) + '" target="_blank" rel="noreferrer">' + label + "</a>";
 	      });
@@ -7620,11 +7697,11 @@ INDEX_HTML = r'''<!doctype html>
 	          }
 	          i--;
 	          html.push(
-	            "<table><thead><tr>" +
+	            '<div class="table-wrapper" role="region" aria-label="表格，可左右滑动查看"><table><thead><tr>' +
 	            headers.map((cell) => "<th>" + renderInlineMarkdown(cell) + "</th>").join("") +
 	            "</tr></thead><tbody>" +
 	            rows.map((row) => "<tr>" + row.map((cell) => "<td>" + renderInlineMarkdown(cell) + "</td>").join("") + "</tr>").join("") +
-	            "</tbody></table>"
+	            '</tbody></table><span class="table-scroll-hint">← 左右滑动查看 →</span></div>'
 	          );
 	          continue;
 	        }
@@ -7671,6 +7748,26 @@ INDEX_HTML = r'''<!doctype html>
 	      return html.join("");
 	    }
 
+	    function refreshMarkdownOverflow(root = document) {
+	      const scope = root || document;
+	      scope.querySelectorAll(".table-wrapper").forEach((wrapper) => {
+	        const table = wrapper.querySelector("table");
+	        const overflowing = Boolean(table && table.scrollWidth > wrapper.clientWidth + 2);
+	        wrapper.classList.toggle("is-overflowing", overflowing);
+	        wrapper.classList.toggle("is-scrolled", wrapper.scrollLeft > 8);
+	        if (!wrapper.dataset.scrollHintBound) {
+	          wrapper.dataset.scrollHintBound = "1";
+	          wrapper.addEventListener("scroll", () => {
+	            wrapper.classList.toggle("is-scrolled", wrapper.scrollLeft > 8);
+	          }, { passive: true });
+	        }
+	      });
+	    }
+
+	    function queueMarkdownOverflowRefresh(root = document) {
+	      requestAnimationFrame(() => refreshMarkdownOverflow(root));
+	    }
+
 	    function splitThinkContent(value) {
 	      const reasoning = [];
 	      const content = String(value || "").replace(/<think>\s*([\s\S]*?)\s*<\/think>/gi, (_, text) => {
@@ -7713,6 +7810,7 @@ INDEX_HTML = r'''<!doctype html>
 	      body.hidden = !message.reasoning_open;
 	      body.innerHTML = '<div class="markdown">' + renderMarkdown(reasoningContent) + '</div>';
 	      panel.replaceChildren(toggle, body);
+	      queueMarkdownOverflowRefresh(body);
 	    }
 
 	    function sourceDomain(value) {
@@ -7955,6 +8053,7 @@ INDEX_HTML = r'''<!doctype html>
 
 	      text.className = "message-content markdown";
 	      text.innerHTML = renderMarkdown(displayContent || "");
+	      queueMarkdownOverflowRefresh(text);
 	      copy.hidden = !displayContent || message.role === "assistant";
 	      const canShowAssistantActions = message.role === "assistant" && Boolean(displayContent);
 	      const canShowUserActions = message.role === "user" && displayContent;
@@ -8824,10 +8923,11 @@ INDEX_HTML = r'''<!doctype html>
 	        setStatus("chatStatus", "已复制", "ok");
 	      }
 	    });
-		    syncViewportHeight();
-		    window.addEventListener("resize", syncViewportHeight, { passive: true });
-		    window.addEventListener("resize", () => applySidebarWidth(state.sidebarWidth, true), { passive: true });
-	    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
+			    syncViewportHeight();
+			    window.addEventListener("resize", syncViewportHeight, { passive: true });
+			    window.addEventListener("resize", () => applySidebarWidth(state.sidebarWidth, true), { passive: true });
+			    window.addEventListener("resize", () => queueMarkdownOverflowRefresh($("messages")), { passive: true });
+		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
 	    window.visualViewport?.addEventListener("scroll", syncViewportHeight, { passive: true });
 
 	    bootstrap();
