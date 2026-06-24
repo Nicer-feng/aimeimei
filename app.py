@@ -5923,14 +5923,33 @@ INDEX_HTML = r'''<!doctype html>
 	      gap: 10px;
 	      align-items: end;
 	    }
-	    .media-tabs {
-	      display: flex;
-	      gap: 8px;
-	      flex-wrap: wrap;
-	      margin-bottom: 12px;
-	    }
-	    .media-ai-panel {
-	      border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+		    .media-tabs {
+		      display: flex;
+		      gap: 8px;
+		      flex-wrap: wrap;
+		      margin-bottom: 12px;
+		    }
+		    .media-dialog-title,
+		    .media-upload-title,
+		    .media-ai-title {
+		      display: inline-flex;
+		      align-items: center;
+		      gap: 8px;
+		    }
+		    .media-dialog-title .lucide,
+		    .media-upload-title .lucide,
+		    .media-ai-title .lucide,
+		    .media-tab .lucide,
+		    .media-task-badge .lucide,
+		    .media-ai-actions .lucide,
+		    .library-actions .lucide {
+		      width: 16px;
+		      height: 16px;
+		      color: currentColor;
+		      stroke-width: 2.2;
+		    }
+		    .media-ai-panel {
+		      border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
 	      border-radius: 16px;
 	      background:
 	        radial-gradient(circle at 12% 8%, color-mix(in srgb, var(--accent-soft) 70%, transparent), transparent 36%),
@@ -5939,9 +5958,9 @@ INDEX_HTML = r'''<!doctype html>
 	      display: grid;
 	      gap: 10px;
 	    }
-	    .media-ai-panel strong {
-	      font-size: 15px;
-	    }
+		    .media-ai-panel strong {
+		      font-size: 15px;
+		    }
 	    .media-ai-actions {
 	      display: flex;
 	      flex-wrap: wrap;
@@ -5960,11 +5979,14 @@ INDEX_HTML = r'''<!doctype html>
 	      font-size: 12px;
 	      line-height: 1.6;
 	    }
-	    .media-tab {
-	      min-height: 34px;
-	      padding: 0 12px;
-	      border-radius: 999px;
-	    }
+		    .media-tab {
+		      min-height: 34px;
+		      padding: 0 12px;
+		      border-radius: 999px;
+		      display: inline-flex;
+		      align-items: center;
+		      gap: 6px;
+		    }
 	    .media-tab.active {
 	      border-color: color-mix(in srgb, var(--accent) 54%, var(--line));
 	      background: var(--accent-soft);
@@ -7680,14 +7702,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.6.2</p>
+        <p class="app-version">v2.6.3</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.6.2</span>
+        <span>v2.6.3</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7699,7 +7721,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.2</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.3</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7718,7 +7740,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.6.2</span>
+	          <span>v2.6.3</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -7906,18 +7928,18 @@ INDEX_HTML = r'''<!doctype html>
 	  <section class="media-dialog" id="mediaDialog">
 	    <div class="library-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="mediaDialogTitle">
 	      <div class="dialog-head">
-	        <strong id="mediaDialogTitle">音视频分析</strong>
+	        <strong class="media-dialog-title" id="mediaDialogTitle"><i data-lucide="file-video" aria-hidden="true"></i><span>音视频分析</span></strong>
 	        <button class="icon ui-icon-btn" id="closeMediaDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      </div>
 	      <div class="dialog-body">
 	        <section class="media-upload">
 	          <div>
-	            <strong>上传音频/视频</strong>
-	            <p class="library-card-meta">支持 mp3、mp4、m4a、wav 等格式，文件会上传到 OSS 后交给通义听悟处理。</p>
+		            <strong class="media-upload-title"><i data-lucide="upload" aria-hidden="true"></i><span>上传音频/视频</span></strong>
+		            <p class="library-card-meta">支持 mp3、mp4、m4a、wav 等格式，文件会上传到 OSS 后交给通义听悟处理。</p>
 	          </div>
 	          <div class="media-upload-row">
 	            <label>选择文件<input id="mediaFile" type="file" accept=".mp3,.mp4,.m4a,.wav,.aac,.flac,.mov,.avi,.mkv,.webm,audio/*,video/*"></label>
-	            <button class="primary" id="uploadMediaTask" type="button">开始分析</button>
+		            <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="uploadMediaTask" type="button"><i data-lucide="upload" aria-hidden="true"></i><span>开始分析</span></button>
 	          </div>
 	          <div class="status" id="mediaStatus"></div>
 	        </section>
@@ -8107,6 +8129,14 @@ INDEX_HTML = r'''<!doctype html>
 	        lucideRefreshQueued = false;
 	        renderLucideIcons();
 	      });
+	    }
+
+	    function iconMarkup(name, fallback = "") {
+	      return '<i data-lucide="' + escapeHTML(name) + '" aria-hidden="true"></i>' + (fallback ? '<span class="icon-fallback">' + escapeHTML(fallback) + '</span>' : "");
+	    }
+
+	    function iconLabel(name, label, fallback = "") {
+	      return iconMarkup(name, fallback) + '<span>' + escapeHTML(label) + '</span>';
 	    }
 
 	    window.addEventListener("load", renderLucideIcons, { once: true });
@@ -9271,17 +9301,19 @@ INDEX_HTML = r'''<!doctype html>
 	        actions.className = "library-actions";
 	        const view = document.createElement("button");
 	        view.type = "button";
-	        view.className = task.id === state.selectedMediaTaskId ? "primary" : "";
-	        view.textContent = "查看";
+	        view.className = (task.id === state.selectedMediaTaskId ? "primary ui-btn ui-btn-primary" : "ui-btn ui-btn-secondary") + " inline-flex items-center gap-2";
+	        view.innerHTML = iconLabel("eye", "查看", "看");
 	        view.addEventListener("click", () => selectMediaTask(task.id));
 	        const refresh = document.createElement("button");
 	        refresh.type = "button";
-	        refresh.textContent = "刷新";
+	        refresh.className = "ui-btn ui-btn-secondary inline-flex items-center gap-2";
+	        refresh.innerHTML = iconLabel("rotate-cw", "刷新", "↻");
 	        refresh.addEventListener("click", () => refreshMediaTask(task.id));
 	        actions.append(view, refresh);
 	        card.append(title, meta, summary, actions);
 	        list.appendChild(card);
 	      }
+	      queueLucideRefresh();
 	    }
 
 	    function selectMediaTask(id) {
@@ -9373,6 +9405,43 @@ INDEX_HTML = r'''<!doctype html>
 	      return prompts[type] || prompts.shortVideo;
 	    }
 
+	    function mediaCreativeIcon(type) {
+	      const icons = {
+	        shortVideo: "video",
+	        speech: "mic",
+	        article: "file-text",
+	        xiaohongshu: "book-open",
+	        moments: "share-2",
+	        mindmap: "git-branch",
+	        sellingPoints: "tag",
+	        titles: "type"
+	      };
+	      return icons[type] || "sparkles";
+	    }
+
+	    function mediaTabIcon(key) {
+	      const icons = {
+	        summary: "file-text",
+	        outline: "list",
+	        transcript: "align-left",
+	        enhanced: "sparkles",
+	        mindmap: "git-branch",
+	        copywriting: "clipboard"
+	      };
+	      return icons[key] || "file-text";
+	    }
+
+	    function mediaStatusIcon(status) {
+	      const icons = {
+	        completed: "check-circle",
+	        failed: "alert-circle",
+	        processing: "loader",
+	        uploaded: "clock",
+	        pending: "clock"
+	      };
+	      return icons[status] || "circle";
+	    }
+
 	    function upsertMediaConversationTask(task, conversation) {
 	      if (!task) return;
 	      if (conversation?.id) task.conversation_id = conversation.id;
@@ -9445,7 +9514,8 @@ INDEX_HTML = r'''<!doctype html>
 	      const panel = document.createElement("section");
 	      panel.className = "media-ai-panel";
 	      const title = document.createElement("strong");
-	      title.textContent = "AI 持续加工";
+	      title.className = "media-ai-title";
+	      title.innerHTML = iconLabel("sparkles", "AI 持续加工", "✦");
 	      const hint = document.createElement("div");
 	      hint.className = "media-ai-hint";
 	      hint.textContent = mediaTaskReadyForAI(task)
@@ -9455,19 +9525,22 @@ INDEX_HTML = r'''<!doctype html>
 	      mainActions.className = "media-ai-actions";
 	      const enhance = document.createElement("button");
 	      enhance.type = "button";
-	      enhance.className = mediaHasEnhanced(task) ? "" : "primary";
-	      enhance.textContent = mediaHasEnhanced(task) ? "重新生成AI增强" : "生成AI增强分析";
+	      enhance.className = (mediaHasEnhanced(task) ? "ui-btn ui-btn-secondary" : "primary ui-btn ui-btn-primary") + " inline-flex items-center gap-2";
+	      enhance.innerHTML = mediaHasEnhanced(task)
+	        ? iconLabel("rotate-cw", "重新生成AI增强", "↻")
+	        : iconLabel("sparkles", "生成AI增强分析", "✦");
 	      enhance.disabled = !mediaTaskReadyForAI(task);
 	      enhance.addEventListener("click", () => enhanceMediaTask(task, mediaHasEnhanced(task)).catch((err) => setStatus("mediaStatus", friendlyError(err, "AI 增强分析失败。"), "err")));
 	      const send = document.createElement("button");
 	      send.type = "button";
-	      send.className = mediaHasEnhanced(task) ? "primary" : "";
-	      send.textContent = "发送到AI对话";
+	      send.className = (mediaHasEnhanced(task) ? "primary ui-btn ui-btn-primary" : "ui-btn ui-btn-secondary") + " inline-flex items-center gap-2";
+	      send.innerHTML = iconLabel("message-square", "发送到AI对话", "↗");
 	      send.disabled = !mediaTaskReadyForAI(task);
 	      send.addEventListener("click", () => ensureMediaConversation(task, { open: true }).catch((err) => setStatus("mediaStatus", friendlyError(err, "创建分析会话失败。"), "err")));
 	      const create = document.createElement("button");
 	      create.type = "button";
-	      create.textContent = task.conversation_id ? "进入分析会话" : "创建分析会话";
+	      create.className = "ui-btn ui-btn-secondary inline-flex items-center gap-2";
+	      create.innerHTML = task.conversation_id ? iconLabel("message-square", "进入分析会话", "↗") : iconLabel("plus", "创建分析会话", "+");
 	      create.disabled = !mediaTaskReadyForAI(task);
 	      create.addEventListener("click", () => ensureMediaConversation(task, { open: Boolean(task.conversation_id) }).catch((err) => setStatus("mediaStatus", friendlyError(err, "创建分析会话失败。"), "err")));
 	      mainActions.append(enhance, send, create);
@@ -9486,7 +9559,8 @@ INDEX_HTML = r'''<!doctype html>
 	      for (const [type, label] of items) {
 	        const button = document.createElement("button");
 	        button.type = "button";
-	        button.textContent = label;
+	        button.className = "ui-btn ui-btn-secondary inline-flex items-center gap-2";
+	        button.innerHTML = iconLabel(mediaCreativeIcon(type), label, "•");
 	        button.disabled = !mediaTaskReadyForAI(task);
 	        button.addEventListener("click", () => sendMediaPromptToAI(task, type).catch((err) => setStatus("mediaStatus", friendlyError(err, "发送到 AI 对话失败。"), "err")));
 	        creativeActions.appendChild(button);
@@ -9526,15 +9600,15 @@ INDEX_HTML = r'''<!doctype html>
 	      headText.append(headTitle, headMeta);
 	      const badge = document.createElement("span");
 	      badge.className = "media-task-badge";
-	      badge.textContent = mediaStatusText(task.status);
+	      badge.innerHTML = iconLabel(mediaStatusIcon(task.status), mediaStatusText(task.status), "•");
 	      head.append(headText, badge);
 	      const tabBar = document.createElement("div");
 	      tabBar.className = "media-tabs";
 	      for (const [key, label] of tabs) {
 	        const button = document.createElement("button");
 	        button.type = "button";
-	        button.className = "media-tab" + (state.mediaTab === key ? " active" : "");
-	        button.textContent = label;
+	        button.className = "media-tab ui-btn ui-btn-secondary" + (state.mediaTab === key ? " active" : "");
+	        button.innerHTML = iconLabel(mediaTabIcon(key), label, "•");
 	        button.addEventListener("click", () => {
 	          state.mediaTab = key;
 	          renderMediaDetail();
@@ -9554,20 +9628,23 @@ INDEX_HTML = r'''<!doctype html>
 	      actions.className = "library-actions";
 	      const copy = document.createElement("button");
 	      copy.type = "button";
-	      copy.textContent = "复制当前内容";
+	      copy.className = "ui-btn ui-btn-secondary inline-flex items-center gap-2";
+	      copy.innerHTML = iconLabel("copy", "复制当前内容", "⧉");
 	      copy.addEventListener("click", () => copyText(text, copy));
 	      const refresh = document.createElement("button");
 	      refresh.type = "button";
-	      refresh.textContent = "刷新状态";
+	      refresh.className = "ui-btn ui-btn-secondary inline-flex items-center gap-2";
+	      refresh.innerHTML = iconLabel("rotate-cw", "刷新状态", "↻");
 	      refresh.addEventListener("click", () => refreshMediaTask(task.id));
 	      const del = document.createElement("button");
 	      del.type = "button";
-	      del.className = "danger";
-	      del.textContent = "删除任务";
+	      del.className = "danger ui-btn ui-btn-secondary inline-flex items-center gap-2";
+	      del.innerHTML = iconLabel("trash-2", "删除任务", "删");
 	      del.addEventListener("click", () => deleteMediaTask(task.id));
 	      actions.append(copy, refresh, del);
 	      detail.append(head, aiPanel, tabBar, content, actions);
 	      queueMarkdownOverflowRefresh(content);
+	      queueLucideRefresh();
 	    }
 
 	    function upsertMediaTask(task) {
