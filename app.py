@@ -4534,6 +4534,36 @@ INDEX_HTML = r'''<!doctype html>
   <link rel="icon" type="image/png" sizes="16x16" href="/res/favicon-16.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/res/favicon-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="/res/favicon-64.png">
+  <script>
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = {
+      corePlugins: { preflight: false },
+      theme: {
+        extend: {
+          colors: {
+            primary: "var(--primary)",
+            secondary: "var(--secondary)",
+            surface: "var(--surface)",
+            border: "var(--border)",
+            muted: "var(--muted)",
+            text: "var(--text)"
+          },
+          borderRadius: {
+            ui: "var(--radius)",
+            card: "var(--radius-card)",
+            modal: "var(--radius-modal)"
+          },
+          boxShadow: {
+            ui: "var(--shadow)",
+            soft: "var(--soft-shadow)",
+            glass: "var(--glass-shadow)"
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script defer src="https://unpkg.com/lucide@1.21.0/dist/umd/lucide.min.js"></script>
   <style>
     :root {
       color-scheme: light;
@@ -4554,6 +4584,10 @@ INDEX_HTML = r'''<!doctype html>
       --accent-soft: #FCE8EF;
       --accent-shadow: rgba(217, 143, 168, .22);
       --focus-ring: rgba(217, 143, 168, .18);
+      --primary: var(--accent);
+      --primary-strong: var(--accent-strong);
+      --secondary: #F6E9D6;
+      --border: var(--line);
       --user-bg: #fff0f6;
       --user-line: #edc0cd;
       --user-shadow: rgba(217, 143, 168, .12);
@@ -4565,7 +4599,10 @@ INDEX_HTML = r'''<!doctype html>
       --yellow: #946300;
       --shadow: 0 18px 46px rgba(46, 41, 32, .12);
       --soft-shadow: 0 8px 24px rgba(46, 41, 32, .08);
+      --glass-shadow: 0 20px 52px rgba(46, 41, 32, .14);
       --radius: 8px;
+      --radius-card: 16px;
+      --radius-modal: 24px;
       --content: 900px;
     }
     [data-theme="dark"] {
@@ -4587,6 +4624,10 @@ INDEX_HTML = r'''<!doctype html>
       --accent-soft: #3b2630;
       --accent-shadow: rgba(240, 169, 188, .22);
       --focus-ring: rgba(240, 169, 188, .22);
+      --primary: var(--accent);
+      --primary-strong: var(--accent-strong);
+      --secondary: #252c2a;
+      --border: var(--line);
       --user-bg: #3a2632;
       --user-line: #674055;
       --user-shadow: rgba(0, 0, 0, .2);
@@ -4598,6 +4639,7 @@ INDEX_HTML = r'''<!doctype html>
       --yellow: #e7bf6a;
       --shadow: 0 20px 48px rgba(0, 0, 0, .34);
       --soft-shadow: 0 8px 24px rgba(0, 0, 0, .24);
+      --glass-shadow: 0 22px 54px rgba(0, 0, 0, .38);
     }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
@@ -4661,6 +4703,96 @@ INDEX_HTML = r'''<!doctype html>
       border-color: var(--line);
     }
     button:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+    .ui-btn {
+      min-height: 40px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-weight: 680;
+      box-shadow: none;
+    }
+    .ui-btn-primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+      box-shadow: 0 10px 24px var(--accent-shadow);
+    }
+    .ui-btn-secondary {
+      background: var(--secondary);
+      border-color: var(--border);
+      color: var(--text);
+    }
+    .ui-btn-ghost {
+      background: transparent;
+      border-color: transparent;
+      color: var(--muted);
+    }
+    .ui-icon-btn {
+      display: inline-grid;
+      place-items: center;
+      gap: 0;
+    }
+    .ui-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      background: var(--surface);
+      box-shadow: var(--soft-shadow);
+    }
+    .ui-modal {
+      border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+      border-radius: var(--radius-modal);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .ui-input,
+    .ui-select {
+      min-height: 42px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+    }
+    .ui-badge {
+      min-height: 22px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      padding: 0 8px;
+      font-size: 12px;
+      font-weight: 720;
+    }
+    .ui-toast {
+      border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      color: var(--text);
+      box-shadow: var(--glass-shadow);
+      -webkit-backdrop-filter: blur(16px) saturate(150%);
+      backdrop-filter: blur(16px) saturate(150%);
+    }
+    .lucide {
+      width: 18px;
+      height: 18px;
+      stroke-width: 2;
+      flex: 0 0 auto;
+    }
+    .icon .lucide,
+    .composer-action .lucide,
+    .message-action .lucide {
+      width: 18px;
+      height: 18px;
+    }
+    .lucide-ready .icon-fallback {
+      display: none !important;
+    }
     input, textarea {
       width: 100%;
       min-height: 42px;
@@ -7457,19 +7589,19 @@ INDEX_HTML = r'''<!doctype html>
 </head>
 <body>
   <div class="login" id="loginView">
-    <form class="login-panel" id="loginForm">
+    <form class="login-panel ui-card" id="loginForm">
       <img class="login-mascot" src="/res/meimei-login.png" alt="槑槑猫咪">
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.5.5</p>
+        <p class="app-version">v2.6.0</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.5.5</span>
+        <span>v2.6.0</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7481,15 +7613,15 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.5.5</span></h1>
+            <h1>AI槑槑 <span class="app-version">v2.6.0</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
-        <button class="icon mobile-only" id="closeSide" title="关闭">×</button>
+        <button class="icon mobile-only ui-icon-btn" id="closeSide" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
       </div>
       <div class="side-actions">
 	        <button class="primary" id="newChat">+ 新对话</button>
-        <button class="icon" id="refreshConversations" title="刷新">↻</button>
+        <button class="icon ui-icon-btn" id="refreshConversations" title="刷新"><i data-lucide="rotate-cw" aria-hidden="true"></i><span class="icon-fallback">↻</span></button>
       </div>
       <div class="side-section-title">最近对话</div>
       <div class="conversation-list" id="conversationList"></div>
@@ -7500,7 +7632,7 @@ INDEX_HTML = r'''<!doctype html>
 	        <button id="openSettings">模型管理</button>
 	        <button id="logout">退出</button>
         <footer class="site-icp side-icp">
-          <span>v2.5.5</span>
+          <span>v2.6.0</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -7509,7 +7641,7 @@ INDEX_HTML = r'''<!doctype html>
 
     <main class="main">
       <header class="topbar">
-        <button class="icon mobile-only" id="openSide" title="对话">☰</button>
+        <button class="icon mobile-only ui-icon-btn" id="openSide" title="对话"><i data-lucide="menu" aria-hidden="true"></i><span class="icon-fallback">☰</span></button>
         <div class="top-title">
           <strong id="chatTitle">新对话</strong>
           <span id="chatModel">请选择模型</span>
@@ -7519,7 +7651,7 @@ INDEX_HTML = r'''<!doctype html>
           <button class="icon accent-toggle" id="accentToggle" title="主色调">●</button>
           <button class="icon font-toggle" id="fontSizeToggle" title="字体大小：中">中</button>
           <button class="icon" id="themeToggle" title="切换深浅色">◐</button>
-          <button class="icon danger" id="deleteConversation" title="删除当前对话">⌫</button>
+          <button class="icon danger ui-icon-btn" id="deleteConversation" title="删除当前对话"><i data-lucide="trash-2" aria-hidden="true"></i><span class="icon-fallback">⌫</span></button>
         </div>
       </header>
 
@@ -7527,7 +7659,7 @@ INDEX_HTML = r'''<!doctype html>
       <button class="scroll-latest" id="scrollLatest" type="button" title="回到底部">↓ 回到底部</button>
 
 	      <footer class="composer">
-	        <div class="composer-box">
+	        <div class="composer-box ui-card">
 	          <div class="composer-chip-row" aria-label="常用提示词">
 	            <button class="prompt-chip" type="button" data-prompt-text="帮我润色下面这段文字，让它更自然、更清楚：">润色</button>
 	            <button class="prompt-chip" type="button" data-prompt-text="帮我深度改写下面这段内容，保留原意，但让表达更有条理：">改写</button>
@@ -7538,15 +7670,15 @@ INDEX_HTML = r'''<!doctype html>
 	          <div class="attachment-preview-row" id="attachmentPreviewRow" hidden></div>
 		          <div class="input-row">
 		            <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
-		            <button class="composer-action" id="attachImage" type="button" title="上传图片" aria-label="上传图片">＋</button>
+		            <button class="composer-action ui-icon-btn" id="attachImage" type="button" title="上传图片" aria-label="上传图片"><i data-lucide="image-plus" aria-hidden="true"></i><span class="icon-fallback">＋</span></button>
 		            <textarea id="prompt" placeholder="和 AI槑槑聊点什么..."></textarea>
-		            <button class="composer-action" id="insertNewline" type="button" title="换行（Shift+Enter）" aria-label="换行">↵</button>
-		            <button class="composer-action" id="openInterfaceSettings" type="button" title="界面设置" aria-label="界面设置">⚙</button>
+		            <button class="composer-action ui-icon-btn" id="insertNewline" type="button" title="换行（Shift+Enter）" aria-label="换行"><i data-lucide="corner-down-left" aria-hidden="true"></i><span class="icon-fallback">↵</span></button>
+		            <button class="composer-action ui-icon-btn" id="openInterfaceSettings" type="button" title="界面设置" aria-label="界面设置"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span class="icon-fallback">⚙</span></button>
 		            <button class="primary" id="send" title="发送">发送</button>
 		          </div>
 	          <div class="composer-tools">
 	            <div class="composer-left">
-	              <select class="model-select" id="modelSelect"></select>
+	              <select class="model-select ui-select" id="modelSelect"></select>
 	              <label class="search-toggle" id="webSearchLabel" title="联网搜索">
 	                <input id="webSearchToggle" type="checkbox">
 	                <span>联网搜索</span>
@@ -7556,10 +7688,10 @@ INDEX_HTML = r'''<!doctype html>
 		          </div>
 		        </div>
 		        <div class="interface-popover" id="interfacePopover" role="dialog" aria-modal="false" aria-labelledby="interfacePopoverTitle">
-		          <div class="interface-panel">
+		          <div class="interface-panel ui-modal">
 		            <div class="dialog-head">
 		              <strong id="interfacePopoverTitle">界面设置</strong>
-		              <button class="icon" id="closeInterfaceSettings" type="button" title="关闭">×</button>
+		              <button class="icon ui-icon-btn" id="closeInterfaceSettings" type="button" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 		            </div>
 		            <div class="dialog-body">
 		              <section class="interface-section">
@@ -7595,10 +7727,10 @@ INDEX_HTML = r'''<!doctype html>
 
 	  <div class="drawer-mask" id="drawerMask"></div>
 	  <section class="copy-dialog" id="copyDialog">
-	    <div class="copy-panel">
+	    <div class="copy-panel ui-modal">
 	      <div class="copy-panel-head">
 	        <strong>手动复制</strong>
-	        <button class="icon" id="closeCopyDialog" title="关闭">×</button>
+	        <button class="icon ui-icon-btn" id="closeCopyDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      </div>
 	      <textarea id="manualCopyText" readonly></textarea>
 	      <div class="copy-panel-actions">
@@ -7609,12 +7741,12 @@ INDEX_HTML = r'''<!doctype html>
 	  </section>
 	  <section class="image-preview-dialog" id="imagePreviewDialog">
 	    <div class="image-preview-panel">
-	      <button class="icon" id="closeImagePreview" type="button" title="关闭" style="justify-self:end;background:rgba(255,255,255,.86)">×</button>
+	      <button class="icon ui-icon-btn" id="closeImagePreview" type="button" title="关闭" style="justify-self:end;background:rgba(255,255,255,.86)"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      <img id="imagePreviewFull" alt="图片预览">
 	    </div>
 	  </section>
 	  <section class="confirm-dialog" id="confirmDialog">
-	    <div class="confirm-panel" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+	    <div class="confirm-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
 	      <div>
 	        <h2 id="confirmTitle">确认操作</h2>
 	        <p id="confirmMessage">确定要继续吗？</p>
@@ -7626,10 +7758,10 @@ INDEX_HTML = r'''<!doctype html>
 	    </div>
 	  </section>
 	  <section class="theme-dialog" id="accentDialog">
-	    <div class="accent-panel" role="dialog" aria-modal="true" aria-labelledby="accentDialogTitle">
+	    <div class="accent-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="accentDialogTitle">
 	      <div class="dialog-head">
 	        <strong id="accentDialogTitle">主色调</strong>
-	        <button class="icon" id="closeAccentDialog" title="关闭">×</button>
+	        <button class="icon ui-icon-btn" id="closeAccentDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      </div>
 	      <div class="dialog-body">
 	        <div class="accent-grid" id="accentPresetList"></div>
@@ -7643,10 +7775,10 @@ INDEX_HTML = r'''<!doctype html>
 	    </div>
 	  </section>
 	  <section class="prompt-dialog" id="promptDialog">
-	    <div class="library-panel" role="dialog" aria-modal="true" aria-labelledby="promptDialogTitle">
+	    <div class="library-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="promptDialogTitle">
 	      <div class="dialog-head">
 	        <strong id="promptDialogTitle">提示词库</strong>
-	        <button class="icon" id="closePromptDialog" title="关闭">×</button>
+	        <button class="icon ui-icon-btn" id="closePromptDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      </div>
 	      <div class="dialog-body">
 	        <div class="library-grid">
@@ -7668,10 +7800,10 @@ INDEX_HTML = r'''<!doctype html>
 	    </div>
 	  </section>
 	      <section class="favorite-dialog" id="favoriteDialog">
-	    <div class="library-panel" role="dialog" aria-modal="true" aria-labelledby="favoriteDialogTitle">
+	    <div class="library-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="favoriteDialogTitle">
 	      <div class="dialog-head">
 	        <strong id="favoriteDialogTitle">🐾 我的收藏</strong>
-	        <button class="icon" id="closeFavoriteDialog" title="关闭">×</button>
+	        <button class="icon ui-icon-btn" id="closeFavoriteDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      </div>
 	      <div class="dialog-body">
 	        <div class="favorite-layout">
@@ -7682,10 +7814,10 @@ INDEX_HTML = r'''<!doctype html>
 	    </div>
 	  </section>
 	  <section class="media-dialog" id="mediaDialog">
-	    <div class="library-panel" role="dialog" aria-modal="true" aria-labelledby="mediaDialogTitle">
+	    <div class="library-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="mediaDialogTitle">
 	      <div class="dialog-head">
 	        <strong id="mediaDialogTitle">音视频分析</strong>
-	        <button class="icon" id="closeMediaDialog" title="关闭">×</button>
+	        <button class="icon ui-icon-btn" id="closeMediaDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      </div>
 	      <div class="dialog-body">
 	        <section class="media-upload">
@@ -7709,7 +7841,7 @@ INDEX_HTML = r'''<!doctype html>
 	  <section class="drawer" id="settingsDrawer">
     <div class="drawer-head">
       <strong>模型管理</strong>
-      <button class="icon" id="closeSettings" title="关闭">×</button>
+      <button class="icon ui-icon-btn" id="closeSettings" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
     </div>
     <div class="drawer-body">
       <section class="panel">
@@ -7864,7 +7996,30 @@ INDEX_HTML = r'''<!doctype html>
 		      composerBlur: localStorage.getItem("aiPlatformComposerBlur") || "18",
 		      sidebarWidth: localStorage.getItem("aiPlatformSidebarWidth") || "322"
 	    };
+	    let lucideRefreshQueued = false;
 	    $("adminKey").value = state.adminKey;
+
+	    function renderLucideIcons() {
+	      if (!window.lucide || typeof window.lucide.createIcons !== "function") return;
+	      window.lucide.createIcons({
+	        attrs: {
+	          "stroke-width": 2,
+	          "aria-hidden": "true"
+	        }
+	      });
+	      document.documentElement.classList.add("lucide-ready");
+	    }
+
+	    function queueLucideRefresh() {
+	      if (lucideRefreshQueued) return;
+	      lucideRefreshQueued = true;
+	      requestAnimationFrame(() => {
+	        lucideRefreshQueued = false;
+	        renderLucideIcons();
+	      });
+	    }
+
+	    window.addEventListener("load", renderLucideIcons, { once: true });
 
 	    function userStorageKey(key) {
 	      return state.user?.id ? `aiPlatform:${state.user.id}:${key}` : key;
@@ -10172,12 +10327,12 @@ INDEX_HTML = r'''<!doctype html>
 	      copy.className = "copy-btn";
 	      copy.type = "button";
 	      copy.title = "复制";
-	      copy.textContent = "⧉";
+	      copy.innerHTML = '<i data-lucide="copy" aria-hidden="true"></i><span class="icon-fallback">⧉</span>';
 	      copy.addEventListener("click", () => copyText(visibleMessageContent(message), copy));
 	      const copyAction = document.createElement("button");
 	      copyAction.className = "message-action copy-action";
 	      copyAction.type = "button";
-	      copyAction.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path></svg>';
+	      copyAction.innerHTML = '<i data-lucide="copy" aria-hidden="true"></i><span class="icon-fallback">⧉</span>';
 	      copyAction.setAttribute("aria-label", "复制");
 	      copyAction.title = "复制这条消息";
 	      copyAction.addEventListener("click", () => copyText(visibleMessageContent(message), copyAction));
@@ -10309,6 +10464,7 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	      settleMessageScroll(previousTop, shouldFollow);
 	      updateChatUsage();
+	      queueLucideRefresh();
 	    }
 
 	    function renderMessages(options = {}) {
@@ -10330,6 +10486,7 @@ INDEX_HTML = r'''<!doctype html>
 	      box.replaceChildren(fragment);
 	      settleMessageScroll(previousTop, shouldFollow);
 	      updateChatUsage();
+	      queueLucideRefresh();
 	    }
 
 	    async function copyText(text, button) {
@@ -11442,6 +11599,7 @@ INDEX_HTML = r'''<!doctype html>
 		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
 	    window.visualViewport?.addEventListener("scroll", syncViewportHeight, { passive: true });
 
+	    queueLucideRefresh();
 	    bootstrap();
   </script>
 </body>
