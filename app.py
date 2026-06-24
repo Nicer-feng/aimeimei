@@ -6713,10 +6713,11 @@ INDEX_HTML = r'''<!doctype html>
       #prompt,
       .prompt-chip,
       .composer-action,
-      .model-select,
-      .search-toggle {
-        background: color-mix(in srgb, var(--surface) 86%, transparent);
-      }
+	      .model-select,
+	      .model-picker,
+	      .search-toggle {
+	        background: color-mix(in srgb, var(--surface) 86%, transparent);
+	      }
     }
     .composer-chip-row {
       display: flex;
@@ -6775,9 +6776,9 @@ INDEX_HTML = r'''<!doctype html>
       object-fit: cover;
       display: block;
     }
-    .attachment-remove {
-      position: absolute;
-      right: 4px;
+	    .attachment-remove {
+	      position: absolute;
+	      right: 4px;
       top: 4px;
       width: 22px;
       min-width: 22px;
@@ -6788,9 +6789,14 @@ INDEX_HTML = r'''<!doctype html>
       background: rgba(43, 37, 35, .72);
       color: #fff;
       border: 0;
-      font-size: 14px;
-      line-height: 1;
-    }
+	      font-size: 14px;
+	      line-height: 1;
+	    }
+	    .attachment-remove .lucide {
+	      width: 13px;
+	      height: 13px;
+	      stroke-width: 2.6;
+	    }
     .attachment-ring {
       --progress: 0;
       position: absolute;
@@ -6899,12 +6905,45 @@ INDEX_HTML = r'''<!doctype html>
       padding: 0 2px 2px;
       align-items: center;
     }
-    .composer-left {
-      gap: 8px;
-    }
-    .model-select,
-    .search-toggle {
-      height: 34px;
+	    .composer-left {
+	      gap: 8px;
+	    }
+	    .model-picker {
+	      min-width: 270px;
+	      max-width: min(420px, 100%);
+	      height: 34px;
+	      min-height: 34px;
+	      padding: 0 10px 0 12px;
+	      display: inline-flex;
+	      align-items: center;
+	      gap: 8px;
+	      border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+	      border-radius: 999px;
+	      background: rgba(var(--composer-control-rgb), var(--composer-control-opacity));
+	      color: var(--muted);
+	      -webkit-backdrop-filter: blur(var(--composer-field-blur)) saturate(1.2);
+	      backdrop-filter: blur(var(--composer-field-blur)) saturate(1.2);
+	      box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
+	    }
+	    .model-picker .lucide {
+	      width: 16px;
+	      height: 16px;
+	      color: var(--accent-strong);
+	      stroke-width: 2.2;
+	    }
+	    .model-picker .model-select {
+	      width: 100%;
+	      min-width: 0;
+	      height: 100%;
+	      min-height: 0;
+	      padding: 0 24px 0 0;
+	      border: 0;
+	      background: transparent;
+	      box-shadow: none;
+	    }
+	    .model-select,
+	    .search-toggle {
+	      height: 34px;
       min-height: 34px;
       border-radius: 999px;
       background: rgba(var(--composer-control-rgb), var(--composer-control-opacity));
@@ -6920,9 +6959,21 @@ INDEX_HTML = r'''<!doctype html>
       -webkit-backdrop-filter: blur(var(--composer-field-blur)) saturate(1.25);
       backdrop-filter: blur(var(--composer-field-blur)) saturate(1.25);
     }
-    .model-select {
-      min-width: 270px;
-    }
+	    .model-select {
+	      min-width: 270px;
+	    }
+	    .model-picker .model-select {
+	      width: 100%;
+	      min-width: 0;
+	      height: 100%;
+	      min-height: 0;
+	      padding: 0 24px 0 0;
+	      border: 0;
+	      background: transparent;
+	      box-shadow: none;
+	      -webkit-backdrop-filter: none;
+	      backdrop-filter: none;
+	    }
     .status {
       min-height: 18px;
       font-size: 12px;
@@ -6961,11 +7012,22 @@ INDEX_HTML = r'''<!doctype html>
         inset 0 1px 0 rgba(255,255,255,.12),
         0 22px 60px rgba(0,0,0,.42);
     }
-    .interface-panel .dialog-head {
-      min-height: 54px;
-      padding: 0 14px 0 16px;
-      background: color-mix(in srgb, var(--surface) 44%, transparent);
-    }
+	    .interface-panel .dialog-head {
+	      min-height: 54px;
+	      padding: 0 14px 0 16px;
+	      background: color-mix(in srgb, var(--surface) 44%, transparent);
+	    }
+	    .interface-title {
+	      display: inline-flex;
+	      align-items: center;
+	      gap: 8px;
+	    }
+	    .interface-title .lucide {
+	      width: 17px;
+	      height: 17px;
+	      color: var(--accent-strong);
+	      stroke-width: 2.2;
+	    }
     .interface-panel .dialog-body {
       display: grid;
       gap: 14px;
@@ -7165,14 +7227,19 @@ INDEX_HTML = r'''<!doctype html>
         gap: 8px;
         padding-top: 6px;
       }
-      .composer-left {
-        width: auto;
-        flex: 1 1 auto;
-        flex-wrap: nowrap;
-      }
-      .model-select {
-        width: auto;
-        min-width: 0;
+	      .composer-left {
+	        width: auto;
+	        flex: 1 1 auto;
+	        flex-wrap: nowrap;
+	      }
+	      .model-picker {
+	        width: auto;
+	        min-width: 0;
+	        flex: 1 1 auto;
+	      }
+	      .model-select {
+	        width: auto;
+	        min-width: 0;
         flex: 1 1 auto;
       }
       .search-toggle {
@@ -7612,15 +7679,15 @@ INDEX_HTML = r'''<!doctype html>
       <img class="login-mascot" src="/res/meimei-login.png" alt="槑槑猫咪">
       <div class="login-copy">
         <h1>欢迎回家</h1>
-        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.6.1</p>
+	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
+        <p class="app-version">v2.6.2</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.6.1</span>
+        <span>v2.6.2</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7632,7 +7699,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.1</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.2</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7651,7 +7718,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.6.1</span>
+	          <span>v2.6.2</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -7697,7 +7764,10 @@ INDEX_HTML = r'''<!doctype html>
 		          </div>
 	          <div class="composer-tools">
 	            <div class="composer-left">
-	              <select class="model-select ui-select" id="modelSelect"></select>
+	              <div class="model-picker">
+	                <i data-lucide="sparkles" aria-hidden="true"></i><span class="icon-fallback">✦</span>
+	                <select class="model-select ui-select" id="modelSelect"></select>
+	              </div>
 		              <label class="search-toggle inline-flex items-center gap-2" id="webSearchLabel" title="联网搜索">
 		                <input id="webSearchToggle" type="checkbox">
 		                <i data-lucide="globe-2" aria-hidden="true"></i><span class="icon-fallback">⌁</span>
@@ -7707,12 +7777,12 @@ INDEX_HTML = r'''<!doctype html>
 		            <div class="status" id="chatStatus"></div>
 		          </div>
 		        </div>
-		        <div class="interface-popover" id="interfacePopover" role="dialog" aria-modal="false" aria-labelledby="interfacePopoverTitle">
-		          <div class="interface-panel ui-modal">
-		            <div class="dialog-head">
-		              <strong id="interfacePopoverTitle">界面设置</strong>
-		              <button class="icon ui-icon-btn" id="closeInterfaceSettings" type="button" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
-		            </div>
+			        <div class="interface-popover" id="interfacePopover" role="dialog" aria-modal="false" aria-labelledby="interfacePopoverTitle">
+			          <div class="interface-panel ui-modal">
+			            <div class="dialog-head">
+			              <strong class="interface-title" id="interfacePopoverTitle"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>界面设置</span></strong>
+			              <button class="icon ui-icon-btn" id="closeInterfaceSettings" type="button" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+			            </div>
 		            <div class="dialog-body">
 		              <section class="interface-section">
 		                <h2>输入区</h2>
@@ -7732,10 +7802,10 @@ INDEX_HTML = r'''<!doctype html>
 		                  <input id="composerBlurRange" type="range" min="0" max="30" step="1" value="18">
 		                  <small>实时调整底部输入区的 backdrop-filter blur。</small>
 		                </label>
-		              </section>
-		              <div class="interface-actions">
-		                <button id="resetInterfaceSettings" type="button">恢复默认设置</button>
-		                <span class="interface-hint">后续可继续加入深色模式、字体大小、气泡宽度和 AI 回复字号。</span>
+			              </section>
+			              <div class="interface-actions">
+			                <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetInterfaceSettings" type="button"><i data-lucide="rotate-ccw" aria-hidden="true"></i><span>恢复默认设置</span></button>
+			                <span class="interface-hint">后续可继续加入深色模式、字体大小、气泡宽度和 AI 回复字号。</span>
 		              </div>
 		              <div class="status" id="interfaceStatus"></div>
 		            </div>
@@ -10628,22 +10698,23 @@ INDEX_HTML = r'''<!doctype html>
 	          ring.textContent = item.status === "error" ? "!" : (item.progress >= 100 ? "✓" : Math.round(item.progress || 0) + "%");
 	          card.appendChild(ring);
 	        }
-	        const remove = document.createElement("button");
-	        remove.className = "attachment-remove";
-	        remove.type = "button";
-	        remove.title = "移除图片";
-	        remove.textContent = "×";
-	        remove.addEventListener("click", () => removeAttachment(item.client_id));
-	        card.appendChild(remove);
+		        const remove = document.createElement("button");
+		        remove.className = "attachment-remove ui-icon-btn";
+		        remove.type = "button";
+		        remove.title = "移除图片";
+		        remove.innerHTML = '<i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span>';
+		        remove.addEventListener("click", () => removeAttachment(item.client_id));
+		        card.appendChild(remove);
 	        if (item.status !== "ready") {
 	          const status = document.createElement("div");
 	          status.className = "attachment-progress";
 	          status.textContent = item.status === "error" ? "上传失败" : "上传中";
 	          card.appendChild(status);
 	        }
-	        row.appendChild(card);
-	      }
-	    }
+		        row.appendChild(card);
+		      }
+		      queueLucideRefresh();
+		    }
 
 	    function removeAttachment(clientId) {
 	      const item = state.attachments.find((entry) => entry.client_id === clientId);
