@@ -5800,12 +5800,27 @@ INDEX_HTML = r'''<!doctype html>
       gap: 10px;
       border-bottom: 1px solid var(--line);
     }
-    .dialog-head strong { font-size: 16px; }
-    .dialog-body {
-      overflow: auto;
-      padding: 16px;
-      background: var(--surface-soft);
-    }
+	    .dialog-head strong { font-size: 16px; }
+	    .dialog-title,
+	    .panel-title,
+	    .library-editor-title {
+	      display: inline-flex;
+	      align-items: center;
+	      gap: 8px;
+	    }
+	    .dialog-title .lucide,
+	    .panel-title .lucide,
+	    .library-editor-title .lucide {
+	      width: 17px;
+	      height: 17px;
+	      color: var(--accent-strong);
+	      stroke-width: 2.2;
+	    }
+	    .dialog-body {
+	      overflow: auto;
+	      padding: 16px;
+	      background: var(--surface-soft);
+	    }
     .library-grid {
       display: grid;
       grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
@@ -5840,11 +5855,16 @@ INDEX_HTML = r'''<!doctype html>
       color: var(--muted-2);
       font-size: 12px;
     }
-    .library-actions {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
+	    .library-actions {
+	      display: flex;
+	      gap: 8px;
+	      flex-wrap: wrap;
+	    }
+	    .library-actions .ui-btn {
+	      min-height: 36px;
+	      border-radius: 999px;
+	      padding: 0 12px;
+	    }
     .accent-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7702,14 +7722,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.6.3</p>
+        <p class="app-version">v2.6.4</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.6.3</span>
+        <span>v2.6.4</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7721,7 +7741,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.3</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.4</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7740,7 +7760,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.6.3</span>
+	          <span>v2.6.4</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -7872,15 +7892,15 @@ INDEX_HTML = r'''<!doctype html>
 	  <section class="theme-dialog" id="accentDialog">
 	    <div class="accent-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="accentDialogTitle">
 	      <div class="dialog-head">
-	        <strong id="accentDialogTitle">主色调</strong>
+		        <strong class="dialog-title" id="accentDialogTitle"><i data-lucide="palette" aria-hidden="true"></i><span>主色调</span></strong>
 	        <button class="icon ui-icon-btn" id="closeAccentDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      </div>
 	      <div class="dialog-body">
 	        <div class="accent-grid" id="accentPresetList"></div>
 	        <label class="color-field">自定义颜色<input id="customAccentColor" type="color" value="#e58aa6"></label>
 	        <div class="library-actions">
-	          <button class="primary" id="applyCustomAccent" type="button">应用</button>
-	          <button id="resetAccent" type="button">恢复粉色</button>
+		          <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="applyCustomAccent" type="button"><i data-lucide="check" aria-hidden="true"></i><span>应用</span></button>
+		          <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetAccent" type="button"><i data-lucide="rotate-ccw" aria-hidden="true"></i><span>恢复粉色</span></button>
 	        </div>
 	        <div class="status" id="accentStatus"></div>
 	      </div>
@@ -7889,21 +7909,21 @@ INDEX_HTML = r'''<!doctype html>
 	  <section class="prompt-dialog" id="promptDialog">
 	    <div class="library-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="promptDialogTitle">
 	      <div class="dialog-head">
-	        <strong id="promptDialogTitle">提示词库</strong>
+		        <strong class="dialog-title" id="promptDialogTitle"><i data-lucide="book-open" aria-hidden="true"></i><span>提示词库</span></strong>
 	        <button class="icon ui-icon-btn" id="closePromptDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      </div>
 	      <div class="dialog-body">
 	        <div class="library-grid">
 	          <div class="item-list" id="promptLibraryList"></div>
 	          <section class="library-editor">
-	            <h2>新增/编辑提示词</h2>
+		            <h2 class="library-editor-title"><i data-lucide="pencil" aria-hidden="true"></i><span>新增/编辑提示词</span></h2>
 	            <input id="editingPromptId" type="hidden">
 	            <label>标题<input id="promptTitle" placeholder="例如：朋友圈文案"></label>
 	            <label>内容<textarea id="promptContent" rows="6" placeholder="写下点击后要填入输入框的内容"></textarea></label>
 	            <label>排序<input id="promptSortOrder" type="number" value="100"></label>
 	            <div class="library-actions">
-	              <button class="primary" id="savePromptTemplate">保存提示词</button>
-	              <button id="resetPromptTemplate">清空</button>
+		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="savePromptTemplate"><i data-lucide="save" aria-hidden="true"></i><span>保存提示词</span></button>
+		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetPromptTemplate"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
 	            </div>
 	            <div class="status" id="promptLibraryStatus"></div>
 	          </section>
@@ -7914,7 +7934,7 @@ INDEX_HTML = r'''<!doctype html>
 	      <section class="favorite-dialog" id="favoriteDialog">
 	    <div class="library-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="favoriteDialogTitle">
 	      <div class="dialog-head">
-	        <strong id="favoriteDialogTitle">🐾 我的收藏</strong>
+		        <strong class="dialog-title" id="favoriteDialogTitle"><i data-lucide="star" aria-hidden="true"></i><span>我的收藏</span></strong>
 	        <button class="icon ui-icon-btn" id="closeFavoriteDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      </div>
 	      <div class="dialog-body">
@@ -7952,22 +7972,22 @@ INDEX_HTML = r'''<!doctype html>
 	  </section>
 	  <section class="drawer" id="settingsDrawer">
     <div class="drawer-head">
-      <strong>模型管理</strong>
+	      <strong class="dialog-title"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></strong>
       <button class="icon ui-icon-btn" id="closeSettings" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
     </div>
     <div class="drawer-body">
       <section class="panel">
-	        <h2>管理员</h2>
+		        <h2 class="panel-title"><i data-lucide="shield" aria-hidden="true"></i><span>管理员</span></h2>
 	        <label>管理密钥<input id="adminKey" type="password" autocomplete="off"></label>
         <div class="grid2">
           <label>新的家用登录密码<input id="familyPassword" type="password" autocomplete="new-password" placeholder="至少 8 位"></label>
-          <div style="display:flex;align-items:end"><button id="changePassword">修改登录密码</button></div>
+	          <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
         </div>
 	        <div class="status" id="adminStatus"></div>
 	      </section>
 
 	      <section class="panel" id="accountAdminPanel">
-	        <h2>账号管理</h2>
+		        <h2 class="panel-title"><i data-lucide="users" aria-hidden="true"></i><span>账号管理</span></h2>
 	        <input id="editingUserId" type="hidden">
 	        <div class="grid2">
 	          <label>账号<input id="accountUsername" autocomplete="off" placeholder="只能用字母、数字、_、-"></label>
@@ -7979,15 +7999,15 @@ INDEX_HTML = r'''<!doctype html>
 	        </div>
 	        <label>密码<input id="accountPassword" type="password" autocomplete="new-password" placeholder="新增账号必填，编辑时留空保持原密码"></label>
 	        <div class="library-actions">
-	          <button class="primary" id="saveAccount">保存账号</button>
-	          <button id="resetAccountForm">清空</button>
+		          <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveAccount"><i data-lucide="save" aria-hidden="true"></i><span>保存账号</span></button>
+		          <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetAccountForm"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
 	        </div>
 	        <div class="status" id="accountStatus"></div>
 	        <div id="accountList"></div>
 	      </section>
 
 	      <section class="panel">
-	        <h2>联网搜索</h2>
+		        <h2 class="panel-title"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></h2>
 	        <div class="grid2">
 	          <label>搜索服务
 	            <select id="searchProvider">
@@ -8026,14 +8046,14 @@ INDEX_HTML = r'''<!doctype html>
 	          </label>
 	        </div>
 	        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-	          <button class="primary" id="saveSearch">保存搜索配置</button>
-	          <button id="clearSearchKey">清空搜索 Key</button>
+		          <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveSearch"><i data-lucide="save" aria-hidden="true"></i><span>保存搜索配置</span></button>
+		          <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="clearSearchKey"><i data-lucide="key-round" aria-hidden="true"></i><span>清空搜索 Key</span></button>
 	        </div>
 	        <div class="status" id="searchStatus"></div>
 	      </section>
 
 	      <section class="panel">
-        <h2>新增/编辑模型</h2>
+	        <h2 class="panel-title"><i data-lucide="bot" aria-hidden="true"></i><span>新增/编辑模型</span></h2>
         <input id="editingModelId" type="hidden">
         <div class="grid2">
           <label>显示名称<input id="modelName" placeholder="DeepSeek Chat"></label>
@@ -8050,14 +8070,14 @@ INDEX_HTML = r'''<!doctype html>
           <label>图片理解<select id="supportsVision"><option value="0">不支持</option><option value="1">支持图片理解</option></select></label>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <button class="primary" id="saveModel">保存模型</button>
-          <button id="resetModelForm">清空</button>
+	          <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveModel"><i data-lucide="save" aria-hidden="true"></i><span>保存模型</span></button>
+	          <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetModelForm"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
         </div>
         <div class="status" id="modelStatus"></div>
       </section>
 
       <section class="panel">
-        <h2>已配置模型</h2>
+	        <h2 class="panel-title"><i data-lucide="list" aria-hidden="true"></i><span>已配置模型</span></h2>
         <div id="adminModelList"></div>
       </section>
     </div>
@@ -8137,6 +8157,15 @@ INDEX_HTML = r'''<!doctype html>
 
 	    function iconLabel(name, label, fallback = "") {
 	      return iconMarkup(name, fallback) + '<span>' + escapeHTML(label) + '</span>';
+	    }
+
+	    function createIconButton(name, label, options = {}) {
+	      const button = document.createElement("button");
+	      button.type = "button";
+	      const tone = options.primary ? "primary ui-btn ui-btn-primary" : "ui-btn ui-btn-secondary";
+	      button.className = tone + (options.danger ? " danger" : "") + " inline-flex items-center gap-2";
+	      button.innerHTML = iconLabel(name, label, options.fallback || "");
+	      return button;
 	    }
 
 	    window.addEventListener("load", renderLucideIcons, { once: true });
@@ -8982,28 +9011,21 @@ INDEX_HTML = r'''<!doctype html>
 	        meta.textContent = "排序 " + item.sort_order + " · " + formatTime(item.updated_at);
 	        const actions = document.createElement("div");
 	        actions.className = "library-actions";
-	        const use = document.createElement("button");
-	        use.className = "primary";
-	        use.type = "button";
-	        use.textContent = "填入输入框";
-	        use.addEventListener("click", () => {
-	          insertPromptText(item.content);
-	          closePromptLibrary();
-	        });
-	        const edit = document.createElement("button");
-	        edit.type = "button";
-	        edit.textContent = "编辑";
-	        edit.addEventListener("click", () => fillPromptForm(item));
-	        const del = document.createElement("button");
-	        del.type = "button";
-	        del.className = "danger";
-	        del.textContent = "删除";
-	        del.addEventListener("click", () => deletePromptTemplate(item.id, item.title));
-	        actions.append(use, edit, del);
-	        card.append(title, content, meta, actions);
-	        box.appendChild(card);
-	      }
-	    }
+		        const use = createIconButton("corner-down-left", "填入输入框", { primary: true, fallback: "↵" });
+		        use.addEventListener("click", () => {
+		          insertPromptText(item.content);
+		          closePromptLibrary();
+		        });
+		        const edit = createIconButton("pencil", "编辑", { fallback: "✎" });
+		        edit.addEventListener("click", () => fillPromptForm(item));
+		        const del = createIconButton("trash-2", "删除", { danger: true, fallback: "删" });
+		        del.addEventListener("click", () => deletePromptTemplate(item.id, item.title));
+		        actions.append(use, edit, del);
+		        card.append(title, content, meta, actions);
+		        box.appendChild(card);
+		      }
+		      queueLucideRefresh();
+		    }
 
 	    function fillPromptForm(item) {
 	      $("editingPromptId").value = item.id || "";
@@ -9117,27 +9139,17 @@ INDEX_HTML = r'''<!doctype html>
 	          summary.textContent = favoriteSummary(item.content);
 	          const actions = document.createElement("div");
 	          actions.className = "library-actions";
-	          const view = document.createElement("button");
-	          view.className = item.id === state.selectedFavoriteId ? "primary" : "";
-	          view.type = "button";
-	          view.textContent = "查看";
-	          view.addEventListener("click", () => selectFavorite(item.id));
-	          const insert = document.createElement("button");
-	          insert.type = "button";
-	          insert.textContent = "插入输入框";
-	          insert.addEventListener("click", () => {
-	            insertPromptText(item.content);
-	            closeFavorites();
-	          });
-	          const copy = document.createElement("button");
-	          copy.type = "button";
-	          copy.textContent = "复制";
-	          copy.addEventListener("click", () => copyText(item.content, copy));
-	          const del = document.createElement("button");
-	          del.className = "danger";
-	          del.type = "button";
-	          del.textContent = "删除";
-	          del.addEventListener("click", () => deleteFavorite(item.id));
+		          const view = createIconButton("eye", "查看", { primary: item.id === state.selectedFavoriteId, fallback: "看" });
+		          view.addEventListener("click", () => selectFavorite(item.id));
+		          const insert = createIconButton("corner-down-left", "插入输入框", { fallback: "↵" });
+		          insert.addEventListener("click", () => {
+		            insertPromptText(item.content);
+		            closeFavorites();
+		          });
+		          const copy = createIconButton("copy", "复制", { fallback: "⧉" });
+		          copy.addEventListener("click", () => copyText(item.content, copy));
+		          const del = createIconButton("trash-2", "删除", { danger: true, fallback: "删" });
+		          del.addEventListener("click", () => deleteFavorite(item.id));
 	          actions.append(view, insert, copy, del);
 	          card.append(title, meta, summary, actions);
 	          list.appendChild(card);
@@ -9153,13 +9165,14 @@ INDEX_HTML = r'''<!doctype html>
 	        const content = document.createElement("div");
 	        content.className = "markdown";
 	        content.innerHTML = renderMarkdown(current.content || "");
-	        detail.append(meta, content);
-	        queueMarkdownOverflowRefresh(content);
+		        detail.append(meta, content);
+		        queueMarkdownOverflowRefresh(content);
 	      } else {
 	        state.selectedFavoriteId = null;
-	        detail.innerHTML = '<div class="favorite-detail-empty">选择一条收藏查看完整回答</div>';
-	      }
-	    }
+		        detail.innerHTML = '<div class="favorite-detail-empty">选择一条收藏查看完整回答</div>';
+		      }
+		      queueLucideRefresh();
+		    }
 
 	    function selectFavorite(id) {
 	      state.selectedFavoriteId = id;
@@ -11397,16 +11410,12 @@ INDEX_HTML = r'''<!doctype html>
         info.innerHTML = `<strong></strong><span></span>`;
         info.querySelector("strong").textContent = model.name + (model.enabled ? "" : "（停用）");
         info.querySelector("span").textContent = model.model + (model.supports_vision ? " · 支持图片理解" : "") + " · " + model.base_url + (model.has_api_key ? " · Key 已保存" : " · 未配置 Key");
-        const actions = document.createElement("div");
-        actions.style.display = "flex";
-        actions.style.gap = "6px";
-        const edit = document.createElement("button");
-        edit.textContent = "编辑";
-        edit.addEventListener("click", () => fillModelForm(model));
-        const del = document.createElement("button");
-        del.className = "danger";
-        del.textContent = "删除";
-        del.addEventListener("click", () => deleteModel(model.id));
+	        const actions = document.createElement("div");
+	        actions.className = "library-actions";
+	        const edit = createIconButton("pencil", "编辑", { fallback: "✎" });
+	        edit.addEventListener("click", () => fillModelForm(model));
+	        const del = createIconButton("trash-2", "删除", { danger: true, fallback: "删" });
+	        del.addEventListener("click", () => deleteModel(model.id));
         actions.append(edit, del);
         row.append(info, actions);
         box.appendChild(row);
@@ -11524,17 +11533,15 @@ INDEX_HTML = r'''<!doctype html>
 	        info.innerHTML = `<strong></strong><span></span>`;
 	        info.querySelector("strong").textContent = (user.display_name || user.username) + (user.is_active ? "" : "（已禁用）");
 	        info.querySelector("span").textContent = user.username + " · " + (user.role === "admin" ? "管理员" : "家庭成员") + " · " + formatTime(user.created_at);
-	        const actions = document.createElement("div");
-	        actions.style.display = "flex";
-	        actions.style.gap = "6px";
-	        const edit = document.createElement("button");
-	        edit.type = "button";
-	        edit.textContent = "编辑";
-	        edit.addEventListener("click", () => fillAccountForm(user));
+		        const actions = document.createElement("div");
+		        actions.className = "library-actions";
+		        const edit = createIconButton("pencil", "编辑", { fallback: "✎" });
+		        edit.addEventListener("click", () => fillAccountForm(user));
 	        actions.append(edit);
 	        row.append(info, actions);
 	        box.appendChild(row);
 	      }
+	      queueLucideRefresh();
 	    }
 
 	    function fillAccountForm(user) {
