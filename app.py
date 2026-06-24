@@ -4786,6 +4786,8 @@ INDEX_HTML = r'''<!doctype html>
     }
     .icon .lucide,
     .composer-action .lucide,
+    .sidebar-action .lucide,
+    .side-primary-action .lucide,
     .message-action .lucide {
       width: 18px;
       height: 18px;
@@ -4926,6 +4928,13 @@ INDEX_HTML = r'''<!doctype html>
     .side-actions .primary {
       justify-content: flex-start;
       box-shadow: none;
+    }
+    .side-primary-action,
+    .sidebar-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
     .side-section-title {
       padding: 2px 16px 8px;
@@ -5606,6 +5615,12 @@ INDEX_HTML = r'''<!doctype html>
     .search-toggle.disabled {
       opacity: .55;
       cursor: not-allowed;
+    }
+    .search-toggle .lucide {
+      width: 16px;
+      height: 16px;
+      color: var(--accent-strong);
+      stroke-width: 2.2;
     }
     .composer-left {
       display: flex;
@@ -6347,6 +6362,12 @@ INDEX_HTML = r'''<!doctype html>
       background: color-mix(in srgb, var(--surface) 64%, transparent);
       color: var(--muted);
       font-weight: 620;
+    }
+    .side-foot button .lucide {
+      width: 15px;
+      height: 15px;
+      color: currentColor;
+      stroke-width: 2.2;
     }
     .side-icp {
       grid-column: 1 / -1;
@@ -7414,9 +7435,7 @@ INDEX_HTML = r'''<!doctype html>
     .prompt-chip {
       box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
     }
-    .search-toggle span::before {
-      content: "⌁";
-      margin-right: 5px;
+    .search-toggle .icon-fallback {
       color: var(--accent-strong);
       font-weight: 800;
     }
@@ -7594,14 +7613,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
         <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.6.0</p>
+        <p class="app-version">v2.6.1</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.6.0</span>
+        <span>v2.6.1</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7613,26 +7632,26 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version">v2.6.0</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.1</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
         <button class="icon mobile-only ui-icon-btn" id="closeSide" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
       </div>
       <div class="side-actions">
-	        <button class="primary" id="newChat">+ 新对话</button>
+		        <button class="primary side-primary-action inline-flex items-center justify-center gap-2" id="newChat"><i data-lucide="plus" aria-hidden="true"></i><span>新对话</span></button>
         <button class="icon ui-icon-btn" id="refreshConversations" title="刷新"><i data-lucide="rotate-cw" aria-hidden="true"></i><span class="icon-fallback">↻</span></button>
       </div>
       <div class="side-section-title">最近对话</div>
       <div class="conversation-list" id="conversationList"></div>
       <div class="side-foot">
-	        <button id="openPromptLibrary">提示词库</button>
-	        <button id="openFavorites">我的收藏 <span class="nav-count" id="favoriteCount">0</span></button>
-	        <button id="openMediaAnalysis">音视频分析</button>
-	        <button id="openSettings">模型管理</button>
-	        <button id="logout">退出</button>
-        <footer class="site-icp side-icp">
-          <span>v2.6.0</span>
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openPromptLibrary"><i data-lucide="book-open" aria-hidden="true"></i><span>提示词库</span></button>
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openFavorites"><i data-lucide="star" aria-hidden="true"></i><span>我的收藏</span> <span class="nav-count" id="favoriteCount">0</span></button>
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openMediaAnalysis"><i data-lucide="file-video" aria-hidden="true"></i><span>音视频分析</span></button>
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
+	        <footer class="site-icp side-icp">
+	          <span>v2.6.1</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -7661,11 +7680,11 @@ INDEX_HTML = r'''<!doctype html>
 	      <footer class="composer">
 	        <div class="composer-box ui-card">
 	          <div class="composer-chip-row" aria-label="常用提示词">
-	            <button class="prompt-chip" type="button" data-prompt-text="帮我润色下面这段文字，让它更自然、更清楚：">润色</button>
-	            <button class="prompt-chip" type="button" data-prompt-text="帮我深度改写下面这段内容，保留原意，但让表达更有条理：">改写</button>
-	            <button class="prompt-chip" type="button" data-prompt-text="帮我扩写下面这段内容，补充细节，让它更完整：">扩写</button>
-		            <button class="prompt-chip" type="button" data-prompt-text="帮我精简下面这段内容，保留重点，表达更利落：">精简</button>
-	            <button class="prompt-chip" id="openPrompts" type="button">更多</button>
+		            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我润色下面这段文字，让它更自然、更清楚：">润色</button>
+		            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我深度改写下面这段内容，保留原意，但让表达更有条理：">改写</button>
+		            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我扩写下面这段内容，补充细节，让它更完整：">扩写</button>
+			            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我精简下面这段内容，保留重点，表达更利落：">精简</button>
+		            <button class="prompt-chip ui-badge inline-flex items-center" id="openPrompts" type="button">更多</button>
 	          </div>
 	          <div class="attachment-preview-row" id="attachmentPreviewRow" hidden></div>
 		          <div class="input-row">
@@ -7679,10 +7698,11 @@ INDEX_HTML = r'''<!doctype html>
 	          <div class="composer-tools">
 	            <div class="composer-left">
 	              <select class="model-select ui-select" id="modelSelect"></select>
-	              <label class="search-toggle" id="webSearchLabel" title="联网搜索">
-	                <input id="webSearchToggle" type="checkbox">
-	                <span>联网搜索</span>
-	              </label>
+		              <label class="search-toggle inline-flex items-center gap-2" id="webSearchLabel" title="联网搜索">
+		                <input id="webSearchToggle" type="checkbox">
+		                <i data-lucide="globe-2" aria-hidden="true"></i><span class="icon-fallback">⌁</span>
+		                <span>联网搜索</span>
+		              </label>
 	            </div>
 		            <div class="status" id="chatStatus"></div>
 		          </div>
