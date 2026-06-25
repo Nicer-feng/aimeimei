@@ -5144,6 +5144,11 @@ INDEX_HTML = r'''<!doctype html>
       background: var(--surface);
       border-color: var(--line);
     }
+    .conv-action .lucide {
+      width: 15px;
+      height: 15px;
+      stroke-width: 2.2;
+    }
     .conv-action.danger:hover {
       color: var(--red);
     }
@@ -7802,14 +7807,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.6.6</p>
+        <p class="app-version">v2.6.7</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.6.6</span>
+        <span>v2.6.7</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7821,7 +7826,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.6</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.7</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7840,7 +7845,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.6.6</span>
+	          <span>v2.6.7</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -8245,6 +8250,16 @@ INDEX_HTML = r'''<!doctype html>
 	      const tone = options.primary ? "primary ui-btn ui-btn-primary" : "ui-btn ui-btn-secondary";
 	      button.className = tone + (options.danger ? " danger" : "") + " inline-flex items-center gap-2";
 	      button.innerHTML = iconLabel(name, label, options.fallback || "");
+	      return button;
+	    }
+
+	    function createIconOnlyButton(name, title, options = {}) {
+	      const button = document.createElement("button");
+	      button.type = "button";
+	      button.className = (options.className || "ui-icon-btn") + (options.danger ? " danger" : "");
+	      button.title = title;
+	      button.setAttribute("aria-label", title);
+	      button.innerHTML = iconMarkup(name, options.fallback || "");
 	      return button;
 	    }
 
@@ -9973,17 +9988,9 @@ INDEX_HTML = r'''<!doctype html>
 
 	          const actions = document.createElement("div");
 	          actions.className = "conv-actions";
-	          const save = document.createElement("button");
-	          save.className = "conv-action";
-	          save.type = "button";
-	          save.title = "保存";
-	          save.textContent = "✓";
+	          const save = createIconOnlyButton("check", "保存", { className: "conv-action ui-icon-btn", fallback: "✓" });
 	          save.addEventListener("click", () => saveConversationTitle(conv.id, input.value));
-	          const cancel = document.createElement("button");
-	          cancel.className = "conv-action";
-	          cancel.type = "button";
-	          cancel.title = "取消";
-	          cancel.textContent = "×";
+	          const cancel = createIconOnlyButton("x", "取消", { className: "conv-action ui-icon-btn", fallback: "×" });
 	          cancel.addEventListener("click", () => {
 	            state.editingConversationId = null;
 	            renderConversations();
@@ -10006,23 +10013,16 @@ INDEX_HTML = r'''<!doctype html>
 
 	          const actions = document.createElement("div");
 	          actions.className = "conv-actions";
-	          const edit = document.createElement("button");
-	          edit.className = "conv-action";
-	          edit.type = "button";
-	          edit.title = "重命名";
-	          edit.textContent = "✎";
+	          const edit = createIconOnlyButton("pencil", "重命名", { className: "conv-action ui-icon-btn", fallback: "✎" });
 	          edit.addEventListener("click", () => startRenameConversation(conv.id));
-	          const del = document.createElement("button");
-	          del.className = "conv-action danger";
-	          del.type = "button";
-	          del.title = "删除";
-	          del.textContent = "⌫";
+	          const del = createIconOnlyButton("trash-2", "删除", { className: "conv-action ui-icon-btn", danger: true, fallback: "⌫" });
 	          del.addEventListener("click", () => deleteConversationById(conv.id));
 	          actions.append(edit, del);
 	          row.append(main, actions);
 	        }
 	        box.appendChild(row);
 	      }
+	      queueLucideRefresh();
 	    }
 
 	    function renderConversationLoading() {
