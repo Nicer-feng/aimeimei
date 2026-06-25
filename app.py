@@ -7455,13 +7455,23 @@ INDEX_HTML = r'''<!doctype html>
       color: var(--muted);
       font-size: 11px;
     }
-    .message-action {
-      min-height: 30px;
-      padding: 0 10px;
-      color: color-mix(in srgb, var(--muted) 88%, var(--text));
-    }
-    .message-action.copy-action {
-      width: 32px;
+	    .message-action {
+	      min-height: 30px;
+	      padding: 0 10px;
+	      color: color-mix(in srgb, var(--muted) 88%, var(--text));
+	      display: inline-flex;
+	      align-items: center;
+	      justify-content: center;
+	      gap: 6px;
+	    }
+	    .message-action .lucide,
+	    .reasoning-toggle .lucide {
+	      width: 14px;
+	      height: 14px;
+	      stroke-width: 2.2;
+	    }
+	    .message-action.copy-action {
+	      width: 32px;
       min-width: 32px;
       height: 32px;
       min-height: 32px;
@@ -7722,14 +7732,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.6.4</p>
+        <p class="app-version">v2.6.5</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.6.4</span>
+        <span>v2.6.5</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7741,7 +7751,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.4</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.5</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7760,7 +7770,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.6.4</span>
+	          <span>v2.6.5</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -10340,7 +10350,8 @@ INDEX_HTML = r'''<!doctype html>
 	      const toggle = document.createElement("button");
 	      toggle.className = "reasoning-toggle";
 	      toggle.type = "button";
-	      toggle.textContent = message.reasoning_open ? "收起思考过程" : (message.thinking ? "槑槑正在思考" : "查看思考过程");
+	      const toggleLabel = message.reasoning_open ? "收起思考过程" : (message.thinking ? "槑槑正在思考" : "查看思考过程");
+	      toggle.innerHTML = iconLabel(message.thinking ? "loader" : "brain", toggleLabel, "思");
 	      toggle.title = message.reasoning_open ? "收起思考过程" : "展开思考过程";
 	      toggle.addEventListener("click", () => toggleReasoning(message));
 	      const body = document.createElement("div");
@@ -10523,13 +10534,13 @@ INDEX_HTML = r'''<!doctype html>
 	      const regenerate = document.createElement("button");
 	      regenerate.className = "message-action regenerate-action";
 	      regenerate.type = "button";
-	      regenerate.textContent = "重新生成";
+	      regenerate.innerHTML = iconLabel("rotate-cw", "重新生成", "↻");
 	      regenerate.title = "把上一条问题放回输入框";
 	      regenerate.addEventListener("click", () => regenerateFromMessage(message));
 	      const continueWrite = document.createElement("button");
 	      continueWrite.className = "message-action continue-action";
 	      continueWrite.type = "button";
-	      continueWrite.textContent = "继续写";
+	      continueWrite.innerHTML = iconLabel("pen-line", "继续写", "✎");
 	      continueWrite.title = "基于这条回答继续写";
 	      continueWrite.addEventListener("click", () => continueFromMessage(message));
 	      const reason = document.createElement("button");
@@ -10609,7 +10620,7 @@ INDEX_HTML = r'''<!doctype html>
 	      if (reason) reason.hidden = true;
 	      if (favorite) {
 	        favorite.hidden = !(message.role === "assistant" && message.id && displayContent);
-	        favorite.textContent = message.favorite_id ? "已收藏" : "收藏";
+	        favorite.innerHTML = message.favorite_id ? iconLabel("star", "已收藏", "★") : iconLabel("star", "收藏", "☆");
 	        favorite.classList.toggle("active", Boolean(message.favorite_id));
 	        favorite.title = message.favorite_id ? "取消收藏" : "收藏这条回答";
 	      }
