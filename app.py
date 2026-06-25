@@ -4807,12 +4807,82 @@ INDEX_HTML = r'''<!doctype html>
       transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
     }
     textarea { resize: vertical; }
-    input:focus, textarea:focus, select:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--focus-ring);
-      outline: none;
-    }
-    .login {
+	    input:focus, textarea:focus, select:focus {
+	      border-color: var(--accent);
+	      box-shadow: 0 0 0 3px var(--focus-ring);
+	      outline: none;
+	    }
+	    .login-panel label,
+	    .library-editor label,
+	    .drawer .panel label,
+	    .media-upload label,
+	    .color-field {
+	      display: grid;
+	      gap: 7px;
+	      color: var(--muted);
+	      font-size: 13px;
+	      font-weight: 680;
+	    }
+	    .login-panel input:not([type="hidden"]),
+	    .library-editor input:not([type="hidden"]),
+	    .library-editor textarea,
+	    .drawer .panel input:not([type="hidden"]),
+	    .drawer .panel select,
+	    .drawer .panel textarea,
+	    .media-upload input[type="file"],
+	    .color-field input[type="color"],
+	    #manualCopyText {
+	      min-height: 44px;
+	      border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+	      border-radius: 14px;
+	      background: color-mix(in srgb, var(--surface) 88%, var(--surface-soft));
+	      color: var(--text);
+	      box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
+	    }
+	    .library-editor textarea,
+	    .drawer .panel textarea,
+	    #manualCopyText {
+	      line-height: 1.65;
+	    }
+	    .drawer .panel select,
+	    .library-editor input[type="number"] {
+	      cursor: pointer;
+	    }
+	    .empty-state {
+	      min-height: 180px;
+	      display: grid;
+	      place-items: center;
+	      gap: 8px;
+	      padding: 24px;
+	      border: 1px dashed color-mix(in srgb, var(--line) 78%, transparent);
+	      border-radius: 18px;
+	      background: color-mix(in srgb, var(--surface) 76%, var(--surface-soft));
+	      color: var(--muted);
+	      text-align: center;
+	    }
+	    .empty-state.compact {
+	      min-height: 120px;
+	      padding: 16px;
+	    }
+	    .empty-state .lucide {
+	      width: 28px;
+	      height: 28px;
+	      color: var(--accent-strong);
+	      stroke-width: 1.9;
+	    }
+	    .empty-state strong {
+	      color: var(--text);
+	      font-size: 15px;
+	      font-weight: 760;
+	    }
+	    .empty-state p {
+	      max-width: 320px;
+	      margin: 0;
+	      color: var(--muted);
+	      font-size: 13px;
+	      line-height: 1.6;
+	    }
+	    .login {
       height: 100%;
       min-height: 100%;
       display: grid;
@@ -7732,14 +7802,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.6.5</p>
+        <p class="app-version">v2.6.6</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.6.5</span>
+        <span>v2.6.6</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7751,7 +7821,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.5</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.6</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7770,7 +7840,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.6.5</span>
+	          <span>v2.6.6</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -8176,6 +8246,13 @@ INDEX_HTML = r'''<!doctype html>
 	      button.className = tone + (options.danger ? " danger" : "") + " inline-flex items-center gap-2";
 	      button.innerHTML = iconLabel(name, label, options.fallback || "");
 	      return button;
+	    }
+
+	    function createEmptyState(icon, title, description = "", options = {}) {
+	      const node = document.createElement("div");
+	      node.className = "empty-state" + (options.compact ? " compact" : "");
+	      node.innerHTML = iconMarkup(icon, options.fallback || "") + '<strong>' + escapeHTML(title) + '</strong>' + (description ? '<p>' + escapeHTML(description) + '</p>' : "");
+	      return node;
 	    }
 
 	    window.addEventListener("load", renderLucideIcons, { once: true });
@@ -9003,10 +9080,8 @@ INDEX_HTML = r'''<!doctype html>
 	      if (!box) return;
 	      box.innerHTML = "";
 	      if (!state.prompts.length) {
-	        const div = document.createElement("div");
-	        div.className = "library-card";
-	        div.innerHTML = "<p>还没有提示词。右侧可以新增一个常用模板。</p>";
-	        box.appendChild(div);
+	        box.appendChild(createEmptyState("book-open", "还没有提示词", "右侧可以新增一个常用模板。", { compact: true }));
+	        queueLucideRefresh();
 	        return;
 	      }
 	      for (const item of state.prompts) {
@@ -9132,10 +9207,9 @@ INDEX_HTML = r'''<!doctype html>
 	      if (!list || !detail) return;
 	      list.innerHTML = "";
 	      if (errorText) {
-	        list.innerHTML = '<div class="library-card"><p></p></div>';
-	        list.querySelector("p").textContent = errorText;
+	        list.appendChild(createEmptyState("alert-circle", "收藏加载失败", errorText, { compact: true }));
 	      } else if (!state.favorites.length) {
-	        list.innerHTML = '<div class="library-card"><p>还没有收藏。看到好用的 AI 回复时，点消息下面的“收藏”。</p></div>';
+	        list.appendChild(createEmptyState("star", "还没有收藏", "看到好用的 AI 回复时，点消息下面的“收藏”。", { compact: true }));
 	      } else {
 	        for (const item of state.favorites) {
 	          const card = document.createElement("article");
@@ -9179,10 +9253,10 @@ INDEX_HTML = r'''<!doctype html>
 		        queueMarkdownOverflowRefresh(content);
 	      } else {
 	        state.selectedFavoriteId = null;
-		        detail.innerHTML = '<div class="favorite-detail-empty">选择一条收藏查看完整回答</div>';
-		      }
-		      queueLucideRefresh();
-		    }
+	        detail.replaceChildren(createEmptyState("eye", "选择一条收藏", "在左侧选择一条收藏查看完整回答。"));
+	      }
+	      queueLucideRefresh();
+	    }
 
 	    function selectFavorite(id) {
 	      state.selectedFavoriteId = id;
@@ -9307,7 +9381,8 @@ INDEX_HTML = r'''<!doctype html>
 	      const list = $("mediaTaskList");
 	      list.innerHTML = "";
 	      if (!state.mediaTasks.length) {
-	        list.innerHTML = '<div class="library-card"><strong>还没有任务</strong><p>上传一段音频或视频，槑槑会帮你转写和整理。</p></div>';
+	        list.appendChild(createEmptyState("file-video", "还没有任务", "上传一段音频或视频，槑槑会帮你转写和整理。", { compact: true }));
+	        queueLucideRefresh();
 	        return;
 	      }
 	      for (const task of state.mediaTasks) {
@@ -9596,7 +9671,8 @@ INDEX_HTML = r'''<!doctype html>
 	      const detail = $("mediaTaskDetail");
 	      const task = currentMediaTask();
 	      if (!task) {
-	        detail.innerHTML = '<div class="media-empty">选择或上传一个音视频任务</div>';
+	        detail.replaceChildren(createEmptyState("file-video", "选择或上传任务", "上传音频/视频后，这里会显示转写、摘要和 AI 增强结果。"));
+	        queueLucideRefresh();
 	        return;
 	      }
 	      state.selectedMediaTaskId = task.id;
@@ -11408,12 +11484,13 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
 	    function renderAdminModels(models) {
-      const box = $("adminModelList");
-      box.innerHTML = "";
-      if (!models.length) {
-        box.innerHTML = '<div class="status">暂无模型</div>';
-        return;
-      }
+	      const box = $("adminModelList");
+	      box.innerHTML = "";
+	      if (!models.length) {
+	        box.appendChild(createEmptyState("bot", "暂无模型", "添加一个模型后，家人就可以开始使用 AI槑槑。", { compact: true }));
+	        queueLucideRefresh();
+	        return;
+	      }
       for (const model of models) {
         const row = document.createElement("div");
         row.className = "model-row";
@@ -11534,7 +11611,8 @@ INDEX_HTML = r'''<!doctype html>
 	      const box = $("accountList");
 	      box.innerHTML = "";
 	      if (!users.length) {
-	        box.innerHTML = '<div class="status">暂无账号。</div>';
+	        box.appendChild(createEmptyState("users", "暂无账号", "新增家庭账号后，每个人会看到自己的会话和收藏。", { compact: true }));
+	        queueLucideRefresh();
 	        return;
 	      }
 	      for (const user of users) {
