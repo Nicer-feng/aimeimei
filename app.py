@@ -6571,6 +6571,137 @@ INDEX_HTML = r'''<!doctype html>
       background: transparent;
       padding-bottom: clamp(180px, 22vh, 248px);
     }
+    .conversation-minimap {
+      position: absolute;
+      left: clamp(16px, 2.2vw, 34px);
+      top: 86px;
+      bottom: clamp(188px, 23vh, 258px);
+      z-index: 5;
+      width: 14px;
+      padding: 8px 3px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--line) 54%, transparent);
+      background: color-mix(in srgb, var(--surface) 38%, transparent);
+      box-shadow: 0 10px 28px rgba(73, 54, 35, .055);
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+      backdrop-filter: blur(14px) saturate(140%);
+      opacity: .82;
+      transition: opacity .18s ease, background .18s ease;
+    }
+    .conversation-minimap:hover,
+    .conversation-minimap:focus-within {
+      opacity: 1;
+      background: color-mix(in srgb, var(--surface) 56%, transparent);
+    }
+    .minimap-track {
+      position: relative;
+      height: 100%;
+      border-radius: 999px;
+    }
+    .minimap-viewport {
+      position: absolute;
+      left: -2px;
+      right: -2px;
+      min-height: 18px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--accent) 48%, transparent);
+      background: color-mix(in srgb, var(--accent-soft) 58%, transparent);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface) 38%, transparent);
+      pointer-events: none;
+      transition: top .12s ease, height .12s ease, opacity .16s ease;
+    }
+    .minimap-marker {
+      position: absolute;
+      left: 50%;
+      width: 5px;
+      min-height: 3px;
+      padding: 0;
+      border: 0;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--muted-2) 72%, transparent);
+      transform: translateX(-50%);
+      cursor: pointer;
+      opacity: .82;
+      transition: width .14s ease, opacity .14s ease, transform .14s ease, background .14s ease;
+    }
+    .minimap-marker:hover,
+    .minimap-marker:focus-visible {
+      width: 8px;
+      opacity: 1;
+      transform: translateX(-50%) scaleX(1.08);
+      outline: none;
+    }
+    .minimap-marker.is-user {
+      width: 4px;
+      background: color-mix(in srgb, var(--accent) 54%, var(--muted-2));
+    }
+    .minimap-marker.is-assistant {
+      width: 7px;
+      background: color-mix(in srgb, var(--muted) 68%, transparent);
+    }
+    .minimap-marker.is-system {
+      background: color-mix(in srgb, var(--muted-2) 52%, transparent);
+    }
+    .minimap-marker.has-search {
+      background: #5b9cf0;
+    }
+    .minimap-marker.has-media {
+      background: #a78bfa;
+    }
+    .minimap-marker.has-image {
+      background: #42b883;
+    }
+    .minimap-marker.has-attachment {
+      background: #42b883;
+    }
+    .minimap-marker.has-favorite {
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 36%, transparent);
+    }
+    .minimap-tooltip {
+      position: absolute;
+      left: 22px;
+      top: 0;
+      width: 236px;
+      max-width: min(236px, calc(100vw - 80px));
+      padding: 10px 12px;
+      border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      color: var(--text);
+      box-shadow: 0 16px 42px rgba(73, 54, 35, .12);
+      -webkit-backdrop-filter: blur(16px) saturate(150%);
+      backdrop-filter: blur(16px) saturate(150%);
+      opacity: 0;
+      transform: translate(4px, -50%);
+      pointer-events: none;
+      transition: opacity .14s ease, transform .14s ease;
+    }
+    .minimap-tooltip.show {
+      opacity: 1;
+      transform: translate(0, -50%);
+    }
+    .minimap-tooltip strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+      font-weight: 760;
+      color: var(--text);
+    }
+    .minimap-tooltip span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .minimap-tooltip p {
+      margin: 7px 0 0;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .conversation-minimap[hidden] {
+      display: none !important;
+    }
     .messages-inner,
     .bubble {
       width: min(var(--reading), 100%);
@@ -7728,6 +7859,9 @@ INDEX_HTML = r'''<!doctype html>
       .chat-usage {
         display: none;
       }
+      .conversation-minimap {
+        display: none !important;
+      }
       .composer-tools {
         padding-top: 8px;
       }
@@ -7807,14 +7941,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.6.9</p>
+        <p class="app-version">v2.7.0</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.6.9</span>
+        <span>v2.7.0</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7826,7 +7960,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.6.9</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.7.0</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7845,7 +7979,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.6.9</span>
+	          <span>v2.7.0</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -7869,6 +8003,12 @@ INDEX_HTML = r'''<!doctype html>
       </header>
 
       <section class="messages" id="messages"></section>
+      <nav class="conversation-minimap" id="conversationMinimap" aria-label="对话缩略导航" hidden>
+        <div class="minimap-track" id="minimapTrack">
+          <div class="minimap-viewport" id="minimapViewport"></div>
+        </div>
+        <div class="minimap-tooltip" id="minimapTooltip" role="tooltip"></div>
+      </nav>
       <button class="scroll-latest" id="scrollLatest" type="button" title="回到底部">↓ 回到底部</button>
 
 	      <footer class="composer">
@@ -8201,6 +8341,7 @@ INDEX_HTML = r'''<!doctype html>
 	      followOutput: true,
 	      hasNewWhilePaused: false,
 	      programmaticScroll: false,
+	      minimapQueued: false,
 	      isComposing: false,
 	      lastCompositionEndAt: 0,
 	      messageSeq: 0,
@@ -10163,6 +10304,7 @@ INDEX_HTML = r'''<!doctype html>
 		      $("chatTitle").textContent = "新对话";
 		      $("chatModel").textContent = state.models[0] ? "准备使用 " + state.models[0].name : "请选择模型";
 	      updateChatUsage();
+	      hideConversationMinimap();
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
@@ -10516,6 +10658,169 @@ INDEX_HTML = r'''<!doctype html>
 	      el.hidden = count <= 0;
 	    }
 
+	    function minimapAvailable() {
+	      return window.matchMedia && window.matchMedia("(min-width: 901px)").matches;
+	    }
+
+	    function hideConversationMinimap() {
+	      const minimap = $("conversationMinimap");
+	      const tooltip = $("minimapTooltip");
+	      if (minimap) minimap.hidden = true;
+	      if (tooltip) tooltip.classList.remove("show");
+	    }
+
+	    function messageMinimapFlags(message) {
+	      const content = String(message?.content || "");
+	      const sources = Array.isArray(message?.sources) ? message.sources : [];
+	      const images = messageImages(message);
+	      return {
+	        search: sources.length > 0 || /联网搜索|参考来源|搜索结果/i.test(content),
+	        media: /ai-meimei-media-task|音视频分析|通义听悟|转写全文|智能摘要/i.test(content),
+	        image: images.length > 0,
+	        attachment: images.length > 0 || /附件|文件|图片/i.test(content),
+	        favorite: Boolean(message?.favorite_id)
+	      };
+	    }
+
+	    function messageMinimapTitle(message, flags) {
+	      const base = message?.role === "user" ? "你" : (message?.role === "assistant" ? "槑槑" : "系统");
+	      const tags = [];
+	      if (flags.search) tags.push("联网搜索");
+	      if (flags.media) tags.push("音视频分析");
+	      if (flags.image) tags.push("图片");
+	      else if (flags.attachment) tags.push("附件");
+	      if (flags.favorite) tags.push("已收藏");
+	      return tags.length ? base + " · " + tags.join(" · ") : base;
+	    }
+
+	    function messageMinimapSummary(message) {
+	      const text = visibleMessageContent(message)
+	        .replace(/[#>*_`\[\]()]/g, "")
+	        .replace(/\s+/g, " ")
+	        .trim();
+	      if (text) return text.slice(0, 40);
+	      if (messageImages(message).length) return "图片消息";
+	      if (message?.thinking) return "槑槑正在整理思路...";
+	      return "暂无可预览内容";
+	    }
+
+	    function minimapMarkerClass(message, flags) {
+	      const classes = ["minimap-marker", "is-" + (message?.role || "system")];
+	      if (flags.search) classes.push("has-search");
+	      if (flags.media) classes.push("has-media");
+	      if (flags.image) classes.push("has-image");
+	      if (flags.attachment) classes.push("has-attachment");
+	      if (flags.favorite) classes.push("has-favorite");
+	      return classes.join(" ");
+	    }
+
+	    function showMinimapTooltip(message, marker) {
+	      const tooltip = $("minimapTooltip");
+	      const minimap = $("conversationMinimap");
+	      if (!tooltip || !minimap || !marker) return;
+	      const flags = messageMinimapFlags(message);
+	      const tokens = messageTotalTokens(message);
+	      const meta = [formatMessageTime(message?.created_at)];
+	      if (tokens) meta.push(formatTokens(tokens));
+	      tooltip.innerHTML =
+	        "<strong>" + escapeHTML(messageMinimapTitle(message, flags)) + "</strong>" +
+	        "<span>" + escapeHTML(meta.filter(Boolean).join(" · ")) + "</span>" +
+	        "<p>" + escapeHTML(messageMinimapSummary(message)) + "</p>";
+	      const y = clampNumber(marker.offsetTop + marker.offsetHeight / 2, 28, Math.max(28, minimap.clientHeight - 28), 28);
+	      tooltip.style.top = y + "px";
+	      tooltip.classList.add("show");
+	    }
+
+	    function hideMinimapTooltip() {
+	      const tooltip = $("minimapTooltip");
+	      if (tooltip) tooltip.classList.remove("show");
+	    }
+
+	    function updateConversationMinimapViewport() {
+	      const box = $("messages");
+	      const track = $("minimapTrack");
+	      const viewport = $("minimapViewport");
+	      const minimap = $("conversationMinimap");
+	      if (!box || !track || !viewport || !minimap || minimap.hidden) return;
+	      const trackHeight = track.clientHeight;
+	      const scrollHeight = Math.max(box.scrollHeight, box.clientHeight, 1);
+	      const height = clampNumber((box.clientHeight / scrollHeight) * trackHeight, 18, trackHeight, trackHeight);
+	      const top = clampNumber((box.scrollTop / scrollHeight) * trackHeight, 0, Math.max(0, trackHeight - height), 0);
+	      viewport.style.height = height + "px";
+	      viewport.style.top = top + "px";
+	    }
+
+	    function scrollToMinimapMessage(message, behavior = "smooth") {
+	      const box = $("messages");
+	      const wrap = box?.querySelector(`[data-message-key="${messageKey(message)}"]`);
+	      if (!box || !wrap) return;
+	      const target = clampNumber(
+	        wrap.offsetTop - Math.max(36, (box.clientHeight - wrap.offsetHeight) / 2),
+	        0,
+	        Math.max(0, box.scrollHeight - box.clientHeight),
+	        0
+	      );
+	      state.programmaticScroll = true;
+	      box.scrollTo({ top: target, behavior });
+	      setTimeout(() => {
+	        state.programmaticScroll = false;
+	        handleMessagesScroll();
+	      }, behavior === "smooth" ? 520 : 0);
+	      updateConversationMinimapViewport();
+	    }
+
+	    function renderConversationMinimap() {
+	      const minimap = $("conversationMinimap");
+	      const track = $("minimapTrack");
+	      const viewport = $("minimapViewport");
+	      const box = $("messages");
+	      if (!minimap || !track || !viewport || !box) return;
+	      track.querySelectorAll(".minimap-marker").forEach((node) => node.remove());
+	      if (!minimapAvailable() || !state.messages.length) {
+	        hideConversationMinimap();
+	        return;
+	      }
+	      minimap.hidden = false;
+	      const scrollHeight = Math.max(box.scrollHeight, box.clientHeight, 1);
+	      const trackHeight = track.clientHeight;
+	      if (!trackHeight || !scrollHeight) {
+	        hideConversationMinimap();
+	        return;
+	      }
+	      for (const message of state.messages) {
+	        const wrap = box.querySelector(`[data-message-key="${messageKey(message)}"]`);
+	        if (!wrap) continue;
+	        const flags = messageMinimapFlags(message);
+	        const marker = document.createElement("button");
+	        marker.type = "button";
+	        marker.className = minimapMarkerClass(message, flags);
+	        marker.setAttribute("aria-label", messageMinimapTitle(message, flags));
+	        marker.style.top = clampNumber((wrap.offsetTop / scrollHeight) * trackHeight, 0, trackHeight - 4, 0) + "px";
+	        const rawHeight = (Math.max(wrap.offsetHeight, 24) / scrollHeight) * trackHeight;
+	        const minHeight = message.role === "assistant" ? 6 : 3;
+	        marker.style.height = clampNumber(rawHeight, minHeight, Math.max(minHeight, Math.min(38, trackHeight)), minHeight) + "px";
+	        marker.addEventListener("click", (event) => {
+	          event.preventDefault();
+	          scrollToMinimapMessage(message, "smooth");
+	        });
+	        marker.addEventListener("pointerenter", () => showMinimapTooltip(message, marker));
+	        marker.addEventListener("pointerleave", hideMinimapTooltip);
+	        marker.addEventListener("focus", () => showMinimapTooltip(message, marker));
+	        marker.addEventListener("blur", hideMinimapTooltip);
+	        track.appendChild(marker);
+	      }
+	      updateConversationMinimapViewport();
+	    }
+
+	    function queueConversationMinimap() {
+	      if (state.minimapQueued) return;
+	      state.minimapQueued = true;
+	      requestAnimationFrame(() => {
+	        state.minimapQueued = false;
+	        renderConversationMinimap();
+	      });
+	    }
+
 	    function isNearBottom(box = $("messages")) {
 	      return box.scrollHeight - box.scrollTop - box.clientHeight < 96;
 	    }
@@ -10543,9 +10848,11 @@ INDEX_HTML = r'''<!doctype html>
 	        box.scrollTop = box.scrollHeight;
 	      }
 	      updateScrollLatestButton();
+	      updateConversationMinimapViewport();
 	    }
 
 	    function handleMessagesScroll() {
+	      updateConversationMinimapViewport();
 	      if (state.programmaticScroll) return;
 	      if (isNearBottom()) {
 	        state.followOutput = true;
@@ -10732,6 +11039,7 @@ INDEX_HTML = r'''<!doctype html>
 	      settleMessageScroll(previousTop, shouldFollow);
 	      updateChatUsage();
 	      queueLucideRefresh();
+	      queueConversationMinimap();
 	    }
 
 	    function renderMessages(options = {}) {
@@ -10744,6 +11052,7 @@ INDEX_HTML = r'''<!doctype html>
 	        state.hasNewWhilePaused = false;
 	        updateScrollLatestButton();
 	        updateChatUsage();
+	        hideConversationMinimap();
 	        return;
 	      }
 	      const fragment = document.createDocumentFragment();
@@ -10754,6 +11063,7 @@ INDEX_HTML = r'''<!doctype html>
 	      settleMessageScroll(previousTop, shouldFollow);
 	      updateChatUsage();
 	      queueLucideRefresh();
+	      queueConversationMinimap();
 	    }
 
 	    async function copyText(text, button) {
@@ -10848,6 +11158,7 @@ INDEX_HTML = r'''<!doctype html>
 	        img.src = url;
 	        img.alt = image.filename || "聊天图片";
 	        img.loading = "lazy";
+	        img.addEventListener("load", queueConversationMinimap, { once: true });
 	        button.appendChild(img);
 	        button.addEventListener("click", () => openImagePreview(url));
 	        container.appendChild(button);
@@ -11860,6 +12171,7 @@ INDEX_HTML = r'''<!doctype html>
 			    window.addEventListener("resize", syncViewportHeight, { passive: true });
 			    window.addEventListener("resize", () => applySidebarWidth(state.sidebarWidth, true), { passive: true });
 			    window.addEventListener("resize", () => queueMarkdownOverflowRefresh($("messages")), { passive: true });
+			    window.addEventListener("resize", queueConversationMinimap, { passive: true });
 		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
 	    window.visualViewport?.addEventListener("scroll", syncViewportHeight, { passive: true });
 
