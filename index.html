@@ -4,21 +4,27 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>槑槑小记</title>
-  <meta name="description" content="槑槑小记，记录日常生活、照片与温柔片段的个人小站。">
+  <meta name="description" content="槑槑小记，冯上炅的个人生活小站，包含 AI槑槑、小猫书和日常记录。">
   <link rel="icon" href="/favicon.ico">
   <style>
     :root {
       --bg: #fffdfb;
-      --surface: rgba(255, 255, 255, .78);
+      --bg-warm: #fbf7f2;
+      --surface: rgba(255, 255, 255, .76);
       --surface-strong: rgba(255, 255, 255, .92);
-      --text: #27211f;
-      --muted: #7f746f;
-      --line: rgba(82, 65, 58, .13);
+      --surface-soft: rgba(250, 246, 240, .74);
+      --text: #292321;
+      --muted: #857974;
+      --subtle: #aa9a91;
+      --line: rgba(82, 65, 58, .12);
       --pink: #e9afc0;
       --pink-strong: #d98fa8;
+      --rose-deep: #b96783;
       --cream: #f6e9d6;
       --honey: #e8c37a;
-      --shadow: 0 24px 70px rgba(103, 78, 67, .13);
+      --mint: #d9e8d4;
+      --shadow: 0 26px 80px rgba(103, 78, 67, .14);
+      --shadow-soft: 0 14px 42px rgba(104, 78, 67, .08);
       --radius: 28px;
     }
     * {
@@ -32,7 +38,10 @@
       min-height: 100%;
       margin: 0;
       overflow-x: hidden;
-      background: linear-gradient(135deg, #fff 0%, #fffaf4 46%, #fff 100%);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(233, 175, 192, .18), transparent 28%),
+        radial-gradient(circle at 86% 16%, rgba(246, 233, 214, .86), transparent 30%),
+        linear-gradient(135deg, #fff 0%, var(--bg-warm) 50%, #fff 100%);
       color: var(--text);
       font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
       font-size: 16px;
@@ -52,60 +61,98 @@
       isolation: isolate;
       min-height: 100vh;
     }
-    .nav {
+    .nav-wrap {
       position: sticky;
       top: 0;
-      z-index: 20;
+      z-index: 30;
+      border-bottom: 1px solid rgba(82, 65, 58, .07);
+      background: rgba(255, 253, 251, .68);
+      backdrop-filter: blur(18px) saturate(150%);
+    }
+    .nav {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 20px;
-      width: min(1120px, calc(100vw - 32px));
+      gap: 18px;
+      width: min(1160px, calc(100vw - 32px));
+      min-height: 72px;
       margin: 0 auto;
-      padding: 18px 0;
-      backdrop-filter: blur(18px);
     }
     .brand {
       display: flex;
       align-items: center;
       gap: 12px;
       min-width: 0;
-      font-weight: 850;
-      font-size: 18px;
     }
     .brand img {
-      width: 44px;
-      height: 44px;
-      border-radius: 16px;
-      border: 1px solid rgba(255, 255, 255, .86);
-      box-shadow: 0 10px 30px rgba(217, 143, 168, .22);
+      width: 46px;
+      height: 46px;
+      border-radius: 17px;
+      border: 1px solid rgba(255, 255, 255, .9);
+      box-shadow: 0 10px 30px rgba(217, 143, 168, .24);
     }
-    .nav-links {
+    .brand-name {
+      display: grid;
+      gap: 1px;
+    }
+    .brand-name strong {
+      font-size: 18px;
+      line-height: 1.1;
+      font-weight: 850;
+    }
+    .brand-name span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .nav-links,
+    .nav-actions {
       display: flex;
       align-items: center;
       gap: 8px;
+    }
+    .nav-links {
       color: var(--muted);
       font-size: 14px;
-      font-weight: 650;
+      font-weight: 700;
     }
-    .nav-links a {
+    .nav-links a,
+    .nav-actions a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       min-height: 40px;
       padding: 8px 13px;
       border-radius: 999px;
+      transition: background .18s ease, color .18s ease, transform .18s ease, border-color .18s ease;
     }
-    .nav-links a:hover {
-      background: rgba(255, 255, 255, .7);
+    .nav-links a:hover,
+    .nav-actions a:hover {
+      background: rgba(255, 255, 255, .76);
       color: var(--text);
+    }
+    .nav-actions a {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .62);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 760;
+    }
+    .nav-actions .primary {
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--pink), var(--pink-strong));
+      color: #fff;
+      box-shadow: 0 14px 28px rgba(217, 143, 168, .25);
     }
     .hero {
       --spot-x: 54%;
       --spot-y: 42%;
       position: relative;
       isolation: isolate;
-      min-height: calc(100vh - 84px);
       display: grid;
       place-items: center;
-      padding: 48px 16px 76px;
+      min-height: calc(100vh - 72px);
+      padding: 54px 16px 66px;
       overflow: hidden;
     }
     .hero::before {
@@ -114,7 +161,16 @@
       inset: 0;
       z-index: -3;
       pointer-events: none;
-      background: radial-gradient(circle 340px at var(--spot-x) var(--spot-y), rgba(233, 175, 192, .22), transparent 72%);
+      background: radial-gradient(circle 360px at var(--spot-x) var(--spot-y), rgba(233, 175, 192, .24), transparent 72%);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      z-index: -1;
+      height: 34%;
+      pointer-events: none;
+      background: linear-gradient(to bottom, transparent, rgba(255, 253, 251, .96));
     }
     .word-field {
       --local-x: 50%;
@@ -129,25 +185,25 @@
     .word-layer {
       position: absolute;
       inset: 0;
-      color: rgba(121, 104, 96, .11);
-      font-size: clamp(30px, 4.1vw, 64px);
+      color: rgba(121, 104, 96, .085);
+      font-size: clamp(32px, 4.35vw, 68px);
       font-weight: 900;
       white-space: nowrap;
     }
     .word-track {
       position: absolute;
-      inset: -16% -18%;
+      inset: -17% -18%;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      gap: clamp(22px, 2.9vw, 42px);
-      transform: rotate(-13deg) scale(1.06);
+      gap: clamp(18px, 2.55vw, 34px);
+      transform: rotate(-16deg) scale(1.08);
       transform-origin: center;
     }
     .word-row {
       display: flex;
       align-items: center;
-      gap: clamp(26px, 4.2vw, 72px);
+      gap: clamp(22px, 3.6vw, 58px);
       line-height: 1;
       transform: translateX(var(--shift, 0));
     }
@@ -157,49 +213,64 @@
     }
     .word-layer.color {
       color: color-mix(in srgb, var(--pink-strong) 82%, var(--honey));
-      opacity: .96;
-      -webkit-mask-image: radial-gradient(circle 220px at var(--local-x) var(--local-y), #000 0%, #000 34%, transparent 74%);
-      mask-image: radial-gradient(circle 220px at var(--local-x) var(--local-y), #000 0%, #000 34%, transparent 74%);
-      filter: saturate(1.08);
+      opacity: .82;
+      -webkit-mask-image: radial-gradient(circle 210px at var(--local-x) var(--local-y), #000 0%, #000 30%, transparent 72%);
+      mask-image: radial-gradient(circle 210px at var(--local-x) var(--local-y), #000 0%, #000 30%, transparent 72%);
+      filter: saturate(1.06);
+    }
+    .hero-shell {
+      width: min(1080px, 100%);
+      display: grid;
+      gap: 18px;
     }
     .hero-card {
-      width: min(1020px, 100%);
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 330px;
-      align-items: center;
-      gap: 34px;
-      padding: clamp(26px, 4vw, 54px);
+      grid-template-columns: minmax(0, 1.08fr) minmax(280px, .72fr);
+      align-items: stretch;
+      gap: 26px;
+      padding: clamp(22px, 3.3vw, 42px);
       border: 1px solid rgba(255, 255, 255, .76);
-      border-radius: clamp(26px, 4vw, 48px);
-      background: linear-gradient(135deg, rgba(255,255,255,.88), rgba(255,250,245,.72));
+      border-radius: clamp(28px, 4vw, 46px);
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.9), rgba(255,250,245,.76)),
+        rgba(255,255,255,.62);
       box-shadow: var(--shadow);
-      backdrop-filter: blur(22px);
+      backdrop-filter: blur(22px) saturate(148%);
+    }
+    .hero-copy {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-width: 0;
+      padding: clamp(4px, 1vw, 12px);
     }
     .eyebrow {
       display: inline-flex;
       align-items: center;
       gap: 8px;
+      width: fit-content;
       min-height: 34px;
       padding: 6px 12px;
       border: 1px solid color-mix(in srgb, var(--pink) 46%, var(--line));
       border-radius: 999px;
       background: rgba(255,255,255,.72);
-      color: var(--pink-strong);
+      color: var(--rose-deep);
       font-size: 14px;
-      font-weight: 800;
+      font-weight: 820;
     }
     h1 {
+      max-width: 670px;
       margin: 22px 0 14px;
-      font-size: clamp(48px, 8vw, 96px);
-      line-height: .95;
+      font-size: clamp(48px, 7.4vw, 92px);
+      line-height: .96;
       letter-spacing: 0;
     }
     .hero-copy p {
-      max-width: 590px;
+      max-width: 620px;
       margin: 0;
       color: var(--muted);
-      font-size: clamp(17px, 2vw, 21px);
-      line-height: 1.85;
+      font-size: clamp(17px, 1.9vw, 21px);
+      line-height: 1.86;
     }
     .actions {
       display: flex;
@@ -211,14 +282,20 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 48px;
-      padding: 0 18px;
+      gap: 8px;
+      min-height: 50px;
+      padding: 0 20px;
       border-radius: 999px;
       border: 1px solid var(--line);
       background: rgba(255,255,255,.74);
       color: var(--text);
-      font-weight: 780;
+      font-weight: 800;
       box-shadow: 0 12px 28px rgba(104, 78, 67, .08);
+      transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+    }
+    .button:hover,
+    .portal-card:hover {
+      transform: translateY(-2px);
     }
     .button.primary {
       border-color: transparent;
@@ -230,12 +307,13 @@
       position: relative;
       display: grid;
       place-items: center;
-      min-height: 350px;
-      border-radius: 38px;
+      min-height: 356px;
+      border-radius: 36px;
       background:
-        radial-gradient(circle at 28% 22%, rgba(255,255,255,.9), transparent 26%),
-        linear-gradient(155deg, rgba(246,233,214,.78), rgba(233,175,192,.38));
-      border: 1px solid rgba(255,255,255,.72);
+        radial-gradient(circle at 28% 22%, rgba(255,255,255,.9), transparent 25%),
+        radial-gradient(circle at 80% 84%, rgba(216, 138, 166, .22), transparent 34%),
+        linear-gradient(155deg, rgba(246,233,214,.78), rgba(233,175,192,.36));
+      border: 1px solid rgba(255,255,255,.76);
       overflow: hidden;
     }
     .cat-panel::before,
@@ -243,7 +321,7 @@
       content: "";
       position: absolute;
       border-radius: 999px;
-      background: rgba(255,255,255,.42);
+      background: rgba(255,255,255,.44);
     }
     .cat-panel::before {
       width: 118px;
@@ -260,52 +338,111 @@
     .cat-panel img {
       position: relative;
       z-index: 1;
-      width: min(238px, 76%);
+      width: min(250px, 76%);
       border-radius: 42px;
       filter: drop-shadow(0 28px 32px rgba(107, 82, 72, .18));
       animation: floatCat 5.8s ease-in-out infinite;
     }
-    .note-strip {
-      width: min(1120px, calc(100vw - 32px));
-      margin: -36px auto 0;
+    .cat-note {
+      position: absolute;
+      left: 22px;
+      right: 22px;
+      bottom: 20px;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1px solid rgba(255,255,255,.72);
+      border-radius: 22px;
+      background: rgba(255,255,255,.72);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 740;
+      backdrop-filter: blur(14px);
+    }
+    .cat-note strong {
+      color: var(--text);
+      font-size: 14px;
+    }
+    .portal-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 16px;
+      gap: 14px;
     }
-    .note-card {
-      min-height: 156px;
+    .portal-card {
+      position: relative;
+      min-height: 176px;
       padding: 22px;
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--surface-strong);
-      box-shadow: 0 16px 48px rgba(104, 78, 67, .08);
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+      transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
     }
-    .note-card small {
-      color: var(--pink-strong);
+    .portal-card:hover {
+      border-color: rgba(217, 143, 168, .34);
+      box-shadow: 0 18px 52px rgba(104, 78, 67, .11);
+    }
+    .portal-card::after {
+      content: "";
+      position: absolute;
+      right: -34px;
+      top: -38px;
+      width: 112px;
+      height: 112px;
+      border-radius: 999px;
+      background: var(--card-glow, rgba(233, 175, 192, .2));
+    }
+    .portal-card small {
+      position: relative;
+      z-index: 1;
+      color: var(--rose-deep);
       font-weight: 850;
     }
-    .note-card h2 {
-      margin: 10px 0 8px;
-      font-size: 21px;
-      line-height: 1.25;
+    .portal-card h2 {
+      position: relative;
+      z-index: 1;
+      margin: 12px 0 8px;
+      font-size: 23px;
+      line-height: 1.24;
       letter-spacing: 0;
     }
-    .note-card p {
+    .portal-card p {
+      position: relative;
+      z-index: 1;
       margin: 0;
       color: var(--muted);
       font-size: 15px;
+      line-height: 1.72;
+    }
+    .portal-card .arrow {
+      position: absolute;
+      right: 20px;
+      bottom: 18px;
+      display: grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      background: rgba(255, 250, 245, .9);
+      color: var(--rose-deep);
+      font-weight: 900;
     }
     .section {
-      width: min(960px, calc(100vw - 32px));
-      margin: 82px auto;
-      padding: 34px;
+      width: min(1000px, calc(100vw - 32px));
+      margin: 78px auto;
+      padding: clamp(24px, 3vw, 34px);
       border-radius: 34px;
       border: 1px solid var(--line);
       background: rgba(255,255,255,.68);
+      box-shadow: 0 18px 56px rgba(104, 78, 67, .06);
     }
     .section h2 {
       margin: 0 0 10px;
-      font-size: clamp(28px, 4vw, 44px);
+      font-size: clamp(28px, 4vw, 42px);
       line-height: 1.16;
       letter-spacing: 0;
     }
@@ -356,14 +493,14 @@
       transition: color .2s ease, border-color .2s ease;
     }
     footer a:hover {
-      color: var(--accent);
+      color: var(--rose-deep);
       border-color: currentColor;
     }
     @keyframes floatCat {
       0%, 100% { transform: translateY(0) rotate(-1deg); }
       50% { transform: translateY(-10px) rotate(1.4deg); }
     }
-    @media (max-width: 840px) {
+    @media (max-width: 900px) {
       .nav {
         width: min(100vw - 24px, 720px);
       }
@@ -372,84 +509,130 @@
       }
       .hero {
         min-height: auto;
-        padding-top: 26px;
+        padding-top: 28px;
       }
       .hero-card {
         grid-template-columns: 1fr;
-        gap: 24px;
+        gap: 20px;
       }
       .cat-panel {
-        min-height: 250px;
+        min-height: 258px;
         order: -1;
       }
-      .note-strip,
+      .cat-panel img {
+        width: min(210px, 70%);
+      }
+      .portal-grid,
       .memory-list {
         grid-template-columns: 1fr;
       }
-      .note-strip {
-        margin-top: 20px;
+      .portal-card {
+        min-height: 150px;
       }
       .section {
         margin: 52px auto;
-        padding: 24px;
       }
     }
-    @media (max-width: 520px) {
+    @media (max-width: 560px) {
       body {
         font-size: 15px;
+      }
+      .nav {
+        min-height: 66px;
       }
       .brand img {
         width: 40px;
         height: 40px;
         border-radius: 14px;
       }
-      h1 {
-        font-size: 54px;
+      .brand-name span,
+      .nav-actions a:not(.primary) {
+        display: none;
+      }
+      .nav-actions .primary {
+        min-height: 38px;
+        padding: 7px 12px;
+        font-size: 13px;
+      }
+      .hero {
+        padding: 22px 12px 46px;
       }
       .hero-card {
-        padding: 22px;
+        padding: 18px;
         border-radius: 30px;
+      }
+      h1 {
+        font-size: 50px;
+      }
+      .hero-copy p {
+        font-size: 16px;
       }
       .actions {
         flex-direction: column;
+        margin-top: 24px;
       }
       .button {
         width: 100%;
+      }
+      .cat-panel {
+        min-height: 224px;
+        border-radius: 28px;
+      }
+      .cat-note {
+        left: 14px;
+        right: 14px;
+        bottom: 14px;
       }
       .word-layer {
         font-size: 34px;
       }
       .word-track {
-        gap: 24px;
-        transform: rotate(-13deg) scale(1.08);
+        gap: 20px;
+        transform: rotate(-16deg) scale(1.1);
       }
       .word-row {
-        gap: 30px;
+        gap: 28px;
+      }
+      .portal-card,
+      .section {
+        border-radius: 24px;
       }
     }
     @media (prefers-reduced-motion: reduce) {
       html {
         scroll-behavior: auto;
       }
-      .cat-panel img {
+      .cat-panel img,
+      .button,
+      .portal-card {
         animation: none;
+        transition: none;
       }
     }
   </style>
 </head>
 <body>
   <div class="page">
-    <nav class="nav" aria-label="首页导航">
-      <a class="brand" href="#top" aria-label="槑槑小记首页">
-        <img src="/res/meimei-avatar.png" alt="槑槑头像">
-        <span>槑槑小记</span>
-      </a>
-      <div class="nav-links">
-        <a href="#notes">日常片段</a>
-        <a href="#about">关于小记</a>
-        <a href="#memory">记忆角落</a>
-      </div>
-    </nav>
+    <div class="nav-wrap">
+      <nav class="nav" aria-label="首页导航">
+        <a class="brand" href="#top" aria-label="槑槑小记首页">
+          <img src="/res/meimei-avatar.png" alt="槑槑头像">
+          <span class="brand-name">
+            <strong>槑槑小记</strong>
+            <span>冯上炅的生活小站</span>
+          </span>
+        </a>
+        <div class="nav-links">
+          <a href="#entries">入口</a>
+          <a href="#about">关于</a>
+          <a href="#memory">记忆</a>
+        </div>
+        <div class="nav-actions">
+          <a href="/cat/">小猫书</a>
+          <a class="primary" href="/ai">AI槑槑</a>
+        </div>
+      </nav>
+    </div>
 
     <main id="top">
       <section class="hero" aria-label="槑槑小记欢迎区">
@@ -457,48 +640,58 @@
           <div class="word-layer base" id="wordBase"></div>
           <div class="word-layer color" id="wordColor"></div>
         </div>
-        <div class="hero-card">
-          <div class="hero-copy">
-            <span class="eyebrow">个人日常记录</span>
-            <h1>槑槑小记</h1>
-            <p>把生活里柔软的小事慢慢记下来。这里是一个个人非经营性小站，用来保存日常、照片、随笔和一些想留住的片段。</p>
-            <div class="actions">
-              <a class="button primary" href="#notes">看看最近记录</a>
-              <a class="button" href="#about">了解这个小站</a>
+        <div class="hero-shell">
+          <div class="hero-card">
+            <div class="hero-copy">
+              <span class="eyebrow">欢迎来到槑槑的小空间</span>
+              <h1>槑槑小记</h1>
+              <p>把日常、猫咪和灵感放在一起。AI槑槑负责陪家里人聊天和整理内容，小猫书用来分享朋友家的猫，日常小记留给那些值得慢慢保存的片段。</p>
+              <div class="actions">
+                <a class="button primary" href="/ai">进入 AI槑槑</a>
+                <a class="button" href="/cat/">打开小猫书</a>
+                <a class="button" href="#entries">看看都有啥</a>
+              </div>
+            </div>
+            <div class="cat-panel" aria-label="槑槑猫咪形象">
+              <img src="/res/meimei-avatar.png" alt="槑槑卡通头像">
+              <div class="cat-note">
+                <span><strong>槑槑在这里</strong></span>
+                <span>陪你慢慢记录</span>
+              </div>
             </div>
           </div>
-          <div class="cat-panel" aria-label="槑槑猫咪插画">
-            <img src="/res/meimei-avatar.png" alt="槑槑卡通头像">
-          </div>
-        </div>
-      </section>
 
-      <section class="note-strip" id="notes" aria-label="日常片段">
-        <article class="note-card">
-          <small>今日小记</small>
-          <h2>把平凡日子收好</h2>
-          <p>随手记录生活里的小变化，哪怕只是天气、晚饭和一句想说的话。</p>
-        </article>
-        <article class="note-card">
-          <small>照片角落</small>
-          <h2>留住槑槑的样子</h2>
-          <p>用照片和文字整理记忆，让那些温柔瞬间一直有地方可以回来。</p>
-        </article>
-        <article class="note-card">
-          <small>家人日常</small>
-          <h2>简单、安静、私人的页面</h2>
-          <p>不做商业用途，不开放注册，只是一个用来记录生活的小空间。</p>
-        </article>
+          <section class="portal-grid" id="entries" aria-label="站点入口">
+            <a class="portal-card" href="/ai" style="--card-glow: rgba(233, 175, 192, .22)">
+              <small>家庭 AI 助手</small>
+              <h2>AI槑槑</h2>
+              <p>聊天、写作、图片理解、音视频分析，给家里人用的温暖 AI 助手。</p>
+              <span class="arrow">→</span>
+            </a>
+            <a class="portal-card" href="/cat/" style="--card-glow: rgba(246, 233, 214, .74)">
+              <small>猫咪照片分享</small>
+              <h2>小猫书</h2>
+              <p>熟人小圈子的猫咪相册，看看朋友们最近又发了哪些猫猫动态。</p>
+              <span class="arrow">→</span>
+            </a>
+            <a class="portal-card" href="#memory" style="--card-glow: rgba(217, 232, 212, .7)">
+              <small>日常记录</small>
+              <h2>生活小记</h2>
+              <p>把照片、随笔和一些想留住的话收好，后面慢慢补成一本小册子。</p>
+              <span class="arrow">↓</span>
+            </a>
+          </section>
+        </div>
       </section>
 
       <section class="section" id="about">
         <h2>关于这个小站</h2>
-        <p>槑槑小记是个人维护的生活记录页。它不追求热闹，只想把值得记住的小事放得清楚、好看一点，方便以后慢慢翻看。</p>
+        <p>槑槑小记不追求热闹，只想把常用的小工具和生活里的温柔片段放得清楚一点。打开首页就能去 AI槑槑，也能去小猫书看猫。</p>
       </section>
 
       <section class="section" id="memory">
         <h2>记忆角落</h2>
-        <p>后面可以在这里放一些相册、随笔、旅行片段或给槑槑写的小故事。</p>
+        <p>后面这里可以继续放相册、随笔、旅行片段，或者给槑槑写的小故事。</p>
         <div class="memory-list">
           <div>
             <strong>生活</strong>
@@ -518,7 +711,7 @@
 
     <footer>
       <span>© 2026 槑槑小记</span>
-      <span>v2.6.7</span>
+      <span>v2.6.8</span>
       <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
     </footer>
   </div>
@@ -528,10 +721,10 @@
     const hero = field.closest(".hero");
     const base = document.getElementById("wordBase");
     const color = document.getElementById("wordColor");
-    const words = ["槑槑小记", "生活片段", "温柔日常", "MEIMEI NOTES", "照片", "随笔"];
-    const rowCount = 15;
+    const words = ["槑槑小记", "AI槑槑", "小猫书", "生活片段", "温柔日常", "MEIMEI NOTES", "照片", "随笔"];
+    const rowCount = 16;
     const wordsPerRow = 18;
-    const rowShifts = ["-18vw", "-11vw", "-4vw", "3vw", "10vw"];
+    const rowShifts = ["-18vw", "-12vw", "-6vw", "0", "6vw", "12vw"];
     const track = document.createElement("div");
     track.className = "word-track";
 
