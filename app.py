@@ -6573,25 +6573,24 @@ INDEX_HTML = r'''<!doctype html>
     }
     .conversation-minimap {
       position: absolute;
-      left: clamp(16px, 2.2vw, 34px);
+      left: clamp(14px, 1.8vw, 28px);
       top: 86px;
       bottom: clamp(188px, 23vh, 258px);
       z-index: 5;
-      width: 14px;
-      padding: 8px 3px;
+      width: 8px;
+      padding: 7px 1px;
       border-radius: 999px;
-      border: 1px solid color-mix(in srgb, var(--line) 54%, transparent);
-      background: color-mix(in srgb, var(--surface) 38%, transparent);
-      box-shadow: 0 10px 28px rgba(73, 54, 35, .055);
-      -webkit-backdrop-filter: blur(14px) saturate(140%);
-      backdrop-filter: blur(14px) saturate(140%);
-      opacity: .82;
-      transition: opacity .18s ease, background .18s ease;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      opacity: .24;
+      transition: opacity .2s ease, background .2s ease;
     }
     .conversation-minimap:hover,
-    .conversation-minimap:focus-within {
-      opacity: 1;
-      background: color-mix(in srgb, var(--surface) 56%, transparent);
+    .conversation-minimap:focus-within,
+    .conversation-minimap.is-scrolling {
+      opacity: .78;
+      background: color-mix(in srgb, var(--surface) 18%, transparent);
     }
     .minimap-track {
       position: relative;
@@ -6600,85 +6599,96 @@ INDEX_HTML = r'''<!doctype html>
     }
     .minimap-viewport {
       position: absolute;
-      left: -2px;
-      right: -2px;
+      left: -3px;
+      right: -3px;
       min-height: 18px;
       border-radius: 999px;
-      border: 1px solid color-mix(in srgb, var(--accent) 48%, transparent);
-      background: color-mix(in srgb, var(--accent-soft) 58%, transparent);
-      box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface) 38%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+      background: color-mix(in srgb, var(--accent-soft) 34%, transparent);
+      box-shadow: 0 5px 16px rgba(73, 54, 35, .05);
       pointer-events: none;
       transition: top .12s ease, height .12s ease, opacity .16s ease;
     }
     .minimap-marker {
       position: absolute;
       left: 50%;
-      width: 5px;
-      min-height: 3px;
+      width: 2px;
+      min-height: 2px;
       padding: 0;
       border: 0;
       border-radius: 999px;
-      background: color-mix(in srgb, var(--muted-2) 72%, transparent);
+      background: color-mix(in srgb, var(--muted-2) 42%, transparent);
       transform: translateX(-50%);
       cursor: pointer;
-      opacity: .82;
+      opacity: .58;
+      overflow: visible;
       transition: width .14s ease, opacity .14s ease, transform .14s ease, background .14s ease;
     }
     .minimap-marker:hover,
     .minimap-marker:focus-visible {
-      width: 8px;
+      width: 4px;
       opacity: 1;
       transform: translateX(-50%) scaleX(1.08);
       outline: none;
     }
-    .minimap-marker.is-user {
+    .minimap-marker::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 0;
+      height: 0;
+      border-radius: 999px;
+      transform: translate(-50%, -50%);
+      transition: width .14s ease, height .14s ease, box-shadow .14s ease;
+    }
+    .minimap-marker.has-search::after {
       width: 4px;
-      background: color-mix(in srgb, var(--accent) 54%, var(--muted-2));
-    }
-    .minimap-marker.is-assistant {
-      width: 7px;
-      background: color-mix(in srgb, var(--muted) 68%, transparent);
-    }
-    .minimap-marker.is-system {
-      background: color-mix(in srgb, var(--muted-2) 52%, transparent);
-    }
-    .minimap-marker.has-search {
+      height: 4px;
       background: #5b9cf0;
+      box-shadow: 0 0 0 1px rgba(91, 156, 240, .18);
     }
-    .minimap-marker.has-media {
+    .minimap-marker.has-media::after {
+      width: 4px;
+      height: 4px;
       background: #a78bfa;
+      box-shadow: 0 0 0 1px rgba(167, 139, 250, .18);
     }
-    .minimap-marker.has-image {
+    .minimap-marker.has-image::after,
+    .minimap-marker.has-attachment::after {
+      width: 4px;
+      height: 4px;
       background: #42b883;
+      box-shadow: 0 0 0 1px rgba(66, 184, 131, .18);
     }
-    .minimap-marker.has-attachment {
-      background: #42b883;
-    }
-    .minimap-marker.has-favorite {
-      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 36%, transparent);
+    .minimap-marker.has-favorite::after {
+      width: 4px;
+      height: 4px;
+      background: color-mix(in srgb, var(--accent) 78%, #ffffff);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
     }
     .minimap-tooltip {
       position: absolute;
-      left: 22px;
+      left: 15px;
       top: 0;
       width: 236px;
       max-width: min(236px, calc(100vw - 80px));
-      padding: 10px 12px;
-      border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
-      border-radius: 14px;
-      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      padding: 11px 12px;
+      border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--surface) 78%, transparent);
       color: var(--text);
-      box-shadow: 0 16px 42px rgba(73, 54, 35, .12);
-      -webkit-backdrop-filter: blur(16px) saturate(150%);
-      backdrop-filter: blur(16px) saturate(150%);
+      box-shadow: 0 18px 48px rgba(73, 54, 35, .13);
+      -webkit-backdrop-filter: blur(18px) saturate(155%);
+      backdrop-filter: blur(18px) saturate(155%);
       opacity: 0;
-      transform: translate(4px, -50%);
+      transform: translate(5px, -50%) scale(.98);
       pointer-events: none;
-      transition: opacity .14s ease, transform .14s ease;
+      transition: opacity .15s ease, transform .15s ease;
     }
     .minimap-tooltip.show {
       opacity: 1;
-      transform: translate(0, -50%);
+      transform: translate(0, -50%) scale(1);
     }
     .minimap-tooltip strong {
       display: block;
@@ -7941,14 +7951,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.7.0</p>
+        <p class="app-version">v2.7.1</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.7.0</span>
+        <span>v2.7.1</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7960,7 +7970,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.7.0</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.7.1</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7979,7 +7989,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.7.0</span>
+	          <span>v2.7.1</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -8342,6 +8352,7 @@ INDEX_HTML = r'''<!doctype html>
 	      hasNewWhilePaused: false,
 	      programmaticScroll: false,
 	      minimapQueued: false,
+	      minimapFadeTimer: 0,
 	      isComposing: false,
 	      lastCompositionEndAt: 0,
 	      messageSeq: 0,
@@ -10665,8 +10676,26 @@ INDEX_HTML = r'''<!doctype html>
 	    function hideConversationMinimap() {
 	      const minimap = $("conversationMinimap");
 	      const tooltip = $("minimapTooltip");
-	      if (minimap) minimap.hidden = true;
+	      if (state.minimapFadeTimer) {
+	        clearTimeout(state.minimapFadeTimer);
+	        state.minimapFadeTimer = 0;
+	      }
+	      if (minimap) {
+	        minimap.hidden = true;
+	        minimap.classList.remove("is-scrolling");
+	      }
 	      if (tooltip) tooltip.classList.remove("show");
+	    }
+
+	    function pulseConversationMinimap() {
+	      const minimap = $("conversationMinimap");
+	      if (!minimap || minimap.hidden) return;
+	      minimap.classList.add("is-scrolling");
+	      if (state.minimapFadeTimer) clearTimeout(state.minimapFadeTimer);
+	      state.minimapFadeTimer = window.setTimeout(() => {
+	        minimap.classList.remove("is-scrolling");
+	        state.minimapFadeTimer = 0;
+	      }, 820);
 	    }
 
 	    function messageMinimapFlags(message) {
@@ -10762,6 +10791,7 @@ INDEX_HTML = r'''<!doctype html>
 	      );
 	      state.programmaticScroll = true;
 	      box.scrollTo({ top: target, behavior });
+	      pulseConversationMinimap();
 	      setTimeout(() => {
 	        state.programmaticScroll = false;
 	        handleMessagesScroll();
@@ -10795,10 +10825,10 @@ INDEX_HTML = r'''<!doctype html>
 	        marker.type = "button";
 	        marker.className = minimapMarkerClass(message, flags);
 	        marker.setAttribute("aria-label", messageMinimapTitle(message, flags));
-	        marker.style.top = clampNumber((wrap.offsetTop / scrollHeight) * trackHeight, 0, trackHeight - 4, 0) + "px";
+	        marker.style.top = clampNumber((wrap.offsetTop / scrollHeight) * trackHeight, 0, trackHeight - 2, 0) + "px";
 	        const rawHeight = (Math.max(wrap.offsetHeight, 24) / scrollHeight) * trackHeight;
-	        const minHeight = message.role === "assistant" ? 6 : 3;
-	        marker.style.height = clampNumber(rawHeight, minHeight, Math.max(minHeight, Math.min(38, trackHeight)), minHeight) + "px";
+	        const minHeight = 2;
+	        marker.style.height = clampNumber(rawHeight, minHeight, Math.max(minHeight, Math.min(28, trackHeight)), minHeight) + "px";
 	        marker.addEventListener("click", (event) => {
 	          event.preventDefault();
 	          scrollToMinimapMessage(message, "smooth");
@@ -10849,10 +10879,12 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	      updateScrollLatestButton();
 	      updateConversationMinimapViewport();
+	      pulseConversationMinimap();
 	    }
 
 	    function handleMessagesScroll() {
 	      updateConversationMinimapViewport();
+	      pulseConversationMinimap();
 	      if (state.programmaticScroll) return;
 	      if (isNearBottom()) {
 	        state.followOutput = true;
