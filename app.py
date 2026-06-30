@@ -6720,13 +6720,11 @@ INDEX_HTML = r'''<!doctype html>
       width: 248px;
       max-width: min(248px, calc(100vw - 96px));
       padding: 12px 13px;
-      border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
+      border: 1px solid var(--line);
       border-radius: 16px;
-      background: color-mix(in srgb, var(--surface) 82%, transparent);
+      background: var(--surface);
       color: var(--text);
-      box-shadow: 0 18px 52px rgba(73, 54, 35, .14);
-      -webkit-backdrop-filter: blur(18px) saturate(155%);
-      backdrop-filter: blur(18px) saturate(155%);
+      box-shadow: 0 16px 42px rgba(73, 54, 35, .16);
       opacity: 0;
       transform: translate(7px, -50%) scale(.985);
       pointer-events: none;
@@ -7997,14 +7995,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.7.2</p>
+        <p class="app-version">v2.7.3</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.7.2</span>
+        <span>v2.7.3</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -8016,7 +8014,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.7.2</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.7.3</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -8035,7 +8033,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.7.2</span>
+	          <span>v2.7.3</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
