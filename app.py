@@ -6578,19 +6578,31 @@ INDEX_HTML = r'''<!doctype html>
       bottom: clamp(188px, 23vh, 258px);
       z-index: 5;
       width: 8px;
-      padding: 7px 1px;
-      border-radius: 999px;
+      padding: 7px 0;
+      border-radius: 16px;
       border: 0;
       background: transparent;
       box-shadow: none;
-      opacity: .24;
-      transition: opacity .2s ease, background .2s ease;
+      opacity: .42;
+      transform-origin: left center;
+      filter: saturate(.94);
+      transition: opacity .2s ease, width .24s cubic-bezier(.2, .8, .2, 1), transform .24s cubic-bezier(.2, .8, .2, 1), filter .24s ease, background .2s ease, box-shadow .2s ease;
     }
     .conversation-minimap:hover,
     .conversation-minimap:focus-within,
     .conversation-minimap.is-scrolling {
-      opacity: .78;
-      background: color-mix(in srgb, var(--surface) 18%, transparent);
+      opacity: .86;
+      background: color-mix(in srgb, var(--surface) 16%, transparent);
+      filter: saturate(1.02);
+    }
+    .conversation-minimap.is-expanded {
+      width: 56px;
+      opacity: .92;
+      transform: translateX(-2px);
+      background: color-mix(in srgb, var(--surface) 26%, transparent);
+      box-shadow: 0 16px 46px rgba(73, 54, 35, .06);
+      -webkit-backdrop-filter: blur(10px) saturate(130%);
+      backdrop-filter: blur(10px) saturate(130%);
     }
     .minimap-track {
       position: relative;
@@ -6599,48 +6611,74 @@ INDEX_HTML = r'''<!doctype html>
     }
     .minimap-viewport {
       position: absolute;
-      left: -3px;
-      right: -3px;
+      left: 50%;
+      width: 8px;
       min-height: 18px;
       border-radius: 999px;
       border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
       background: color-mix(in srgb, var(--accent-soft) 34%, transparent);
       box-shadow: 0 5px 16px rgba(73, 54, 35, .05);
       pointer-events: none;
-      transition: top .12s ease, height .12s ease, opacity .16s ease;
+      transform: translateX(-50%);
+      transition: top .12s ease, height .12s ease, width .18s ease, opacity .16s ease, background .16s ease, border-color .16s ease;
+    }
+    .conversation-minimap.is-expanded .minimap-viewport {
+      width: 42px;
+      border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+      background: color-mix(in srgb, var(--accent-soft) 44%, transparent);
     }
     .minimap-marker {
       position: absolute;
-      left: 50%;
-      width: 2px;
+      left: 0;
+      right: 0;
+      width: 100%;
       min-height: 2px;
       padding: 0;
       border: 0;
       border-radius: 999px;
-      background: color-mix(in srgb, var(--muted-2) 42%, transparent);
-      transform: translateX(-50%);
+      background: transparent;
+      transform: none;
       cursor: pointer;
-      opacity: .58;
+      opacity: .74;
       overflow: visible;
       transition: width .14s ease, opacity .14s ease, transform .14s ease, background .14s ease;
     }
     .minimap-marker:hover,
     .minimap-marker:focus-visible {
-      width: 4px;
       opacity: 1;
-      transform: translateX(-50%) scaleX(1.08);
       outline: none;
     }
+    .minimap-marker::before,
     .minimap-marker::after {
       content: "";
       position: absolute;
       left: 50%;
       top: 50%;
-      width: 0;
-      height: 0;
       border-radius: 999px;
       transform: translate(-50%, -50%);
-      transition: width .14s ease, height .14s ease, box-shadow .14s ease;
+      transition: width .16s ease, height .16s ease, opacity .16s ease, box-shadow .16s ease, background .16s ease;
+    }
+    .minimap-marker::before {
+      width: 2px;
+      height: 100%;
+      min-height: 2px;
+      background: color-mix(in srgb, var(--muted-2) 54%, transparent);
+      opacity: .74;
+    }
+    .conversation-minimap.is-expanded .minimap-marker::before {
+      width: 8px;
+      background: color-mix(in srgb, var(--muted-2) 42%, transparent);
+      opacity: .68;
+    }
+    .minimap-marker:hover::before,
+    .minimap-marker:focus-visible::before {
+      width: 12px;
+      opacity: .9;
+      background: color-mix(in srgb, var(--muted) 50%, transparent);
+    }
+    .minimap-marker::after {
+      width: 0;
+      height: 0;
     }
     .minimap-marker.has-search::after {
       width: 4px;
@@ -6667,24 +6705,32 @@ INDEX_HTML = r'''<!doctype html>
       background: color-mix(in srgb, var(--accent) 78%, #ffffff);
       box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
     }
+    .conversation-minimap.is-expanded .minimap-marker.has-search::after,
+    .conversation-minimap.is-expanded .minimap-marker.has-media::after,
+    .conversation-minimap.is-expanded .minimap-marker.has-image::after,
+    .conversation-minimap.is-expanded .minimap-marker.has-attachment::after,
+    .conversation-minimap.is-expanded .minimap-marker.has-favorite::after {
+      width: 6px;
+      height: 6px;
+    }
     .minimap-tooltip {
       position: absolute;
-      left: 15px;
+      left: calc(100% + 10px);
       top: 0;
-      width: 236px;
-      max-width: min(236px, calc(100vw - 80px));
-      padding: 11px 12px;
+      width: 248px;
+      max-width: min(248px, calc(100vw - 96px));
+      padding: 12px 13px;
       border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
       border-radius: 16px;
-      background: color-mix(in srgb, var(--surface) 78%, transparent);
+      background: color-mix(in srgb, var(--surface) 82%, transparent);
       color: var(--text);
-      box-shadow: 0 18px 48px rgba(73, 54, 35, .13);
+      box-shadow: 0 18px 52px rgba(73, 54, 35, .14);
       -webkit-backdrop-filter: blur(18px) saturate(155%);
       backdrop-filter: blur(18px) saturate(155%);
       opacity: 0;
-      transform: translate(5px, -50%) scale(.98);
+      transform: translate(7px, -50%) scale(.985);
       pointer-events: none;
-      transition: opacity .15s ease, transform .15s ease;
+      transition: opacity .16s ease, transform .18s cubic-bezier(.2, .8, .2, 1), top .12s ease;
     }
     .minimap-tooltip.show {
       opacity: 1;
@@ -7951,14 +7997,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.7.1</p>
+        <p class="app-version">v2.7.2</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.7.1</span>
+        <span>v2.7.2</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -7970,7 +8016,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.7.1</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.7.2</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -7989,7 +8035,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.7.1</span>
+	          <span>v2.7.2</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -8353,6 +8399,8 @@ INDEX_HTML = r'''<!doctype html>
 	      programmaticScroll: false,
 	      minimapQueued: false,
 	      minimapFadeTimer: 0,
+	      minimapCollapseTimer: 0,
+	      minimapTooltipTimer: 0,
 	      isComposing: false,
 	      lastCompositionEndAt: 0,
 	      messageSeq: 0,
@@ -10680,11 +10728,49 @@ INDEX_HTML = r'''<!doctype html>
 	        clearTimeout(state.minimapFadeTimer);
 	        state.minimapFadeTimer = 0;
 	      }
+	      if (state.minimapCollapseTimer) {
+	        clearTimeout(state.minimapCollapseTimer);
+	        state.minimapCollapseTimer = 0;
+	      }
+	      if (state.minimapTooltipTimer) {
+	        clearTimeout(state.minimapTooltipTimer);
+	        state.minimapTooltipTimer = 0;
+	      }
 	      if (minimap) {
 	        minimap.hidden = true;
-	        minimap.classList.remove("is-scrolling");
+	        minimap.classList.remove("is-scrolling", "is-expanded");
 	      }
 	      if (tooltip) tooltip.classList.remove("show");
+	    }
+
+	    function expandConversationMinimap() {
+	      const minimap = $("conversationMinimap");
+	      if (!minimap || minimap.hidden) return;
+	      if (state.minimapCollapseTimer) {
+	        clearTimeout(state.minimapCollapseTimer);
+	        state.minimapCollapseTimer = 0;
+	      }
+	      minimap.classList.add("is-expanded");
+	    }
+
+	    function scheduleCollapseConversationMinimap() {
+	      const minimap = $("conversationMinimap");
+	      if (!minimap || minimap.hidden) return;
+	      if (state.minimapCollapseTimer) clearTimeout(state.minimapCollapseTimer);
+	      state.minimapCollapseTimer = window.setTimeout(() => {
+	        minimap.classList.remove("is-expanded");
+	        hideMinimapTooltip(true);
+	        state.minimapCollapseTimer = 0;
+	      }, 300);
+	    }
+
+	    function handleMinimapOutsidePointer(event) {
+	      const minimap = $("conversationMinimap");
+	      if (!minimap || minimap.hidden || !minimap.classList.contains("is-expanded")) return;
+	      if (minimap.contains(event.target)) return;
+	      const active = document.activeElement;
+	      if (active && minimap.contains(active) && typeof active.blur === "function") active.blur();
+	      scheduleCollapseConversationMinimap();
 	    }
 
 	    function pulseConversationMinimap() {
@@ -10712,7 +10798,7 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
 	    function messageMinimapTitle(message, flags) {
-	      const base = message?.role === "user" ? "你" : (message?.role === "assistant" ? "槑槑" : "系统");
+	      const base = message?.role === "user" ? "用户" : (message?.role === "assistant" ? "槑槑" : "系统");
 	      const tags = [];
 	      if (flags.search) tags.push("联网搜索");
 	      if (flags.media) tags.push("音视频分析");
@@ -10727,7 +10813,7 @@ INDEX_HTML = r'''<!doctype html>
 	        .replace(/[#>*_`\[\]()]/g, "")
 	        .replace(/\s+/g, " ")
 	        .trim();
-	      if (text) return text.slice(0, 40);
+	      if (text) return text.slice(0, 60);
 	      if (messageImages(message).length) return "图片消息";
 	      if (message?.thinking) return "槑槑正在整理思路...";
 	      return "暂无可预览内容";
@@ -10743,10 +10829,15 @@ INDEX_HTML = r'''<!doctype html>
 	      return classes.join(" ");
 	    }
 
-	    function showMinimapTooltip(message, marker) {
+	    function showMinimapTooltip(message, marker, event) {
 	      const tooltip = $("minimapTooltip");
 	      const minimap = $("conversationMinimap");
 	      if (!tooltip || !minimap || !marker) return;
+	      expandConversationMinimap();
+	      if (state.minimapTooltipTimer) {
+	        clearTimeout(state.minimapTooltipTimer);
+	        state.minimapTooltipTimer = 0;
+	      }
 	      const flags = messageMinimapFlags(message);
 	      const tokens = messageTotalTokens(message);
 	      const meta = [formatMessageTime(message?.created_at)];
@@ -10755,14 +10846,25 @@ INDEX_HTML = r'''<!doctype html>
 	        "<strong>" + escapeHTML(messageMinimapTitle(message, flags)) + "</strong>" +
 	        "<span>" + escapeHTML(meta.filter(Boolean).join(" · ")) + "</span>" +
 	        "<p>" + escapeHTML(messageMinimapSummary(message)) + "</p>";
-	      const y = clampNumber(marker.offsetTop + marker.offsetHeight / 2, 28, Math.max(28, minimap.clientHeight - 28), 28);
+	      const pointerY = event?.clientY ? event.clientY - minimap.getBoundingClientRect().top : marker.offsetTop + marker.offsetHeight / 2;
+	      const y = clampNumber(pointerY, 34, Math.max(34, minimap.clientHeight - 34), 34);
 	      tooltip.style.top = y + "px";
 	      tooltip.classList.add("show");
 	    }
 
-	    function hideMinimapTooltip() {
+	    function hideMinimapTooltip(immediate = false) {
 	      const tooltip = $("minimapTooltip");
-	      if (tooltip) tooltip.classList.remove("show");
+	      if (!tooltip) return;
+	      if (state.minimapTooltipTimer) clearTimeout(state.minimapTooltipTimer);
+	      if (immediate) {
+	        tooltip.classList.remove("show");
+	        state.minimapTooltipTimer = 0;
+	        return;
+	      }
+	      state.minimapTooltipTimer = window.setTimeout(() => {
+	        tooltip.classList.remove("show");
+	        state.minimapTooltipTimer = 0;
+	      }, 120);
 	    }
 
 	    function updateConversationMinimapViewport() {
@@ -10833,7 +10935,8 @@ INDEX_HTML = r'''<!doctype html>
 	          event.preventDefault();
 	          scrollToMinimapMessage(message, "smooth");
 	        });
-	        marker.addEventListener("pointerenter", () => showMinimapTooltip(message, marker));
+	        marker.addEventListener("pointerenter", (event) => showMinimapTooltip(message, marker, event));
+	        marker.addEventListener("pointermove", (event) => showMinimapTooltip(message, marker, event));
 	        marker.addEventListener("pointerleave", hideMinimapTooltip);
 	        marker.addEventListener("focus", () => showMinimapTooltip(message, marker));
 	        marker.addEventListener("blur", hideMinimapTooltip);
@@ -12098,6 +12201,11 @@ INDEX_HTML = r'''<!doctype html>
 	    $("insertNewline").addEventListener("click", insertNewlineAtCursor);
 	    $("deleteConversation").addEventListener("click", deleteCurrentConversation);
 	    $("messages").addEventListener("scroll", handleMessagesScroll, { passive: true });
+	    $("conversationMinimap").addEventListener("pointerenter", expandConversationMinimap);
+	    $("conversationMinimap").addEventListener("pointerleave", scheduleCollapseConversationMinimap);
+	    $("conversationMinimap").addEventListener("focusin", expandConversationMinimap);
+	    $("conversationMinimap").addEventListener("focusout", scheduleCollapseConversationMinimap);
+	    document.addEventListener("pointerdown", handleMinimapOutsidePointer);
     $("scrollLatest").addEventListener("click", () => scrollToLatest("smooth"));
 	    $("prompt").addEventListener("input", autosizePrompt);
 	    $("prompt").addEventListener("focus", handlePromptFocus);

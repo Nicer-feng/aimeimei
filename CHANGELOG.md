@@ -1,5 +1,14 @@
 # 变更记录
 
+## 2.7.2 - 2026-06-30
+
+- 优化 AI 聊天页 Conversation Minimap 交互，改为默认低调可见、hover 后横向展开浏览。
+- Minimap hover 时扩展到 56px，并增加更丝滑的 opacity、width、transform、filter 动画。
+- 预览卡片支持跟随鼠标上下移动，切换 marker 时减少闪烁。
+- 当前视口高亮块在默认状态保持克制，hover 展开后更明显。
+- 鼠标离开 minimap 后延迟 300ms 收起，降低误触闪烁。
+- 全站版本号同步更新到 `v2.7.2`。
+
 ## 2.7.1 - 2026-06-30
 
 - 调整 AI 聊天页 Conversation Minimap 视觉风格，从时间轴感改为 Cursor/Codex 风格的低存在感缩略导航。
