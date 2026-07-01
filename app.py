@@ -7798,6 +7798,235 @@ INDEX_HTML = r'''<!doctype html>
 	      -webkit-backdrop-filter: none;
 	      backdrop-filter: none;
 	    }
+    .model-picker {
+      position: relative;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+    .model-select.is-native-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      min-width: 1px;
+      min-height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .model-picker-button {
+      width: 100%;
+      min-width: 270px;
+      max-width: min(420px, 100%);
+      height: 34px;
+      min-height: 34px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 11px 0 12px;
+      border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+      border-radius: 999px;
+      background: rgba(var(--composer-control-rgb), var(--composer-control-opacity));
+      color: var(--muted);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
+      -webkit-backdrop-filter: blur(var(--composer-field-blur)) saturate(1.2);
+      backdrop-filter: blur(var(--composer-field-blur)) saturate(1.2);
+      text-align: left;
+    }
+    .model-picker-button:hover,
+    .model-picker-button[aria-expanded="true"] {
+      color: var(--text);
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 58%, rgba(var(--composer-control-rgb), var(--composer-control-opacity)));
+    }
+    .model-picker-button .model-picker-main {
+      min-width: 0;
+      display: grid;
+      gap: 0;
+      flex: 1 1 auto;
+    }
+    .model-picker-name,
+    .model-picker-code {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .model-picker-name {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 760;
+      line-height: 1.15;
+    }
+    .model-picker-code {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.15;
+    }
+    .model-picker-button .chevron {
+      flex: 0 0 auto;
+      width: 16px;
+      height: 16px;
+      color: var(--muted);
+      transition: transform .16s ease;
+    }
+    .model-picker-button[aria-expanded="true"] .chevron {
+      transform: rotate(180deg);
+    }
+    .model-picker-dialog {
+      position: fixed;
+      inset: 0;
+      z-index: 34;
+      display: none;
+      pointer-events: none;
+    }
+    .model-picker-dialog.show {
+      display: block;
+      pointer-events: auto;
+    }
+    .model-picker-popover {
+      position: fixed;
+      width: min(430px, calc(100vw - 24px));
+      max-height: min(70vh, 560px);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+      border-radius: 24px;
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      box-shadow: 0 24px 72px rgba(73, 54, 35, .18);
+      -webkit-backdrop-filter: blur(22px) saturate(155%);
+      backdrop-filter: blur(22px) saturate(155%);
+      transform-origin: 16% 100%;
+      animation: modelPickerIn .16s cubic-bezier(.2, .8, .2, 1) both;
+    }
+    .model-picker-search {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 58px;
+      padding: 10px 14px;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+    }
+    .model-picker-search .lucide {
+      width: 17px;
+      height: 17px;
+      color: var(--muted);
+    }
+    #modelPickerSearch {
+      min-height: 38px;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      font-size: 15px;
+      font-weight: 650;
+    }
+    #modelPickerSearch:focus {
+      box-shadow: none;
+    }
+    .model-picker-list {
+      overflow: auto;
+      padding: 8px;
+    }
+    .model-option {
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      min-height: 76px;
+      padding: 11px 12px;
+      border: 1px solid transparent;
+      border-radius: 18px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      transition: background .14s ease, border-color .14s ease, transform .14s ease;
+    }
+    .model-option:hover,
+    .model-option.active {
+      border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+      background: color-mix(in srgb, var(--accent-soft) 44%, var(--surface));
+      transform: translateY(-1px);
+    }
+    .model-option-main {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+    }
+    .model-option-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .model-option-title strong {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+      font-weight: 780;
+    }
+    .model-provider {
+      flex: 0 0 auto;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface-soft) 82%, transparent);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 760;
+    }
+    .model-code-line {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .model-tags {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+    .model-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      min-height: 20px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface-soft) 74%, transparent);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 720;
+    }
+    .model-tag .lucide {
+      width: 12px;
+      height: 12px;
+      stroke-width: 2.3;
+    }
+    .model-check {
+      width: 28px;
+      height: 28px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 999px;
+      color: var(--accent-strong);
+      background: color-mix(in srgb, var(--accent-soft) 74%, transparent);
+      opacity: 0;
+    }
+    .model-option.selected .model-check {
+      opacity: 1;
+    }
+    @keyframes modelPickerIn {
+      from { opacity: 0; transform: translateY(7px) scale(.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
     .status {
       min-height: 18px;
       font-size: 12px;
@@ -8061,6 +8290,10 @@ INDEX_HTML = r'''<!doctype html>
 	        min-width: 0;
 	        flex: 1 1 auto;
 	      }
+	      .model-picker-button {
+	        min-width: 0;
+	        max-width: none;
+	      }
 	      .model-select {
 	        width: auto;
 	        min-width: 0;
@@ -8088,6 +8321,26 @@ INDEX_HTML = r'''<!doctype html>
       }
       .scroll-latest {
         bottom: 176px;
+      }
+      .model-picker-dialog.show {
+        display: grid;
+        place-items: end center;
+        background: rgba(34, 28, 24, .18);
+        -webkit-backdrop-filter: blur(8px) saturate(115%);
+        backdrop-filter: blur(8px) saturate(115%);
+      }
+      .model-picker-popover {
+        inset: auto 0 0 0 !important;
+        width: 100%;
+        max-height: min(76vh, calc(var(--app-height, 100vh) - 42px));
+        border-right: 0;
+        border-bottom: 0;
+        border-left: 0;
+        border-radius: 24px 24px 0 0;
+        transform-origin: 50% 100%;
+      }
+      .model-option {
+        min-height: 72px;
       }
       .global-search-dialog {
         place-items: end center;
@@ -8551,14 +8804,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.8.1</p>
+        <p class="app-version">v2.8.2</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.8.1</span>
+        <span>v2.8.2</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -8570,7 +8823,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.8.1</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.8.2</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -8594,7 +8847,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.8.1</span>
+	          <span>v2.8.2</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -8647,8 +8900,15 @@ INDEX_HTML = r'''<!doctype html>
 	          <div class="composer-tools">
 	            <div class="composer-left">
 	              <div class="model-picker">
-	                <i data-lucide="sparkles" aria-hidden="true"></i><span class="icon-fallback">✦</span>
-	                <select class="model-select ui-select" id="modelSelect"></select>
+	                <button class="model-picker-button" id="modelPickerButton" type="button" aria-haspopup="listbox" aria-expanded="false">
+	                  <i data-lucide="sparkles" aria-hidden="true"></i><span class="icon-fallback">✦</span>
+	                  <span class="model-picker-main">
+	                    <span class="model-picker-name" id="modelPickerName">选择模型</span>
+	                    <span class="model-picker-code" id="modelPickerCode">暂无可用模型</span>
+	                  </span>
+	                  <i class="chevron" data-lucide="chevron-down" aria-hidden="true"></i>
+	                </button>
+	                <select class="model-select ui-select is-native-hidden" id="modelSelect" tabindex="-1" aria-hidden="true"></select>
 	              </div>
 		              <label class="search-toggle inline-flex items-center gap-2" id="webSearchLabel" title="联网搜索">
 		                <input id="webSearchToggle" type="checkbox">
@@ -8692,8 +8952,17 @@ INDEX_HTML = r'''<!doctype html>
 		              <div class="status" id="interfaceStatus"></div>
 		            </div>
 		          </div>
-		        </div>
+			        </div>
 		      </footer>
+	  <section class="model-picker-dialog" id="modelPickerDialog">
+	    <div class="model-picker-popover" id="modelPickerPopover" role="dialog" aria-label="选择模型">
+	      <div class="model-picker-search">
+	        <i data-lucide="search" aria-hidden="true"></i>
+	        <input id="modelPickerSearch" autocomplete="off" placeholder="搜索模型、供应商或能力...">
+	      </div>
+	      <div class="model-picker-list" id="modelPickerList" role="listbox"></div>
+	    </div>
+	  </section>
     </main>
   </div>
 
@@ -8978,6 +9247,8 @@ INDEX_HTML = r'''<!doctype html>
 	      globalSearchError: "",
 	      globalSearchTimer: 0,
 	      globalSearchSeq: 0,
+	      modelPickerFilter: "",
+	      modelPickerSelectedIndex: 0,
 	      isComposing: false,
 	      lastCompositionEndAt: 0,
 	      messageSeq: 0,
@@ -9602,7 +9873,7 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     function setDialogOpenState() {
-	      const open = ["promptDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "globalSearchDialog", "confirmDialog"].some((id) => {
+	      const open = ["promptDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "globalSearchDialog", "modelPickerDialog", "confirmDialog"].some((id) => {
         const el = $(id);
         return el && el.classList.contains("show");
       });
@@ -9806,6 +10077,8 @@ INDEX_HTML = r'''<!doctype html>
         opt.value = "";
         opt.textContent = "暂无可用模型";
         select.appendChild(opt);
+        syncModelPickerButton();
+        renderModelPickerList();
         return;
       }
       for (const model of state.models) {
@@ -9818,11 +10091,203 @@ INDEX_HTML = r'''<!doctype html>
         select.value = state.currentConversation.model_id;
       }
       updateVisionUI();
+      syncModelPickerButton();
+      renderModelPickerList();
     }
 
     function selectedModel() {
       const id = $("modelSelect")?.value || state.currentConversation?.model_id || "";
       return state.models.find((model) => model.id === id) || null;
+    }
+
+    function modelProviderLabel(model) {
+      const raw = String(model?.provider || model?.name || model?.model || "").trim();
+      if (/小米|mimo|MiMo/i.test(raw)) return "小米";
+      if (/qwen|通义|aliyun|阿里/i.test(raw)) return "Qwen";
+      if (/deepseek|深度求索/i.test(raw)) return "DeepSeek";
+      if (/kimi|moonshot|月之暗面/i.test(raw)) return "Kimi";
+      if (/openai|gpt/i.test(raw)) return "OpenAI";
+      if (/claude|anthropic/i.test(raw)) return "Claude";
+      return raw || "模型";
+    }
+
+    function modelCapabilityTags(model) {
+      const text = [model?.name, model?.provider, model?.model].join(" ").toLowerCase();
+      const tags = [];
+      if (model?.supports_vision) tags.push({ icon: "image", label: "可看图" });
+      if (/reason|thinking|r1|推理|思考|qwq/.test(text)) tags.push({ icon: "brain", label: "推理" });
+      if (/flash|turbo|lite|mini|fast|快速|speed/.test(text)) tags.push({ icon: "zap", label: "快速" });
+      if (/max|pro|主力|旗舰|plus/.test(text)) tags.push({ icon: "sparkles", label: "主力" });
+      return tags.slice(0, 4);
+    }
+
+    function modelSearchText(model) {
+      return [model?.name, model?.model, model?.provider, modelProviderLabel(model), ...modelCapabilityTags(model).map((tag) => tag.label)]
+        .join(" ")
+        .toLowerCase();
+    }
+
+    function filteredModels() {
+      const query = String(state.modelPickerFilter || "").trim().toLowerCase();
+      if (!query) return state.models.slice();
+      return state.models.filter((model) => modelSearchText(model).includes(query));
+    }
+
+    function syncModelPickerButton() {
+      const button = $("modelPickerButton");
+      const name = $("modelPickerName");
+      const code = $("modelPickerCode");
+      if (!button || !name || !code) return;
+      const model = selectedModel();
+      button.disabled = !state.models.length;
+      name.textContent = model ? model.name : "选择模型";
+      code.textContent = model ? model.model : (state.models.length ? "请选择一个模型" : "暂无可用模型");
+      button.title = model ? `${model.name} · ${modelProviderLabel(model)} · ${model.model}` : "选择模型";
+    }
+
+    function positionModelPickerPopover() {
+      const popover = $("modelPickerPopover");
+      const button = $("modelPickerButton");
+      if (!popover || !button || isSmallScreen()) return;
+      const rect = button.getBoundingClientRect();
+      const width = Math.min(430, window.innerWidth - 24);
+      const left = clampNumber(rect.left, 12, Math.max(12, window.innerWidth - width - 12), 12);
+      const maxTop = Math.max(12, window.innerHeight - Math.min(560, window.innerHeight * .7) - 12);
+      const preferredTop = rect.top - 10 - Math.min(560, window.innerHeight * .7);
+      const belowTop = rect.bottom + 10;
+      popover.style.width = width + "px";
+      popover.style.left = left + "px";
+      popover.style.top = (preferredTop > 12 ? preferredTop : Math.min(belowTop, maxTop)) + "px";
+      popover.style.bottom = "auto";
+    }
+
+    function openModelPicker() {
+      if (!state.models.length) return;
+      closeInterfaceSettings();
+      const dialog = $("modelPickerDialog");
+      const button = $("modelPickerButton");
+      const search = $("modelPickerSearch");
+      if (!dialog || !button || !search) return;
+      state.modelPickerFilter = "";
+      search.value = "";
+      const currentId = $("modelSelect").value;
+      const list = filteredModels();
+      state.modelPickerSelectedIndex = Math.max(0, list.findIndex((model) => model.id === currentId));
+      dialog.classList.add("show");
+      button.setAttribute("aria-expanded", "true");
+      positionModelPickerPopover();
+      renderModelPickerList();
+      setDialogOpenState();
+      setTimeout(() => search.focus(), 40);
+    }
+
+    function closeModelPicker() {
+      const dialog = $("modelPickerDialog");
+      const button = $("modelPickerButton");
+      if (dialog) dialog.classList.remove("show");
+      if (button) button.setAttribute("aria-expanded", "false");
+      setDialogOpenState();
+    }
+
+    function renderModelPickerList() {
+      const box = $("modelPickerList");
+      if (!box) return;
+      const models = filteredModels();
+      box.replaceChildren();
+      if (!models.length) {
+        box.appendChild(createEmptyState("search", "没有找到模型", "换个关键词试试看。", { compact: true }));
+        queueLucideRefresh();
+        return;
+      }
+      state.modelPickerSelectedIndex = clampNumber(state.modelPickerSelectedIndex, 0, models.length - 1, 0);
+      const currentId = $("modelSelect")?.value || "";
+      for (const [index, model] of models.entries()) {
+        const selected = model.id === currentId;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "model-option" + (selected ? " selected" : "") + (index === state.modelPickerSelectedIndex ? " active" : "");
+        button.setAttribute("role", "option");
+        button.setAttribute("aria-selected", selected ? "true" : "false");
+        const tags = modelCapabilityTags(model);
+        button.innerHTML =
+          '<span class="model-option-main">' +
+            '<span class="model-option-title"><strong>' + escapeHTML(model.name) + '</strong><span class="model-provider">' + escapeHTML(modelProviderLabel(model)) + '</span></span>' +
+            '<span class="model-code-line">' + escapeHTML(model.model) + '</span>' +
+            '<span class="model-tags">' + tags.map((tag) => '<span class="model-tag">' + iconMarkup(tag.icon) + '<span>' + escapeHTML(tag.label) + '</span></span>').join("") + '</span>' +
+          '</span>' +
+          '<span class="model-check">' + iconMarkup("check", "✓") + '</span>';
+        button.addEventListener("mouseenter", () => setModelPickerSelectedIndex(index));
+        button.addEventListener("click", () => chooseModel(model.id));
+        box.appendChild(button);
+      }
+      queueLucideRefresh();
+      scrollActiveModelOptionIntoView();
+    }
+
+    function scrollActiveModelOptionIntoView() {
+      const active = $("modelPickerList")?.querySelector(".model-option.active");
+      if (active) active.scrollIntoView({ block: "nearest" });
+    }
+
+    function setModelPickerSelectedIndex(index) {
+      const models = filteredModels();
+      if (!models.length) return;
+      state.modelPickerSelectedIndex = clampNumber(index, 0, models.length - 1, 0);
+      const items = $("modelPickerList")?.querySelectorAll(".model-option") || [];
+      items.forEach((node, itemIndex) => node.classList.toggle("active", itemIndex === state.modelPickerSelectedIndex));
+      scrollActiveModelOptionIntoView();
+    }
+
+    function moveModelPickerSelection(delta) {
+      const models = filteredModels();
+      if (!models.length) return;
+      setModelPickerSelectedIndex((state.modelPickerSelectedIndex + delta + models.length) % models.length);
+    }
+
+    function chooseModel(modelId) {
+      const select = $("modelSelect");
+      const model = state.models.find((item) => item.id === modelId);
+      if (!select || !model) return;
+      select.value = modelId;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      closeModelPicker();
+      if (!state.currentConversation) {
+        $("chatModel").textContent = "准备使用 " + model.name;
+      }
+      setStatus("chatStatus", "已选择 " + model.name + "，下次发送会使用它", "ok");
+      $("prompt").focus();
+    }
+
+    function handleModelPickerSearchInput() {
+      state.modelPickerFilter = $("modelPickerSearch").value.trim();
+      const models = filteredModels();
+      const currentId = $("modelSelect").value;
+      const currentIndex = models.findIndex((model) => model.id === currentId);
+      state.modelPickerSelectedIndex = currentIndex >= 0 ? currentIndex : 0;
+      renderModelPickerList();
+    }
+
+    function handleModelPickerKeydown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeModelPicker();
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        moveModelPickerSelection(1);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        moveModelPickerSelection(-1);
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const model = filteredModels()[state.modelPickerSelectedIndex];
+        if (model) chooseModel(model.id);
+      }
     }
 
     function selectedModelSupportsVision() {
@@ -13094,6 +13559,12 @@ INDEX_HTML = r'''<!doctype html>
     });
     $("globalSearchInput").addEventListener("input", scheduleGlobalSearch);
     $("globalSearchInput").addEventListener("keydown", handleGlobalSearchKeydown);
+    $("modelPickerButton").addEventListener("click", openModelPicker);
+    $("modelPickerDialog").addEventListener("click", (event) => {
+      if (event.target === $("modelPickerDialog")) closeModelPicker();
+    });
+    $("modelPickerSearch").addEventListener("input", handleModelPickerSearchInput);
+    $("modelPickerSearch").addEventListener("keydown", handleModelPickerKeydown);
     $("openPrompts").addEventListener("click", openPromptLibrary);
     document.querySelectorAll(".prompt-chip[data-prompt-text]").forEach((button) => {
       button.addEventListener("click", () => insertPromptText(button.dataset.promptText || ""));
@@ -13170,6 +13641,7 @@ INDEX_HTML = r'''<!doctype html>
 	        return;
 	      }
 	      if (event.key === "Escape") {
+	        closeModelPicker();
 	        closeGlobalSearch();
 	        closeInterfaceSettings();
 	        closeImagePreview();
@@ -13196,6 +13668,8 @@ INDEX_HTML = r'''<!doctype html>
     });
 	    $("themeToggle").addEventListener("click", toggleTheme);
 	    $("modelSelect").addEventListener("change", () => {
+	      syncModelPickerButton();
+	      renderModelPickerList();
 	      updateVisionUI();
 	      if (state.attachments.length && !selectedModelSupportsVision()) {
 	        setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
@@ -13254,6 +13728,7 @@ INDEX_HTML = r'''<!doctype html>
 			    window.addEventListener("resize", syncViewportHeight, { passive: true });
 			    window.addEventListener("resize", () => applySidebarWidth(state.sidebarWidth, true), { passive: true });
 			    window.addEventListener("resize", updateChatUsage, { passive: true });
+			    window.addEventListener("resize", positionModelPickerPopover, { passive: true });
 			    window.addEventListener("resize", () => queueMarkdownOverflowRefresh($("messages")), { passive: true });
 			    window.addEventListener("resize", queueConversationMinimap, { passive: true });
 		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
