@@ -241,6 +241,8 @@ def init_db(secrets_data=None):
               title TEXT NOT NULL,
               model_id TEXT NOT NULL,
               archived INTEGER NOT NULL DEFAULT 0,
+              pinned INTEGER NOT NULL DEFAULT 0,
+              pinned_at INTEGER NOT NULL DEFAULT 0,
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL,
               FOREIGN KEY (model_id) REFERENCES models(id)
@@ -440,6 +442,10 @@ def init_db(secrets_data=None):
             conn.execute(
                 f"ALTER TABLE conversations ADD COLUMN user_id TEXT NOT NULL DEFAULT '{DEFAULT_AI_USER_ID}'"
             )
+        if "pinned" not in conversation_columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+        if "pinned_at" not in conversation_columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN pinned_at INTEGER NOT NULL DEFAULT 0")
         message_columns = table_columns(conn, "messages")
         if "user_id" not in message_columns:
             conn.execute(
@@ -601,6 +607,8 @@ def conversation_row(row):
         "model_name": row["model_name"],
         "model": row["model"],
         "supports_vision": bool(row["supports_vision"]) if "supports_vision" in row.keys() else False,
+        "pinned": bool(row["pinned"]) if "pinned" in row.keys() else False,
+        "pinned_at": row["pinned_at"] if "pinned_at" in row.keys() else 0,
         "updated_at": row["updated_at"],
         "created_at": row["created_at"],
     }
@@ -1773,6 +1781,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
             return self.require_user(self.handle_messages)
+        if path.startswith("/api/conversations/") and path.endswith("/stats"):
+            return self.require_user(self.handle_conversation_stats)
+        if path.startswith("/api/sessions/") and path.endswith("/stats"):
+            return self.require_user(self.handle_conversation_stats)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_HEAD(self):
@@ -1828,6 +1840,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_media_task_enhance)
         if path.startswith("/api/media/tasks/") and path.endswith("/conversation"):
             return self.require_user(self.handle_media_task_conversation)
+        if path.startswith("/api/conversations/") and (path.endswith("/pin") or path.endswith("/unpin")):
+            return self.require_user(self.handle_conversation_pin)
+        if path.startswith("/api/sessions/") and (path.endswith("/pin") or path.endswith("/unpin")):
+            return self.require_user(self.handle_conversation_pin)
         if path == "/api/conversations":
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
@@ -4120,7 +4136,7 @@ mindmap_text 要求：
                     FROM conversations c
                     JOIN models m ON m.id = c.model_id
                     WHERE c.archived=0 AND c.user_id=?
-                    ORDER BY c.updated_at DESC
+                    ORDER BY c.pinned DESC, c.updated_at DESC
                     LIMIT 200
                     """,
                     (user_id,),
@@ -4164,6 +4180,98 @@ mindmap_text 要求：
         if len(parts) >= 3:
             return parts[2]
         return ""
+
+    def handle_conversation_pin(self):
+        conversation_id = self.conversation_id_from_path()
+        user_id = self.current_user()["id"]
+        pinned = 0 if urlparse(self.path).path.endswith("/unpin") else 1
+        with db() as conn:
+            existing = conn.execute(
+                "SELECT id FROM conversations WHERE id=? AND user_id=? AND archived=0",
+                (conversation_id, user_id),
+            ).fetchone()
+            if not existing:
+                return self.error(HTTPStatus.NOT_FOUND, "conversation not found")
+            conn.execute(
+                "UPDATE conversations SET pinned=?, pinned_at=? WHERE id=? AND user_id=?",
+                (pinned, now() if pinned else 0, conversation_id, user_id),
+            )
+            row = conn.execute(
+                """
+                SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision
+                FROM conversations c
+                JOIN models m ON m.id = c.model_id
+                WHERE c.id=? AND c.user_id=?
+                """,
+                (conversation_id, user_id),
+            ).fetchone()
+        return self.json({"ok": True, "conversation": conversation_row(row)})
+
+    def handle_conversation_stats(self):
+        conversation_id = self.conversation_id_from_path()
+        user_id = self.current_user()["id"]
+        with db() as conn:
+            row = conn.execute(
+                """
+                SELECT c.id, c.updated_at, m.name AS model_name, m.model AS model,
+                       COUNT(msg.id) AS message_count,
+                       COALESCE(SUM(CASE WHEN msg.role='user' THEN 1 ELSE 0 END), 0) AS turn_count,
+                       COALESCE(SUM(
+                         CASE
+                           WHEN msg.total_tokens > 0 THEN msg.total_tokens
+                           ELSE COALESCE(msg.prompt_tokens, 0) + COALESCE(msg.completion_tokens, 0)
+                         END
+                       ), 0) AS total_tokens
+                FROM conversations c
+                JOIN models m ON m.id = c.model_id
+                LEFT JOIN messages msg ON msg.conversation_id=c.id AND msg.user_id=c.user_id AND msg.role!='system'
+                WHERE c.id=? AND c.user_id=? AND c.archived=0
+                GROUP BY c.id
+                """,
+                (conversation_id, user_id),
+            ).fetchone()
+            if not row:
+                return self.error(HTTPStatus.NOT_FOUND, "conversation not found")
+            web_search_count = conn.execute(
+                """
+                SELECT COUNT(DISTINCT s.message_id) AS n
+                FROM message_sources s
+                JOIN messages msg ON msg.id=s.message_id
+                WHERE msg.conversation_id=? AND msg.user_id=?
+                """,
+                (conversation_id, user_id),
+            ).fetchone()["n"]
+            attachment_count = conn.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM chat_message_images
+                WHERE user_id=? AND session_id=? AND message_id>0
+                """,
+                (user_id, conversation_id),
+            ).fetchone()["n"]
+            media_task_count = conn.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM media_analysis_tasks
+                WHERE user_id=? AND conversation_id=?
+                """,
+                (user_id, conversation_id),
+            ).fetchone()["n"]
+        return self.json(
+            {
+                "stats": {
+                    "total_tokens": int(row["total_tokens"] or 0),
+                    "message_count": int(row["message_count"] or 0),
+                    "turn_count": int(row["turn_count"] or 0),
+                    "model_name": row["model_name"],
+                    "model_code": row["model"],
+                    "web_search_count": int(web_search_count or 0),
+                    "attachment_count": int(attachment_count or 0),
+                    "media_task_count": int(media_task_count or 0),
+                    "updated_at": row["updated_at"],
+                }
+            }
+        )
 
     def handle_conversation_item(self):
         conversation_id = self.conversation_id_from_path()
@@ -5286,11 +5394,35 @@ INDEX_HTML = r'''<!doctype html>
     }
     .conv-main:hover { background: transparent; }
     .conv-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       font-weight: 580;
       font-size: 14px;
+    }
+    .conv-title-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .conv-pin-indicator {
+      display: inline-grid;
+      place-items: center;
+      width: 16px;
+      height: 16px;
+      color: var(--accent-strong);
+      opacity: .86;
+      flex: 0 0 auto;
+    }
+    .conv-pin-indicator .lucide {
+      width: 13px;
+      height: 13px;
+      stroke-width: 2.4;
     }
     .conv-meta {
       color: var(--muted);
@@ -5323,10 +5455,15 @@ INDEX_HTML = r'''<!doctype html>
     }
     .conv:hover .conv-actions,
     .conv.active .conv-actions,
+    .conv.pinned .pin-action,
     .conv.editing .conv-actions,
     .conv:focus-within .conv-actions {
       opacity: 1;
       pointer-events: auto;
+    }
+    .conv.pinned .pin-action {
+      color: var(--accent-strong);
+      background: color-mix(in srgb, var(--accent-soft) 72%, transparent);
     }
     .conv-action {
       width: 32px;
@@ -8327,7 +8464,10 @@ INDEX_HTML = r'''<!doctype html>
         padding: 14px 16px;
       }
       .chat-usage {
-        display: none;
+        display: block;
+        font-size: 11px;
+        max-width: min(72vw, 260px);
+        margin: 1px auto 0;
       }
       .conversation-minimap {
         display: none !important;
@@ -8411,14 +8551,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.8.0</p>
+        <p class="app-version">v2.8.1</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.8.0</span>
+        <span>v2.8.1</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -8430,7 +8570,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.8.0</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.8.1</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -8454,7 +8594,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.8.0</span>
+	          <span>v2.8.1</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -8809,6 +8949,7 @@ INDEX_HTML = r'''<!doctype html>
 	      mediaPollTimer: null,
 	      conversations: [],
 	      currentConversation: null,
+	      conversationStats: null,
 	      messages: [],
 	      attachments: [],
 	      uploadingImages: false,
@@ -9595,6 +9736,7 @@ INDEX_HTML = r'''<!doctype html>
 	      state.authed = false;
 	      applyCurrentUser(null);
 	      state.currentConversation = null;
+	      state.conversationStats = null;
       state.messages = [];
       clearAttachments();
       showLogin();
@@ -10556,6 +10698,7 @@ INDEX_HTML = r'''<!doctype html>
         const res = await api("/api/conversations");
         const data = await res.json();
         state.conversations = data.conversations || [];
+        sortConversations();
         renderConversations();
         if (!state.currentConversation && state.conversations.length) {
           await selectConversation(state.conversations[0].id);
@@ -10594,20 +10737,17 @@ INDEX_HTML = r'''<!doctype html>
         box.appendChild(div);
         return;
 	      }
-	      let lastGroup = "";
-	      for (const conv of state.conversations) {
-	        const group = conversationGroupLabel(conv.updated_at || conv.created_at);
-	        if (group !== lastGroup) {
-	          const title = document.createElement("div");
-	          title.className = "conversation-group";
-	          title.textContent = group;
-	          box.appendChild(title);
-	          lastGroup = group;
-	        }
+	      function appendGroup(titleText) {
+	        const title = document.createElement("div");
+	        title.className = "conversation-group";
+	        title.textContent = titleText;
+	        box.appendChild(title);
+	      }
+	      function appendConversation(conv) {
 	        const row = document.createElement("div");
 	        const active = state.currentConversation?.id === conv.id;
 	        const editing = state.editingConversationId === conv.id;
-	        row.className = "conv" + (active ? " active" : "") + (editing ? " editing" : "");
+	        row.className = "conv" + (active ? " active" : "") + (editing ? " editing" : "") + (conv.pinned ? " pinned" : "");
 
 	        if (editing) {
 	          const input = document.createElement("input");
@@ -10641,22 +10781,46 @@ INDEX_HTML = r'''<!doctype html>
 		          const main = document.createElement("button");
 		          main.className = "conv-main";
 		          main.type = "button";
-		          main.innerHTML = `<span class="conv-title"></span><span class="conv-meta"><span class="conv-model"></span><span class="conv-time"></span></span>`;
-		          main.querySelector(".conv-title").textContent = conv.title;
+		          main.innerHTML = `<span class="conv-title"><span class="conv-title-text"></span></span><span class="conv-meta"><span class="conv-model"></span><span class="conv-time"></span></span>`;
+		          main.querySelector(".conv-title-text").textContent = conv.title;
+		          if (conv.pinned) {
+		            const pin = document.createElement("span");
+		            pin.className = "conv-pin-indicator";
+		            pin.title = "已置顶";
+		            pin.innerHTML = iconMarkup("pin", "📌");
+		            main.querySelector(".conv-title").appendChild(pin);
+		          }
 		          main.querySelector(".conv-model").textContent = conv.model_name || "未命名模型";
 		          main.querySelector(".conv-time").textContent = formatTime(conv.updated_at);
 		          main.addEventListener("click", () => selectConversation(conv.id));
 
 	          const actions = document.createElement("div");
 	          actions.className = "conv-actions";
+	          const pinToggle = createIconOnlyButton(conv.pinned ? "pin-off" : "pin", conv.pinned ? "取消置顶" : "置顶", { className: "conv-action pin-action ui-icon-btn", fallback: conv.pinned ? "取" : "置" });
+	          pinToggle.addEventListener("click", () => togglePinConversation(conv.id));
 	          const edit = createIconOnlyButton("pencil", "重命名", { className: "conv-action ui-icon-btn", fallback: "✎" });
 	          edit.addEventListener("click", () => startRenameConversation(conv.id));
 	          const del = createIconOnlyButton("trash-2", "删除", { className: "conv-action ui-icon-btn", danger: true, fallback: "⌫" });
 	          del.addEventListener("click", () => deleteConversationById(conv.id));
-	          actions.append(edit, del);
+	          actions.append(pinToggle, edit, del);
 	          row.append(main, actions);
 	        }
 	        box.appendChild(row);
+	      }
+	      const pinned = state.conversations.filter((conv) => conv.pinned);
+	      const normal = state.conversations.filter((conv) => !conv.pinned);
+	      if (pinned.length) {
+	        appendGroup("置顶");
+	        pinned.forEach(appendConversation);
+	      }
+	      let lastGroup = "";
+	      for (const conv of normal) {
+	        const group = conversationGroupLabel(conv.updated_at || conv.created_at);
+	        if (group !== lastGroup) {
+	          appendGroup(group);
+	          lastGroup = group;
+	        }
+	        appendConversation(conv);
 	      }
 	      queueLucideRefresh();
 	    }
@@ -10720,6 +10884,14 @@ INDEX_HTML = r'''<!doctype html>
       return d.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
     }
 
+    function sortConversations() {
+      state.conversations.sort((a, b) => {
+        const pinnedDelta = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+        if (pinnedDelta) return pinnedDelta;
+        return Number(b.updated_at || 0) - Number(a.updated_at || 0);
+      });
+    }
+
     function upsertConversation(conversation) {
       if (!conversation) return;
       const index = state.conversations.findIndex((item) => item.id === conversation.id);
@@ -10728,9 +10900,27 @@ INDEX_HTML = r'''<!doctype html>
       } else {
         state.conversations.unshift(conversation);
       }
-      state.conversations.sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+      sortConversations();
       renderConversations();
     }
+
+	    async function togglePinConversation(id) {
+	      const conv = state.conversations.find((item) => item.id === id);
+	      if (!conv) return;
+	      const action = conv.pinned ? "unpin" : "pin";
+	      const res = await api(`/api/conversations/${id}/${action}`, { method: "POST" });
+	      if (!res.ok) {
+	        setStatus("chatStatus", await readError(res, conv.pinned ? "取消置顶失败，稍后再试一下。" : "置顶失败，稍后再试一下。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      upsertConversation(data.conversation);
+	      if (state.currentConversation?.id === id) {
+	        state.currentConversation = data.conversation;
+	        updateChatHeader();
+	      }
+	      setStatus("chatStatus", conv.pinned ? "已取消置顶" : "已置顶", "ok");
+	    }
 
     async function newConversation(modelId = $("modelSelect").value) {
       if (!modelId && state.models[0]) modelId = state.models[0].id;
@@ -10752,6 +10942,7 @@ INDEX_HTML = r'''<!doctype html>
         if (!res.ok) throw new Error(await readError(res, "新建对话失败，稍后再试一下。"));
         const data = await res.json();
         state.currentConversation = data.conversation;
+        state.conversationStats = null;
         state.messages = [];
         await loadConversations();
         updateChatHeader();
@@ -10782,6 +10973,7 @@ INDEX_HTML = r'''<!doctype html>
         state.messages = data.messages || [];
         const targetMessageId = Number(options.messageId || 0);
         renderMessages({ forceScroll: !targetMessageId });
+        await loadConversationStats(id);
         closeSidebar();
         if (targetMessageId) {
           requestAnimationFrame(() => scrollToMessageId(targetMessageId));
@@ -10827,6 +11019,7 @@ INDEX_HTML = r'''<!doctype html>
 		    function renderEmpty() {
 		      $("chatTitle").textContent = "新对话";
 		      $("chatModel").textContent = state.models[0] ? "准备使用 " + state.models[0].name : "请选择模型";
+	      state.conversationStats = null;
 	      updateChatUsage();
 	      hideConversationMinimap();
 	      const box = $("messages");
@@ -11399,11 +11592,49 @@ INDEX_HTML = r'''<!doctype html>
 	      return state.messages.reduce((sum, item) => sum + messageTotalTokens(item), 0);
 	    }
 
+	    async function loadConversationStats(id = state.currentConversation?.id) {
+	      if (!id) {
+	        state.conversationStats = null;
+	        updateChatUsage();
+	        return;
+	      }
+	      try {
+	        const res = await api(`/api/conversations/${id}/stats`);
+	        if (!res.ok) throw new Error(await readError(res, "统计暂时加载失败。"));
+	        const data = await res.json();
+	        if (state.currentConversation?.id !== id) return;
+	        state.conversationStats = data.stats || null;
+	      } catch {
+	        if (state.currentConversation?.id === id) state.conversationStats = null;
+	      }
+	      updateChatUsage();
+	    }
+
 	    function updateChatUsage() {
 	      const el = $("chatUsage");
 	      if (!el) return;
-	      const tokens = currentConversationTokens();
-	      el.textContent = tokens ? "本对话 " + formatTokens(tokens) : "";
+	      if (!state.currentConversation) {
+	        el.textContent = "";
+	        el.title = "";
+	        return;
+	      }
+	      const stats = state.conversationStats || {};
+	      const tokens = Math.max(Number(stats.total_tokens || 0), currentConversationTokens());
+	      const localTurns = state.messages.filter((item) => item.role === "user").length;
+	      const turns = Math.max(Number(stats.turn_count || 0), localTurns);
+	      const compactParts = [];
+	      if (tokens) compactParts.push(formatTokens(tokens));
+	      if (turns) compactParts.push(turns + "轮");
+	      const detailParts = [...compactParts];
+	      if (stats.web_search_count) detailParts.push(stats.web_search_count + "次联网");
+	      if (stats.attachment_count) detailParts.push(stats.attachment_count + "张图片");
+	      if (stats.media_task_count) detailParts.push(stats.media_task_count + "个音视频");
+	      if (stats.model_code) detailParts.push(stats.model_code);
+	      if (stats.updated_at) detailParts.push("更新 " + formatTime(stats.updated_at));
+	      const mobile = isSmallScreen();
+	      const visibleParts = mobile ? compactParts : detailParts;
+	      el.textContent = visibleParts.length ? visibleParts.join(" · ") : "";
+	      el.title = detailParts.join(" · ");
 	    }
 
 	    function updateFavoriteCount() {
@@ -12488,6 +12719,7 @@ INDEX_HTML = r'''<!doctype html>
 	          updateStreamingMessage(assistant);
 	        }
 	        await loadConversations();
+	        await loadConversationStats(state.currentConversation?.id);
 	        setStatus("chatStatus", "");
 	      } catch (err) {
 	        assistant.thinking = false;
@@ -13021,6 +13253,7 @@ INDEX_HTML = r'''<!doctype html>
 			    syncViewportHeight();
 			    window.addEventListener("resize", syncViewportHeight, { passive: true });
 			    window.addEventListener("resize", () => applySidebarWidth(state.sidebarWidth, true), { passive: true });
+			    window.addEventListener("resize", updateChatUsage, { passive: true });
 			    window.addEventListener("resize", () => queueMarkdownOverflowRefresh($("messages")), { passive: true });
 			    window.addEventListener("resize", queueConversationMinimap, { passive: true });
 		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
