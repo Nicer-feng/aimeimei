@@ -470,7 +470,7 @@ def init_db(secrets_data=None):
         media_columns = table_columns(conn, "media_analysis_tasks")
         if "conversation_id" not in media_columns:
             conn.execute("ALTER TABLE media_analysis_tasks ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''")
-        for column in ("enhanced_summary", "key_points", "ai_outputs_json"):
+        for column in ("enhanced_summary", "key_points", "mindmap_text", "copywriting_text", "ai_outputs_json"):
             if column not in media_columns:
                 conn.execute(f"ALTER TABLE media_analysis_tasks ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
 
@@ -667,6 +667,47 @@ def media_task_public(row):
         "error_message": row["error_message"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+    }
+
+
+def compact_search_text(text):
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def search_snippet(text, query, limit=140):
+    value = compact_search_text(text)
+    if not value:
+        return ""
+    needle = compact_search_text(query).lower()
+    lower = value.lower()
+    index = lower.find(needle) if needle else -1
+    if index < 0:
+        return value[:limit].rstrip() + ("..." if len(value) > limit else "")
+    start = max(0, index - 46)
+    end = min(len(value), index + len(needle) + 86)
+    snippet = value[start:end].strip()
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(value):
+        snippet += "..."
+    return snippet
+
+
+def like_escape(text):
+    return str(text or "").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def search_result_row(result_id, result_type, session_id, message_id, title, snippet, role, created_at, score):
+    return {
+        "id": str(result_id),
+        "type": result_type,
+        "session_id": session_id or "",
+        "message_id": int(message_id or 0),
+        "title": title or "未命名对话",
+        "snippet": snippet or "",
+        "role": role or "",
+        "created_at": int(created_at or 0),
+        "score": int(score or 0),
     }
 
 
@@ -1708,6 +1749,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.handle_me()
         if path == "/api/models":
             return self.require_user(self.handle_models)
+        if path == "/api/search":
+            return self.require_user(self.handle_global_search)
         if path == "/api/search-config":
             return self.require_user(self.handle_search_config)
         if path == "/api/prompts":
@@ -2857,6 +2900,161 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def handle_search_config(self):
         return self.json({"search": public_web_search_config(self.server.secrets)})
+
+    def handle_global_search(self):
+        user_id = self.current_user()["id"]
+        params = parse_qs(urlparse(self.path).query)
+        query = compact_search_text((params.get("q") or [""])[0])[:80]
+        results = []
+        with db() as conn:
+            if not query:
+                rows = conn.execute(
+                    """
+                    SELECT id, title, updated_at
+                    FROM conversations
+                    WHERE user_id=? AND archived=0
+                    ORDER BY updated_at DESC
+                    LIMIT 8
+                    """,
+                    (user_id,),
+                ).fetchall()
+                for row in rows:
+                    results.append(
+                        search_result_row(
+                            row["id"],
+                            "conversation",
+                            row["id"],
+                            0,
+                            row["title"],
+                            "最近对话",
+                            "",
+                            row["updated_at"],
+                            20,
+                        )
+                    )
+                return self.json({"query": query, "results": results})
+
+            like = "%" + like_escape(query) + "%"
+            conversation_rows = conn.execute(
+                """
+                SELECT id, title, updated_at
+                FROM conversations
+                WHERE user_id=? AND archived=0 AND title LIKE ? ESCAPE '\\'
+                ORDER BY updated_at DESC
+                LIMIT 20
+                """,
+                (user_id, like),
+            ).fetchall()
+            for row in conversation_rows:
+                results.append(
+                    search_result_row(
+                        "conversation:" + row["id"],
+                        "conversation",
+                        row["id"],
+                        0,
+                        row["title"],
+                        search_snippet(row["title"], query),
+                        "",
+                        row["updated_at"],
+                        100,
+                    )
+                )
+
+            message_rows = conn.execute(
+                """
+                SELECT m.id, m.conversation_id, m.role, m.content, m.created_at,
+                       c.title AS conversation_title
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.user_id=? AND c.user_id=? AND c.archived=0
+                  AND m.role!='system' AND m.content LIKE ? ESCAPE '\\'
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT 50
+                """,
+                (user_id, user_id, like),
+            ).fetchall()
+            for row in message_rows:
+                score = 86 if row["role"] == "user" else 82
+                results.append(
+                    search_result_row(
+                        "message:" + str(row["id"]),
+                        "message",
+                        row["conversation_id"],
+                        row["id"],
+                        row["conversation_title"],
+                        search_snippet(row["content"], query),
+                        row["role"],
+                        row["created_at"],
+                        score,
+                    )
+                )
+
+            favorite_rows = conn.execute(
+                """
+                SELECT f.id, f.message_id, f.conversation_id, f.conversation_title,
+                       f.role, f.content, f.created_at,
+                       c.id AS live_conversation_id
+                FROM favorite_messages f
+                LEFT JOIN conversations c ON c.id = f.conversation_id AND c.user_id=f.user_id AND c.archived=0
+                WHERE f.user_id=? AND f.content LIKE ? ESCAPE '\\'
+                ORDER BY f.created_at DESC
+                LIMIT 30
+                """,
+                (user_id, like),
+            ).fetchall()
+            for row in favorite_rows:
+                results.append(
+                    search_result_row(
+                        "favorite:" + row["id"],
+                        "favorite",
+                        row["live_conversation_id"] or "",
+                        row["message_id"] if row["live_conversation_id"] else 0,
+                        row["conversation_title"] or "原会话已删除",
+                        search_snippet(row["content"], query),
+                        row["role"],
+                        row["created_at"],
+                        72,
+                    )
+                )
+
+            media_rows = conn.execute(
+                """
+                SELECT id, filename, conversation_id, summary_text, enhanced_summary,
+                       key_points, copywriting_text, updated_at, created_at
+                FROM media_analysis_tasks
+                WHERE user_id=? AND (
+                  filename LIKE ? ESCAPE '\\'
+                  OR summary_text LIKE ? ESCAPE '\\'
+                  OR enhanced_summary LIKE ? ESCAPE '\\'
+                  OR key_points LIKE ? ESCAPE '\\'
+                  OR copywriting_text LIKE ? ESCAPE '\\'
+                )
+                ORDER BY updated_at DESC
+                LIMIT 30
+                """,
+                (user_id, like, like, like, like, like),
+            ).fetchall()
+            for row in media_rows:
+                source_text = "\n".join(
+                    str(row[key] or "")
+                    for key in ("filename", "enhanced_summary", "key_points", "summary_text", "copywriting_text")
+                )
+                results.append(
+                    search_result_row(
+                        "media:" + row["id"],
+                        "media",
+                        row["conversation_id"],
+                        0,
+                        row["filename"] or "音视频分析",
+                        search_snippet(source_text, query),
+                        "",
+                        row["updated_at"] or row["created_at"],
+                        68,
+                    )
+                )
+
+        results.sort(key=lambda item: (item["score"], item["created_at"]), reverse=True)
+        return self.json({"query": query, "results": results[:60]})
 
     def handle_admin_search(self):
         if self.command == "GET":
@@ -6407,6 +6605,37 @@ INDEX_HTML = r'''<!doctype html>
       border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
       background: color-mix(in srgb, var(--surface) 72%, transparent);
     }
+    .global-search-trigger {
+      width: 100%;
+      min-height: 44px;
+      justify-content: flex-start;
+      gap: 10px;
+      padding: 0 12px;
+      border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--surface) 72%, transparent);
+      color: var(--muted);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
+      font-weight: 650;
+      text-align: left;
+    }
+    .global-search-trigger:hover,
+    .global-search-trigger:focus-visible {
+      color: var(--text);
+      border-color: color-mix(in srgb, var(--accent) 36%, var(--line));
+      background: color-mix(in srgb, var(--surface) 88%, var(--accent-soft));
+    }
+    .global-search-trigger .shortcut {
+      margin-left: auto;
+      min-width: 42px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface-soft) 80%, transparent);
+      color: var(--muted-2);
+      font-size: 11px;
+      font-weight: 760;
+      text-align: center;
+    }
     .side-section-title {
       padding: 4px 6px 0;
       font-size: 12px;
@@ -6532,6 +6761,162 @@ INDEX_HTML = r'''<!doctype html>
     body.sidebar-resizing .main,
     body.sidebar-resizing .messages {
       pointer-events: none;
+    }
+    .global-search-dialog {
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+      display: none;
+      place-items: start center;
+      padding: min(12vh, 96px) 18px 24px;
+      background: rgba(34, 28, 24, .18);
+      -webkit-backdrop-filter: blur(10px) saturate(120%);
+      backdrop-filter: blur(10px) saturate(120%);
+    }
+    .global-search-dialog.show {
+      display: grid;
+      animation: searchFadeIn .16s ease both;
+    }
+    .global-search-panel {
+      width: min(720px, 100%);
+      max-height: min(76vh, 720px);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      border-radius: 26px;
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      box-shadow: 0 26px 80px rgba(73, 54, 35, .18);
+      -webkit-backdrop-filter: blur(20px) saturate(155%);
+      backdrop-filter: blur(20px) saturate(155%);
+      transform-origin: 50% 12%;
+      animation: searchScaleIn .18s cubic-bezier(.2, .8, .2, 1) both;
+    }
+    .global-search-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 70px;
+      padding: 12px 16px;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+    }
+    .global-search-head .lucide {
+      color: var(--muted);
+    }
+    #globalSearchInput {
+      min-height: 46px;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      font-size: 18px;
+      font-weight: 650;
+    }
+    #globalSearchInput:focus {
+      box-shadow: none;
+    }
+    .global-search-key {
+      flex: 0 0 auto;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface-soft) 84%, transparent);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+    .global-search-list {
+      min-height: 230px;
+      overflow: auto;
+      padding: 10px;
+    }
+    .global-search-item {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      min-height: 76px;
+      padding: 12px;
+      border: 1px solid transparent;
+      border-radius: 18px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      transition: background .14s ease, border-color .14s ease, transform .14s ease;
+    }
+    .global-search-item:hover,
+    .global-search-item.active {
+      border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+      background: color-mix(in srgb, var(--accent-soft) 48%, var(--surface));
+      transform: translateY(-1px);
+    }
+    .global-search-icon {
+      width: 38px;
+      height: 38px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--surface-soft) 76%, transparent);
+      color: var(--accent-strong);
+    }
+    .global-search-content {
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+    }
+    .global-search-title {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+      color: var(--text);
+      font-weight: 760;
+    }
+    .global-search-title span:first-child {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .global-search-role {
+      flex: 0 0 auto;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface-soft) 86%, transparent);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 760;
+    }
+    .global-search-snippet {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .global-search-snippet mark {
+      border-radius: 5px;
+      background: color-mix(in srgb, var(--accent) 22%, transparent);
+      color: var(--accent-strong);
+      padding: 0 2px;
+    }
+    .global-search-time {
+      color: var(--muted-2);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .search-hit-highlight .bubble-shell {
+      animation: searchHitPulse 1.8s ease;
+    }
+    @keyframes searchFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes searchScaleIn {
+      from { opacity: 0; transform: scale(.975) translateY(-6px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    @keyframes searchHitPulse {
+      0%, 100% { box-shadow: inherit; }
+      16% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent), var(--shadow); }
     }
     @media (min-width: 901px) {
       .sidebar-resizer {
@@ -7567,6 +7952,37 @@ INDEX_HTML = r'''<!doctype html>
       .scroll-latest {
         bottom: 176px;
       }
+      .global-search-dialog {
+        place-items: end center;
+        padding: 0;
+      }
+      .global-search-panel {
+        width: 100%;
+        max-height: min(86vh, calc(var(--app-height, 100vh) - 34px));
+        border-radius: 24px 24px 0 0;
+        border-right: 0;
+        border-bottom: 0;
+        border-left: 0;
+      }
+      .global-search-head {
+        min-height: 62px;
+        padding: 10px 14px;
+      }
+      #globalSearchInput {
+        font-size: 16px;
+      }
+      .global-search-item {
+        grid-template-columns: 34px minmax(0, 1fr);
+        min-height: 72px;
+      }
+      .global-search-icon {
+        width: 34px;
+        height: 34px;
+        border-radius: 12px;
+      }
+      .global-search-time {
+        grid-column: 2;
+      }
     }
 
     /* Product polish: reading surface, identity and composer details */
@@ -7995,14 +8411,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.7.4</p>
+        <p class="app-version">v2.8.0</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.7.4</span>
+        <span>v2.8.0</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -8014,12 +8430,17 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.7.4</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.8.0</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
         <button class="icon mobile-only ui-icon-btn" id="closeSide" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
       </div>
+      <button class="global-search-trigger inline-flex items-center" id="openGlobalSearch" type="button">
+        <i data-lucide="search" aria-hidden="true"></i>
+        <span>搜索历史对话...</span>
+        <span class="shortcut" id="globalSearchShortcut">⌘K</span>
+      </button>
       <div class="side-actions">
 		        <button class="primary side-primary-action inline-flex items-center justify-center gap-2" id="newChat"><i data-lucide="plus" aria-hidden="true"></i><span>新对话</span></button>
         <button class="icon ui-icon-btn" id="refreshConversations" title="刷新"><i data-lucide="rotate-cw" aria-hidden="true"></i><span class="icon-fallback">↻</span></button>
@@ -8033,7 +8454,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.7.4</span>
+	          <span>v2.8.0</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -8154,6 +8575,16 @@ INDEX_HTML = r'''<!doctype html>
 	    <div class="image-preview-panel">
 	      <button class="icon ui-icon-btn" id="closeImagePreview" type="button" title="关闭" style="justify-self:end;background:rgba(255,255,255,.86)"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      <img id="imagePreviewFull" alt="图片预览">
+	    </div>
+	  </section>
+	  <section class="global-search-dialog" id="globalSearchDialog">
+	    <div class="global-search-panel ui-modal" role="dialog" aria-modal="true" aria-label="搜索历史对话">
+	      <div class="global-search-head">
+	        <i data-lucide="search" aria-hidden="true"></i>
+	        <input id="globalSearchInput" autocomplete="off" placeholder="搜索历史对话、消息、收藏、音视频...">
+	        <span class="global-search-key">Esc</span>
+	      </div>
+	      <div class="global-search-list" id="globalSearchResults" role="listbox"></div>
 	    </div>
 	  </section>
 	  <section class="confirm-dialog" id="confirmDialog">
@@ -8399,6 +8830,13 @@ INDEX_HTML = r'''<!doctype html>
 	      minimapFadeTimer: 0,
 	      minimapCollapseTimer: 0,
 	      minimapTooltipTimer: 0,
+	      globalSearchResults: [],
+	      globalSearchQuery: "",
+	      globalSearchSelected: 0,
+	      globalSearchLoading: false,
+	      globalSearchError: "",
+	      globalSearchTimer: 0,
+	      globalSearchSeq: 0,
 	      isComposing: false,
 	      lastCompositionEndAt: 0,
 	      messageSeq: 0,
@@ -9023,7 +9461,7 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     function setDialogOpenState() {
-	      const open = ["promptDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "confirmDialog"].some((id) => {
+	      const open = ["promptDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "globalSearchDialog", "confirmDialog"].some((id) => {
         const el = $(id);
         return el && el.classList.contains("show");
       });
@@ -9403,10 +9841,10 @@ INDEX_HTML = r'''<!doctype html>
 	      return text.length > 110 ? text.slice(0, 110) + "..." : text;
 	    }
 
-	    function openFavorites() {
+	    async function openFavorites() {
 	      $("favoriteDialog").classList.add("show");
 	      setDialogOpenState();
-	      loadFavorites();
+	      await loadFavorites();
 	    }
 
 	    function closeFavorites() {
@@ -9550,10 +9988,10 @@ INDEX_HTML = r'''<!doctype html>
 	      return map[status] || status || "处理中";
 	    }
 
-	    function openMediaAnalysis() {
+	    async function openMediaAnalysis() {
 	      $("mediaDialog").classList.add("show");
 	      setDialogOpenState();
-	      loadMediaTasks();
+	      await loadMediaTasks();
 	    }
 
 	    function closeMediaAnalysis() {
@@ -10329,7 +10767,7 @@ INDEX_HTML = r'''<!doctype html>
       }
     }
 
-	    async function selectConversation(id) {
+	    async function selectConversation(id, options = {}) {
 	      state.editingConversationId = null;
 	      const conv = state.conversations.find((item) => item.id === id);
 	      if (!conv) return;
@@ -10342,11 +10780,40 @@ INDEX_HTML = r'''<!doctype html>
         if (!res.ok) throw new Error(await readError(res, "消息暂时加载失败。"));
         const data = await res.json();
         state.messages = data.messages || [];
-        renderMessages({ forceScroll: true });
+        const targetMessageId = Number(options.messageId || 0);
+        renderMessages({ forceScroll: !targetMessageId });
         closeSidebar();
+        if (targetMessageId) {
+          requestAnimationFrame(() => scrollToMessageId(targetMessageId));
+        }
       } catch (err) {
         setStatus("chatStatus", friendlyError(err, "消息暂时加载失败。"), "err");
       }
+    }
+
+    function scrollToMessageId(messageId) {
+      const box = $("messages");
+      if (!box || !messageId) return false;
+      const message = state.messages.find((item) => Number(item.id || 0) === Number(messageId));
+      if (!message) return false;
+      const wrap = box.querySelector(`[data-message-key="${messageKey(message)}"]`);
+      if (!wrap) return false;
+      const target = clampNumber(
+        wrap.offsetTop - Math.max(72, box.clientHeight * .18),
+        0,
+        Math.max(0, box.scrollHeight - box.clientHeight),
+        0
+      );
+      state.programmaticScroll = true;
+      box.scrollTo({ top: target, behavior: "smooth" });
+      wrap.classList.add("search-hit-highlight");
+      setTimeout(() => {
+        state.programmaticScroll = false;
+        handleMessagesScroll();
+      }, 520);
+      setTimeout(() => wrap.classList.remove("search-hit-highlight"), 1900);
+      queueConversationMinimap();
+      return true;
     }
 
     function updateChatHeader() {
@@ -10416,6 +10883,238 @@ INDEX_HTML = r'''<!doctype html>
 	        return href;
 	      }
 	      return "#";
+	    }
+
+	    function escapeRegExp(value) {
+	      return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	    }
+
+	    function globalSearchShortcutText() {
+	      return /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || "") ? "⌘K" : "Ctrl K";
+	    }
+
+	    function globalSearchIcon(type, role) {
+	      if (type === "conversation") return "messages-square";
+	      if (type === "favorite") return "star";
+	      if (type === "media") return "file-video";
+	      if (role === "user") return "user-round";
+	      if (role === "assistant") return "cat";
+	      return "message-square";
+	    }
+
+	    function globalSearchTypeLabel(item) {
+	      if (item.type === "conversation") return "会话";
+	      if (item.type === "favorite") return "收藏";
+	      if (item.type === "media") return "音视频";
+	      if (item.role === "user") return "用户消息";
+	      if (item.role === "assistant") return "槑槑回复";
+	      return "消息";
+	    }
+
+	    function highlightSearchText(value, query = state.globalSearchQuery) {
+	      const text = String(value || "");
+	      const q = String(query || "").trim();
+	      if (!q) return escapeHTML(text);
+	      const pattern = new RegExp("(" + escapeRegExp(q) + ")", "ig");
+	      return escapeHTML(text).replace(pattern, "<mark>$1</mark>");
+	    }
+
+	    function openGlobalSearch() {
+	      if (!state.authed) return;
+	      const dialog = $("globalSearchDialog");
+	      const input = $("globalSearchInput");
+	      if (!dialog || !input) return;
+	      dialog.classList.add("show");
+	      setDialogOpenState();
+	      state.globalSearchSelected = 0;
+	      state.globalSearchQuery = "";
+	      state.globalSearchError = "";
+	      input.value = "";
+	      renderGlobalSearchResults();
+	      runGlobalSearch("");
+	      setTimeout(() => {
+	        input.focus();
+	        input.select();
+	      }, 30);
+	    }
+
+	    function closeGlobalSearch() {
+	      const dialog = $("globalSearchDialog");
+	      if (!dialog) return;
+	      dialog.classList.remove("show");
+	      if (state.globalSearchTimer) {
+	        clearTimeout(state.globalSearchTimer);
+	        state.globalSearchTimer = 0;
+	      }
+	      setDialogOpenState();
+	    }
+
+	    function scheduleGlobalSearch() {
+	      const input = $("globalSearchInput");
+	      state.globalSearchQuery = input ? input.value.trim() : "";
+	      state.globalSearchLoading = true;
+	      state.globalSearchError = "";
+	      renderGlobalSearchResults();
+	      if (state.globalSearchTimer) clearTimeout(state.globalSearchTimer);
+	      state.globalSearchTimer = window.setTimeout(() => {
+	        state.globalSearchTimer = 0;
+	        runGlobalSearch(state.globalSearchQuery);
+	      }, 200);
+	    }
+
+	    async function runGlobalSearch(query) {
+	      const seq = ++state.globalSearchSeq;
+	      state.globalSearchLoading = true;
+	      state.globalSearchError = "";
+	      renderGlobalSearchResults();
+	      try {
+	        const res = await api("/api/search?q=" + encodeURIComponent(query || ""));
+	        if (!res.ok) throw new Error(await readError(res, "搜索失败，稍后再试一下。"));
+	        const data = await res.json();
+	        if (seq !== state.globalSearchSeq) return;
+	        state.globalSearchResults = data.results || [];
+	        state.globalSearchSelected = 0;
+	        state.globalSearchLoading = false;
+	        renderGlobalSearchResults();
+	      } catch (err) {
+	        if (seq !== state.globalSearchSeq) return;
+	        state.globalSearchResults = [];
+	        state.globalSearchLoading = false;
+	        state.globalSearchError = friendlyError(err, "搜索暂时不可用，稍后再试一下。");
+	        renderGlobalSearchResults();
+	      }
+	    }
+
+	    function renderGlobalSearchResults() {
+	      const box = $("globalSearchResults");
+	      if (!box) return;
+	      box.replaceChildren();
+	      if (state.globalSearchLoading && !state.globalSearchResults.length) {
+	        box.appendChild(createEmptyState("loader-circle", "槑槑正在搜索...", "稍等一下，正在翻历史记录。", { compact: true }));
+	        queueLucideRefresh();
+	        return;
+	      }
+	      if (state.globalSearchError) {
+	        box.appendChild(createEmptyState("circle-alert", state.globalSearchError, "", { compact: true }));
+	        queueLucideRefresh();
+	        return;
+	      }
+	      if (!state.globalSearchResults.length) {
+	        const title = state.globalSearchQuery ? "槑槑没有找到相关内容" : "输入关键词开始搜索";
+	        const desc = state.globalSearchQuery ? "换个关键词试试看。" : "可以搜索会话标题、历史消息、收藏和音视频分析。";
+	        box.appendChild(createEmptyState("search", title, desc, { compact: true }));
+	        queueLucideRefresh();
+	        return;
+	      }
+	      for (const [index, item] of state.globalSearchResults.entries()) {
+	        const button = document.createElement("button");
+	        button.type = "button";
+	        button.className = "global-search-item" + (index === state.globalSearchSelected ? " active" : "");
+	        button.setAttribute("role", "option");
+	        button.setAttribute("aria-selected", index === state.globalSearchSelected ? "true" : "false");
+	        button.dataset.index = String(index);
+	        const roleLabel = item.role ? (item.role === "assistant" ? "槑槑" : (item.role === "user" ? "用户" : item.role)) : globalSearchTypeLabel(item);
+	        button.innerHTML =
+	          '<span class="global-search-icon">' + iconMarkup(globalSearchIcon(item.type, item.role)) + '</span>' +
+	          '<span class="global-search-content">' +
+	            '<span class="global-search-title"><span>' + highlightSearchText(item.title || "未命名对话") + '</span><span class="global-search-role">' + escapeHTML(roleLabel) + '</span></span>' +
+	            '<span class="global-search-snippet">' + highlightSearchText(item.snippet || "最近对话") + '</span>' +
+	          '</span>' +
+	          '<span class="global-search-time">' + escapeHTML(formatTime(item.created_at)) + '</span>';
+	        button.addEventListener("mouseenter", () => {
+	          setGlobalSearchSelected(index);
+	        });
+	        button.addEventListener("click", () => openGlobalSearchResult(item));
+	        box.appendChild(button);
+	      }
+	      queueLucideRefresh();
+	      scrollSelectedGlobalSearchIntoView();
+	    }
+
+	    function scrollSelectedGlobalSearchIntoView() {
+	      const selected = $("globalSearchResults")?.querySelector(".global-search-item.active");
+	      if (selected) selected.scrollIntoView({ block: "nearest" });
+	    }
+
+	    function setGlobalSearchSelected(index) {
+	      if (!state.globalSearchResults.length) return;
+	      state.globalSearchSelected = clampNumber(index, 0, state.globalSearchResults.length - 1, 0);
+	      const items = $("globalSearchResults")?.querySelectorAll(".global-search-item") || [];
+	      items.forEach((node, itemIndex) => {
+	        const active = itemIndex === state.globalSearchSelected;
+	        node.classList.toggle("active", active);
+	        node.setAttribute("aria-selected", active ? "true" : "false");
+	      });
+	      scrollSelectedGlobalSearchIntoView();
+	    }
+
+	    function moveGlobalSearchSelection(delta) {
+	      if (!state.globalSearchResults.length) return;
+	      const length = state.globalSearchResults.length;
+	      setGlobalSearchSelected((state.globalSearchSelected + delta + length) % length);
+	    }
+
+	    function handleGlobalSearchKeydown(event) {
+	      if (event.key === "Escape") {
+	        event.preventDefault();
+	        closeGlobalSearch();
+	        return;
+	      }
+	      if (event.key === "ArrowDown") {
+	        event.preventDefault();
+	        moveGlobalSearchSelection(1);
+	        return;
+	      }
+	      if (event.key === "ArrowUp") {
+	        event.preventDefault();
+	        moveGlobalSearchSelection(-1);
+	        return;
+	      }
+	      if (event.key === "Home") {
+	        event.preventDefault();
+	        setGlobalSearchSelected(0);
+	        return;
+	      }
+	      if (event.key === "End") {
+	        event.preventDefault();
+	        setGlobalSearchSelected(Math.max(0, state.globalSearchResults.length - 1));
+	        return;
+	      }
+	      if (event.key === "Enter") {
+	        event.preventDefault();
+	        const item = state.globalSearchResults[state.globalSearchSelected];
+	        if (item) openGlobalSearchResult(item);
+	      }
+	    }
+
+	    async function openGlobalSearchResult(item) {
+	      if (!item) return;
+	      closeGlobalSearch();
+	      const sessionId = item.session_id || "";
+	      if (sessionId) {
+	        if (!state.conversations.some((conv) => conv.id === sessionId)) {
+	          await loadConversations();
+	        }
+	        await selectConversation(sessionId, { messageId: item.message_id });
+	        return;
+	      }
+	      if (item.type === "favorite") {
+	        const favoriteId = String(item.id || "").replace(/^favorite:/, "");
+	        await openFavorites();
+	        state.selectedFavoriteId = Number(favoriteId || 0) || null;
+	        renderFavorites();
+	        setStatus("chatStatus", "原会话已删除，已打开收藏内容。", "");
+	        return;
+	      }
+	      if (item.type === "media") {
+	        const taskId = String(item.id || "").replace(/^media:/, "");
+	        await openMediaAnalysis();
+	        state.selectedMediaTaskId = taskId;
+	        renderMediaTasks();
+	        renderMediaDetail();
+	        return;
+	      }
+	      setStatus("chatStatus", "这条结果暂时无法直接打开。", "err");
 	    }
 
 	    function renderInlineMarkdown(value) {
@@ -12151,11 +12850,18 @@ INDEX_HTML = r'''<!doctype html>
       el.focus();
     }
 
+    $("globalSearchShortcut").textContent = globalSearchShortcutText();
     $("loginForm").addEventListener("submit", login);
     $("logout").addEventListener("click", logout);
     $("newChat").addEventListener("click", () => {
       newConversation().catch((err) => setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err"));
     });
+    $("openGlobalSearch").addEventListener("click", openGlobalSearch);
+    $("globalSearchDialog").addEventListener("click", (event) => {
+      if (event.target === $("globalSearchDialog")) closeGlobalSearch();
+    });
+    $("globalSearchInput").addEventListener("input", scheduleGlobalSearch);
+    $("globalSearchInput").addEventListener("keydown", handleGlobalSearchKeydown);
     $("openPrompts").addEventListener("click", openPromptLibrary);
     document.querySelectorAll(".prompt-chip[data-prompt-text]").forEach((button) => {
       button.addEventListener("click", () => insertPromptText(button.dataset.promptText || ""));
@@ -12225,7 +12931,14 @@ INDEX_HTML = r'''<!doctype html>
 	    $("resetInterfaceSettings").addEventListener("click", resetInterfaceSettings);
 	    document.addEventListener("click", handleInterfaceOutsideClick);
 	    document.addEventListener("keydown", (event) => {
+	      const key = String(event.key || "").toLowerCase();
+	      if ((event.metaKey || event.ctrlKey) && key === "k") {
+	        event.preventDefault();
+	        openGlobalSearch();
+	        return;
+	      }
 	      if (event.key === "Escape") {
+	        closeGlobalSearch();
 	        closeInterfaceSettings();
 	        closeImagePreview();
 	      }
