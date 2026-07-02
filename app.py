@@ -6644,6 +6644,19 @@ INDEX_HTML = r'''<!doctype html>
       --composer-control-opacity: .44;
       --composer-glass-blur: 18px;
       --composer-field-blur: 12px;
+      --glass-opacity: var(--composer-glass-opacity);
+      --glass-blur: var(--composer-glass-blur);
+      --glass-bg: rgba(var(--composer-glass-rgb), var(--glass-opacity));
+      --glass-border: color-mix(in srgb, var(--line) 52%, rgba(255,255,255,.72));
+      --glass-shadow:
+        inset 0 1px 0 rgba(255,255,255,.82),
+        inset 0 -1px 0 rgba(255,255,255,.34),
+        0 18px 50px rgba(73, 54, 35, .14);
+      --glass-shadow-strong:
+        inset 0 1px 0 rgba(255,255,255,.82),
+        inset 0 -1px 0 rgba(255,255,255,.38),
+        0 20px 58px rgba(73, 54, 35, .16);
+      --scroll-latest-bottom: calc(max(12px, env(safe-area-inset-bottom, 0px)) + 160px);
     }
     [data-theme="dark"] {
       --bg: #181614;
@@ -6664,6 +6677,15 @@ INDEX_HTML = r'''<!doctype html>
       --composer-glass-rgb: 31, 28, 25;
       --composer-field-rgb: 255, 255, 255;
       --composer-control-rgb: 255, 255, 255;
+      --glass-border: color-mix(in srgb, var(--line) 72%, rgba(255,255,255,.12));
+      --glass-shadow:
+        inset 0 1px 0 rgba(255,255,255,.1),
+        inset 0 -1px 0 rgba(255,255,255,.04),
+        0 18px 50px rgba(0, 0, 0, .34);
+      --glass-shadow-strong:
+        inset 0 1px 0 rgba(255,255,255,.12),
+        inset 0 -1px 0 rgba(255,255,255,.06),
+        0 20px 58px rgba(0, 0, 0, .42);
     }
     body {
       background:
@@ -7502,23 +7524,16 @@ INDEX_HTML = r'''<!doctype html>
       padding: 11px;
       gap: 9px;
       pointer-events: auto;
-      border: 1px solid color-mix(in srgb, var(--line) 52%, rgba(255,255,255,.72));
-      background: rgba(var(--composer-glass-rgb), var(--composer-glass-opacity));
-      -webkit-backdrop-filter: blur(var(--composer-glass-blur)) saturate(160%);
-      backdrop-filter: blur(var(--composer-glass-blur)) saturate(160%);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.82),
-        inset 0 -1px 0 rgba(255,255,255,.34),
-        0 18px 50px rgba(73, 54, 35, .14);
+      border: 1px solid var(--glass-border);
+      background: var(--glass-bg);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      box-shadow: var(--glass-shadow);
       transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
     }
     .composer-box:focus-within {
       border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.82),
-        inset 0 -1px 0 rgba(255,255,255,.38),
-        0 20px 58px rgba(73, 54, 35, .16),
-        0 0 0 4px var(--focus-ring);
+      box-shadow: var(--glass-shadow-strong), 0 0 0 4px var(--focus-ring);
     }
     [data-theme="dark"] .composer {
       background: transparent;
@@ -8032,9 +8047,55 @@ INDEX_HTML = r'''<!doctype html>
       font-size: 12px;
     }
     .scroll-latest {
-      bottom: 172px;
+      position: absolute;
+      left: auto;
+      right: 24px;
+      bottom: var(--scroll-latest-bottom);
+      z-index: 11;
+      width: 44px;
+      min-width: 44px;
+      height: 44px;
+      min-height: 44px;
+      display: grid;
+      place-items: center;
+      padding: 0;
       border-radius: 999px;
-      border-color: color-mix(in srgb, var(--line) 80%, transparent);
+      border: 1px solid var(--glass-border);
+      background: var(--glass-bg);
+      color: var(--accent-strong);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      box-shadow: var(--glass-shadow);
+      font-size: 0;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px) scale(.94);
+      transition:
+        opacity .18s ease,
+        transform .18s ease,
+        box-shadow .18s ease,
+        border-color .18s ease,
+        background .18s ease;
+    }
+    .scroll-latest.show {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0) scale(1);
+    }
+    .scroll-latest:hover,
+    .scroll-latest:focus-visible {
+      border-color: color-mix(in srgb, var(--accent) 50%, var(--glass-border));
+      box-shadow: var(--glass-shadow-strong), 0 0 0 4px var(--focus-ring);
+      transform: translateY(-1px) scale(1.06);
+    }
+    .scroll-latest .lucide {
+      width: 21px;
+      height: 21px;
+      stroke-width: 2.35;
+    }
+    .scroll-latest .icon-fallback {
+      font-size: 18px;
+      line-height: 1;
     }
     .interface-popover {
       position: absolute;
@@ -8051,19 +8112,15 @@ INDEX_HTML = r'''<!doctype html>
     .interface-panel {
       display: grid;
       overflow: hidden;
-      border: 1px solid color-mix(in srgb, var(--line) 70%, rgba(255,255,255,.5));
+      border: 1px solid var(--glass-border);
       border-radius: 24px;
-      background: rgba(var(--composer-glass-rgb), .88);
-      -webkit-backdrop-filter: blur(22px) saturate(150%);
-      backdrop-filter: blur(22px) saturate(150%);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.72),
-        0 22px 56px rgba(73, 54, 35, .18);
+      background: var(--glass-bg);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      box-shadow: var(--glass-shadow-strong);
     }
     [data-theme="dark"] .interface-panel {
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.12),
-        0 22px 60px rgba(0,0,0,.42);
+      box-shadow: var(--glass-shadow-strong);
     }
 	    .interface-panel .dialog-head {
 	      min-height: 54px;
@@ -8157,6 +8214,9 @@ INDEX_HTML = r'''<!doctype html>
     }
     @media (max-width: 900px) {
       .app { grid-template-columns: 1fr; }
+      .main {
+        --scroll-latest-bottom: calc(max(10px, env(safe-area-inset-bottom, 0px)) + 204px);
+      }
       .sidebar {
         width: min(340px, 88vw);
         padding: 14px 12px;
@@ -8195,6 +8255,9 @@ INDEX_HTML = r'''<!doctype html>
     }
     @media (max-width: 620px) {
       body { font-size: 15px; }
+      .main {
+        --scroll-latest-bottom: calc(max(10px, env(safe-area-inset-bottom, 0px)) + 188px);
+      }
       .topbar {
         min-height: 58px;
         grid-template-columns: 42px minmax(0, 1fr) auto;
@@ -8320,7 +8383,12 @@ INDEX_HTML = r'''<!doctype html>
         min-height: 46px;
       }
       .scroll-latest {
-        bottom: 176px;
+        right: 16px;
+        bottom: var(--scroll-latest-bottom);
+        width: 42px;
+        min-width: 42px;
+        height: 42px;
+        min-height: 42px;
       }
       .model-picker-dialog.show {
         display: grid;
@@ -8804,14 +8872,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.8.3</p>
+        <p class="app-version">v2.8.4</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.8.3</span>
+        <span>v2.8.4</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -8823,7 +8891,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.8.3</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.8.4</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -8847,7 +8915,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.8.3</span>
+	          <span>v2.8.4</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -8877,7 +8945,9 @@ INDEX_HTML = r'''<!doctype html>
         </div>
         <div class="minimap-tooltip" id="minimapTooltip" role="tooltip"></div>
       </nav>
-      <button class="scroll-latest" id="scrollLatest" type="button" title="回到底部">↓ 回到底部</button>
+      <button class="scroll-latest" id="scrollLatest" type="button" title="回到底部" aria-label="回到底部">
+        <i data-lucide="arrow-down" aria-hidden="true"></i><span class="icon-fallback">↓</span>
+      </button>
 
 	      <footer class="composer">
 	        <div class="composer-box ui-card">
@@ -12357,7 +12427,9 @@ INDEX_HTML = r'''<!doctype html>
 	      const button = $("scrollLatest");
 	      if (!button) return;
 	      const awayFromBottom = !isNearBottom();
-	      button.textContent = state.hasNewWhilePaused || state.sending ? "↓ 新内容" : "↓ 回到底部";
+	      const label = state.hasNewWhilePaused || state.sending ? "查看新内容" : "回到底部";
+	      button.title = label;
+	      button.setAttribute("aria-label", label);
 	      button.classList.toggle("show", awayFromBottom && state.messages.length > 0);
 	    }
 
