@@ -364,6 +364,18 @@ def init_db(secrets_data=None):
               updated_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS user_profiles (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              title TEXT NOT NULL,
+              content TEXT NOT NULL,
+              type TEXT NOT NULL DEFAULT 'profile',
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              enabled INTEGER NOT NULL DEFAULT 1,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS favorite_messages (
               id TEXT PRIMARY KEY,
               user_id TEXT NOT NULL DEFAULT 'default',
@@ -587,6 +599,7 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_conversation ON messages(user_id, conversation_id, id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_images_user_session ON chat_message_images(user_id, session_id, message_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_favorites_user_created ON favorite_messages(user_id, created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_profiles_user_sort ON user_profiles(user_id, sort_order ASC, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_user_updated ON media_analysis_tasks(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_task_id ON media_analysis_tasks(task_id)")
@@ -680,6 +693,55 @@ def conversation_row(row):
         "updated_at": row["updated_at"],
         "created_at": row["created_at"],
     }
+
+
+def estimate_profile_tokens(text) -> int:
+    value = str(text or "")
+    cjk = sum(1 for char in value if "\u4e00" <= char <= "\u9fff")
+    other = max(0, len(value) - cjk)
+    return max(0, int(cjk * 0.8 + other / 4))
+
+
+def user_profile_row(row):
+    title = row["title"]
+    content = row["content"]
+    text = f"{title}\n{content}"
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "title": title,
+        "content": content,
+        "type": row["type"],
+        "sort_order": row["sort_order"],
+        "enabled": bool(row["enabled"]),
+        "char_count": len(text),
+        "token_estimate": estimate_profile_tokens(text),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def profile_totals(rows):
+    enabled_rows = [row for row in rows if bool(row["enabled"])]
+    all_text = "\n".join(f"{row['title']}\n{row['content']}" for row in enabled_rows)
+    return {
+        "enabled_count": len(enabled_rows),
+        "total_count": len(rows),
+        "char_count": len(all_text),
+        "token_estimate": estimate_profile_tokens(all_text),
+    }
+
+
+def build_user_profile_context(rows):
+    enabled_rows = [row for row in rows if bool(row["enabled"]) and str(row["content"] or "").strip()]
+    if not enabled_rows:
+        return ""
+    parts = ["用户长期档案："]
+    for row in enabled_rows:
+        title = str(row["title"] or "").strip() or "未命名"
+        content = str(row["content"] or "").strip()
+        parts.append(f"【{title}】\n{content}")
+    return "\n\n".join(parts)
 
 
 DEFAULT_PROMPT_TEMPLATES = [
@@ -1831,6 +1893,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_global_search)
         if path == "/api/search-config":
             return self.require_user(self.handle_search_config)
+        if path == "/api/profiles":
+            return self.require_user(self.handle_profiles)
         if path == "/api/prompts":
             return self.require_user(self.handle_prompts)
         if path == "/api/favorites":
@@ -1892,6 +1956,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_admin(self.handle_admin_password)
         if path == "/api/admin/users":
             return self.require_admin(self.handle_admin_users)
+        if path == "/api/profiles":
+            return self.require_user(self.handle_profiles)
+        if path == "/api/profiles/reorder":
+            return self.require_user(self.handle_profile_reorder)
         if path == "/api/prompts":
             return self.require_user(self.handle_prompts)
         if path == "/api/favorites":
@@ -1930,12 +1998,16 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_admin(self.handle_admin_model_item)
         if path.startswith("/api/admin/users/"):
             return self.require_admin(self.handle_admin_user_item)
+        if path.startswith("/api/profiles/"):
+            return self.require_user(self.handle_profile_item)
         if path.startswith("/api/prompts/"):
             return self.require_user(self.handle_prompt_item)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_PATCH(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/profiles/"):
+            return self.require_user(self.handle_profile_item)
         if path.startswith("/api/conversations/"):
             return self.require_user(self.handle_conversation_item)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
@@ -1950,6 +2022,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_admin(self.handle_admin_model_item)
         if path.startswith("/api/prompts/"):
             return self.require_user(self.handle_prompt_item)
+        if path.startswith("/api/profiles/"):
+            return self.require_user(self.handle_profile_item)
         if path.startswith("/api/favorites/message/"):
             return self.require_user(self.handle_favorite_by_message)
         if path.startswith("/api/favorites/"):
@@ -3424,6 +3498,148 @@ class AppHandler(BaseHTTPRequestHandler):
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         return self.json({"user": ai_user_public(row)})
 
+    def handle_profiles(self):
+        user_id = self.current_user()["id"]
+        if self.command == "GET":
+            with db() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM user_profiles
+                    WHERE user_id=?
+                    ORDER BY sort_order ASC, updated_at DESC
+                    LIMIT 300
+                    """,
+                    (user_id,),
+                ).fetchall()
+            return self.json(
+                {
+                    "profiles": [user_profile_row(row) for row in rows],
+                    "totals": profile_totals(rows),
+                }
+            )
+
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+
+        title = str(data.get("title") or "").strip()[:80]
+        content = str(data.get("content") or "").strip()
+        profile_type = str(data.get("type") or "profile").strip().lower()[:32] or "profile"
+        if profile_type not in ("profile", "project", "style", "memory"):
+            profile_type = "profile"
+        enabled = 1 if data.get("enabled", True) else 0
+        sort_order = clamp_int(data.get("sort_order"), 100, -100000, 100000)
+        if not title or not content:
+            return self.error(HTTPStatus.BAD_REQUEST, "title and content are required")
+        if len(content) > 12000:
+            return self.error(HTTPStatus.BAD_REQUEST, "content too long")
+
+        profile_id = b64_token(10)
+        ts = now()
+        with db() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_profiles
+                (id, user_id, title, content, type, sort_order, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (profile_id, user_id, title, content, profile_type, sort_order, enabled, ts, ts),
+            )
+            row = conn.execute(
+                "SELECT * FROM user_profiles WHERE id=? AND user_id=?",
+                (profile_id, user_id),
+            ).fetchone()
+        return self.json({"profile": user_profile_row(row)}, HTTPStatus.CREATED)
+
+    def profile_id_from_path(self):
+        return urlparse(self.path).path.rstrip("/").rsplit("/", 1)[-1]
+
+    def handle_profile_item(self):
+        profile_id = self.profile_id_from_path()
+        user_id = self.current_user()["id"]
+        with db() as conn:
+            row = conn.execute(
+                "SELECT * FROM user_profiles WHERE id=? AND user_id=?",
+                (profile_id, user_id),
+            ).fetchone()
+            if not row:
+                return self.error(HTTPStatus.NOT_FOUND, "profile not found")
+
+            if self.command == "DELETE":
+                conn.execute("DELETE FROM user_profiles WHERE id=? AND user_id=?", (profile_id, user_id))
+                return self.json({"ok": True})
+
+            try:
+                data = self.read_body()
+            except Exception:
+                return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+            title = str(data.get("title", row["title"]) or "").strip()[:80]
+            content = str(data.get("content", row["content"]) or "").strip()
+            profile_type = str(data.get("type", row["type"]) or "profile").strip().lower()[:32] or "profile"
+            if profile_type not in ("profile", "project", "style", "memory"):
+                profile_type = "profile"
+            enabled = 1 if data.get("enabled", bool(row["enabled"])) else 0
+            sort_order = clamp_int(data.get("sort_order", row["sort_order"]), row["sort_order"], -100000, 100000)
+            if not title or not content:
+                return self.error(HTTPStatus.BAD_REQUEST, "title and content are required")
+            if len(content) > 12000:
+                return self.error(HTTPStatus.BAD_REQUEST, "content too long")
+            conn.execute(
+                """
+                UPDATE user_profiles
+                SET title=?, content=?, type=?, sort_order=?, enabled=?, updated_at=?
+                WHERE id=? AND user_id=?
+                """,
+                (title, content, profile_type, sort_order, enabled, now(), profile_id, user_id),
+            )
+            row = conn.execute(
+                "SELECT * FROM user_profiles WHERE id=? AND user_id=?",
+                (profile_id, user_id),
+            ).fetchone()
+        return self.json({"profile": user_profile_row(row)})
+
+    def handle_profile_reorder(self):
+        user_id = self.current_user()["id"]
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+        ids = data.get("ids") or []
+        if not isinstance(ids, list):
+            return self.error(HTTPStatus.BAD_REQUEST, "ids required")
+        clean_ids = []
+        for item in ids:
+            value = str(item or "").strip()
+            if value and value not in clean_ids:
+                clean_ids.append(value)
+        with db() as conn:
+            existing = {
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM user_profiles WHERE user_id=?",
+                    (user_id,),
+                ).fetchall()
+            }
+            ts = now()
+            for index, profile_id in enumerate(clean_ids):
+                if profile_id in existing:
+                    conn.execute(
+                        "UPDATE user_profiles SET sort_order=?, updated_at=? WHERE id=? AND user_id=?",
+                        ((index + 1) * 10, ts, profile_id, user_id),
+                    )
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM user_profiles
+                WHERE user_id=?
+                ORDER BY sort_order ASC, updated_at DESC
+                """,
+                (user_id,),
+            ).fetchall()
+        return self.json({"profiles": [user_profile_row(row) for row in rows], "totals": profile_totals(rows)})
+
     def handle_prompts(self):
         if self.command == "GET":
             with db() as conn:
@@ -4521,6 +4737,8 @@ mindmap_text 要求：
         search_results = []
         search_config = web_search_config(self.server.secrets)
         use_web_search = should_use_web_search(content, requested_web_search, search_config)
+        use_profile = data.get("use_profile", True) is not False
+        profile_rows = []
         with db() as conn:
             convo = conn.execute(
                 """
@@ -4610,6 +4828,17 @@ mindmap_text 要求：
                 """,
                 (conversation_id, user_id),
             ).fetchall()
+            if use_profile:
+                profile_rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM user_profiles
+                    WHERE user_id=? AND enabled=1
+                    ORDER BY sort_order ASC, updated_at DESC
+                    LIMIT 80
+                    """,
+                    (user_id,),
+                ).fetchall()
             history_images = conn.execute(
                 """
                 SELECT *
@@ -4652,6 +4881,11 @@ mindmap_text 要求：
             if convo["system_prompt"].strip():
                 upstream_messages.append(
                     {"role": "system", "content": convo["system_prompt"].strip()}
+                )
+            profile_context = build_user_profile_context(profile_rows) if use_profile else ""
+            if profile_context:
+                upstream_messages.append(
+                    {"role": "system", "content": profile_context}
                 )
             if results:
                 upstream_messages.append(
@@ -6295,6 +6529,7 @@ INDEX_HTML = r'''<!doctype html>
 	    .theme-dialog,
 	    .prompt-dialog,
 	    .favorite-dialog,
+	    .profile-dialog,
 	    .media-dialog {
       position: fixed;
       inset: 0;
@@ -6309,11 +6544,13 @@ INDEX_HTML = r'''<!doctype html>
 	    .theme-dialog.show,
 	    .prompt-dialog.show,
 	    .favorite-dialog.show,
+	    .profile-dialog.show,
 	    .media-dialog.show { display: grid; }
     .confirm-dialog { z-index: 40; }
     .copy-panel,
     .confirm-panel,
     .accent-panel,
+    .profile-panel,
     .library-panel {
       width: min(720px, 100%);
       max-height: min(680px, 88vh);
@@ -6328,6 +6565,12 @@ INDEX_HTML = r'''<!doctype html>
     }
     .library-panel {
       width: min(940px, 100%);
+      grid-template-rows: auto minmax(0, 1fr);
+      padding: 0;
+      overflow: hidden;
+    }
+    .profile-panel {
+      width: min(980px, 100%);
       grid-template-rows: auto minmax(0, 1fr);
       padding: 0;
       overflow: hidden;
@@ -6399,6 +6642,141 @@ INDEX_HTML = r'''<!doctype html>
       box-shadow: var(--soft-shadow);
       display: grid;
       gap: 8px;
+    }
+    .profile-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .profile-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(300px, .9fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .profile-token-warning {
+      color: var(--yellow);
+      font-weight: 720;
+    }
+    .profile-card {
+      cursor: grab;
+    }
+    .profile-card.dragging {
+      opacity: .58;
+      transform: scale(.99);
+    }
+    .profile-card.disabled {
+      opacity: .62;
+    }
+    .profile-card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .profile-card-title {
+      min-width: 0;
+      display: grid;
+      gap: 3px;
+    }
+    .profile-card-title strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .profile-card-content {
+      white-space: pre-wrap;
+      max-height: 130px;
+      overflow: hidden;
+    }
+    .profile-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .profile-switch input {
+      width: 16px;
+      min-height: 16px;
+      accent-color: var(--accent);
+      box-shadow: none;
+    }
+    .profile-status-chip {
+      justify-self: center;
+      width: fit-content;
+      min-height: 24px;
+      margin: 3px auto 0;
+      padding: 0 9px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface) 62%, transparent);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
+    }
+    .profile-status-chip .lucide {
+      width: 14px;
+      height: 14px;
+      color: var(--accent-strong);
+    }
+    .profile-status-chip.disabled {
+      opacity: .64;
+    }
+    .profile-status-chip:hover,
+    .profile-status-chip:focus-visible {
+      color: var(--accent-strong);
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 56%, var(--surface));
+    }
+    .profile-popover {
+      position: absolute;
+      top: 72px;
+      left: 50%;
+      z-index: 13;
+      width: min(360px, calc(100vw - 24px));
+      display: none;
+      transform: translateX(-50%);
+      border: 1px solid var(--glass-border);
+      border-radius: 22px;
+      background: var(--glass-bg);
+      color: var(--text);
+      box-shadow: var(--glass-shadow-strong);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      overflow: hidden;
+    }
+    .profile-popover.show {
+      display: grid;
+      animation: searchScaleIn .16s cubic-bezier(.2, .8, .2, 1) both;
+    }
+    .profile-popover-head,
+    .profile-popover-foot {
+      padding: 12px;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+    }
+    .profile-popover-foot {
+      border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      border-bottom: 0;
+    }
+    .profile-popover-list {
+      display: grid;
+      gap: 6px;
+      max-height: 260px;
+      overflow: auto;
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 13px;
     }
     .library-card strong {
       display: block;
@@ -6754,10 +7132,12 @@ INDEX_HTML = r'''<!doctype html>
       .copy-panel,
       .confirm-panel,
       .accent-panel,
+      .profile-panel,
       .library-panel { max-height: 92vh; }
       .accent-grid { grid-template-columns: 1fr; }
 	      .library-grid,
 	      .favorite-layout,
+	      .profile-layout,
 	      .media-layout { grid-template-columns: 1fr; }
       .side-foot { grid-template-columns: 1fr 1fr; }
     }
@@ -9175,6 +9555,7 @@ INDEX_HTML = r'''<!doctype html>
       }
 	      .prompt-dialog,
 	      .favorite-dialog,
+	      .profile-dialog,
 	      .media-dialog,
 	      .theme-dialog,
       .copy-dialog,
@@ -9183,6 +9564,7 @@ INDEX_HTML = r'''<!doctype html>
         padding: 0;
       }
 	      .library-panel,
+	      .profile-panel,
 	      .accent-panel,
       .copy-panel,
       .confirm-panel {
@@ -9209,14 +9591,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.8.6</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.8.7</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.8.6</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.8.7</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -9228,7 +9610,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.8.6</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.8.7</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -9248,11 +9630,12 @@ INDEX_HTML = r'''<!doctype html>
       <div class="side-foot">
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openPromptLibrary"><i data-lucide="book-open" aria-hidden="true"></i><span>提示词库</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openFavorites"><i data-lucide="star" aria-hidden="true"></i><span>我的收藏</span> <span class="nav-count" id="favoriteCount">0</span></button>
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openProfiles"><i data-lucide="user-round-cog" aria-hidden="true"></i><span>AI档案</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openMediaAnalysis"><i data-lucide="file-video" aria-hidden="true"></i><span>音视频分析</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.8.6</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.8.7</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -9266,6 +9649,7 @@ INDEX_HTML = r'''<!doctype html>
           <strong id="chatTitle">新对话</strong>
           <span id="chatModel">请选择模型</span>
           <span class="chat-usage" id="chatUsage"></span>
+          <button class="profile-status-chip" id="profileStatus" type="button"><i data-lucide="brain" aria-hidden="true"></i><span>AI档案未加载</span></button>
         </div>
         <div class="top-actions">
           <button class="icon accent-toggle" id="accentToggle" title="主色调">●</button>
@@ -9275,6 +9659,14 @@ INDEX_HTML = r'''<!doctype html>
         </div>
       </header>
 
+      <div class="profile-popover" id="profilePopover" role="dialog" aria-label="本次聊天 AI档案">
+        <div class="profile-popover-head">
+          <strong>本次 AI档案</strong>
+          <div class="library-card-meta" id="profilePopoverMeta">0 条</div>
+        </div>
+        <div class="profile-popover-list" id="profileLoadedList"></div>
+        <label class="profile-popover-foot profile-switch"><input id="disableProfileForConversation" type="checkbox"><span>本次聊天不加载 AI档案</span></label>
+      </div>
       <section class="messages" id="messages"></section>
       <nav class="conversation-minimap" id="conversationMinimap" aria-label="对话缩略导航" hidden>
         <div class="minimap-track" id="minimapTrack">
@@ -9470,6 +9862,40 @@ INDEX_HTML = r'''<!doctype html>
 	      </div>
 	    </div>
 	  </section>
+	  <section class="profile-dialog" id="profileDialog">
+	    <div class="profile-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="profileDialogTitle">
+	      <div class="dialog-head">
+		        <strong class="dialog-title" id="profileDialogTitle"><i data-lucide="user-round-cog" aria-hidden="true"></i><span>AI档案</span></strong>
+	        <button class="icon ui-icon-btn" id="closeProfileDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <div class="dialog-body">
+	        <div class="profile-summary">
+	          <span id="profileSummary">当前 Profile：约 0 Token</span>
+	          <span id="profileWarning" class="profile-token-warning" hidden>AI档案较长，会增加每次模型调用成本。</span>
+	        </div>
+	        <div class="profile-layout">
+	          <div class="item-list" id="profileList"></div>
+	          <section class="library-editor">
+		            <h2 class="library-editor-title"><i data-lucide="pencil" aria-hidden="true"></i><span>新增/编辑档案</span></h2>
+	            <input id="editingProfileId" type="hidden">
+	            <label>标题<input id="profileTitle" placeholder="例如：输出风格"></label>
+	            <label>内容<textarea id="profileContent" rows="8" placeholder="写下希望槑槑长期参考的信息"></textarea></label>
+	            <div class="grid2">
+	              <label>类型<select id="profileType"><option value="profile">profile</option><option value="style">style</option><option value="project">project</option><option value="memory">memory</option></select></label>
+	              <label>排序<input id="profileSortOrder" type="number" value="100"></label>
+	            </div>
+	            <label class="profile-switch"><input id="profileEnabled" type="checkbox" checked><span>启用，聊天时自动加载</span></label>
+	            <div class="library-card-meta" id="profileEditorMeta">0 字 · 约 0 Token</div>
+	            <div class="library-actions">
+		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveProfile"><i data-lucide="save" aria-hidden="true"></i><span>保存档案</span></button>
+		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetProfile"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
+	            </div>
+	            <div class="status" id="profileStatusText"></div>
+	          </section>
+	        </div>
+	      </div>
+	    </div>
+	  </section>
 	      <section class="favorite-dialog" id="favoriteDialog">
 	    <div class="library-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="favoriteDialogTitle">
 	      <div class="dialog-head">
@@ -9629,6 +10055,11 @@ INDEX_HTML = r'''<!doctype html>
 	      user: null,
 	      models: [],
 	      prompts: [],
+	      profiles: [],
+	      profileTotals: null,
+	      editingProfileId: null,
+	      profileDragId: "",
+	      profileDisabledByConversation: {},
 	      favorites: [],
 	      selectedFavoriteId: null,
 	      mediaTasks: [],
@@ -9773,6 +10204,7 @@ INDEX_HTML = r'''<!doctype html>
 	      state.composerOpacity = getUserStorage("aiPlatformComposerOpacity", localStorage.getItem("aiPlatformComposerOpacity") || "80");
 	      state.composerBlur = getUserStorage("aiPlatformComposerBlur", localStorage.getItem("aiPlatformComposerBlur") || "18");
 	      state.sidebarWidth = getUserStorage("aiPlatformSidebarWidth", localStorage.getItem("aiPlatformSidebarWidth") || "322");
+	      loadProfileSessionPrefs();
 	      applyInterfaceSettings({ save: false });
 	      applyFontSize(state.fontSize);
 	      applyTheme(preferredTheme());
@@ -10298,7 +10730,7 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     function setDialogOpenState() {
-	      const open = ["promptDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "globalSearchDialog", "modelPickerDialog", "changelogDialog", "confirmDialog"].some((id) => {
+	      const open = ["promptDialog", "profileDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "globalSearchDialog", "modelPickerDialog", "changelogDialog", "confirmDialog"].some((id) => {
         const el = $(id);
         return el && el.classList.contains("show");
       });
@@ -10387,7 +10819,7 @@ INDEX_HTML = r'''<!doctype html>
 	        loadUserPreferences();
 		        state.authed = true;
 		        showApp();
-		        await Promise.all([loadModels(), loadSearchConfig(), loadPrompts(), loadFavorites(), loadConversations(), health()]);
+		        await Promise.all([loadModels(), loadSearchConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
 	      } catch {
 	        showLogin();
 	      }
@@ -10424,7 +10856,7 @@ INDEX_HTML = r'''<!doctype html>
 		      loadUserPreferences();
 		      state.authed = true;
 	      showApp();
-	      await Promise.all([loadModels(), loadSearchConfig(), loadPrompts(), loadFavorites(), loadConversations(), health()]);
+	      await Promise.all([loadModels(), loadSearchConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
 	    }
 
     async function logout() {
@@ -10433,8 +10865,13 @@ INDEX_HTML = r'''<!doctype html>
 	      applyCurrentUser(null);
 	      state.currentConversation = null;
 	      state.conversationStats = null;
+	      state.profiles = [];
+	      state.profileTotals = null;
+	      state.profileDisabledByConversation = {};
       state.messages = [];
       clearAttachments();
+	      closeProfilePopover();
+	      closeProfiles();
       showLogin();
     }
 
@@ -10928,6 +11365,401 @@ INDEX_HTML = r'''<!doctype html>
 	      setStatus("promptLibraryStatus", "提示词已删除", "ok");
 	      await loadPrompts();
 	      if (!state.messages.length) renderEmpty();
+	    }
+
+	    function estimateClientTokens(text) {
+	      const value = String(text || "");
+	      let cjk = 0;
+	      for (const char of value) {
+	        if (char >= "\u4e00" && char <= "\u9fff") cjk++;
+	      }
+	      const other = Math.max(0, value.length - cjk);
+	      return Math.max(0, Math.round(cjk * .8 + other / 4));
+	    }
+
+	    function enabledProfiles() {
+	      return state.profiles.filter((item) => item.enabled && String(item.content || "").trim());
+	    }
+
+	    function profileTextStats(title, content) {
+	      const text = [title, content].filter(Boolean).join("\n");
+	      return {
+	        chars: text.length,
+	        tokens: estimateClientTokens(text)
+	      };
+	    }
+
+	    function currentProfileTotals() {
+	      const profiles = enabledProfiles();
+	      const text = profiles.map((item) => [item.title, item.content].join("\n")).join("\n");
+	      return {
+	        enabled_count: profiles.length,
+	        total_count: state.profiles.length,
+	        char_count: text.length,
+	        token_estimate: estimateClientTokens(text)
+	      };
+	    }
+
+	    function loadProfileSessionPrefs() {
+	      try {
+	        state.profileDisabledByConversation = JSON.parse(getUserStorage("aiPlatformProfileDisabledByConversation", "{}") || "{}") || {};
+	      } catch {
+	        state.profileDisabledByConversation = {};
+	      }
+	    }
+
+	    function saveProfileSessionPrefs() {
+	      setUserStorage("aiPlatformProfileDisabledByConversation", JSON.stringify(state.profileDisabledByConversation || {}));
+	    }
+
+	    function profileDisabledForConversation(id = state.currentConversation?.id) {
+	      return Boolean(id && state.profileDisabledByConversation?.[id]);
+	    }
+
+	    function setProfileDisabledForCurrentConversation(disabled) {
+	      const id = state.currentConversation?.id;
+	      if (!id) {
+	        const checkbox = $("disableProfileForConversation");
+	        if (checkbox) checkbox.checked = false;
+	        setStatus("chatStatus", "先进入一个对话，再设置本次是否加载 AI档案。", "err");
+	        return;
+	      }
+	      if (disabled) state.profileDisabledByConversation[id] = true;
+	      else delete state.profileDisabledByConversation[id];
+	      saveProfileSessionPrefs();
+	      renderProfileStatus();
+	      renderProfilePopover();
+	    }
+
+	    function updateProfileEditorMeta() {
+	      const meta = $("profileEditorMeta");
+	      if (!meta) return;
+	      const stats = profileTextStats($("profileTitle").value.trim(), $("profileContent").value.trim());
+	      meta.textContent = stats.chars + " 字 · 约 " + stats.tokens + " Token";
+	    }
+
+	    function updateProfileSummary() {
+	      const totals = state.profileTotals || currentProfileTotals();
+	      const summary = $("profileSummary");
+	      const warning = $("profileWarning");
+	      if (summary) {
+	        summary.textContent = "当前 Profile：已启用 " + Number(totals.enabled_count || 0) + " 条 · 约 " + Number(totals.token_estimate || 0) + " Token";
+	      }
+	      if (warning) warning.hidden = Number(totals.token_estimate || 0) <= 1000;
+	    }
+
+	    function renderProfileStatus() {
+	      const button = $("profileStatus");
+	      if (!button) return;
+	      const label = button.querySelector("span") || button;
+	      const enabledCount = enabledProfiles().length;
+	      const disabled = profileDisabledForConversation();
+	      button.classList.toggle("disabled", disabled || !enabledCount);
+	      if (disabled) {
+	        label.textContent = "本次未加载 AI档案";
+	        button.title = "当前会话已关闭 AI档案加载";
+	      } else if (enabledCount) {
+	        label.textContent = "本次已加载 AI档案（" + enabledCount + "条）";
+	        button.title = "聊天时会自动参考已启用的 AI档案";
+	      } else {
+	        label.textContent = "AI档案未设置";
+	        button.title = "点击管理长期档案";
+	      }
+	      queueLucideRefresh();
+	    }
+
+	    function renderProfilePopover() {
+	      const list = $("profileLoadedList");
+	      if (!list) return;
+	      const profiles = enabledProfiles();
+	      const disabled = profileDisabledForConversation();
+	      const checkbox = $("disableProfileForConversation");
+	      const meta = $("profilePopoverMeta");
+	      list.innerHTML = "";
+	      if (checkbox) {
+	        checkbox.checked = disabled;
+	        checkbox.disabled = !state.currentConversation;
+	      }
+	      if (meta) {
+	        meta.textContent = profiles.length ? (profiles.length + " 条 · 约 " + currentProfileTotals().token_estimate + " Token") : "0 条";
+	      }
+	      if (!profiles.length) {
+	        list.appendChild(createEmptyState("brain", "还没有启用的 AI档案", "可以在左侧菜单的“AI档案”里添加。", { compact: true }));
+	      } else {
+	        for (const item of profiles) {
+	          const row = document.createElement("label");
+	          row.className = "profile-switch";
+	          const input = document.createElement("input");
+	          input.type = "checkbox";
+	          input.checked = !disabled;
+	          input.disabled = true;
+	          const text = document.createElement("span");
+	          text.textContent = item.title;
+	          row.title = item.content || item.title;
+	          row.append(input, text);
+	          list.appendChild(row);
+	        }
+	      }
+	      queueLucideRefresh();
+	    }
+
+	    function openProfilePopover(event) {
+	      event?.stopPropagation();
+	      const popover = $("profilePopover");
+	      if (!popover) return;
+	      renderProfilePopover();
+	      popover.classList.add("show");
+	      setDialogOpenState();
+	    }
+
+	    function closeProfilePopover() {
+	      const popover = $("profilePopover");
+	      if (!popover) return;
+	      popover.classList.remove("show");
+	      setDialogOpenState();
+	    }
+
+	    function toggleProfilePopover(event) {
+	      const popover = $("profilePopover");
+	      if (popover?.classList.contains("show")) closeProfilePopover();
+	      else openProfilePopover(event);
+	    }
+
+	    function handleProfileOutsideClick(event) {
+	      const popover = $("profilePopover");
+	      if (!popover || !popover.classList.contains("show")) return;
+	      if (popover.contains(event.target) || $("profileStatus")?.contains(event.target)) return;
+	      closeProfilePopover();
+	    }
+
+	    function applyProfilesPayload(data) {
+	      state.profiles = data.profiles || [];
+	      state.profileTotals = data.totals || currentProfileTotals();
+	      renderProfileList();
+	      updateProfileSummary();
+	      renderProfileStatus();
+	      renderProfilePopover();
+	    }
+
+	    async function loadProfiles() {
+	      try {
+	        const res = await api("/api/profiles");
+	        const data = await res.json();
+	        applyProfilesPayload(data);
+	      } catch (err) {
+	        state.profiles = [];
+	        state.profileTotals = null;
+	        renderProfileList(friendlyError(err, "AI档案暂时加载失败。"));
+	        renderProfileStatus();
+	      }
+	    }
+
+	    async function openProfiles() {
+	      $("profileDialog").classList.add("show");
+	      setDialogOpenState();
+	      resetProfileForm(false);
+	      await loadProfiles();
+	    }
+
+	    function closeProfiles() {
+	      $("profileDialog").classList.remove("show");
+	      setDialogOpenState();
+	    }
+
+	    function renderProfileList(errorText = "") {
+	      const box = $("profileList");
+	      if (!box) return;
+	      box.innerHTML = "";
+	      if (errorText) {
+	        box.appendChild(createEmptyState("alert-circle", "AI档案加载失败", errorText, { compact: true }));
+	        queueLucideRefresh();
+	        return;
+	      }
+	      if (!state.profiles.length) {
+	        box.appendChild(createEmptyState("user-round-cog", "还没有 AI档案", "先添加职业、输出风格或常用平台，让槑槑更懂你。", { compact: true }));
+	        queueLucideRefresh();
+	        return;
+	      }
+	      for (const item of state.profiles) {
+	        const card = document.createElement("article");
+	        card.className = "library-card profile-card" + (item.enabled ? "" : " disabled");
+	        card.draggable = true;
+	        card.dataset.id = item.id;
+	        card.addEventListener("dragstart", (event) => {
+	          state.profileDragId = item.id;
+	          card.classList.add("dragging");
+	          event.dataTransfer.effectAllowed = "move";
+	          event.dataTransfer.setData("text/plain", item.id);
+	        });
+	        card.addEventListener("dragend", () => {
+	          state.profileDragId = "";
+	          card.classList.remove("dragging");
+	        });
+	        card.addEventListener("dragover", (event) => {
+	          event.preventDefault();
+	          event.dataTransfer.dropEffect = "move";
+	        });
+	        card.addEventListener("drop", (event) => {
+	          event.preventDefault();
+	          moveProfileBefore(item.id);
+	        });
+
+	        const head = document.createElement("div");
+	        head.className = "profile-card-head";
+	        const titleBox = document.createElement("div");
+	        titleBox.className = "profile-card-title";
+	        const title = document.createElement("strong");
+	        title.textContent = item.title || "未命名档案";
+	        const stats = profileTextStats(item.title, item.content);
+	        const meta = document.createElement("span");
+	        meta.className = "library-card-meta";
+	        meta.textContent = item.type + " · " + stats.chars + " 字 · 约 " + stats.tokens + " Token";
+	        titleBox.append(title, meta);
+	        const toggle = document.createElement("label");
+	        toggle.className = "profile-switch";
+	        const toggleInput = document.createElement("input");
+	        toggleInput.type = "checkbox";
+	        toggleInput.checked = Boolean(item.enabled);
+	        toggleInput.addEventListener("change", () => toggleProfileEnabled(item.id, toggleInput.checked));
+	        const toggleText = document.createElement("span");
+	        toggleText.textContent = item.enabled ? "启用" : "停用";
+	        toggle.append(toggleInput, toggleText);
+	        head.append(titleBox, toggle);
+
+	        const content = document.createElement("p");
+	        content.className = "profile-card-content";
+	        content.textContent = item.content || "";
+	        const footer = document.createElement("div");
+	        footer.className = "library-actions";
+	        const edit = createIconButton("pencil", "编辑", { fallback: "✎" });
+	        edit.addEventListener("click", () => fillProfileForm(item));
+	        const del = createIconButton("trash-2", "删除", { danger: true, fallback: "删" });
+	        del.addEventListener("click", () => deleteProfile(item.id, item.title));
+	        const grip = document.createElement("span");
+	        grip.className = "library-card-meta";
+	        grip.innerHTML = iconLabel("grip-vertical", "拖拽排序");
+	        footer.append(edit, del, grip);
+	        card.append(head, content, footer);
+	        box.appendChild(card);
+	      }
+	      queueLucideRefresh();
+	    }
+
+	    function moveProfileBefore(targetId) {
+	      const dragId = state.profileDragId;
+	      if (!dragId || dragId === targetId) return;
+	      const list = state.profiles.slice();
+	      const from = list.findIndex((item) => item.id === dragId);
+	      const to = list.findIndex((item) => item.id === targetId);
+	      if (from < 0 || to < 0) return;
+	      const [dragged] = list.splice(from, 1);
+	      const nextTo = list.findIndex((item) => item.id === targetId);
+	      list.splice(nextTo, 0, dragged);
+	      state.profiles = list;
+	      state.profileTotals = currentProfileTotals();
+	      renderProfileList();
+	      updateProfileSummary();
+	      renderProfileStatus();
+	      saveProfileOrder();
+	    }
+
+	    async function saveProfileOrder() {
+	      const res = await api("/api/profiles/reorder", {
+	        method: "POST",
+	        body: JSON.stringify({ ids: state.profiles.map((item) => item.id) })
+	      });
+	      if (!res.ok) {
+	        setStatus("profileStatusText", await readError(res, "排序保存失败，稍后再试一下。"), "err");
+	        await loadProfiles();
+	        return;
+	      }
+	      const data = await res.json();
+	      applyProfilesPayload(data);
+	      setStatus("profileStatusText", "排序已保存", "ok");
+	    }
+
+	    function fillProfileForm(item) {
+	      state.editingProfileId = item.id || "";
+	      $("editingProfileId").value = item.id || "";
+	      $("profileTitle").value = item.title || "";
+	      $("profileContent").value = item.content || "";
+	      $("profileType").value = item.type || "profile";
+	      $("profileSortOrder").value = item.sort_order ?? 100;
+	      $("profileEnabled").checked = Boolean(item.enabled);
+	      updateProfileEditorMeta();
+	      setStatus("profileStatusText", "正在编辑：" + (item.title || ""), "");
+	    }
+
+	    function resetProfileForm(clearStatus = true) {
+	      state.editingProfileId = null;
+	      $("editingProfileId").value = "";
+	      $("profileTitle").value = "";
+	      $("profileContent").value = "";
+	      $("profileType").value = "profile";
+	      $("profileSortOrder").value = "100";
+	      $("profileEnabled").checked = true;
+	      updateProfileEditorMeta();
+	      if (clearStatus) setStatus("profileStatusText", "");
+	    }
+
+	    async function saveProfile() {
+	      const id = $("editingProfileId").value;
+	      const body = {
+	        title: $("profileTitle").value.trim(),
+	        content: $("profileContent").value.trim(),
+	        type: $("profileType").value || "profile",
+	        sort_order: Number($("profileSortOrder").value || 100),
+	        enabled: $("profileEnabled").checked
+	      };
+	      if (!body.title || !body.content) {
+	        setStatus("profileStatusText", "标题和内容都要填写。", "err");
+	        return;
+	      }
+	      const res = await api(id ? `/api/profiles/${id}` : "/api/profiles", {
+	        method: id ? "PUT" : "POST",
+	        body: JSON.stringify(body)
+	      });
+	      if (!res.ok) {
+	        setStatus("profileStatusText", await readError(res, "AI档案保存失败，稍后再试一下。"), "err");
+	        return;
+	      }
+	      resetProfileForm(false);
+	      await loadProfiles();
+	      setStatus("profileStatusText", "AI档案已保存", "ok");
+	    }
+
+	    async function toggleProfileEnabled(id, enabled) {
+	      const item = state.profiles.find((profile) => profile.id === id);
+	      if (!item) return;
+	      const res = await api(`/api/profiles/${id}`, {
+	        method: "PATCH",
+	        body: JSON.stringify({ ...item, enabled })
+	      });
+	      if (!res.ok) {
+	        setStatus("profileStatusText", await readError(res, "状态保存失败，稍后再试一下。"), "err");
+	        await loadProfiles();
+	        return;
+	      }
+	      await loadProfiles();
+	      setStatus("profileStatusText", enabled ? "已启用" : "已停用", "ok");
+	    }
+
+	    async function deleteProfile(id, title) {
+	      const ok = await confirmAction({
+	        title: "删除 AI档案",
+	        message: `确定删除“${title || "这条档案"}”吗？删除后后续聊天不会再参考它。`,
+	        confirmText: "删除",
+	        danger: true
+	      });
+	      if (!ok) return;
+	      const res = await api(`/api/profiles/${id}`, { method: "DELETE" });
+	      if (!res.ok) {
+	        setStatus("profileStatusText", await readError(res, "删除 AI档案失败，稍后再试一下。"), "err");
+	        return;
+	      }
+	      if ($("editingProfileId").value === id) resetProfileForm(false);
+	      await loadProfiles();
+	      setStatus("profileStatusText", "AI档案已删除", "ok");
 	    }
 
 	    async function loadFavorites() {
@@ -11912,6 +12744,8 @@ INDEX_HTML = r'''<!doctype html>
         state.messages = [];
         await loadConversations();
         updateChatHeader();
+        renderProfileStatus();
+        renderProfilePopover();
         renderMessages({ forceScroll: true });
         return state.currentConversation;
       })();
@@ -11931,6 +12765,8 @@ INDEX_HTML = r'''<!doctype html>
       state.currentConversation = conv;
       $("modelSelect").value = conv.model_id;
       updateChatHeader();
+      renderProfileStatus();
+      renderProfilePopover();
       renderConversations();
       try {
         const res = await api(`/api/conversations/${id}/messages`);
@@ -11979,6 +12815,8 @@ INDEX_HTML = r'''<!doctype html>
       $("chatTitle").textContent = conv ? conv.title : "新对话";
       $("chatModel").textContent = conv ? (conv.model_name + (conv.supports_vision ? " · 可看图" : "") + " · " + conv.model) : "请选择模型";
       updateChatUsage();
+      renderProfileStatus();
+      renderProfilePopover();
       renderModelSelect();
     }
 
@@ -11987,6 +12825,8 @@ INDEX_HTML = r'''<!doctype html>
 		      $("chatModel").textContent = state.models[0] ? "准备使用 " + state.models[0].name : "请选择模型";
 	      state.conversationStats = null;
 	      updateChatUsage();
+	      renderProfileStatus();
+	      renderProfilePopover();
 	      hideConversationMinimap();
 	      const box = $("messages");
 	      box.innerHTML = `
@@ -13750,9 +14590,10 @@ INDEX_HTML = r'''<!doctype html>
 	      setStatus("chatStatus", searchStatusText, "");
 
 	      try {
+	        const useProfile = !profileDisabledForConversation(state.currentConversation.id);
 	        const res = await api(`/api/conversations/${state.currentConversation.id}/messages`, {
 	          method: "POST",
-	          body: JSON.stringify({ content, web_search: useWebSearch, image_ids: readyAttachments.map((item) => item.id) }),
+	          body: JSON.stringify({ content, web_search: useWebSearch, use_profile: useProfile, image_ids: readyAttachments.map((item) => item.id) }),
 	          signal: state.abortController.signal
 	        });
         if (!res.ok) throw new Error(await readError(res, "发送失败，稍后再试一下。"));
@@ -14205,6 +15046,18 @@ INDEX_HTML = r'''<!doctype html>
 	    $("promptDialog").addEventListener("click", (event) => {
 	      if (event.target === $("promptDialog")) closePromptLibrary();
 	    });
+	    $("openProfiles").addEventListener("click", openProfiles);
+	    $("closeProfileDialog").addEventListener("click", closeProfiles);
+	    $("profileDialog").addEventListener("click", (event) => {
+	      if (event.target === $("profileDialog")) closeProfiles();
+	    });
+	    $("saveProfile").addEventListener("click", saveProfile);
+	    $("resetProfile").addEventListener("click", resetProfileForm);
+	    $("profileTitle").addEventListener("input", updateProfileEditorMeta);
+	    $("profileContent").addEventListener("input", updateProfileEditorMeta);
+	    $("profileStatus").addEventListener("click", toggleProfilePopover);
+	    $("disableProfileForConversation").addEventListener("change", () => setProfileDisabledForCurrentConversation($("disableProfileForConversation").checked));
+	    document.addEventListener("click", handleProfileOutsideClick);
 	    document.querySelectorAll("[data-version-trigger]").forEach((button) => {
 	      button.addEventListener("click", (event) => openChangelog(event, { full: false }));
 	    });
@@ -14281,6 +15134,8 @@ INDEX_HTML = r'''<!doctype html>
 	        closeModelPicker();
 	        closeGlobalSearch();
 	        closeChangelog();
+	        closeProfilePopover();
+	        closeProfiles();
 	        closeInterfaceSettings();
 	        closeImagePreview();
 	      }
