@@ -4296,11 +4296,26 @@ mindmap_text 要求：
             except Exception:
                 return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
             title = str(data.get("title") or row["title"]).strip()[:80] or row["title"]
+            model_id = str(data.get("model_id") or row["model_id"]).strip()
+            if model_id != row["model_id"]:
+                model = conn.execute(
+                    "SELECT id FROM models WHERE id=? AND enabled=1", (model_id,)
+                ).fetchone()
+                if not model:
+                    return self.error(HTTPStatus.BAD_REQUEST, "model not found")
             conn.execute(
-                "UPDATE conversations SET title=?, updated_at=? WHERE id=? AND user_id=?",
-                (title, now(), conversation_id, user_id),
+                "UPDATE conversations SET title=?, model_id=?, updated_at=? WHERE id=? AND user_id=?",
+                (title, model_id, now(), conversation_id, user_id),
             )
-        return self.json({"ok": True})
+            updated = conn.execute(
+                """
+                SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision
+                FROM conversations c JOIN models m ON m.id=c.model_id
+                WHERE c.id=? AND c.user_id=?
+                """,
+                (conversation_id, user_id),
+            ).fetchone()
+        return self.json({"ok": True, "conversation": conversation_row(updated)})
 
     def handle_messages(self):
         conversation_id = self.conversation_id_from_path()
@@ -8872,14 +8887,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.8.4</p>
+        <p class="app-version">v2.8.5</p>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.8.4</span>
+        <span>v2.8.5</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -8891,7 +8906,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.8.4</span></h1>
+            <h1>AI槑槑 <span class="app-version ui-badge">v2.8.5</span></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -8915,7 +8930,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.8.4</span>
+	          <span>v2.8.5</span>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -9072,10 +9087,11 @@ INDEX_HTML = r'''<!doctype html>
 	        <h2 id="confirmTitle">确认操作</h2>
 	        <p id="confirmMessage">确定要继续吗？</p>
 	      </div>
-	      <div class="confirm-actions">
-	        <button id="cancelConfirm">取消</button>
-	        <button class="primary" id="confirmOk">确定</button>
-	      </div>
+      <div class="confirm-actions">
+        <button id="cancelConfirm">取消</button>
+        <button id="secondaryConfirm" hidden>新建对话</button>
+        <button class="primary" id="confirmOk">确定</button>
+      </div>
 	    </div>
 	  </section>
 	  <section class="theme-dialog" id="accentDialog">
@@ -10316,17 +10332,91 @@ INDEX_HTML = r'''<!doctype html>
       setModelPickerSelectedIndex((state.modelPickerSelectedIndex + delta + models.length) % models.length);
     }
 
-    function chooseModel(modelId) {
+    async function updateCurrentConversationModel(modelId) {
+      if (!state.currentConversation) return false;
+      const model = state.models.find((item) => item.id === modelId);
+      if (!model) return false;
+      const res = await api(`/api/conversations/${state.currentConversation.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ model_id: modelId })
+      });
+      if (!res.ok) {
+        setStatus("chatStatus", await readError(res, "切换模型失败，稍后再试一下。"), "err");
+        return false;
+      }
+      const data = await res.json();
+      state.currentConversation = data.conversation || {
+        ...state.currentConversation,
+        model_id: model.id,
+        model_name: model.name,
+        model: model.model,
+        supports_vision: Boolean(model.supports_vision)
+      };
+      upsertConversation(state.currentConversation);
+      $("modelSelect").value = state.currentConversation.model_id;
+      updateChatHeader();
+      await loadConversationStats(state.currentConversation.id);
+      updateVisionUI();
+      return true;
+    }
+
+    function hasCurrentConversationHistory() {
+      return state.messages.some((message) => message && message.role !== "system" && (message.content || message.id || message.images?.length));
+    }
+
+    async function chooseModel(modelId) {
       const select = $("modelSelect");
       const model = state.models.find((item) => item.id === modelId);
       if (!select || !model) return;
+      closeModelPicker();
+      if (state.sending) {
+        setStatus("chatStatus", "槑槑还在回复，等这条生成完再切换模型。", "err");
+        return;
+      }
+      const previousId = select.value || state.currentConversation?.model_id || "";
+      if (previousId === modelId) {
+        syncModelPickerButton();
+        $("prompt").focus();
+        return;
+      }
+      if (state.currentConversation) {
+        if (hasCurrentConversationHistory()) {
+          const action = await confirmAction({
+            title: "切换这个对话的模型？",
+            message: "当前对话已有历史内容。可以让 " + model.name + " 读取这段上下文继续聊，也可以新建一个空对话使用它。",
+            confirmText: "当前对话继续",
+            secondaryText: "新建对话",
+            cancelText: "取消"
+          });
+          if (action === true) {
+            if (await updateCurrentConversationModel(modelId)) {
+              setStatus("chatStatus", "已切换到 " + model.name + "，会带着当前上下文继续。", "ok");
+            }
+          } else if (action === "secondary") {
+            await newConversation(modelId);
+            setStatus("chatStatus", "已新建对话，准备使用 " + model.name + "。", "ok");
+          } else {
+            select.value = previousId;
+            syncModelPickerButton();
+            renderModelPickerList();
+          }
+        } else {
+          if (await updateCurrentConversationModel(modelId)) {
+            setStatus("chatStatus", "已切换到 " + model.name + "。", "ok");
+          }
+        }
+        if (state.attachments.length && !selectedModelSupportsVision()) {
+          setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
+        }
+        $("prompt").focus();
+        return;
+      }
       select.value = modelId;
       select.dispatchEvent(new Event("change", { bubbles: true }));
-      closeModelPicker();
       if (!state.currentConversation) {
         $("chatModel").textContent = "准备使用 " + model.name;
       }
-      setStatus("chatStatus", "已选择 " + model.name + "，下次发送会使用它", "ok");
+      setStatus("chatStatus", "已选择 " + model.name + "，新对话会使用它。", "ok");
       $("prompt").focus();
     }
 
@@ -12987,10 +13077,15 @@ INDEX_HTML = r'''<!doctype html>
 	      const dialog = $("confirmDialog");
 	      const ok = $("confirmOk");
 	      const cancel = $("cancelConfirm");
+	      const secondary = $("secondaryConfirm");
 	      $("confirmTitle").textContent = options.title || "确认操作";
 	      $("confirmMessage").textContent = options.message || "确定要继续吗？";
 	      ok.textContent = options.confirmText || "确定";
+	      cancel.textContent = options.cancelText || "取消";
+	      secondary.textContent = options.secondaryText || "";
+	      secondary.hidden = !options.secondaryText;
 	      ok.classList.toggle("danger", Boolean(options.danger));
+	      secondary.classList.toggle("danger", Boolean(options.secondaryDanger));
 	      dialog.classList.add("show");
 	      setDialogOpenState();
 	      return new Promise((resolve) => {
@@ -12999,12 +13094,16 @@ INDEX_HTML = r'''<!doctype html>
 	          setDialogOpenState();
 	          ok.removeEventListener("click", onOk);
 	          cancel.removeEventListener("click", onCancel);
+	          secondary.removeEventListener("click", onSecondary);
 	          dialog.removeEventListener("click", onBackdrop);
 	          document.removeEventListener("keydown", onKey);
+	          secondary.hidden = true;
+	          secondary.classList.remove("danger");
 	          resolve(result);
 	        }
 	        function onOk() { cleanup(true); }
 	        function onCancel() { cleanup(false); }
+	        function onSecondary() { cleanup("secondary"); }
 	        function onBackdrop(event) {
 	          if (event.target === dialog) cleanup(false);
 	        }
@@ -13013,6 +13112,7 @@ INDEX_HTML = r'''<!doctype html>
 	        }
 	        ok.addEventListener("click", onOk);
 	        cancel.addEventListener("click", onCancel);
+	        secondary.addEventListener("click", onSecondary);
 	        dialog.addEventListener("click", onBackdrop);
 	        document.addEventListener("keydown", onKey);
 	        setTimeout(() => cancel.focus(), 0);
@@ -13144,13 +13244,16 @@ INDEX_HTML = r'''<!doctype html>
 	        }
 	      }
 
-	      if (!state.currentConversation || state.currentConversation.model_id !== selectedModelId) {
+	      if (!state.currentConversation) {
 	        try {
 	          await newConversation(selectedModelId);
 	        } catch (err) {
 	          setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err");
 	          return;
 	        }
+	      } else if (state.currentConversation.model_id !== selectedModelId) {
+	        const switched = await updateCurrentConversationModel(selectedModelId);
+	        if (!switched) return;
 	      }
 	      if (!state.currentConversation) return;
 	      if (readyAttachments.length && !state.currentConversation.supports_vision) {
