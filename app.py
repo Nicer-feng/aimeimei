@@ -24,6 +24,8 @@ APP_DIR = Path(__file__).resolve().parent
 RES_DIR = APP_DIR / "res"
 HOME_PAGE_PATH = APP_DIR / "index.html"
 CAT_PAGE_PATH = APP_DIR / "cat.html"
+CHANGELOG_PATH = APP_DIR / "CHANGELOG.md"
+VERSION_PATH = APP_DIR / "VERSION"
 LISTEN = os.environ.get("AI_PLATFORM_LISTEN", ":8080")
 DB_PATH = DATA_DIR / "ai-platform.db"
 SECRETS_PATH = DATA_DIR / "secrets.json"
@@ -63,6 +65,72 @@ def today_text() -> str:
 
 def current_year() -> str:
     return time.strftime("%Y", time.localtime())
+
+
+def current_app_version() -> str:
+    try:
+        value = VERSION_PATH.read_text(encoding="utf-8").strip()
+        if value:
+            return value.lstrip("v")
+    except OSError:
+        pass
+    entries = parse_changelog()
+    if entries:
+        return entries[0]["version"]
+    return ""
+
+
+def parse_changelog(limit=None):
+    try:
+        text = CHANGELOG_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    entries = []
+    current = None
+
+    def finish_entry():
+        if not current:
+            return
+        points = current["points"]
+        title = ""
+        for point in points:
+            if "版本号同步" not in point and "全站版本号" not in point:
+                title = point.rstrip("。")
+                break
+        if not title and points:
+            title = points[0].rstrip("。")
+        current["title"] = title or "更新内容"
+        entries.append(current.copy())
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        match = re.match(r"^##\s+v?([0-9][^\s]*)\s*(?:-\s*(.+?))?\s*$", line)
+        if match:
+            finish_entry()
+            date_text = (match.group(2) or "").strip()
+            current = {
+                "version": match.group(1).strip().lstrip("v"),
+                "date": date_text,
+                "title": "",
+                "points": [],
+                "commit": "",
+            }
+            continue
+        if not current:
+            continue
+        bullet = re.match(r"^[-*]\s+(.+)$", line)
+        if bullet:
+            point = bullet.group(1).strip()
+            if point:
+                current["points"].append(point)
+            continue
+        commit = re.search(r"\b([0-9a-f]{7,40})\b", line, re.I)
+        if commit and not current.get("commit"):
+            current["commit"] = commit.group(1)[:12]
+    finish_entry()
+    if limit is not None:
+        return entries[: max(0, int(limit))]
+    return entries
 
 
 def b64_token(size: int = 32) -> str:
@@ -1753,6 +1821,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_cat_admin(self.handle_cat_admin_users)
         if path == "/api/health":
             return self.json({"status": "ok", "time": iso_now()})
+        if path == "/api/changelog":
+            return self.handle_changelog()
         if path == "/api/me":
             return self.handle_me()
         if path == "/api/models":
@@ -1923,6 +1993,25 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.html(CAT_PAGE_PATH.read_text())
         except FileNotFoundError:
             return self.error(HTTPStatus.NOT_FOUND, "cat page not found")
+
+    def handle_changelog(self):
+        params = parse_qs(urlparse(self.path).query)
+        raw_limit = (params.get("limit") or [""])[0]
+        limit = None
+        if raw_limit:
+            try:
+                limit = max(1, min(50, int(raw_limit)))
+            except ValueError:
+                limit = 10
+        all_entries = parse_changelog()
+        entries = all_entries[:limit] if limit is not None else all_entries
+        return self.json(
+            {
+                "version": current_app_version(),
+                "entries": entries,
+                "has_more": limit is not None and len(all_entries) > len(entries),
+            }
+        )
 
     def handle_res_file(self, path):
         name = unquote(path.removeprefix("/res/"))
@@ -5241,6 +5330,22 @@ INDEX_HTML = r'''<!doctype html>
     }
     .login-panel h1 { margin: 0; font-size: 30px; letter-spacing: 0; }
     .login-panel p { margin: 0; color: var(--muted); font-size: 16px; }
+    .login-copy .app-version {
+      justify-self: center;
+      min-height: 24px;
+      padding: 0 10px;
+      border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface-soft) 70%, transparent);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+    .login-copy .app-version:hover,
+    .login-copy .app-version:focus-visible {
+      border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface));
+    }
     .login-panel label {
       font-weight: 680;
       color: var(--muted);
@@ -5261,6 +5366,30 @@ INDEX_HTML = r'''<!doctype html>
     }
     .site-icp a:hover {
       color: var(--accent-strong);
+    }
+    .version-trigger {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      text-decoration: none;
+      transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+    }
+    .version-trigger:hover,
+    .version-trigger:focus-visible {
+      color: var(--accent-strong);
+      outline: none;
+    }
+    .site-icp .version-trigger {
+      min-height: 0;
+      padding: 0;
+      border-radius: 999px;
+    }
+    .site-icp .version-trigger:hover,
+    .site-icp .version-trigger:focus-visible {
+      transform: translateY(-1px);
     }
     .app {
       height: var(--app-height, 100vh);
@@ -5308,6 +5437,12 @@ INDEX_HTML = r'''<!doctype html>
       font-size: 12px;
       font-weight: 700;
       line-height: 1;
+    }
+    .brand h1 .app-version:hover,
+    .brand h1 .app-version:focus-visible {
+      border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface));
+      box-shadow: 0 8px 20px rgba(217, 143, 168, .14);
     }
     .brand span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
     .side-actions {
@@ -7077,6 +7212,174 @@ INDEX_HTML = r'''<!doctype html>
       font-size: 12px;
       white-space: nowrap;
     }
+    .changelog-dialog {
+      position: fixed;
+      inset: 0;
+      z-index: 46;
+      display: none;
+      pointer-events: none;
+    }
+    .changelog-dialog.show {
+      display: block;
+    }
+    .changelog-dialog.full {
+      pointer-events: auto;
+      display: grid;
+      place-items: center;
+      padding: min(10vh, 82px) 18px 24px;
+      background: rgba(34, 28, 24, .16);
+      -webkit-backdrop-filter: blur(10px) saturate(120%);
+      backdrop-filter: blur(10px) saturate(120%);
+    }
+    .changelog-panel {
+      position: absolute;
+      width: min(430px, calc(100vw - 24px));
+      max-height: min(72vh, 640px);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      overflow: hidden;
+      pointer-events: auto;
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      background: var(--glass-bg);
+      color: var(--text);
+      box-shadow: var(--glass-shadow-strong);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      transform-origin: 50% 0;
+      animation: searchScaleIn .16s cubic-bezier(.2, .8, .2, 1) both;
+    }
+    .changelog-dialog.full .changelog-panel {
+      position: relative;
+      inset: auto !important;
+      width: min(760px, 100%);
+      max-height: min(82vh, 760px);
+      transform-origin: 50% 12%;
+    }
+    .changelog-head,
+    .changelog-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+    }
+    .changelog-foot {
+      border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      border-bottom: 0;
+      justify-content: flex-end;
+    }
+    .changelog-title {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-weight: 780;
+      color: var(--text);
+    }
+    .changelog-title .lucide {
+      color: var(--accent-strong);
+      width: 18px;
+      height: 18px;
+      stroke-width: 2.2;
+    }
+    .changelog-list {
+      overflow: auto;
+      padding: 10px;
+      display: grid;
+      gap: 10px;
+      min-height: 180px;
+    }
+    .changelog-entry {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      border-radius: 18px;
+      background: color-mix(in srgb, var(--surface) 68%, transparent);
+      box-shadow: 0 10px 26px rgba(73, 54, 35, .06);
+    }
+    .changelog-entry.is-current {
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface));
+    }
+    .changelog-entry-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .changelog-version {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      font-weight: 800;
+      color: var(--text);
+    }
+    .changelog-date {
+      flex: 0 0 auto;
+      color: var(--muted-2);
+      font-size: 12px;
+    }
+    .changelog-current {
+      border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      border-radius: 999px;
+      padding: 2px 7px;
+      background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+      color: var(--accent-strong);
+      font-size: 11px;
+      font-weight: 760;
+    }
+    .changelog-entry h3 {
+      margin: 0;
+      color: var(--text);
+      font-size: 14px;
+      letter-spacing: 0;
+      line-height: 1.35;
+    }
+    .changelog-points {
+      margin: 0;
+      padding: 0 0 0 17px;
+      color: var(--muted);
+      display: grid;
+      gap: 4px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .changelog-points li {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .changelog-dialog.full .changelog-points li {
+      display: list-item;
+      overflow: visible;
+    }
+    .changelog-commit {
+      color: var(--muted-2);
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .changelog-more {
+      min-height: 38px;
+      border-radius: 999px;
+      color: var(--accent-strong);
+      background: color-mix(in srgb, var(--surface-soft) 72%, transparent);
+    }
+    .changelog-more .lucide {
+      width: 16px;
+      height: 16px;
+    }
+    .changelog-empty {
+      min-height: 160px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+    }
     .search-hit-highlight .bubble-shell {
       animation: searchHitPulse 1.8s ease;
     }
@@ -8412,6 +8715,25 @@ INDEX_HTML = r'''<!doctype html>
         -webkit-backdrop-filter: blur(8px) saturate(115%);
         backdrop-filter: blur(8px) saturate(115%);
       }
+      .changelog-dialog.show,
+      .changelog-dialog.full {
+        display: grid;
+        place-items: end center;
+        pointer-events: auto;
+        padding: 12px 10px max(10px, env(safe-area-inset-bottom, 0px));
+        background: rgba(34, 28, 24, .18);
+        -webkit-backdrop-filter: blur(8px) saturate(115%);
+        backdrop-filter: blur(8px) saturate(115%);
+      }
+      .changelog-panel,
+      .changelog-dialog.full .changelog-panel {
+        position: relative;
+        inset: auto !important;
+        width: 100%;
+        max-height: min(82vh, 720px);
+        border-radius: 24px;
+        transform-origin: 50% 100%;
+      }
       .model-picker-popover {
         inset: auto 0 0 0 !important;
         width: 100%;
@@ -8887,14 +9209,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <p class="app-version">v2.8.5</p>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.8.6</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <span>v2.8.5</span>
+        <button class="version-trigger" type="button" data-version-trigger>v2.8.6</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -8906,7 +9228,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <span class="app-version ui-badge">v2.8.5</span></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.8.6</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -8930,7 +9252,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <span>v2.8.5</span>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.8.6</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -9079,6 +9401,18 @@ INDEX_HTML = r'''<!doctype html>
 	        <span class="global-search-key">Esc</span>
 	      </div>
 	      <div class="global-search-list" id="globalSearchResults" role="listbox"></div>
+	    </div>
+	  </section>
+	  <section class="changelog-dialog" id="changelogDialog" aria-label="更新日志">
+	    <div class="changelog-panel ui-modal" id="changelogPanel" role="dialog" aria-modal="false" aria-labelledby="changelogTitle">
+	      <div class="changelog-head">
+	        <strong class="changelog-title" id="changelogTitle"><i data-lucide="history" aria-hidden="true"></i><span id="changelogTitleText">最近更新</span></strong>
+	        <button class="icon ui-icon-btn" id="closeChangelog" type="button" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <div class="changelog-list" id="changelogList"></div>
+	      <div class="changelog-foot">
+	        <button class="changelog-more ui-btn ui-btn-secondary inline-flex items-center gap-2" id="openFullChangelog" type="button"><i data-lucide="list" aria-hidden="true"></i><span>查看更多更新</span><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+	      </div>
 	    </div>
 	  </section>
 	  <section class="confirm-dialog" id="confirmDialog">
@@ -9333,6 +9667,11 @@ INDEX_HTML = r'''<!doctype html>
 	      globalSearchError: "",
 	      globalSearchTimer: 0,
 	      globalSearchSeq: 0,
+	      changelogEntries: [],
+	      changelogVersion: "",
+	      changelogHasMore: false,
+	      changelogFull: false,
+	      changelogAnchor: null,
 	      modelPickerFilter: "",
 	      modelPickerSelectedIndex: 0,
 	      isComposing: false,
@@ -9959,7 +10298,7 @@ INDEX_HTML = r'''<!doctype html>
     }
 
     function setDialogOpenState() {
-	      const open = ["promptDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "globalSearchDialog", "modelPickerDialog", "confirmDialog"].some((id) => {
+	      const open = ["promptDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "globalSearchDialog", "modelPickerDialog", "changelogDialog", "confirmDialog"].some((id) => {
         const el = $(id);
         return el && el.classList.contains("show");
       });
@@ -11767,6 +12106,121 @@ INDEX_HTML = r'''<!doctype html>
 	        state.globalSearchTimer = 0;
 	      }
 	      setDialogOpenState();
+	    }
+
+	    function versionLabel(version) {
+	      const text = String(version || "").trim();
+	      return text ? (text.startsWith("v") ? text : "v" + text) : "v";
+	    }
+
+	    function renderChangelogLoading() {
+	      const box = $("changelogList");
+	      if (!box) return;
+	      box.replaceChildren(createEmptyState("loader-circle", "槑槑正在翻更新记录...", "稍等一下。", { compact: true }));
+	      queueLucideRefresh();
+	    }
+
+	    function renderChangelogEntries() {
+	      const box = $("changelogList");
+	      const more = $("openFullChangelog");
+	      const title = $("changelogTitleText");
+	      if (!box || !more || !title) return;
+	      const entries = state.changelogEntries || [];
+	      title.textContent = state.changelogFull ? "完整更新日志" : "最近更新";
+	      more.hidden = state.changelogFull || (!state.changelogHasMore && entries.length <= 8);
+	      box.replaceChildren();
+	      if (!entries.length) {
+	        const empty = document.createElement("div");
+	        empty.className = "changelog-empty";
+	        empty.textContent = "暂无更新日志";
+	        box.appendChild(empty);
+	        queueLucideRefresh();
+	        return;
+	      }
+	      const current = String(state.changelogVersion || "").replace(/^v/i, "");
+	      for (const entry of entries) {
+	        const article = document.createElement("article");
+	        const isCurrent = String(entry.version || "").replace(/^v/i, "") === current;
+	        article.className = "changelog-entry" + (isCurrent ? " is-current" : "");
+	        const points = Array.isArray(entry.points) ? entry.points : [];
+	        const visiblePoints = state.changelogFull ? points : points.slice(0, 4);
+	        article.innerHTML =
+	          '<div class="changelog-entry-head">' +
+	            '<span class="changelog-version"><span>' + escapeHTML(versionLabel(entry.version)) + '</span>' +
+	              (isCurrent ? '<span class="changelog-current">当前版本</span>' : '') +
+	            '</span>' +
+	            '<span class="changelog-date">' + escapeHTML(entry.date || "") + '</span>' +
+	          '</div>' +
+	          '<h3>' + escapeHTML(entry.title || "更新内容") + '</h3>' +
+	          '<ul class="changelog-points">' + (visiblePoints.length ? visiblePoints.map((point) => '<li>' + escapeHTML(point) + '</li>').join("") : '<li>暂无详细说明。</li>') + '</ul>' +
+	          (entry.commit ? '<span class="changelog-commit">' + escapeHTML(entry.commit) + '</span>' : '');
+	        box.appendChild(article);
+	      }
+	      queueLucideRefresh();
+	    }
+
+	    function positionChangelogPanel() {
+	      const dialog = $("changelogDialog");
+	      const panel = $("changelogPanel");
+	      const anchor = state.changelogAnchor;
+	      if (!dialog || !panel || !anchor || state.changelogFull || isSmallScreen()) return;
+	      const rect = anchor.getBoundingClientRect();
+	      const width = Math.min(430, window.innerWidth - 24);
+	      const height = Math.min(panel.offsetHeight || 520, window.innerHeight - 24);
+	      const left = clampNumber(rect.left, 12, Math.max(12, window.innerWidth - width - 12), 12);
+	      let top = rect.bottom + 10;
+	      if (top + height > window.innerHeight - 12) top = rect.top - height - 10;
+	      top = clampNumber(top, 12, Math.max(12, window.innerHeight - height - 12), 12);
+	      panel.style.width = width + "px";
+	      panel.style.left = left + "px";
+	      panel.style.top = top + "px";
+	      panel.style.bottom = "auto";
+	    }
+
+	    async function openChangelog(event, options = {}) {
+	      event?.preventDefault();
+	      event?.stopPropagation();
+	      const dialog = $("changelogDialog");
+	      const panel = $("changelogPanel");
+	      if (!dialog || !panel) return;
+	      state.changelogFull = Boolean(options.full);
+	      if (!state.changelogFull) state.changelogAnchor = event?.currentTarget || state.changelogAnchor;
+	      dialog.classList.add("show");
+	      dialog.classList.toggle("full", state.changelogFull);
+	      panel.setAttribute("aria-modal", state.changelogFull ? "true" : "false");
+	      renderChangelogLoading();
+	      setDialogOpenState();
+	      try {
+	        const url = "/api/changelog" + (state.changelogFull ? "" : "?limit=8");
+	        const res = await request(url);
+	        if (!res.ok) throw new Error(await readError(res, "更新日志暂时加载失败。"));
+	        const data = await res.json();
+	        state.changelogEntries = data.entries || [];
+	        state.changelogVersion = data.version || "";
+	        state.changelogHasMore = Boolean(data.has_more);
+	        renderChangelogEntries();
+	        requestAnimationFrame(positionChangelogPanel);
+	      } catch (err) {
+	        const box = $("changelogList");
+	        if (box) box.replaceChildren(createEmptyState("circle-alert", friendlyError(err, "更新日志暂时加载失败。"), "", { compact: true }));
+	        queueLucideRefresh();
+	      }
+	    }
+
+	    function closeChangelog() {
+	      const dialog = $("changelogDialog");
+	      if (!dialog) return;
+	      dialog.classList.remove("show", "full");
+	      state.changelogFull = false;
+	      setDialogOpenState();
+	    }
+
+	    function handleChangelogOutsideClick(event) {
+	      const dialog = $("changelogDialog");
+	      const panel = $("changelogPanel");
+	      if (!dialog || !panel || !dialog.classList.contains("show")) return;
+	      if (panel.contains(event.target) || event.target.closest?.("[data-version-trigger]")) return;
+	      closeChangelog();
 	    }
 
 	    function scheduleGlobalSearch() {
@@ -13748,10 +14202,16 @@ INDEX_HTML = r'''<!doctype html>
     });
     $("openPromptLibrary").addEventListener("click", openPromptLibrary);
     $("closePromptDialog").addEventListener("click", closePromptLibrary);
-    $("promptDialog").addEventListener("click", (event) => {
-      if (event.target === $("promptDialog")) closePromptLibrary();
-    });
-    $("savePromptTemplate").addEventListener("click", savePromptTemplate);
+	    $("promptDialog").addEventListener("click", (event) => {
+	      if (event.target === $("promptDialog")) closePromptLibrary();
+	    });
+	    document.querySelectorAll("[data-version-trigger]").forEach((button) => {
+	      button.addEventListener("click", (event) => openChangelog(event, { full: false }));
+	    });
+	    $("closeChangelog").addEventListener("click", closeChangelog);
+	    $("openFullChangelog").addEventListener("click", (event) => openChangelog(event, { full: true }));
+	    document.addEventListener("click", handleChangelogOutsideClick);
+	    $("savePromptTemplate").addEventListener("click", savePromptTemplate);
     $("resetPromptTemplate").addEventListener("click", resetPromptForm);
 	    $("openFavorites").addEventListener("click", openFavorites);
 	    $("closeFavoriteDialog").addEventListener("click", closeFavorites);
@@ -13820,6 +14280,7 @@ INDEX_HTML = r'''<!doctype html>
 	      if (event.key === "Escape") {
 	        closeModelPicker();
 	        closeGlobalSearch();
+	        closeChangelog();
 	        closeInterfaceSettings();
 	        closeImagePreview();
 	      }
@@ -13906,6 +14367,7 @@ INDEX_HTML = r'''<!doctype html>
 			    window.addEventListener("resize", () => applySidebarWidth(state.sidebarWidth, true), { passive: true });
 			    window.addEventListener("resize", updateChatUsage, { passive: true });
 			    window.addEventListener("resize", positionModelPickerPopover, { passive: true });
+			    window.addEventListener("resize", positionChangelogPanel, { passive: true });
 			    window.addEventListener("resize", () => queueMarkdownOverflowRefresh($("messages")), { passive: true });
 			    window.addEventListener("resize", queueConversationMinimap, { passive: true });
 		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
