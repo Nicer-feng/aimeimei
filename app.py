@@ -8496,6 +8496,38 @@ INDEX_HTML = r'''<!doctype html>
       -webkit-backdrop-filter: blur(var(--composer-field-blur)) saturate(1.25);
       backdrop-filter: blur(var(--composer-field-blur)) saturate(1.25);
     }
+    .messages,
+    .messages .bubble,
+    .messages .bubble-shell,
+    .messages .message-content,
+    .messages .markdown {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    .composer,
+    .composer *,
+    .scroll-latest,
+    .scroll-latest *,
+    .model-picker,
+    .model-picker *,
+    .search-toggle,
+    .search-toggle *,
+    .prompt-chip,
+    .composer-action,
+    .interface-popover,
+    .interface-popover *,
+    .attachment-preview-row,
+    .attachment-preview-row *,
+    .model-picker-dialog,
+    .model-picker-dialog * {
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #prompt,
+    #modelPickerSearch {
+      -webkit-user-select: text;
+      user-select: text;
+    }
 	    .model-select {
 	      min-width: 270px;
 	    }
@@ -9591,14 +9623,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.8.7</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.8.8</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.8.7</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.8.8</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -9610,7 +9642,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.8.7</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.8.8</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -9635,7 +9667,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.8.7</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.8.8</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -10091,6 +10123,8 @@ INDEX_HTML = r'''<!doctype html>
 	      minimapFadeTimer: 0,
 	      minimapCollapseTimer: 0,
 	      minimapTooltipTimer: 0,
+	      chatSelectionActive: false,
+	      chatSelectionStartedInMessages: false,
 	      globalSearchResults: [],
 	      globalSearchQuery: "",
 	      globalSearchSelected: 0,
@@ -13836,6 +13870,77 @@ INDEX_HTML = r'''<!doctype html>
 	      pulseConversationMinimap();
 	    }
 
+	    function selectionNodeInside(node, root) {
+	      if (!node || !root) return false;
+	      const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+	      return Boolean(element && root.contains(element));
+	    }
+
+	    function editableSelectionNode(node) {
+	      const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+	      return Boolean(element?.closest("textarea, input, [contenteditable='true']"));
+	    }
+
+	    function lastMessageSelectionBoundary() {
+	      const box = $("messages");
+	      if (!box) return null;
+	      const messages = box.querySelectorAll(".bubble");
+	      return messages.length ? messages[messages.length - 1] : null;
+	    }
+
+	    function clampChatSelectionToMessages() {
+	      if (!state.chatSelectionActive && !state.chatSelectionStartedInMessages) return;
+	      const selection = window.getSelection?.();
+	      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+	      const box = $("messages");
+	      const composer = document.querySelector(".composer");
+	      const latest = $("scrollLatest");
+	      const anchorInMessages = selectionNodeInside(selection.anchorNode, box);
+	      const focusInMessages = selectionNodeInside(selection.focusNode, box);
+	      if (!anchorInMessages || focusInMessages) return;
+	      const focusInBlockedArea =
+	        selectionNodeInside(selection.focusNode, composer) ||
+	        selectionNodeInside(selection.focusNode, latest) ||
+	        !focusInMessages;
+	      if (!focusInBlockedArea) return;
+	      const boundary = lastMessageSelectionBoundary();
+	      if (!boundary) return;
+	      const range = document.createRange();
+	      try {
+	        range.setStart(selection.anchorNode, selection.anchorOffset);
+	        range.setEndAfter(boundary);
+	        selection.removeAllRanges();
+	        selection.addRange(range);
+	      } catch {}
+	    }
+
+	    function beginChatTextSelection(event) {
+	      if (event.button !== undefined && event.button !== 0) return;
+	      if (editableSelectionNode(event.target)) return;
+	      if (!selectionNodeInside(event.target, $("messages"))) return;
+	      state.chatSelectionActive = true;
+	      state.chatSelectionStartedInMessages = true;
+	    }
+
+	    function endChatTextSelection() {
+	      if (!state.chatSelectionStartedInMessages) return;
+	      clampChatSelectionToMessages();
+	      setTimeout(() => {
+	        state.chatSelectionActive = false;
+	        state.chatSelectionStartedInMessages = false;
+	      }, 80);
+	    }
+
+	    function handleComposerSelectStart(event) {
+	      if (event.target === $("prompt")) return;
+	      event.preventDefault();
+	      if (state.chatSelectionStartedInMessages) clampChatSelectionToMessages();
+	    }
+
+	    function handleSelectionChange() {
+	      clampChatSelectionToMessages();
+	    }
+
 	    function handleMessagesScroll() {
 	      updateConversationMinimapViewport();
 	      pulseConversationMinimap();
@@ -15097,7 +15202,13 @@ INDEX_HTML = r'''<!doctype html>
 	    });
 	    $("insertNewline").addEventListener("click", insertNewlineAtCursor);
 	    $("deleteConversation").addEventListener("click", deleteCurrentConversation);
+	    $("messages").addEventListener("pointerdown", beginChatTextSelection);
 	    $("messages").addEventListener("scroll", handleMessagesScroll, { passive: true });
+	    document.addEventListener("pointerup", endChatTextSelection);
+	    document.addEventListener("pointercancel", endChatTextSelection);
+	    document.addEventListener("selectionchange", handleSelectionChange);
+	    document.querySelector(".composer")?.addEventListener("selectstart", handleComposerSelectStart);
+	    $("scrollLatest").addEventListener("selectstart", (event) => event.preventDefault());
 	    $("conversationMinimap").addEventListener("pointerenter", expandConversationMinimap);
 	    $("conversationMinimap").addEventListener("pointerleave", scheduleCollapseConversationMinimap);
 	    $("conversationMinimap").addEventListener("focusin", expandConversationMinimap);
@@ -15225,6 +15336,7 @@ INDEX_HTML = r'''<!doctype html>
 			    window.addEventListener("resize", positionChangelogPanel, { passive: true });
 			    window.addEventListener("resize", () => queueMarkdownOverflowRefresh($("messages")), { passive: true });
 			    window.addEventListener("resize", queueConversationMinimap, { passive: true });
+			    window.addEventListener("blur", endChatTextSelection);
 		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
 	    window.visualViewport?.addEventListener("scroll", syncViewportHeight, { passive: true });
 
