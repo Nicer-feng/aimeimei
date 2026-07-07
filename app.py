@@ -1911,6 +1911,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_admin(self.handle_admin_search)
         if path == "/api/admin/token-stats":
             return self.require_admin(self.handle_admin_token_stats)
+        if path == "/api/admin/overview":
+            return self.require_admin(self.handle_admin_overview)
         if path == "/api/admin/users":
             return self.require_admin(self.handle_admin_users)
         if path == "/api/conversations":
@@ -3434,6 +3436,51 @@ class AppHandler(BaseHTTPRequestHandler):
                 "users": users,
                 "query": query,
                 "sort": sort,
+            }
+        )
+
+    def handle_admin_overview(self):
+        search = web_search_config(self.server.secrets)
+        media_oss = media_oss_config(self.server.secrets)
+        chat_oss = chat_image_oss_config(self.server.secrets)
+        cat_oss = cat_oss_config(self.server.secrets)
+        tingwu = tingwu_config(self.server.secrets)
+        with db() as conn:
+            user_count = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+            active_user_count = conn.execute("SELECT COUNT(*) AS n FROM users WHERE is_active=1").fetchone()["n"]
+            model_count = conn.execute("SELECT COUNT(*) AS n FROM models").fetchone()["n"]
+            enabled_model_count = conn.execute("SELECT COUNT(*) AS n FROM models WHERE enabled=1").fetchone()["n"]
+            conversation_count = conn.execute("SELECT COUNT(*) AS n FROM conversations WHERE archived=0").fetchone()["n"]
+        return self.json(
+            {
+                "overview": {
+                    "users": {
+                        "total": int(user_count or 0),
+                        "active": int(active_user_count or 0),
+                    },
+                    "models": {
+                        "total": int(model_count or 0),
+                        "enabled": int(enabled_model_count or 0),
+                    },
+                    "conversations": {
+                        "total": int(conversation_count or 0),
+                    },
+                    "search": {
+                        "enabled": bool(search["enabled"]),
+                        "configured": bool(search["api_key"]),
+                        "provider": search["provider"],
+                        "mode": search["mode"],
+                    },
+                    "oss": {
+                        "cat": bool(cat_oss["configured"]),
+                        "chat_image": bool(chat_oss["configured"]),
+                        "media": bool(media_oss["configured"]),
+                        "configured": bool(cat_oss["configured"] or chat_oss["configured"] or media_oss["configured"]),
+                    },
+                    "tingwu": {
+                        "configured": bool(tingwu_configured(tingwu)),
+                    },
+                }
             }
         )
 
@@ -7335,7 +7382,338 @@ INDEX_HTML = r'''<!doctype html>
       color: var(--muted);
       font-weight: 720;
     }
+    .admin-workspace {
+      grid-template-rows: 1fr;
+      grid-template-columns: 248px minmax(0, 1fr);
+      overflow: hidden;
+    }
+    .admin-nav {
+      min-width: 0;
+      border-right: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+      background:
+        radial-gradient(circle at 18% 4%, color-mix(in srgb, var(--accent-soft) 72%, transparent), transparent 32%),
+        color-mix(in srgb, var(--surface-soft) 62%, var(--surface));
+      padding: 16px 12px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 18px;
+      overflow: auto;
+    }
+    .admin-brand {
+      display: grid;
+      gap: 4px;
+      padding: 4px 6px 2px;
+    }
+    .admin-brand strong,
+    .admin-nav-item,
+    .admin-kicker,
+    .admin-metric-title,
+    .admin-status-title,
+    .admin-key-title,
+    .admin-plugin-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .admin-brand strong {
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 780;
+    }
+    .admin-brand small {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .admin-nav-list {
+      display: grid;
+      gap: 6px;
+      align-content: start;
+    }
+    .admin-nav-item {
+      width: 100%;
+      min-height: 42px;
+      justify-content: flex-start;
+      border: 1px solid transparent;
+      border-radius: 14px;
+      background: transparent;
+      color: var(--muted);
+      padding: 0 10px;
+      font-weight: 760;
+      text-align: left;
+      box-shadow: none;
+    }
+    .admin-nav-item:hover,
+    .admin-nav-item:focus-visible {
+      color: var(--text);
+      background: color-mix(in srgb, var(--surface) 72%, transparent);
+      border-color: color-mix(in srgb, var(--line) 70%, transparent);
+    }
+    .admin-nav-item.active {
+      color: var(--accent-strong);
+      background: color-mix(in srgb, var(--accent-soft) 62%, var(--surface));
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+      box-shadow: 0 12px 26px rgba(138, 109, 90, .08);
+    }
+    .admin-nav .lucide,
+    .admin-head .lucide,
+    .admin-metric-card .lucide,
+    .admin-status-card .lucide,
+    .admin-key-card .lucide,
+    .admin-plugin-card .lucide,
+    .admin-system-list .lucide {
+      width: 17px;
+      height: 17px;
+      stroke-width: 2.2;
+      color: currentColor;
+    }
+    .admin-main {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, transparent), color-mix(in srgb, var(--surface-soft) 44%, var(--surface)));
+    }
+    .admin-head {
+      min-height: 86px;
+      padding: 18px 20px;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      background: color-mix(in srgb, var(--surface) 74%, transparent);
+      -webkit-backdrop-filter: blur(16px) saturate(145%);
+      backdrop-filter: blur(16px) saturate(145%);
+    }
+    .admin-kicker {
+      color: var(--accent-strong);
+      font-size: 12px;
+      font-weight: 780;
+      letter-spacing: .02em;
+      margin-bottom: 4px;
+    }
+    .admin-head h2 {
+      margin: 0;
+      color: var(--text);
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+    .admin-head p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 13px;
+    }
+    .admin-content {
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+      scrollbar-gutter: stable;
+    }
+    .admin-page {
+      display: none;
+      gap: 14px;
+      align-content: start;
+      animation: adminPageIn .16s ease both;
+    }
+    .admin-page.active {
+      display: grid;
+    }
+    @keyframes adminPageIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .admin-overview-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .admin-status-grid,
+    .admin-plugin-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .admin-metric-card,
+    .admin-status-card,
+    .admin-key-card,
+    .admin-plugin-card {
+      min-width: 0;
+      border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+      border-radius: 18px;
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, transparent), color-mix(in srgb, var(--surface-soft) 32%, var(--surface)));
+      padding: 14px;
+      box-shadow: var(--soft-shadow);
+      display: grid;
+      gap: 8px;
+    }
+    .admin-metric-title,
+    .admin-status-title,
+    .admin-plugin-title {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      min-width: 0;
+    }
+    .admin-metric-card strong {
+      display: block;
+      color: var(--text);
+      font-size: clamp(20px, 2.4vw, 28px);
+      letter-spacing: 0;
+      line-height: 1.1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .admin-metric-card p,
+    .admin-status-card p,
+    .admin-plugin-card p,
+    .admin-key-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .admin-status-badge {
+      width: fit-content;
+      min-height: 24px;
+      padding: 0 9px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      background: color-mix(in srgb, var(--surface-soft) 62%, var(--surface));
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 760;
+    }
+    .admin-status-badge.ok {
+      color: var(--green);
+      border-color: color-mix(in srgb, var(--green) 34%, var(--line));
+      background: color-mix(in srgb, var(--green) 10%, var(--surface));
+    }
+    .admin-status-badge.warn {
+      color: var(--yellow);
+      border-color: color-mix(in srgb, var(--yellow) 36%, var(--line));
+      background: color-mix(in srgb, var(--yellow) 10%, var(--surface));
+    }
+    .admin-key-list {
+      display: grid;
+      gap: 10px;
+    }
+    .admin-key-card {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .admin-key-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .admin-key-row label {
+      margin-bottom: 0;
+    }
+    .admin-system-list {
+      display: grid;
+      gap: 8px;
+    }
+    .admin-system-list div {
+      min-height: 42px;
+      border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--surface-soft) 42%, var(--surface));
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .admin-system-list strong {
+      color: var(--text);
+      font-weight: 780;
+    }
+    @media (min-width: 901px) {
+      .drawer-mask.show {
+        -webkit-backdrop-filter: blur(5px);
+        backdrop-filter: blur(5px);
+      }
+      .drawer.admin-workspace {
+        top: 24px;
+        right: 24px;
+        bottom: 24px;
+        width: min(1180px, calc(100vw - 48px));
+        height: calc(100vh - 48px);
+        max-height: 860px;
+        border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+        border-radius: 28px;
+        background: color-mix(in srgb, var(--surface) 78%, transparent);
+        box-shadow: 0 30px 90px rgba(64, 42, 32, .2);
+        transform: translateX(0) translateY(10px) scale(.985);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .18s ease, transform .2s ease;
+        -webkit-backdrop-filter: blur(22px) saturate(150%);
+        backdrop-filter: blur(22px) saturate(150%);
+      }
+      .drawer.admin-workspace.show {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(0) translateY(0) scale(1);
+      }
+    }
     @media (max-width: 900px) {
+      .admin-workspace {
+        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-columns: 1fr;
+      }
+      .admin-nav {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 12px;
+        gap: 10px;
+        overflow: visible;
+      }
+      .admin-brand {
+        display: none;
+      }
+      .admin-nav-list {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding-bottom: 2px;
+        -webkit-overflow-scrolling: touch;
+      }
+      .admin-nav-item {
+        width: auto;
+        min-width: max-content;
+        min-height: 38px;
+        padding: 0 12px;
+      }
+      .admin-head {
+        min-height: auto;
+        padding: 14px;
+      }
+      .admin-head h2 {
+        font-size: 20px;
+      }
+      .admin-content {
+        padding: 12px;
+      }
+      .admin-overview-grid,
+      .admin-status-grid,
+      .admin-plugin-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .admin-key-row {
+        grid-template-columns: 1fr;
+      }
       .token-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .token-filter-row { grid-template-columns: 1fr; }
     }
@@ -7374,6 +7752,11 @@ INDEX_HTML = r'''<!doctype html>
       .prompt-grid { grid-template-columns: 1fr; }
       .grid2 { grid-template-columns: 1fr; }
       .drawer { width: 100%; }
+      .admin-overview-grid,
+      .admin-status-grid,
+      .admin-plugin-grid {
+        grid-template-columns: 1fr;
+      }
       .copy-panel,
       .confirm-panel,
       .accent-panel,
@@ -9868,14 +10251,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.8.9</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.9.0</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.8.9</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.9.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -9887,7 +10270,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.8.9</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.9.0</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -9909,10 +10292,10 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openFavorites"><i data-lucide="star" aria-hidden="true"></i><span>我的收藏</span> <span class="nav-count" id="favoriteCount">0</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openProfiles"><i data-lucide="user-round-cog" aria-hidden="true"></i><span>AI档案</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openMediaAnalysis"><i data-lucide="file-video" aria-hidden="true"></i><span>音视频分析</span></button>
-		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.8.9</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.9.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -10212,138 +10595,199 @@ INDEX_HTML = r'''<!doctype html>
 	      </div>
 	    </div>
 	  </section>
-	  <section class="drawer" id="settingsDrawer">
-    <div class="drawer-head">
-	      <strong class="dialog-title"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></strong>
-      <button class="icon ui-icon-btn" id="closeSettings" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
-    </div>
-    <div class="drawer-body">
-      <section class="panel">
-		        <h2 class="panel-title"><i data-lucide="shield" aria-hidden="true"></i><span>管理员</span></h2>
-	        <label>管理密钥<input id="adminKey" type="password" autocomplete="off"></label>
-        <div class="grid2">
-          <label>新的家用登录密码<input id="familyPassword" type="password" autocomplete="new-password" placeholder="至少 8 位"></label>
-	          <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
-        </div>
-	        <div class="status" id="adminStatus"></div>
-	      </section>
+	  <section class="drawer admin-workspace" id="settingsDrawer" data-admin-section="overview">
+	    <aside class="admin-nav" aria-label="后台导航">
+	      <div class="admin-brand">
+	        <strong><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></strong>
+	        <small>AI槑槑 Admin Workspace</small>
+	      </div>
+	      <div class="admin-nav-list">
+	        <button class="admin-nav-item active" type="button" data-admin-section="overview"><i data-lucide="layout-dashboard" aria-hidden="true"></i><span>概览</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="accounts"><i data-lucide="users" aria-hidden="true"></i><span>账号管理</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="models"><i data-lucide="bot" aria-hidden="true"></i><span>模型管理</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="keys"><i data-lucide="key-round" aria-hidden="true"></i><span>密钥管理</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="search"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="plugins"><i data-lucide="puzzle" aria-hidden="true"></i><span>插件管理</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="tokens"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="system"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>系统设置</span></button>
+	      </div>
+	    </aside>
+	    <div class="admin-main">
+	      <header class="admin-head">
+	        <div>
+	          <span class="admin-kicker">Admin Workspace</span>
+	          <h2 id="adminModuleTitle">概览</h2>
+	          <p id="adminModuleDesc">查看平台状态、用量和关键配置。</p>
+	        </div>
+	        <button class="icon ui-icon-btn" id="closeSettings" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </header>
+	      <div class="admin-content">
+	        <section class="admin-page active" data-admin-page="overview">
+	          <div class="admin-overview-grid" id="adminOverviewGrid"></div>
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="activity" aria-hidden="true"></i><span>运行状态</span></h2>
+	            <div class="admin-status-grid" id="adminOverviewStatusGrid"></div>
+	            <div class="status" id="adminOverviewStatus"></div>
+	          </section>
+	        </section>
 
-	      <section class="panel" id="accountAdminPanel">
-		        <h2 class="panel-title"><i data-lucide="users" aria-hidden="true"></i><span>账号管理</span></h2>
-	        <input id="editingUserId" type="hidden">
-	        <div class="grid2">
-	          <label>账号<input id="accountUsername" autocomplete="off" placeholder="只能用字母、数字、_、-"></label>
-	          <label>显示名<input id="accountDisplayName" placeholder="家人昵称"></label>
-	        </div>
-	        <div class="grid2">
-	          <label>角色<select id="accountRole"><option value="family">家庭成员</option><option value="admin">管理员</option></select></label>
-	          <label>状态<select id="accountActive"><option value="1">启用</option><option value="0">禁用</option></select></label>
-	        </div>
-	        <label>密码<input id="accountPassword" type="password" autocomplete="new-password" placeholder="新增账号必填，编辑时留空保持原密码"></label>
-	        <div class="library-actions">
-		          <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveAccount"><i data-lucide="save" aria-hidden="true"></i><span>保存账号</span></button>
-		          <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetAccountForm"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
-	        </div>
-	        <div class="status" id="accountStatus"></div>
-	        <div id="accountList"></div>
-	      </section>
+	        <section class="admin-page" data-admin-page="accounts">
+	          <section class="panel" id="accountAdminPanel">
+		            <h2 class="panel-title"><i data-lucide="users" aria-hidden="true"></i><span>账号管理</span></h2>
+	            <input id="editingUserId" type="hidden">
+	            <div class="grid2">
+	              <label>账号<input id="accountUsername" autocomplete="off" placeholder="只能用字母、数字、_、-"></label>
+	              <label>显示名<input id="accountDisplayName" placeholder="家人昵称"></label>
+	            </div>
+	            <div class="grid2">
+	              <label>角色<select id="accountRole"><option value="family">家庭成员</option><option value="admin">管理员</option></select></label>
+	              <label>状态<select id="accountActive"><option value="1">启用</option><option value="0">禁用</option></select></label>
+	            </div>
+	            <label>密码<input id="accountPassword" type="password" autocomplete="new-password" placeholder="新增账号必填，编辑时留空保持原密码"></label>
+	            <div class="library-actions">
+		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveAccount"><i data-lucide="save" aria-hidden="true"></i><span>保存账号</span></button>
+		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetAccountForm"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
+	            </div>
+	            <div class="status" id="accountStatus"></div>
+	            <div id="accountList"></div>
+	          </section>
+	        </section>
 
-	      <section class="panel" id="tokenStatsPanel">
-		        <h2 class="panel-title"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></h2>
-	        <div class="token-summary-grid" id="tokenSummaryGrid"></div>
-	        <div class="token-filter-row">
-	          <label>搜索用户名<input id="tokenStatsQuery" autocomplete="off" placeholder="输入账号或昵称"></label>
-	          <label>排序
-	            <select id="tokenStatsSort">
-	              <option value="tokens">Token最多</option>
-	              <option value="recent">最近使用</option>
-	              <option value="created">注册时间</option>
-	            </select>
-	          </label>
-	          <div style="display:flex;align-items:end">
-		            <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshTokenStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
-	          </div>
-	        </div>
-	        <div class="status" id="tokenStatsStatus"></div>
-	        <div id="tokenStatsList"></div>
-	      </section>
+	        <section class="admin-page" data-admin-page="models">
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="bot" aria-hidden="true"></i><span>新增/编辑模型</span></h2>
+	            <input id="editingModelId" type="hidden">
+	            <input id="apiKey" type="password" autocomplete="off" hidden>
+	            <div class="grid2">
+	              <label>显示名称<input id="modelName" placeholder="DeepSeek Chat"></label>
+	              <label>供应商<input id="provider" placeholder="DeepSeek"></label>
+	            </div>
+	            <label>API Base URL<input id="baseUrl" placeholder="https://api.deepseek.com/v1"></label>
+	            <label>Model<input id="modelCode" placeholder="deepseek-chat"></label>
+	            <label>System Prompt<textarea id="systemPrompt" rows="4"></textarea></label>
+	            <div class="grid2">
+	              <label>启用<select id="enabled"><option value="1">启用</option><option value="0">停用</option></select></label>
+	              <label>图片理解<select id="supportsVision"><option value="0">不支持</option><option value="1">支持图片理解</option></select></label>
+	            </div>
+	            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+		            <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveModel"><i data-lucide="save" aria-hidden="true"></i><span>保存模型</span></button>
+		            <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetModelForm"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
+	            </div>
+	            <div class="status" id="modelStatus"></div>
+	          </section>
+	          <section class="panel">
+		          <h2 class="panel-title"><i data-lucide="list" aria-hidden="true"></i><span>已配置模型</span></h2>
+	            <div id="adminModelList"></div>
+	          </section>
+	        </section>
 
-	      <section class="panel">
-		        <h2 class="panel-title"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></h2>
-	        <div class="grid2">
-	          <label>搜索服务
-	            <select id="searchProvider">
-	              <option value="tavily">Tavily</option>
-	              <option value="brave">Brave Search</option>
-	            </select>
-	          </label>
-	          <label>启用搜索
-	            <select id="searchEnabled">
-	              <option value="0">关闭</option>
-	              <option value="1">开启</option>
-	            </select>
-	          </label>
-	        </div>
-	        <div class="grid2">
-	          <label>搜索策略
-	            <select id="searchMode">
-	              <option value="auto">自动联网</option>
-	              <option value="manual">手动开关</option>
-	              <option value="always">强制联网</option>
-	            </select>
-	          </label>
-	          <label>搜索深度
-	            <select id="searchDepth">
-	              <option value="advanced">更准</option>
-	              <option value="basic">更快</option>
-	            </select>
-	          </label>
-	        </div>
-	        <div class="grid2">
-	          <label>结果数量
-	            <input id="searchResultCount" type="number" min="1" max="8" value="5">
-	          </label>
-	          <label>搜索 API Key
-	            <input id="searchApiKey" type="password" autocomplete="off" placeholder="留空则保持原值">
-	          </label>
-	        </div>
-	        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-		          <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveSearch"><i data-lucide="save" aria-hidden="true"></i><span>保存搜索配置</span></button>
-		          <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="clearSearchKey"><i data-lucide="key-round" aria-hidden="true"></i><span>清空搜索 Key</span></button>
-	        </div>
-	        <div class="status" id="searchStatus"></div>
-	      </section>
+	        <section class="admin-page" data-admin-page="keys">
+	          <section class="panel">
+		            <h2 class="panel-title"><i data-lucide="shield" aria-hidden="true"></i><span>管理密钥</span></h2>
+	            <label>管理密钥<input id="adminKey" type="password" autocomplete="off"></label>
+	            <p class="library-card-meta">管理员账号登录时可不填；使用管理密钥时，所有后台接口都会通过它鉴权。</p>
+	            <div class="status" id="adminStatus"></div>
+	          </section>
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="key-round" aria-hidden="true"></i><span>模型 API Key</span></h2>
+	            <div id="modelKeyList"></div>
+	          </section>
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="search" aria-hidden="true"></i><span>搜索 API Key</span></h2>
+	            <label>搜索 API Key<input id="searchApiKey" type="password" autocomplete="off" placeholder="留空则保持原值"></label>
+	            <div class="library-actions">
+		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveSearchKey" type="button"><i data-lucide="save" aria-hidden="true"></i><span>保存搜索 Key</span></button>
+		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="clearSearchKey" type="button"><i data-lucide="key-round" aria-hidden="true"></i><span>清空搜索 Key</span></button>
+	            </div>
+	          </section>
+	        </section>
 
-	      <section class="panel">
-	        <h2 class="panel-title"><i data-lucide="bot" aria-hidden="true"></i><span>新增/编辑模型</span></h2>
-        <input id="editingModelId" type="hidden">
-        <div class="grid2">
-          <label>显示名称<input id="modelName" placeholder="DeepSeek Chat"></label>
-          <label>供应商<input id="provider" placeholder="DeepSeek"></label>
-        </div>
-        <label>API Base URL<input id="baseUrl" placeholder="https://api.deepseek.com/v1"></label>
-        <div class="grid2">
-          <label>Model<input id="modelCode" placeholder="deepseek-chat"></label>
-          <label>API Key<input id="apiKey" type="password" autocomplete="off" placeholder="留空则保持原值"></label>
-        </div>
-        <label>System Prompt<textarea id="systemPrompt" rows="4"></textarea></label>
-        <div class="grid2">
-          <label>启用<select id="enabled"><option value="1">启用</option><option value="0">停用</option></select></label>
-          <label>图片理解<select id="supportsVision"><option value="0">不支持</option><option value="1">支持图片理解</option></select></label>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-	          <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveModel"><i data-lucide="save" aria-hidden="true"></i><span>保存模型</span></button>
-	          <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetModelForm"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
-        </div>
-        <div class="status" id="modelStatus"></div>
-      </section>
+	        <section class="admin-page" data-admin-page="search">
+	          <section class="panel">
+		            <h2 class="panel-title"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></h2>
+	            <div class="grid2">
+	              <label>搜索服务
+	                <select id="searchProvider">
+	                  <option value="tavily">Tavily</option>
+	                  <option value="brave">Brave Search</option>
+	                </select>
+	              </label>
+	              <label>启用搜索
+	                <select id="searchEnabled">
+	                  <option value="0">关闭</option>
+	                  <option value="1">开启</option>
+	                </select>
+	              </label>
+	            </div>
+	            <div class="grid2">
+	              <label>搜索策略
+	                <select id="searchMode">
+	                  <option value="auto">自动联网</option>
+	                  <option value="manual">手动开关</option>
+	                  <option value="always">强制联网</option>
+	                </select>
+	              </label>
+	              <label>搜索深度
+	                <select id="searchDepth">
+	                  <option value="advanced">更准</option>
+	                  <option value="basic">更快</option>
+	                </select>
+	              </label>
+	            </div>
+	            <label>结果数量<input id="searchResultCount" type="number" min="1" max="8" value="5"></label>
+	            <div class="library-actions">
+		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveSearch"><i data-lucide="save" aria-hidden="true"></i><span>保存搜索配置</span></button>
+	            </div>
+	            <div class="status" id="searchStatus"></div>
+	          </section>
+	        </section>
 
-      <section class="panel">
-	        <h2 class="panel-title"><i data-lucide="list" aria-hidden="true"></i><span>已配置模型</span></h2>
-        <div id="adminModelList"></div>
-      </section>
-    </div>
-  </section>
+	        <section class="admin-page" data-admin-page="plugins">
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="puzzle" aria-hidden="true"></i><span>插件管理</span></h2>
+	            <div class="admin-plugin-grid" id="pluginStatusList"></div>
+	          </section>
+	        </section>
+
+	        <section class="admin-page" data-admin-page="tokens">
+	          <section class="panel" id="tokenStatsPanel">
+		            <h2 class="panel-title"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></h2>
+	            <div class="token-summary-grid" id="tokenSummaryGrid"></div>
+	            <div class="token-filter-row">
+	              <label>搜索用户名<input id="tokenStatsQuery" autocomplete="off" placeholder="输入账号或昵称"></label>
+	              <label>排序
+	                <select id="tokenStatsSort">
+	                  <option value="tokens">Token最多</option>
+	                  <option value="recent">最近使用</option>
+	                  <option value="created">注册时间</option>
+	                </select>
+	              </label>
+	              <div style="display:flex;align-items:end">
+		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshTokenStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	              </div>
+	            </div>
+	            <div class="status" id="tokenStatsStatus"></div>
+	            <div id="tokenStatsList"></div>
+	          </section>
+	        </section>
+
+	        <section class="admin-page" data-admin-page="system">
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>登录与系统</span></h2>
+	            <div class="grid2">
+	              <label>新的家用登录密码<input id="familyPassword" type="password" autocomplete="new-password" placeholder="至少 8 位"></label>
+	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
+	            </div>
+	            <div class="admin-system-list">
+	              <div><span>当前版本</span><strong>v2.9.0</strong></div>
+	              <div><span>数据存储</span><strong>SQLite</strong></div>
+	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
+	            </div>
+	          </section>
+	        </section>
+	      </div>
+	    </div>
+	  </section>
 
   <script>
     const $ = (id) => document.getElementById(id);
@@ -10397,6 +10841,11 @@ INDEX_HTML = r'''<!doctype html>
 	      globalSearchError: "",
 	      globalSearchTimer: 0,
 	      globalSearchSeq: 0,
+	      adminSection: "overview",
+	      adminOverview: null,
+	      adminModels: [],
+	      adminUsers: [],
+	      adminSearch: null,
 	      tokenStats: null,
 	      tokenStatsExpandedUserId: "",
 	      tokenStatsTimer: 0,
@@ -15091,42 +15540,193 @@ INDEX_HTML = r'''<!doctype html>
 	      if (!state.currentConversation) renderEmpty();
 	    }
 
-		    function openSettings() {
+	    const adminSections = {
+	      overview: { title: "概览", desc: "查看平台状态、用量和关键配置。" },
+	      accounts: { title: "账号管理", desc: "创建、编辑和禁用家庭账号。" },
+	      models: { title: "模型管理", desc: "维护模型名称、供应商、Endpoint、System Prompt 和能力标签。" },
+	      keys: { title: "密钥管理", desc: "集中维护管理密钥、模型 API Key 和搜索 API Key。" },
+	      search: { title: "联网搜索", desc: "配置 Tavily/Brave、搜索策略、搜索深度和结果数量。" },
+	      plugins: { title: "插件管理", desc: "查看图片、听悟、搜索、提示词等功能状态，后续可扩展独立开关。" },
+	      tokens: { title: "Token统计", desc: "按账号查看累计 Token 用量和最近请求记录。" },
+	      system: { title: "系统设置", desc: "修改登录密码并查看系统基础信息。" }
+	    };
+
+	    function switchAdminSection(section) {
+	      const key = adminSections[section] ? section : "overview";
+	      state.adminSection = key;
+	      $("settingsDrawer").dataset.adminSection = key;
+	      document.querySelectorAll(".admin-nav-item[data-admin-section]").forEach((button) => {
+	        button.classList.toggle("active", button.dataset.adminSection === key);
+	      });
+	      document.querySelectorAll(".admin-page[data-admin-page]").forEach((page) => {
+	        page.classList.toggle("active", page.dataset.adminPage === key);
+	      });
+	      $("adminModuleTitle").textContent = adminSections[key].title;
+	      $("adminModuleDesc").textContent = adminSections[key].desc;
+	      if (key === "overview") loadAdminOverview();
+	      if (key === "accounts") loadAdminUsers();
+	      if (key === "models") loadAdminModels();
+	      if (key === "keys") loadAdminModels();
+	      if (key === "search") loadAdminSearch();
+	      if (key === "plugins") {
+	        if (!state.adminOverview) loadAdminOverview();
+	        renderPluginStatus();
+	      }
+	      if (key === "tokens") loadTokenStats();
+	      queueLucideRefresh();
+	    }
+
+	    function openSettings() {
 	      $("sidebar").classList.remove("show");
 	      document.body.classList.remove("sidebar-open");
 	      $("drawerMask").classList.add("show");
 	      $("settingsDrawer").classList.add("show");
+	      switchAdminSection(state.adminSection || "overview");
+	      loadAdminOverview();
 	      loadAdminModels();
 	      loadAdminSearch();
 	      loadAdminUsers();
 	      loadTokenStats();
 	    }
 
-    function closeSettings() {
-      $("drawerMask").classList.remove("show");
-      $("settingsDrawer").classList.remove("show");
-    }
-
-		    async function loadAdminModels() {
-		      if (!hasAdminAccess()) {
-		        setStatus("adminStatus", "管理员账号或管理密钥可加载模型", "");
-		        $("adminModelList").innerHTML = "";
-		        return;
-	      }
-      const res = await adminApi("/api/admin/models");
-      if (!res.ok) {
-        setStatus("adminStatus", "管理密钥无效", "err");
-        return;
-      }
-      setStatus("adminStatus", "管理密钥有效", "ok");
-	      const data = await res.json();
-	      renderAdminModels(data.models || []);
+	    function closeSettings() {
+	      $("drawerMask").classList.remove("show");
+	      $("settingsDrawer").classList.remove("show");
 	    }
 
-		    async function loadAdminSearch() {
-		      if (!hasAdminAccess()) {
-		        setStatus("searchStatus", "管理员账号或管理密钥可加载搜索配置", "");
-		        return;
+	    async function loadAdminOverview() {
+	      if (!hasAdminAccess()) {
+	        state.adminOverview = null;
+	        renderAdminOverview();
+	        renderPluginStatus();
+	        setStatus("adminOverviewStatus", "管理员账号或管理密钥可查看后台概览。", "");
+	        return;
+	      }
+	      setStatus("adminOverviewStatus", "正在加载概览...", "");
+	      const res = await adminApi("/api/admin/overview");
+	      if (!res.ok) {
+	        state.adminOverview = null;
+	        renderAdminOverview();
+	        renderPluginStatus();
+	        setStatus("adminOverviewStatus", await readError(res, "概览加载失败，稍后再试一下。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      state.adminOverview = data.overview || {};
+	      renderAdminOverview();
+	      renderPluginStatus();
+	      setStatus("adminOverviewStatus", "");
+	    }
+
+	    function renderAdminOverview() {
+	      const overview = state.adminOverview || {};
+	      const summary = state.tokenStats?.summary || {};
+	      const models = overview.models || {};
+	      const users = overview.users || {};
+	      const conversations = overview.conversations || {};
+	      const search = overview.search || {};
+	      const oss = overview.oss || {};
+	      const tingwu = overview.tingwu || {};
+	      const metricCards = [
+	        ["users", "用户数", users.total || summary.total_users || 0, "启用 " + tokenNumber(users.active || 0) + " 个账号"],
+	        ["message-square", "总请求数", summary.total_requests || 0, "来自聊天请求日志"],
+	        ["coins", "总 Token", summary.total_tokens || 0, "输入 " + tokenNumber(summary.prompt_tokens || 0) + " · 输出 " + tokenNumber(summary.completion_tokens || 0)],
+	        ["bot", "可用模型", models.enabled || state.adminModels.filter((item) => item.enabled).length || 0, "共配置 " + tokenNumber(models.total || state.adminModels.length || 0) + " 个模型"],
+	        ["messages-square", "会话数", conversations.total || 0, "未归档会话"],
+	        ["search", "联网搜索", search.enabled ? "已开启" : "未开启", search.configured ? ((search.provider || "search") + " · " + (search.mode || "auto")) : "尚未配置 Key"],
+	        ["hard-drive-upload", "OSS", oss.configured ? "已配置" : "未配置", ["猫相册", "聊天图片", "音视频"].filter((_, i) => [oss.cat, oss.chat_image, oss.media][i]).join(" · ") || "上传能力待配置"],
+	        ["file-video", "听悟", tingwu.configured ? "已配置" : "未配置", "音视频分析状态"]
+	      ];
+	      const grid = $("adminOverviewGrid");
+	      if (grid) {
+	        grid.innerHTML = metricCards.map(([icon, title, value, desc]) => (
+	          '<article class="admin-metric-card">' +
+	            '<span class="admin-metric-title">' + iconMarkup(icon) + '<span>' + escapeHTML(title) + '</span></span>' +
+	            '<strong>' + escapeHTML(String(typeof value === "number" ? tokenNumber(value) : value)) + '</strong>' +
+	            '<p>' + escapeHTML(desc || "") + '</p>' +
+	          '</article>'
+	        )).join("");
+	      }
+	      const statusGrid = $("adminOverviewStatusGrid");
+	      if (statusGrid) {
+	        const statuses = [
+	          ["search", "联网搜索", search.enabled && search.configured, search.enabled ? "自动/手动搜索策略可用" : "当前未启用"],
+	          ["image", "图片理解上传", Boolean(oss.chat_image), oss.chat_image ? "OSS 已配置，可上传图片" : "聊天图片 OSS 待配置"],
+	          ["file-video", "音视频分析", Boolean(oss.media && tingwu.configured), oss.media && tingwu.configured ? "听悟与媒体 OSS 已就绪" : "需要听悟 AppKey 与媒体 OSS"],
+	          ["book-open", "提示词库", true, "默认模板与自定义模板可用"],
+	          ["user-round-cog", "AI档案", true, "按账号隔离的长期档案可用"],
+	          ["shield-check", "后台权限", hasAdminAccess(), hasAdminAccess() ? "当前账号可管理后台" : "需要管理员身份"]
+	        ];
+	        statusGrid.innerHTML = statuses.map(([icon, title, ok, desc]) => (
+	          '<article class="admin-status-card">' +
+	            '<span class="admin-status-title">' + iconMarkup(icon) + '<span>' + escapeHTML(title) + '</span></span>' +
+	            '<span class="admin-status-badge ' + (ok ? "ok" : "warn") + '">' + escapeHTML(ok ? "正常" : "待配置") + '</span>' +
+	            '<p>' + escapeHTML(desc) + '</p>' +
+	          '</article>'
+	        )).join("");
+	      }
+	      queueLucideRefresh();
+	    }
+
+	    function renderPluginStatus() {
+	      const overview = state.adminOverview || {};
+	      const search = overview.search || state.adminSearch || {};
+	      const oss = overview.oss || {};
+	      const tingwu = overview.tingwu || {};
+	      const visionCount = state.adminModels.filter((item) => item.enabled && item.supports_vision).length;
+	      const plugins = [
+	        ["search", "联网搜索", Boolean(search.enabled && (search.configured || search.has_api_key)), search.enabled ? "已启用搜索策略" : "未启用"],
+	        ["image", "图片理解", visionCount > 0, visionCount ? tokenNumber(visionCount) + " 个模型支持图片理解" : "没有开启图片理解的模型"],
+	        ["upload-cloud", "图片上传", Boolean(oss.chat_image), oss.chat_image ? "聊天图片 OSS 已配置" : "待配置聊天图片 OSS"],
+	        ["file-video", "音视频分析", Boolean(oss.media && tingwu.configured), oss.media && tingwu.configured ? "通义听悟可用" : "待配置听悟或媒体 OSS"],
+	        ["book-open", "提示词库", true, "常用提示词模板已启用"],
+	        ["star", "收藏回答", true, "按账号隔离保存收藏"],
+	        ["user-round-cog", "AI档案", true, "长期档案已启用"],
+	        ["map", "Conversation Minimap", true, "桌面端对话缩略导航"]
+	      ];
+	      const box = $("pluginStatusList");
+	      if (!box) return;
+	      box.innerHTML = plugins.map(([icon, title, ok, desc]) => (
+	        '<article class="admin-plugin-card">' +
+	          '<span class="admin-plugin-title">' + iconMarkup(icon) + '<span>' + escapeHTML(title) + '</span></span>' +
+	          '<span class="admin-status-badge ' + (ok ? "ok" : "warn") + '">' + escapeHTML(ok ? "已启用" : "待配置") + '</span>' +
+	          '<p>' + escapeHTML(desc) + '</p>' +
+	        '</article>'
+	      )).join("");
+	      queueLucideRefresh();
+	    }
+
+	    async function loadAdminModels() {
+	      if (!hasAdminAccess()) {
+	        state.adminModels = [];
+	        setStatus("adminStatus", "管理员账号或管理密钥可加载模型", "");
+	        if ($("adminModelList")) $("adminModelList").innerHTML = "";
+	        renderModelKeys([]);
+	        renderAdminOverview();
+	        renderPluginStatus();
+	        return;
+	      }
+	      const res = await adminApi("/api/admin/models");
+	      if (!res.ok) {
+	        setStatus("adminStatus", "管理密钥无效", "err");
+	        return;
+	      }
+	      setStatus("adminStatus", "管理密钥有效", "ok");
+	      const data = await res.json();
+	      state.adminModels = data.models || [];
+	      renderAdminModels(state.adminModels);
+	      renderModelKeys(state.adminModels);
+	      renderAdminOverview();
+	      renderPluginStatus();
+	    }
+
+	    async function loadAdminSearch() {
+	      if (!hasAdminAccess()) {
+	        state.adminSearch = null;
+	        setStatus("searchStatus", "管理员账号或管理密钥可加载搜索配置", "");
+	        renderAdminOverview();
+	        renderPluginStatus();
+	        return;
 	      }
 	      const res = await adminApi("/api/admin/search");
 	      if (!res.ok) {
@@ -15135,6 +15735,7 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	      const data = await res.json();
 	      const search = data.search || {};
+	      state.adminSearch = search;
 	      $("searchProvider").value = search.provider || "tavily";
 	      $("searchEnabled").value = search.enabled ? "1" : "0";
 	      $("searchMode").value = search.mode || "auto";
@@ -15143,6 +15744,8 @@ INDEX_HTML = r'''<!doctype html>
 	      $("searchApiKey").value = "";
 	      $("searchApiKey").placeholder = search.has_api_key ? "已保存，留空保持原值" : "请输入搜索 API Key";
 	      setStatus("searchStatus", search.has_api_key ? "搜索 Key 已保存；日期会自动按当天注入" : "尚未配置搜索 Key", search.has_api_key ? "ok" : "");
+	      renderAdminOverview();
+	      renderPluginStatus();
 	    }
 
 	    async function saveSearchConfig(clearKey = false) {
@@ -15167,6 +15770,11 @@ INDEX_HTML = r'''<!doctype html>
 	      setStatus("searchStatus", clearKey ? "搜索 Key 已清空" : "搜索配置已保存", "ok");
 	      await loadAdminSearch();
 	      await loadSearchConfig();
+	      await loadAdminOverview();
+	    }
+
+	    async function saveSearchKey() {
+	      await saveSearchConfig(false);
 	    }
 
 	    function tokenNumber(value) {
@@ -15196,8 +15804,10 @@ INDEX_HTML = r'''<!doctype html>
 	    async function loadTokenStats() {
 	      const list = $("tokenStatsList");
 	      if (!hasAdminAccess()) {
+	        state.tokenStats = null;
 	        if (list) list.innerHTML = '<div class="status">管理员账号或管理密钥可查看 Token 统计。</div>';
 	        renderTokenSummary({});
+	        renderAdminOverview();
 	        setStatus("tokenStatsStatus", "");
 	        return;
 	      }
@@ -15207,7 +15817,9 @@ INDEX_HTML = r'''<!doctype html>
 	      const res = await adminApi(`/api/admin/token-stats?q=${query}&sort=${sort}`);
 	      if (!res.ok) {
 	        if (list) list.innerHTML = "";
+	        state.tokenStats = null;
 	        renderTokenSummary({});
+	        renderAdminOverview();
 	        setStatus("tokenStatsStatus", await readError(res, "Token 统计加载失败，稍后再试一下。"), "err");
 	        return;
 	      }
@@ -15215,6 +15827,7 @@ INDEX_HTML = r'''<!doctype html>
 	      state.tokenStats = data;
 	      renderTokenSummary(data.summary || {});
 	      renderTokenStatsList(data.users || []);
+	      renderAdminOverview();
 	      setStatus("tokenStatsStatus", data.users?.length ? "" : "没有匹配的账号。", data.users?.length ? "" : "err");
 	    }
 
@@ -15317,6 +15930,84 @@ INDEX_HTML = r'''<!doctype html>
       }
     }
 
+	    function renderModelKeys(models) {
+	      const box = $("modelKeyList");
+	      if (!box) return;
+	      box.innerHTML = "";
+	      if (!hasAdminAccess()) {
+	        box.appendChild(createEmptyState("key-round", "需要管理员权限", "管理员账号或管理密钥可维护模型 API Key。", { compact: true }));
+	        queueLucideRefresh();
+	        return;
+	      }
+	      if (!models.length) {
+	        box.appendChild(createEmptyState("key-round", "暂无模型 Key", "先在模型管理里添加模型，再回到这里配置 Key。", { compact: true }));
+	        queueLucideRefresh();
+	        return;
+	      }
+	      const list = document.createElement("div");
+	      list.className = "admin-key-list";
+	      for (const model of models) {
+	        const card = document.createElement("article");
+	        card.className = "admin-key-card";
+	        const title = document.createElement("div");
+	        title.className = "admin-key-title";
+	        title.innerHTML = iconMarkup("bot") + '<strong></strong>';
+	        title.querySelector("strong").textContent = model.name + (model.has_api_key ? " · Key 已保存" : " · 未配置 Key");
+	        const desc = document.createElement("p");
+	        desc.textContent = [model.provider, model.model, model.base_url].filter(Boolean).join(" · ");
+	        const row = document.createElement("div");
+	        row.className = "admin-key-row";
+	        const label = document.createElement("label");
+	        label.textContent = "API Key";
+	        const input = document.createElement("input");
+	        input.type = "password";
+	        input.autocomplete = "off";
+	        input.placeholder = model.has_api_key ? "已保存，留空保持原值" : "请输入 API Key";
+	        label.appendChild(input);
+	        const save = createIconButton("save", "保存", { primary: true });
+	        save.addEventListener("click", () => saveModelKey(model.id, input, false));
+	        const clear = createIconButton("eraser", "清空");
+	        clear.addEventListener("click", () => saveModelKey(model.id, input, true));
+	        row.append(label, save, clear);
+	        card.append(title, desc, row);
+	        list.appendChild(card);
+	      }
+	      box.appendChild(list);
+	      queueLucideRefresh();
+	    }
+
+	    async function saveModelKey(modelId, input, clearKey = false) {
+	      const model = state.adminModels.find((item) => item.id === modelId);
+	      if (!model) return;
+	      if (!clearKey && !input.value.trim()) {
+	        setStatus("adminStatus", "请输入要保存的模型 API Key。", "err");
+	        return;
+	      }
+	      const body = {
+	        name: model.name || "",
+	        provider: model.provider || "",
+	        base_url: model.base_url || "",
+	        model: model.model || "",
+	        api_key: clearKey ? "" : input.value.trim(),
+	        clear_api_key: clearKey,
+	        system_prompt: model.system_prompt || "",
+	        enabled: Boolean(model.enabled),
+	        supports_vision: Boolean(model.supports_vision)
+	      };
+	      const res = await adminApi(`/api/admin/models/${modelId}`, {
+	        method: "PUT",
+	        body: JSON.stringify(body)
+	      });
+	      if (!res.ok) {
+	        setStatus("adminStatus", await readError(res, "模型 Key 保存失败，稍后再试一下。"), "err");
+	        return;
+	      }
+	      input.value = "";
+	      setStatus("adminStatus", clearKey ? "模型 Key 已清空" : "模型 Key 已保存", "ok");
+	      await loadAdminModels();
+	      await loadModels();
+	    }
+
     function fillModelForm(model) {
       $("editingModelId").value = model.id;
       $("modelName").value = model.name || "";
@@ -15399,18 +16090,24 @@ INDEX_HTML = r'''<!doctype html>
 	    async function loadAdminUsers() {
 	      const box = $("accountList");
 	      if (!hasAdminAccess()) {
+	        state.adminUsers = [];
 	        box.innerHTML = '<div class="status">管理员账号或管理密钥可管理家庭账号。</div>';
 	        setStatus("accountStatus", "");
+	        renderAdminOverview();
 	        return;
 	      }
 	      const res = await adminApi("/api/admin/users");
 	      if (!res.ok) {
+	        state.adminUsers = [];
 	        box.innerHTML = "";
 	        setStatus("accountStatus", await readError(res, "账号列表加载失败。"), "err");
+	        renderAdminOverview();
 	        return;
 	      }
 	      const data = await res.json();
-	      renderAdminUsers(data.users || []);
+	      state.adminUsers = data.users || [];
+	      renderAdminUsers(state.adminUsers);
+	      renderAdminOverview();
 	      setStatus("accountStatus", "");
 	    }
 
@@ -15639,6 +16336,7 @@ INDEX_HTML = r'''<!doctype html>
 	        closeProfiles();
 	        closeInterfaceSettings();
 	        closeImagePreview();
+	        closeSettings();
 	      }
 	    });
 	    $("prompt").addEventListener("compositionstart", () => {
@@ -15680,12 +16378,16 @@ INDEX_HTML = r'''<!doctype html>
     $("openSettings").addEventListener("click", openSettings);
     $("closeSettings").addEventListener("click", closeSettings);
     $("drawerMask").addEventListener("click", () => { closeSettings(); closeSidebar(); });
+	    document.querySelectorAll(".admin-nav-item[data-admin-section]").forEach((button) => {
+	      button.addEventListener("click", () => switchAdminSection(button.dataset.adminSection));
+	    });
 	    $("saveModel").addEventListener("click", saveModel);
 	    $("resetModelForm").addEventListener("click", resetModelForm);
 		    $("changePassword").addEventListener("click", changePassword);
 		    $("saveAccount").addEventListener("click", saveAccount);
 		    $("resetAccountForm").addEventListener("click", resetAccountForm);
 		    $("adminKey").addEventListener("change", () => {
+		      loadAdminOverview();
 		      loadAdminModels();
 		      loadAdminSearch();
 		      loadAdminUsers();
@@ -15702,6 +16404,7 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	    });
 	    $("saveSearch").addEventListener("click", () => saveSearchConfig(false));
+	    $("saveSearchKey").addEventListener("click", saveSearchKey);
 	    $("clearSearchKey").addEventListener("click", () => saveSearchConfig(true));
 		    $("closeCopyDialog").addEventListener("click", closeManualCopy);
 		    $("copyDialog").addEventListener("click", (event) => {
