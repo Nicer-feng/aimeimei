@@ -63,6 +63,24 @@ def today_text() -> str:
     return time.strftime("%Y-%m-%d", time.localtime())
 
 
+def local_day_start(ts=None) -> int:
+    t = time.localtime(now() if ts is None else int(ts))
+    return int(time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, t.tm_wday, t.tm_yday, t.tm_isdst)))
+
+
+def local_month_start(ts=None) -> int:
+    t = time.localtime(now() if ts is None else int(ts))
+    return int(time.mktime((t.tm_year, t.tm_mon, 1, 0, 0, 0, t.tm_wday, t.tm_yday, t.tm_isdst)))
+
+
+def date_text_from_ts(ts) -> str:
+    try:
+        value = int(ts or now())
+    except (TypeError, ValueError):
+        value = now()
+    return time.strftime("%Y-%m-%d", time.localtime(value))
+
+
 def current_year() -> str:
     return time.strftime("%Y", time.localtime())
 
@@ -288,6 +306,10 @@ def init_db(secrets_data=None):
               system_prompt TEXT NOT NULL DEFAULT '',
               supports_vision INTEGER NOT NULL DEFAULT 0,
               enabled INTEGER NOT NULL DEFAULT 1,
+              input_price_per_million REAL NOT NULL DEFAULT 0,
+              output_price_per_million REAL NOT NULL DEFAULT 0,
+              cost_enabled INTEGER NOT NULL DEFAULT 0,
+              cost_note TEXT NOT NULL DEFAULT '',
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL
             );
@@ -326,8 +348,26 @@ def init_db(secrets_data=None):
               prompt_tokens INTEGER NOT NULL DEFAULT 0,
               completion_tokens INTEGER NOT NULL DEFAULT 0,
               total_tokens INTEGER NOT NULL DEFAULT 0,
+              estimated_cost REAL NOT NULL DEFAULT 0,
+              cost_input_price REAL NOT NULL DEFAULT 0,
+              cost_output_price REAL NOT NULL DEFAULT 0,
+              cost_model_id TEXT NOT NULL DEFAULT '',
+              actual_model TEXT NOT NULL DEFAULT '',
               created_at INTEGER NOT NULL,
               FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS daily_usage (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id TEXT NOT NULL,
+              date TEXT NOT NULL,
+              request_count INTEGER NOT NULL DEFAULT 0,
+              input_tokens INTEGER NOT NULL DEFAULT 0,
+              output_tokens INTEGER NOT NULL DEFAULT 0,
+              total_tokens INTEGER NOT NULL DEFAULT 0,
+              estimated_cost REAL NOT NULL DEFAULT 0,
+              updated_at INTEGER NOT NULL,
+              UNIQUE(user_id, date)
             );
 
             CREATE TABLE IF NOT EXISTS message_sources (
@@ -517,6 +557,13 @@ def init_db(secrets_data=None):
         model_columns = table_columns(conn, "models")
         if "supports_vision" not in model_columns:
             conn.execute("ALTER TABLE models ADD COLUMN supports_vision INTEGER NOT NULL DEFAULT 0")
+        for column in ("input_price_per_million", "output_price_per_million"):
+            if column not in model_columns:
+                conn.execute(f"ALTER TABLE models ADD COLUMN {column} REAL NOT NULL DEFAULT 0")
+        if "cost_enabled" not in model_columns:
+            conn.execute("ALTER TABLE models ADD COLUMN cost_enabled INTEGER NOT NULL DEFAULT 0")
+        if "cost_note" not in model_columns:
+            conn.execute("ALTER TABLE models ADD COLUMN cost_note TEXT NOT NULL DEFAULT ''")
         conversation_columns = table_columns(conn, "conversations")
         if "user_id" not in conversation_columns:
             conn.execute(
@@ -540,6 +587,13 @@ def init_db(secrets_data=None):
                 conn.execute(
                     f"ALTER TABLE messages ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
                 )
+        for column in ("estimated_cost", "cost_input_price", "cost_output_price"):
+            if column not in message_columns:
+                conn.execute(f"ALTER TABLE messages ADD COLUMN {column} REAL NOT NULL DEFAULT 0")
+        if "cost_model_id" not in message_columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN cost_model_id TEXT NOT NULL DEFAULT ''")
+        if "actual_model" not in message_columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN actual_model TEXT NOT NULL DEFAULT ''")
         favorite_columns = table_columns(conn, "favorite_messages")
         if "user_id" not in favorite_columns:
             conn.execute(
@@ -599,11 +653,35 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_conversation ON messages(user_id, conversation_id, id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_images_user_session ON chat_message_images(user_id, session_id, message_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_favorites_user_created ON favorite_messages(user_id, created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_usage_user_date ON daily_usage(user_id, date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_cost_created ON messages(role, created_at, estimated_cost)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_profiles_user_sort ON user_profiles(user_id, sort_order ASC, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_user_updated ON media_analysis_tasks(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_task_id ON media_analysis_tasks(task_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_conversation ON media_analysis_tasks(conversation_id)")
+
+        daily_count = conn.execute("SELECT COUNT(*) AS n FROM daily_usage").fetchone()["n"]
+        if daily_count == 0:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO daily_usage
+                (user_id, date, request_count, input_tokens, output_tokens, total_tokens, estimated_cost, updated_at)
+                SELECT
+                  user_id,
+                  date(created_at, 'unixepoch', 'localtime') AS usage_date,
+                  COUNT(*) AS request_count,
+                  COALESCE(SUM(prompt_tokens), 0) AS input_tokens,
+                  COALESCE(SUM(completion_tokens), 0) AS output_tokens,
+                  COALESCE(SUM(CASE WHEN total_tokens>0 THEN total_tokens ELSE prompt_tokens+completion_tokens END), 0) AS total_tokens,
+                  COALESCE(SUM(estimated_cost), 0) AS estimated_cost,
+                  ?
+                FROM messages
+                WHERE role='assistant'
+                GROUP BY user_id, usage_date
+                """,
+                (now(),),
+            )
 
         cat_post_columns = table_columns(conn, "cat_posts")
         if "cat_id" not in cat_post_columns:
@@ -658,6 +736,10 @@ def public_model(row):
         "system_prompt": row["system_prompt"],
         "supports_vision": bool(row["supports_vision"]) if "supports_vision" in row.keys() else False,
         "enabled": bool(row["enabled"]),
+        "input_price_per_million": float(row["input_price_per_million"] or 0) if "input_price_per_million" in row.keys() else 0,
+        "output_price_per_million": float(row["output_price_per_million"] or 0) if "output_price_per_million" in row.keys() else 0,
+        "cost_enabled": bool(row["cost_enabled"]) if "cost_enabled" in row.keys() else False,
+        "cost_note": row["cost_note"] if "cost_note" in row.keys() else "",
         "has_api_key": bool(row["api_key"].strip()),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -1574,10 +1656,12 @@ def message_token_usage(row):
     total_tokens = int(row["total_tokens"] or 0) if "total_tokens" in row.keys() else 0
     if not total_tokens and (prompt_tokens or completion_tokens):
         total_tokens = prompt_tokens + completion_tokens
+    estimated_cost = float(row["estimated_cost"] or 0) if "estimated_cost" in row.keys() else 0.0
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
+        "estimated_cost": estimated_cost,
     }
 
 
@@ -1602,6 +1686,53 @@ def parse_usage_tokens(usage):
     if not total_tokens and (prompt_tokens or completion_tokens):
         total_tokens = prompt_tokens + completion_tokens
     return (prompt_tokens, completion_tokens, total_tokens)
+
+
+def parse_price(value):
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if number < 0:
+        return 0.0
+    return min(number, 1000000.0)
+
+
+def estimate_request_cost(prompt_tokens, completion_tokens, input_price, output_price, enabled=True):
+    if not enabled:
+        return 0.0
+    cost = (max(0, int(prompt_tokens or 0)) / 1000000.0 * parse_price(input_price)) + (
+        max(0, int(completion_tokens or 0)) / 1000000.0 * parse_price(output_price)
+    )
+    return round(cost, 8)
+
+
+def add_daily_usage(conn, user_id, timestamp, prompt_tokens, completion_tokens, total_tokens, estimated_cost):
+    usage_date = date_text_from_ts(timestamp)
+    ts = now()
+    conn.execute(
+        """
+        INSERT INTO daily_usage
+        (user_id, date, request_count, input_tokens, output_tokens, total_tokens, estimated_cost, updated_at)
+        VALUES (?, ?, 1, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, date) DO UPDATE SET
+          request_count=request_count+1,
+          input_tokens=input_tokens+excluded.input_tokens,
+          output_tokens=output_tokens+excluded.output_tokens,
+          total_tokens=total_tokens+excluded.total_tokens,
+          estimated_cost=estimated_cost+excluded.estimated_cost,
+          updated_at=excluded.updated_at
+        """,
+        (
+            user_id,
+            usage_date,
+            max(0, int(prompt_tokens or 0)),
+            max(0, int(completion_tokens or 0)),
+            max(0, int(total_tokens or 0)),
+            float(estimated_cost or 0),
+            ts,
+        ),
+    )
 
 
 def usage_option_rejected(detail):
@@ -1911,10 +2042,14 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_admin(self.handle_admin_search)
         if path == "/api/admin/token-stats":
             return self.require_admin(self.handle_admin_token_stats)
+        if path == "/api/admin/cost-stats":
+            return self.require_admin(self.handle_admin_cost_stats)
         if path == "/api/admin/overview":
             return self.require_admin(self.handle_admin_overview)
         if path == "/api/admin/users":
             return self.require_admin(self.handle_admin_users)
+        if path == "/api/token-activity":
+            return self.require_user(self.handle_token_activity)
         if path == "/api/conversations":
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
@@ -3569,6 +3704,334 @@ class AppHandler(BaseHTTPRequestHandler):
             }
         )
 
+    def handle_admin_cost_stats(self):
+        params = parse_qs(urlparse(self.path).query)
+        range_key = str((params.get("range") or ["30d"])[0] or "30d").strip().lower()
+        if range_key not in ("7d", "30d", "all"):
+            range_key = "30d"
+        cutoff = 0
+        if range_key == "7d":
+            cutoff = now() - 7 * 86400
+        elif range_key == "30d":
+            cutoff = now() - 30 * 86400
+        range_where = "m.role='assistant'"
+        range_args = []
+        if cutoff:
+            range_where += " AND m.created_at>=?"
+            range_args.append(cutoff)
+
+        with db() as conn:
+            total_summary = conn.execute(
+                """
+                SELECT
+                  COALESCE(SUM(estimated_cost), 0) AS total_cost,
+                  COUNT(*) AS request_count
+                FROM messages
+                WHERE role='assistant'
+                """
+            ).fetchone()
+            today_summary = conn.execute(
+                """
+                SELECT COALESCE(SUM(estimated_cost), 0) AS cost
+                FROM messages
+                WHERE role='assistant' AND created_at>=?
+                """,
+                (local_day_start(),),
+            ).fetchone()
+            month_summary = conn.execute(
+                """
+                SELECT COALESCE(SUM(estimated_cost), 0) AS cost
+                FROM messages
+                WHERE role='assistant' AND created_at>=?
+                """,
+                (local_month_start(),),
+            ).fetchone()
+            range_summary = conn.execute(
+                f"""
+                SELECT
+                  COALESCE(SUM(m.estimated_cost), 0) AS cost,
+                  COUNT(*) AS request_count,
+                  COALESCE(SUM(m.prompt_tokens), 0) AS prompt_tokens,
+                  COALESCE(SUM(m.completion_tokens), 0) AS completion_tokens,
+                  COALESCE(SUM(CASE WHEN m.total_tokens>0 THEN m.total_tokens ELSE m.prompt_tokens+m.completion_tokens END), 0) AS total_tokens
+                FROM messages m
+                WHERE {range_where}
+                """,
+                range_args,
+            ).fetchone()
+            model_rows = conn.execute(
+                f"""
+                SELECT
+                  COALESCE(NULLIF(m.cost_model_id, ''), c.model_id, '') AS model_id,
+                  COALESCE(mo.name, m.actual_model, '未知模型') AS model_name,
+                  COALESCE(mo.model, m.actual_model, '') AS model_code,
+                  COALESCE(mo.provider, '') AS provider,
+                  COUNT(*) AS request_count,
+                  COALESCE(SUM(m.prompt_tokens), 0) AS prompt_tokens,
+                  COALESCE(SUM(m.completion_tokens), 0) AS completion_tokens,
+                  COALESCE(SUM(CASE WHEN m.total_tokens>0 THEN m.total_tokens ELSE m.prompt_tokens+m.completion_tokens END), 0) AS total_tokens,
+                  COALESCE(SUM(m.estimated_cost), 0) AS estimated_cost,
+                  COUNT(DISTINCT m.user_id) AS user_count,
+                  MAX(m.created_at) AS last_used_at
+                FROM messages m
+                LEFT JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
+                LEFT JOIN models mo ON mo.id=COALESCE(NULLIF(m.cost_model_id, ''), c.model_id)
+                WHERE {range_where}
+                GROUP BY model_id, model_name, model_code, provider
+                ORDER BY estimated_cost DESC, total_tokens DESC, request_count DESC
+                LIMIT 100
+                """,
+                range_args,
+            ).fetchall()
+            user_rows = conn.execute(
+                f"""
+                SELECT
+                  u.id,
+                  u.username,
+                  u.display_name,
+                  COUNT(*) AS request_count,
+                  COALESCE(SUM(m.prompt_tokens), 0) AS prompt_tokens,
+                  COALESCE(SUM(m.completion_tokens), 0) AS completion_tokens,
+                  COALESCE(SUM(CASE WHEN m.total_tokens>0 THEN m.total_tokens ELSE m.prompt_tokens+m.completion_tokens END), 0) AS total_tokens,
+                  COALESCE(SUM(m.estimated_cost), 0) AS estimated_cost,
+                  MAX(m.created_at) AS last_used_at
+                FROM messages m
+                LEFT JOIN users u ON u.id=m.user_id
+                WHERE {range_where}
+                GROUP BY u.id
+                ORDER BY estimated_cost DESC, total_tokens DESC, request_count DESC
+                LIMIT 100
+                """,
+                range_args,
+            ).fetchall()
+
+        models = [
+            {
+                "model_id": row["model_id"] or "",
+                "model_name": row["model_name"] or "未知模型",
+                "model_code": row["model_code"] or "",
+                "provider": row["provider"] or "",
+                "request_count": int(row["request_count"] or 0),
+                "prompt_tokens": int(row["prompt_tokens"] or 0),
+                "completion_tokens": int(row["completion_tokens"] or 0),
+                "total_tokens": int(row["total_tokens"] or 0),
+                "estimated_cost": float(row["estimated_cost"] or 0),
+                "user_count": int(row["user_count"] or 0),
+                "last_used_at": row["last_used_at"] or 0,
+            }
+            for row in model_rows
+        ]
+        users = [
+            {
+                "user_id": row["id"] or "",
+                "username": row["username"] or "",
+                "display_name": row["display_name"] or row["username"] or "未知账号",
+                "request_count": int(row["request_count"] or 0),
+                "prompt_tokens": int(row["prompt_tokens"] or 0),
+                "completion_tokens": int(row["completion_tokens"] or 0),
+                "total_tokens": int(row["total_tokens"] or 0),
+                "estimated_cost": float(row["estimated_cost"] or 0),
+                "last_used_at": row["last_used_at"] or 0,
+            }
+            for row in user_rows
+        ]
+        total_requests = int(total_summary["request_count"] or 0)
+        total_cost = float(total_summary["total_cost"] or 0)
+        return self.json(
+            {
+                "range": range_key,
+                "summary": {
+                    "today_cost": float(today_summary["cost"] or 0),
+                    "month_cost": float(month_summary["cost"] or 0),
+                    "total_cost": total_cost,
+                    "average_request_cost": (total_cost / total_requests) if total_requests else 0,
+                    "range_cost": float(range_summary["cost"] or 0),
+                    "range_requests": int(range_summary["request_count"] or 0),
+                    "range_total_tokens": int(range_summary["total_tokens"] or 0),
+                    "top_model": models[0] if models else None,
+                    "top_user": users[0] if users else None,
+                },
+                "models": models,
+                "users": users,
+            }
+        )
+
+    def handle_token_activity(self):
+        user = self.current_user()
+        user_id = user["id"]
+        end_day_start = local_day_start()
+        start_day_start = end_day_start - 364 * 86400
+        start_date = date_text_from_ts(start_day_start)
+        with db() as conn:
+            daily_rows = conn.execute(
+                """
+                SELECT *
+                FROM daily_usage
+                WHERE user_id=? AND date>=?
+                ORDER BY date ASC
+                """,
+                (user_id, start_date),
+            ).fetchall()
+            totals = conn.execute(
+                """
+                SELECT
+                  COALESCE(SUM(request_count), 0) AS request_count,
+                  COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                  COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                  COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                  COALESCE(SUM(estimated_cost), 0) AS estimated_cost,
+                  COUNT(CASE WHEN request_count>0 THEN 1 ELSE NULL END) AS active_days
+                FROM daily_usage
+                WHERE user_id=?
+                """,
+                (user_id,),
+            ).fetchone()
+            conversation_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM conversations WHERE user_id=? AND archived=0",
+                (user_id,),
+            ).fetchone()["n"]
+            model_rows = conn.execute(
+                """
+                SELECT
+                  COALESCE(mo.name, msg.actual_model, '未知模型') AS model_name,
+                  COALESCE(mo.model, msg.actual_model, '') AS model_code,
+                  COUNT(*) AS request_count,
+                  COALESCE(SUM(CASE WHEN msg.total_tokens>0 THEN msg.total_tokens ELSE msg.prompt_tokens+msg.completion_tokens END), 0) AS total_tokens,
+                  COALESCE(SUM(msg.estimated_cost), 0) AS estimated_cost
+                FROM messages msg
+                LEFT JOIN conversations c ON c.id=msg.conversation_id AND c.user_id=msg.user_id
+                LEFT JOIN models mo ON mo.id=COALESCE(NULLIF(msg.cost_model_id, ''), c.model_id)
+                WHERE msg.user_id=? AND msg.role='assistant'
+                GROUP BY model_name, model_code
+                ORDER BY total_tokens DESC, request_count DESC
+                LIMIT 5
+                """,
+                (user_id,),
+            ).fetchall()
+            conversation_rows = conn.execute(
+                """
+                SELECT
+                  c.id,
+                  c.title,
+                  COUNT(msg.id) AS request_count,
+                  COALESCE(SUM(CASE WHEN msg.total_tokens>0 THEN msg.total_tokens ELSE msg.prompt_tokens+msg.completion_tokens END), 0) AS total_tokens
+                FROM conversations c
+                JOIN messages msg ON msg.conversation_id=c.id AND msg.user_id=c.user_id AND msg.role='assistant'
+                WHERE c.user_id=?
+                GROUP BY c.id
+                ORDER BY total_tokens DESC, request_count DESC
+                LIMIT 5
+                """,
+                (user_id,),
+            ).fetchall()
+            day_model_rows = conn.execute(
+                """
+                SELECT
+                  date(msg.created_at, 'unixepoch', 'localtime') AS usage_date,
+                  COALESCE(mo.name, msg.actual_model, '未知模型') AS model_name,
+                  COUNT(*) AS request_count,
+                  COALESCE(SUM(CASE WHEN msg.total_tokens>0 THEN msg.total_tokens ELSE msg.prompt_tokens+msg.completion_tokens END), 0) AS total_tokens,
+                  COALESCE(SUM(msg.estimated_cost), 0) AS estimated_cost
+                FROM messages msg
+                LEFT JOIN conversations c ON c.id=msg.conversation_id AND c.user_id=msg.user_id
+                LEFT JOIN models mo ON mo.id=COALESCE(NULLIF(msg.cost_model_id, ''), c.model_id)
+                WHERE msg.user_id=? AND msg.role='assistant' AND msg.created_at>=?
+                GROUP BY usage_date, model_name
+                ORDER BY usage_date ASC, total_tokens DESC
+                """,
+                (user_id, start_day_start),
+            ).fetchall()
+
+        active_dates = {row["date"] for row in daily_rows if int(row["request_count"] or 0) > 0}
+        longest_streak = 0
+        current_streak = 0
+        streak = 0
+        cursor_day = start_day_start
+        today_date = today_text()
+        while cursor_day <= end_day_start:
+            value = date_text_from_ts(cursor_day)
+            if value in active_dates:
+                streak += 1
+                longest_streak = max(longest_streak, streak)
+                if value <= today_date:
+                    current_streak = streak
+            else:
+                streak = 0
+                if value <= today_date:
+                    current_streak = 0
+            cursor_day += 86400
+
+        daily_by_date = {row["date"]: row for row in daily_rows}
+        days = []
+        cursor_day = start_day_start
+        while cursor_day <= end_day_start:
+            value = date_text_from_ts(cursor_day)
+            row = daily_by_date.get(value)
+            days.append(
+                {
+                    "date": value,
+                    "request_count": int(row["request_count"] or 0) if row else 0,
+                    "input_tokens": int(row["input_tokens"] or 0) if row else 0,
+                    "output_tokens": int(row["output_tokens"] or 0) if row else 0,
+                    "total_tokens": int(row["total_tokens"] or 0) if row else 0,
+                    "estimated_cost": float(row["estimated_cost"] or 0) if row else 0,
+                }
+            )
+            cursor_day += 86400
+
+        day_models = {}
+        for row in day_model_rows:
+            day_models.setdefault(row["usage_date"], []).append(
+                {
+                    "model_name": row["model_name"] or "未知模型",
+                    "request_count": int(row["request_count"] or 0),
+                    "total_tokens": int(row["total_tokens"] or 0),
+                    "estimated_cost": float(row["estimated_cost"] or 0),
+                }
+            )
+
+        total_tokens = int(totals["total_tokens"] or 0)
+        active_day_count = int(totals["active_days"] or 0)
+        return self.json(
+            {
+                "summary": {
+                    "request_count": int(totals["request_count"] or 0),
+                    "input_tokens": int(totals["input_tokens"] or 0),
+                    "output_tokens": int(totals["output_tokens"] or 0),
+                    "total_tokens": total_tokens,
+                    "estimated_cost": float(totals["estimated_cost"] or 0),
+                    "conversation_count": int(conversation_count or 0),
+                    "active_days": active_day_count,
+                    "longest_streak": longest_streak,
+                    "current_streak": current_streak,
+                    "average_daily_tokens": int(total_tokens / active_day_count) if active_day_count else 0,
+                },
+                "days": days,
+                "day_models": day_models,
+                "top_models": [
+                    {
+                        "model_name": row["model_name"] or "未知模型",
+                        "model_code": row["model_code"] or "",
+                        "request_count": int(row["request_count"] or 0),
+                        "total_tokens": int(row["total_tokens"] or 0),
+                        "estimated_cost": float(row["estimated_cost"] or 0),
+                    }
+                    for row in model_rows
+                ],
+                "top_conversations": [
+                    {
+                        "conversation_id": row["id"],
+                        "title": row["title"] or "未命名对话",
+                        "request_count": int(row["request_count"] or 0),
+                        "total_tokens": int(row["total_tokens"] or 0),
+                    }
+                    for row in conversation_rows
+                ],
+                "top_agents": [],
+                "top_prompts": [],
+            }
+        )
+
     def handle_admin_overview(self):
         search = web_search_config(self.server.secrets)
         media_oss = media_oss_config(self.server.secrets)
@@ -3633,6 +4096,10 @@ class AppHandler(BaseHTTPRequestHandler):
         system_prompt = str(data.get("system_prompt") or "").strip()
         supports_vision = 1 if data.get("supports_vision") else 0
         enabled = 1 if data.get("enabled", True) else 0
+        input_price = parse_price(data.get("input_price_per_million"))
+        output_price = parse_price(data.get("output_price_per_million"))
+        cost_enabled = 1 if data.get("cost_enabled") else 0
+        cost_note = str(data.get("cost_note") or "").strip()[:500]
 
         if not name or not base_url or not model:
             return self.error(HTTPStatus.BAD_REQUEST, "name, base_url and model are required")
@@ -3643,10 +4110,27 @@ class AppHandler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO models
-                (id, name, provider, base_url, api_key, model, system_prompt, supports_vision, enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, name, provider, base_url, api_key, model, system_prompt, supports_vision, enabled,
+                 input_price_per_million, output_price_per_million, cost_enabled, cost_note, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (model_id, name, provider, base_url, api_key, model, system_prompt, supports_vision, enabled, ts, ts),
+                (
+                    model_id,
+                    name,
+                    provider,
+                    base_url,
+                    api_key,
+                    model,
+                    system_prompt,
+                    supports_vision,
+                    enabled,
+                    input_price,
+                    output_price,
+                    cost_enabled,
+                    cost_note,
+                    ts,
+                    ts,
+                ),
             )
             row = conn.execute("SELECT * FROM models WHERE id=?", (model_id,)).fetchone()
         return self.json({"model": private_model(row)}, HTTPStatus.CREATED)
@@ -3684,6 +4168,10 @@ class AppHandler(BaseHTTPRequestHandler):
             system_prompt = str(data.get("system_prompt", row["system_prompt"])).strip()
             supports_vision = 1 if data.get("supports_vision", bool(row["supports_vision"])) else 0
             enabled = 1 if data.get("enabled", bool(row["enabled"])) else 0
+            input_price = parse_price(data.get("input_price_per_million", row["input_price_per_million"]))
+            output_price = parse_price(data.get("output_price_per_million", row["output_price_per_million"]))
+            cost_enabled = 1 if data.get("cost_enabled", bool(row["cost_enabled"])) else 0
+            cost_note = str(data.get("cost_note", row["cost_note"]) or "").strip()[:500]
             api_key = row["api_key"]
             if data.get("clear_api_key"):
                 api_key = ""
@@ -3696,10 +4184,26 @@ class AppHandler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 UPDATE models
-                SET name=?, provider=?, base_url=?, api_key=?, model=?, system_prompt=?, supports_vision=?, enabled=?, updated_at=?
+                SET name=?, provider=?, base_url=?, api_key=?, model=?, system_prompt=?, supports_vision=?, enabled=?,
+                    input_price_per_million=?, output_price_per_million=?, cost_enabled=?, cost_note=?, updated_at=?
                 WHERE id=?
                 """,
-                (name, provider, base_url, api_key, model, system_prompt, supports_vision, enabled, now(), model_id),
+                (
+                    name,
+                    provider,
+                    base_url,
+                    api_key,
+                    model,
+                    system_prompt,
+                    supports_vision,
+                    enabled,
+                    input_price,
+                    output_price,
+                    cost_enabled,
+                    cost_note,
+                    now(),
+                    model_id,
+                ),
             )
             row = conn.execute("SELECT * FROM models WHERE id=?", (model_id,)).fetchone()
         return self.json({"model": private_model(row)})
@@ -4966,6 +5470,7 @@ mindmap_text 要求：
                 """
                 SELECT id, role, content, reasoning_content,
                        prompt_tokens, completion_tokens, total_tokens,
+                       estimated_cost,
                        created_at
                 FROM messages
                 WHERE conversation_id=? AND user_id=?
@@ -5072,7 +5577,9 @@ mindmap_text 要求：
         with db() as conn:
             convo = conn.execute(
                 """
-                SELECT c.*, m.name AS model_name, m.base_url, m.api_key, m.model, m.system_prompt, m.supports_vision, m.enabled
+                SELECT c.*, m.name AS model_name, m.base_url, m.api_key, m.model, m.system_prompt,
+                       m.supports_vision, m.enabled, m.input_price_per_million,
+                       m.output_price_per_million, m.cost_enabled
                 FROM conversations c JOIN models m ON m.id=c.model_id
                 WHERE c.id=? AND c.user_id=? AND c.archived=0
                 """,
@@ -5413,15 +5920,27 @@ mindmap_text 要求：
         if think_reasoning:
             reasoning_text = (reasoning_text + "\n\n" + think_reasoning).strip()
         prompt_tokens, completion_tokens, total_tokens = parse_usage_tokens(usage_data)
+        message_created_at = now()
+        input_price_snapshot = parse_price(convo["input_price_per_million"])
+        output_price_snapshot = parse_price(convo["output_price_per_million"])
+        estimated_cost = estimate_request_cost(
+            prompt_tokens,
+            completion_tokens,
+            input_price_snapshot,
+            output_price_snapshot,
+            bool(convo["cost_enabled"]),
+        )
         if assistant_text:
             with db() as conn:
                 cursor = conn.execute(
                     """
                     INSERT INTO messages(
                       user_id, conversation_id, role, content, reasoning_content,
-                      prompt_tokens, completion_tokens, total_tokens, created_at
+                      prompt_tokens, completion_tokens, total_tokens,
+                      estimated_cost, cost_input_price, cost_output_price, cost_model_id, actual_model,
+                      created_at
                     )
-                    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user_id,
@@ -5431,7 +5950,12 @@ mindmap_text 要求：
                         prompt_tokens,
                         completion_tokens,
                         total_tokens,
-                        now(),
+                        estimated_cost,
+                        input_price_snapshot if convo["cost_enabled"] else 0,
+                        output_price_snapshot if convo["cost_enabled"] else 0,
+                        convo["model_id"] if convo["cost_enabled"] else "",
+                        convo["model"],
+                        message_created_at,
                     ),
                 )
                 message_id = cursor.lastrowid
@@ -5454,6 +5978,15 @@ mindmap_text 要求：
                     "UPDATE conversations SET updated_at=? WHERE id=? AND user_id=?",
                     (now(), conversation_id, user_id),
                 )
+                add_daily_usage(
+                    conn,
+                    user_id,
+                    message_created_at,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost,
+                )
             saved_event = {
                 "type": "message_saved",
                 "message_id": message_id,
@@ -5462,6 +5995,7 @@ mindmap_text 要求：
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
+                    "estimated_cost": estimated_cost,
                 },
             }
             try:
@@ -6860,7 +7394,8 @@ INDEX_HTML = r'''<!doctype html>
 	    .prompt-dialog,
 	    .favorite-dialog,
 	    .profile-dialog,
-	    .media-dialog {
+	    .media-dialog,
+	    .token-activity-dialog {
       position: fixed;
       inset: 0;
       z-index: 30;
@@ -6875,7 +7410,8 @@ INDEX_HTML = r'''<!doctype html>
 	    .prompt-dialog.show,
 	    .favorite-dialog.show,
 	    .profile-dialog.show,
-	    .media-dialog.show { display: grid; }
+	    .media-dialog.show,
+	    .token-activity-dialog.show { display: grid; }
     .confirm-dialog { z-index: 40; }
     .copy-panel,
     .confirm-panel,
@@ -6904,6 +7440,19 @@ INDEX_HTML = r'''<!doctype html>
       grid-template-rows: auto minmax(0, 1fr);
       padding: 0;
       overflow: hidden;
+    }
+    .token-activity-panel {
+      width: min(1120px, 100%);
+      max-height: min(820px, 90vh);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      padding: 0;
+      overflow: hidden;
+      border-radius: 26px;
+      background: #11100f;
+      color: #f8f4ee;
+      border-color: rgba(255,255,255,.08);
+      box-shadow: 0 30px 90px rgba(0,0,0,.35);
     }
     .confirm-panel {
       width: min(420px, 100%);
@@ -7338,6 +7887,163 @@ INDEX_HTML = r'''<!doctype html>
 	      place-items: center;
 	      color: var(--muted);
 	      text-align: center;
+	    }
+	    .token-activity-body {
+	      overflow: auto;
+	      padding: 18px;
+	      display: grid;
+	      gap: 14px;
+	      background:
+	        radial-gradient(circle at 18% 0%, rgba(217, 143, 168, .28), transparent 34%),
+	        linear-gradient(180deg, #171514, #100f0e);
+	    }
+	    .activity-hero {
+	      display: grid;
+	      grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+	      gap: 14px;
+	      align-items: stretch;
+	    }
+	    .activity-hero h2 {
+	      margin: 6px 0 6px;
+	      font-size: clamp(28px, 5vw, 54px);
+	      letter-spacing: 0;
+	      line-height: 1;
+	    }
+	    .activity-hero p,
+	    .activity-section-head p {
+	      margin: 0;
+	      color: rgba(248,244,238,.62);
+	      line-height: 1.7;
+	    }
+	    .activity-summary-grid {
+	      display: grid;
+	      grid-template-columns: repeat(3, minmax(0, 1fr));
+	      gap: 10px;
+	    }
+	    .activity-card,
+	    .activity-summary-card {
+	      border: 1px solid rgba(255,255,255,.08);
+	      border-radius: 18px;
+	      background: rgba(255,255,255,.055);
+	      box-shadow: 0 18px 42px rgba(0,0,0,.22);
+	    }
+	    .activity-summary-card {
+	      padding: 12px;
+	      display: grid;
+	      gap: 5px;
+	    }
+	    .activity-summary-card span {
+	      color: rgba(248,244,238,.62);
+	      font-size: 12px;
+	      font-weight: 760;
+	    }
+	    .activity-summary-card strong {
+	      color: #fffaf3;
+	      font-size: 22px;
+	      overflow: hidden;
+	      text-overflow: ellipsis;
+	      white-space: nowrap;
+	    }
+	    .activity-card {
+	      padding: 14px;
+	      display: grid;
+	      gap: 12px;
+	    }
+	    .activity-card h3 {
+	      margin: 0;
+	      color: #fffaf3;
+	      font-size: 16px;
+	      letter-spacing: 0;
+	    }
+	    .activity-section-head {
+	      display: flex;
+	      justify-content: space-between;
+	      align-items: flex-start;
+	      gap: 12px;
+	    }
+	    .activity-legend {
+	      display: inline-flex;
+	      align-items: center;
+	      gap: 4px;
+	    }
+	    .activity-legend i {
+	      width: 13px;
+	      height: 13px;
+	      border-radius: 4px;
+	      background: rgba(255,255,255,.1);
+	    }
+	    .activity-legend i:nth-child(2) { background: rgba(233,175,192,.26); }
+	    .activity-legend i:nth-child(3) { background: rgba(233,175,192,.48); }
+	    .activity-legend i:nth-child(4) { background: rgba(217,143,168,.7); }
+	    .activity-legend i:nth-child(5) { background: #d98fa8; }
+	    .activity-heatmap {
+	      display: grid;
+	      grid-auto-flow: column;
+	      grid-template-rows: repeat(7, 13px);
+	      grid-auto-columns: 13px;
+	      gap: 5px;
+	      overflow-x: auto;
+	      padding: 2px 0 8px;
+	      -webkit-overflow-scrolling: touch;
+	    }
+	    .activity-day {
+	      width: 13px;
+	      height: 13px;
+	      min-width: 13px;
+	      min-height: 13px;
+	      padding: 0;
+	      border-radius: 4px;
+	      border: 1px solid rgba(255,255,255,.06);
+	      background: rgba(255,255,255,.08);
+	      box-shadow: none;
+	      transition: transform .16s ease, border-color .16s ease, background .16s ease;
+	    }
+	    .activity-day:hover,
+	    .activity-day:focus-visible {
+	      transform: scale(1.35);
+	      border-color: rgba(255,255,255,.5);
+	      z-index: 1;
+	    }
+	    .activity-day.level-1 { background: rgba(233,175,192,.26); }
+	    .activity-day.level-2 { background: rgba(233,175,192,.46); }
+	    .activity-day.level-3 { background: rgba(217,143,168,.7); }
+	    .activity-day.level-4 { background: #d98fa8; }
+	    .activity-day-detail {
+	      min-height: 78px;
+	      border: 1px solid rgba(255,255,255,.08);
+	      border-radius: 14px;
+	      background: rgba(0,0,0,.18);
+	      padding: 12px;
+	      color: rgba(248,244,238,.75);
+	      line-height: 1.7;
+	    }
+	    .activity-lists {
+	      display: grid;
+	      grid-template-columns: repeat(3, minmax(0, 1fr));
+	      gap: 14px;
+	    }
+	    .activity-list {
+	      display: grid;
+	      gap: 8px;
+	    }
+	    .activity-row {
+	      min-width: 0;
+	      border: 1px solid rgba(255,255,255,.07);
+	      border-radius: 14px;
+	      background: rgba(255,255,255,.045);
+	      padding: 10px;
+	      display: grid;
+	      gap: 4px;
+	    }
+	    .activity-row strong,
+	    .activity-row span {
+	      overflow: hidden;
+	      text-overflow: ellipsis;
+	      white-space: nowrap;
+	    }
+	    .activity-row span {
+	      color: rgba(248,244,238,.6);
+	      font-size: 12px;
 	    }
 	    .favorite-detail {
       min-height: 260px;
@@ -7892,6 +8598,10 @@ INDEX_HTML = r'''<!doctype html>
       .admin-plugin-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
+      .activity-hero,
+      .activity-lists {
+        grid-template-columns: 1fr;
+      }
       .admin-key-row {
         grid-template-columns: 1fr;
       }
@@ -7948,6 +8658,7 @@ INDEX_HTML = r'''<!doctype html>
 	      .favorite-layout,
 	      .profile-layout,
 	      .media-layout { grid-template-columns: 1fr; }
+      .activity-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .side-foot { grid-template-columns: 1fr 1fr; }
     }
 
@@ -10406,6 +11117,7 @@ INDEX_HTML = r'''<!doctype html>
       }
 	      .library-panel,
 	      .profile-panel,
+	      .token-activity-panel,
 	      .accent-panel,
       .copy-panel,
       .confirm-panel {
@@ -10432,14 +11144,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.9.1</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.10.0</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.9.1</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.10.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -10451,7 +11163,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.9.1</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.10.0</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -10473,10 +11185,11 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openFavorites"><i data-lucide="star" aria-hidden="true"></i><span>我的收藏</span> <span class="nav-count" id="favoriteCount">0</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openProfiles"><i data-lucide="user-round-cog" aria-hidden="true"></i><span>AI档案</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openMediaAnalysis"><i data-lucide="file-video" aria-hidden="true"></i><span>音视频分析</span></button>
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openTokenActivity"><i data-lucide="activity" aria-hidden="true"></i><span>Token活动</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.9.1</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.10.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -10776,6 +11489,50 @@ INDEX_HTML = r'''<!doctype html>
 	      </div>
 	    </div>
 	  </section>
+	  <section class="token-activity-dialog" id="tokenActivityDialog">
+	    <div class="token-activity-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="tokenActivityTitle">
+	      <div class="dialog-head">
+	        <strong class="dialog-title" id="tokenActivityTitle"><i data-lucide="activity" aria-hidden="true"></i><span>Token Activity</span></strong>
+	        <button class="icon ui-icon-btn" id="closeTokenActivity" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <div class="token-activity-body">
+	        <div class="activity-hero">
+	          <div>
+	            <span class="admin-kicker">Personal Dashboard</span>
+	            <h2>Token Activity</h2>
+	            <p>查看自己的 Token 使用节奏、连续使用和模型分布。</p>
+	          </div>
+	          <div class="activity-summary-grid" id="activitySummaryGrid"></div>
+	        </div>
+	        <section class="activity-card">
+	          <div class="activity-section-head">
+	            <div>
+	              <h3>Activity Heatmap</h3>
+	              <p>颜色越深，代表当天 Token 使用量越高。</p>
+	            </div>
+	            <span class="activity-legend"><i></i><i></i><i></i><i></i><i></i></span>
+	          </div>
+	          <div class="activity-heatmap" id="activityHeatmap"></div>
+	          <div class="activity-day-detail" id="activityDayDetail"></div>
+	        </section>
+	        <div class="activity-lists">
+	          <section class="activity-card">
+	            <h3>Top5 模型</h3>
+	            <div id="activityTopModels"></div>
+	          </section>
+	          <section class="activity-card">
+	            <h3>Top5 对话</h3>
+	            <div id="activityTopConversations"></div>
+	          </section>
+	          <section class="activity-card">
+	            <h3>Top5 Prompt / Agent</h3>
+	            <div id="activityTopMeta"></div>
+	          </section>
+	        </div>
+	        <div class="status" id="tokenActivityStatus"></div>
+	      </div>
+	    </div>
+	  </section>
 	  <section class="drawer admin-workspace" id="settingsDrawer" data-admin-section="overview">
 	    <aside class="admin-nav" aria-label="后台导航">
 	      <div class="admin-brand">
@@ -10790,6 +11547,7 @@ INDEX_HTML = r'''<!doctype html>
 	        <button class="admin-nav-item" type="button" data-admin-section="search"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="plugins"><i data-lucide="puzzle" aria-hidden="true"></i><span>插件管理</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="tokens"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="costs"><i data-lucide="coins" aria-hidden="true"></i><span>成本统计</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="system"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>系统设置</span></button>
 	      </div>
 	    </aside>
@@ -10849,6 +11607,14 @@ INDEX_HTML = r'''<!doctype html>
 	            <div class="grid2">
 	              <label>启用<select id="enabled"><option value="1">启用</option><option value="0">停用</option></select></label>
 	              <label>图片理解<select id="supportsVision"><option value="0">不支持</option><option value="1">支持图片理解</option></select></label>
+	            </div>
+	            <div class="grid2">
+	              <label>输入价格（元 / 百万 Token）<input id="inputPricePerMillion" type="number" min="0" step="0.0001" placeholder="例如 2.4"></label>
+	              <label>输出价格（元 / 百万 Token）<input id="outputPricePerMillion" type="number" min="0" step="0.0001" placeholder="例如 9.6"></label>
+	            </div>
+	            <div class="grid2">
+	              <label>成本统计<select id="costEnabled"><option value="0">不参与成本统计</option><option value="1">参与成本统计</option></select></label>
+	              <label>成本备注<input id="costNote" placeholder="例如：百炼官方阶梯价"></label>
 	            </div>
 	            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
 		            <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveModel"><i data-lucide="save" aria-hidden="true"></i><span>保存模型</span></button>
@@ -10975,6 +11741,37 @@ INDEX_HTML = r'''<!doctype html>
 	          </section>
 	        </section>
 
+	        <section class="admin-page" data-admin-page="costs">
+	          <section class="panel" id="costStatsPanel">
+	            <h2 class="panel-title"><i data-lucide="coins" aria-hidden="true"></i><span>成本统计</span></h2>
+	            <div class="token-filter-row">
+	              <label>时间范围
+	                <select id="costStatsRange">
+	                  <option value="7d">最近7天</option>
+	                  <option value="30d" selected>最近30天</option>
+	                  <option value="all">全部时间</option>
+	                </select>
+	              </label>
+	              <div></div>
+	              <div style="display:flex;align-items:end">
+	                <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshCostStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	              </div>
+	            </div>
+	            <div class="token-summary-grid" id="costSummaryGrid"></div>
+	            <div class="grid2">
+	              <section class="panel">
+	                <h2 class="panel-title"><i data-lucide="bot" aria-hidden="true"></i><span>最烧钱模型</span></h2>
+	                <div id="costModelList"></div>
+	              </section>
+	              <section class="panel">
+	                <h2 class="panel-title"><i data-lucide="users" aria-hidden="true"></i><span>最烧钱用户</span></h2>
+	                <div id="costUserList"></div>
+	              </section>
+	            </div>
+	            <div class="status" id="costStatsStatus"></div>
+	          </section>
+	        </section>
+
 	        <section class="admin-page" data-admin-page="system">
 	          <section class="panel">
 	            <h2 class="panel-title"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>登录与系统</span></h2>
@@ -10983,7 +11780,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong>v2.9.1</strong></div>
+	              <div><span>当前版本</span><strong>v2.10.0</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
 	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
 	            </div>
@@ -11055,6 +11852,8 @@ INDEX_HTML = r'''<!doctype html>
 	      tokenStatsExpandedUserId: "",
 	      tokenStatsExpandedModelId: "",
 	      tokenStatsTimer: 0,
+	      costStats: null,
+	      tokenActivity: null,
 	      changelogEntries: [],
 	      changelogVersion: "",
 	      changelogHasMore: false,
@@ -15754,6 +16553,7 @@ INDEX_HTML = r'''<!doctype html>
 	      search: { title: "联网搜索", desc: "配置 Tavily/Brave、搜索策略、搜索深度和结果数量。" },
 	      plugins: { title: "插件管理", desc: "查看图片、听悟、搜索、提示词等功能状态，后续可扩展独立开关。" },
 	      tokens: { title: "Token统计", desc: "按账号查看累计 Token 用量和最近请求记录。" },
+	      costs: { title: "成本统计", desc: "根据模型价格快照查看平台成本、模型排行和用户排行。" },
 	      system: { title: "系统设置", desc: "修改登录密码并查看系统基础信息。" }
 	    };
 
@@ -15779,6 +16579,7 @@ INDEX_HTML = r'''<!doctype html>
 	        renderPluginStatus();
 	      }
 	      if (key === "tokens") loadTokenStats();
+	      if (key === "costs") loadCostStats();
 	      queueLucideRefresh();
 	    }
 
@@ -15793,6 +16594,7 @@ INDEX_HTML = r'''<!doctype html>
 	      loadAdminSearch();
 	      loadAdminUsers();
 	      loadTokenStats();
+	      loadCostStats();
 	    }
 
 	    function closeSettings() {
@@ -15985,6 +16787,13 @@ INDEX_HTML = r'''<!doctype html>
 
 	    function tokenNumber(value) {
 	      return Number(value || 0).toLocaleString();
+	    }
+
+	    function moneyNumber(value) {
+	      const num = Number(value || 0);
+	      if (num >= 1000) return "￥" + num.toLocaleString(undefined, { maximumFractionDigits: 0 });
+	      if (num >= 1) return "￥" + num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+	      return "￥" + num.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 });
 	    }
 
 	    function renderTokenSummary(summary = {}) {
@@ -16236,6 +17045,192 @@ INDEX_HTML = r'''<!doctype html>
 	      return detail;
 	    }
 
+	    async function loadCostStats() {
+	      if (!hasAdminAccess()) {
+	        state.costStats = null;
+	        renderCostStats();
+	        setStatus("costStatsStatus", "管理员账号或管理密钥可查看成本统计。", "");
+	        return;
+	      }
+	      setStatus("costStatsStatus", "正在加载成本统计...", "");
+	      const range = encodeURIComponent($("costStatsRange")?.value || "30d");
+	      const res = await adminApi(`/api/admin/cost-stats?range=${range}`);
+	      if (!res.ok) {
+	        state.costStats = null;
+	        renderCostStats();
+	        setStatus("costStatsStatus", await readError(res, "成本统计加载失败，稍后再试一下。"), "err");
+	        return;
+	      }
+	      state.costStats = await res.json();
+	      renderCostStats();
+	      setStatus("costStatsStatus", "");
+	    }
+
+	    function renderCostStats() {
+	      const data = state.costStats || {};
+	      const summary = data.summary || {};
+	      const costGrid = $("costSummaryGrid");
+	      if (costGrid) {
+	        const cards = [
+	          ["今日成本", moneyNumber(summary.today_cost)],
+	          ["本月成本", moneyNumber(summary.month_cost)],
+	          ["累计成本", moneyNumber(summary.total_cost)],
+	          ["平均每次", moneyNumber(summary.average_request_cost)],
+	          ["范围内成本", moneyNumber(summary.range_cost)]
+	        ];
+	        costGrid.innerHTML = cards.map(([label, value]) => (
+	          '<div class="token-summary-card"><span>' + escapeHTML(label) + '</span><strong>' + escapeHTML(value) + '</strong></div>'
+	        )).join("");
+	      }
+	      renderCostRank("costModelList", data.models || [], "model");
+	      renderCostRank("costUserList", data.users || [], "user");
+	      queueLucideRefresh();
+	    }
+
+	    function renderCostRank(id, rows, type) {
+	      const box = $(id);
+	      if (!box) return;
+	      box.innerHTML = "";
+	      if (!rows.length) {
+	        box.appendChild(createEmptyState(type === "model" ? "bot" : "users", "暂无成本记录", "配置模型价格并产生新请求后，这里会显示成本排行。", { compact: true }));
+	        return;
+	      }
+	      for (const item of rows.slice(0, 20)) {
+	        const row = document.createElement("div");
+	        row.className = "model-row token-user-row";
+	        const main = document.createElement("div");
+	        main.className = "token-user-main";
+	        const title = document.createElement("strong");
+	        title.textContent = type === "model" ? (item.model_name || "未知模型") : (item.display_name || item.username || "未知账号");
+	        const meta = document.createElement("span");
+	        meta.textContent = type === "model"
+	          ? [item.provider, item.model_code, "账号 " + tokenNumber(item.user_count || 0)].filter(Boolean).join(" · ")
+	          : [item.username, "最后 " + (item.last_used_at ? formatTime(item.last_used_at) : "暂无")].filter(Boolean).join(" · ");
+	        const stats = document.createElement("div");
+	        stats.className = "token-user-stats";
+	        stats.innerHTML =
+	          '<span>成本 <b>' + escapeHTML(moneyNumber(item.estimated_cost)) + '</b></span>' +
+	          '<span>请求 <b>' + tokenNumber(item.request_count) + '</b></span>' +
+	          '<span>Token <b>' + tokenNumber(item.total_tokens) + '</b></span>';
+	        main.append(title, meta, stats);
+	        row.append(main);
+	        box.appendChild(row);
+	      }
+	    }
+
+	    function closeTokenActivity() {
+	      $("tokenActivityDialog").classList.remove("show");
+	      setDialogOpenState();
+	    }
+
+	    async function openTokenActivity() {
+	      $("tokenActivityDialog").classList.add("show");
+	      setDialogOpenState();
+	      await loadTokenActivity();
+	    }
+
+	    async function loadTokenActivity() {
+	      setStatus("tokenActivityStatus", "正在加载 Token Activity...", "");
+	      const res = await api("/api/token-activity");
+	      if (!res.ok) {
+	        setStatus("tokenActivityStatus", await readError(res, "Token Activity 加载失败，稍后再试一下。"), "err");
+	        return;
+	      }
+	      state.tokenActivity = await res.json();
+	      renderTokenActivity();
+	      setStatus("tokenActivityStatus", "");
+	    }
+
+	    function tokenActivityLevel(tokens) {
+	      const value = Number(tokens || 0);
+	      if (value >= 50000) return 4;
+	      if (value >= 10000) return 3;
+	      if (value >= 1000) return 2;
+	      if (value >= 100) return 1;
+	      return 0;
+	    }
+
+	    function renderTokenActivity() {
+	      const data = state.tokenActivity || {};
+	      const summary = data.summary || {};
+	      const grid = $("activitySummaryGrid");
+	      if (grid) {
+	        const cards = [
+	          ["累计 Token", tokenNumber(summary.total_tokens)],
+	          ["累计请求", tokenNumber(summary.request_count)],
+	          ["最长连续", tokenNumber(summary.longest_streak) + " 天"],
+	          ["连续登录", tokenNumber(summary.current_streak) + " 天"],
+	          ["平均每日", tokenNumber(summary.average_daily_tokens)],
+	          ["累计花费", moneyNumber(summary.estimated_cost)]
+	        ];
+	        grid.innerHTML = cards.map(([label, value]) => (
+	          '<div class="activity-summary-card"><span>' + escapeHTML(label) + '</span><strong>' + escapeHTML(value) + '</strong></div>'
+	        )).join("");
+	      }
+	      const heatmap = $("activityHeatmap");
+	      if (heatmap) {
+	        heatmap.innerHTML = "";
+	        for (const day of data.days || []) {
+	          const button = document.createElement("button");
+	          button.type = "button";
+	          button.className = "activity-day level-" + tokenActivityLevel(day.total_tokens);
+	          button.title = day.date + "\n请求：" + tokenNumber(day.request_count) + " 次\n输入：" + tokenNumber(day.input_tokens) + "\n输出：" + tokenNumber(day.output_tokens) + "\n总 Token：" + tokenNumber(day.total_tokens);
+	          button.addEventListener("click", () => renderActivityDayDetail(day.date));
+	          heatmap.appendChild(button);
+	        }
+	      }
+	      renderActivityDayDetail(todayTextFromClient(data.days || []));
+	      renderActivityList("activityTopModels", data.top_models || [], "model");
+	      renderActivityList("activityTopConversations", data.top_conversations || [], "conversation");
+	      renderActivityMeta();
+	      queueLucideRefresh();
+	    }
+
+	    function todayTextFromClient(days) {
+	      return days.length ? days[days.length - 1].date : "";
+	    }
+
+	    function renderActivityDayDetail(date) {
+	      const data = state.tokenActivity || {};
+	      const day = (data.days || []).find((item) => item.date === date) || {};
+	      const models = data.day_models?.[date] || [];
+	      const modelText = models.length
+	        ? models.slice(0, 5).map((item) => escapeHTML(item.model_name) + "：" + tokenNumber(item.total_tokens) + " Token").join("<br>")
+	        : "当天暂无模型分布。";
+	      $("activityDayDetail").innerHTML =
+	        '<strong>' + escapeHTML(date || "暂无日期") + '</strong><br>' +
+	        '请求：' + tokenNumber(day.request_count) + ' 次 · 输入：' + tokenNumber(day.input_tokens) +
+	        ' · 输出：' + tokenNumber(day.output_tokens) + ' · 总 Token：' + tokenNumber(day.total_tokens) +
+	        ' · 花费：' + escapeHTML(moneyNumber(day.estimated_cost)) +
+	        '<br><br>' + modelText;
+	    }
+
+	    function renderActivityList(id, rows, type) {
+	      const box = $(id);
+	      if (!box) return;
+	      if (!rows.length) {
+	        box.innerHTML = '<div class="activity-row"><span>暂无记录</span></div>';
+	        return;
+	      }
+	      box.innerHTML = '<div class="activity-list">' + rows.map((item) => {
+	        const title = type === "model" ? (item.model_name || "未知模型") : (item.title || "未命名对话");
+	        const meta = type === "model"
+	          ? tokenNumber(item.request_count) + " 次 · " + tokenNumber(item.total_tokens) + " Token · " + moneyNumber(item.estimated_cost)
+	          : tokenNumber(item.request_count) + " 次 · " + tokenNumber(item.total_tokens) + " Token";
+	        return '<div class="activity-row"><strong>' + escapeHTML(title) + '</strong><span>' + escapeHTML(meta) + '</span></div>';
+	      }).join("") + '</div>';
+	    }
+
+	    function renderActivityMeta() {
+	      const box = $("activityTopMeta");
+	      if (!box) return;
+	      box.innerHTML =
+	        '<div class="activity-list">' +
+	          '<div class="activity-row"><strong>Top5 Agent</strong><span>当前版本还没有独立 Agent 记录。</span></div>' +
+	          '<div class="activity-row"><strong>Top5 Prompt</strong><span>提示词点击暂未单独记录，后续可继续接入。</span></div>' +
+	        '</div>';
+	    }
+
 	    function renderAdminModels(models) {
 	      const box = $("adminModelList");
 	      box.innerHTML = "";
@@ -16250,7 +17245,8 @@ INDEX_HTML = r'''<!doctype html>
         const info = document.createElement("div");
         info.innerHTML = `<strong></strong><span></span>`;
         info.querySelector("strong").textContent = model.name + (model.enabled ? "" : "（停用）");
-        info.querySelector("span").textContent = model.model + (model.supports_vision ? " · 支持图片理解" : "") + " · " + model.base_url + (model.has_api_key ? " · Key 已保存" : " · 未配置 Key");
+        const costText = model.cost_enabled ? (" · 成本 " + model.input_price_per_million + "/" + model.output_price_per_million + " 元/百万") : " · 未计成本";
+        info.querySelector("span").textContent = model.model + (model.supports_vision ? " · 支持图片理解" : "") + " · " + model.base_url + (model.has_api_key ? " · Key 已保存" : " · 未配置 Key") + costText;
 	        const actions = document.createElement("div");
 	        actions.className = "library-actions";
 	        const edit = createIconButton("pencil", "编辑", { fallback: "✎" });
@@ -16352,13 +17348,18 @@ INDEX_HTML = r'''<!doctype html>
       $("systemPrompt").value = model.system_prompt || "";
       $("enabled").value = model.enabled ? "1" : "0";
       $("supportsVision").value = model.supports_vision ? "1" : "0";
+      $("inputPricePerMillion").value = model.input_price_per_million || "";
+      $("outputPricePerMillion").value = model.output_price_per_million || "";
+      $("costEnabled").value = model.cost_enabled ? "1" : "0";
+      $("costNote").value = model.cost_note || "";
       setStatus("modelStatus", "正在编辑：" + model.name, "");
     }
 
     function resetModelForm() {
-      for (const id of ["editingModelId","modelName","provider","baseUrl","modelCode","apiKey","systemPrompt"]) $(id).value = "";
+      for (const id of ["editingModelId","modelName","provider","baseUrl","modelCode","apiKey","systemPrompt","inputPricePerMillion","outputPricePerMillion","costNote"]) $(id).value = "";
       $("enabled").value = "1";
       $("supportsVision").value = "0";
+      $("costEnabled").value = "0";
       $("apiKey").placeholder = "留空则保持原值";
       setStatus("modelStatus", "");
     }
@@ -16373,7 +17374,11 @@ INDEX_HTML = r'''<!doctype html>
         api_key: $("apiKey").value.trim(),
         system_prompt: $("systemPrompt").value.trim(),
         enabled: $("enabled").value === "1",
-        supports_vision: $("supportsVision").value === "1"
+        supports_vision: $("supportsVision").value === "1",
+        input_price_per_million: Number($("inputPricePerMillion").value || 0),
+        output_price_per_million: Number($("outputPricePerMillion").value || 0),
+        cost_enabled: $("costEnabled").value === "1",
+        cost_note: $("costNote").value.trim()
       };
       const res = await adminApi(id ? `/api/admin/models/${id}` : "/api/admin/models", {
         method: id ? "PUT" : "POST",
@@ -16601,6 +17606,11 @@ INDEX_HTML = r'''<!doctype html>
 	    $("mediaDialog").addEventListener("click", (event) => {
 	      if (event.target === $("mediaDialog")) closeMediaAnalysis();
 	    });
+	    $("openTokenActivity").addEventListener("click", openTokenActivity);
+	    $("closeTokenActivity").addEventListener("click", closeTokenActivity);
+	    $("tokenActivityDialog").addEventListener("click", (event) => {
+	      if (event.target === $("tokenActivityDialog")) closeTokenActivity();
+	    });
 	    $("uploadMediaTask").addEventListener("click", uploadMediaTask);
 		    $("refreshConversations").addEventListener("click", loadConversations);
 	    $("sidebarResizer").addEventListener("pointerdown", startSidebarResize);
@@ -16667,6 +17677,7 @@ INDEX_HTML = r'''<!doctype html>
 	        closeChangelog();
 	        closeProfilePopover();
 	        closeProfiles();
+	        closeTokenActivity();
 	        closeInterfaceSettings();
 	        closeImagePreview();
 	        closeSettings();
@@ -16725,6 +17736,7 @@ INDEX_HTML = r'''<!doctype html>
 		      loadAdminSearch();
 		      loadAdminUsers();
 		      loadTokenStats();
+		      loadCostStats();
 		    });
 	    $("tokenStatsQuery").addEventListener("input", scheduleTokenStatsLoad);
 	    $("tokenStatsSort").addEventListener("change", loadTokenStats);
@@ -16735,6 +17747,8 @@ INDEX_HTML = r'''<!doctype html>
 	    $("modelTokenStatsQuery").addEventListener("input", scheduleTokenStatsLoad);
 	    $("modelTokenStatsSort").addEventListener("change", loadTokenStats);
 	    $("refreshModelTokenStats").addEventListener("click", loadTokenStats);
+	    $("costStatsRange").addEventListener("change", loadCostStats);
+	    $("refreshCostStats").addEventListener("click", loadCostStats);
 	    $("openSide").addEventListener("click", openSidebar);
 	    $("closeSide").addEventListener("click", closeSidebar);
 	    $("webSearchToggle").addEventListener("change", () => {
