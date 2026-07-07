@@ -8083,15 +8083,35 @@ INDEX_HTML = r'''<!doctype html>
 	    .activity-legend i:nth-child(3) { background: rgba(233,175,192,.48); }
 	    .activity-legend i:nth-child(4) { background: rgba(217,143,168,.7); }
 	    .activity-legend i:nth-child(5) { background: #d98fa8; }
+	    .activity-heatmap-scroll {
+	      overflow-x: auto;
+	      padding: 2px 0 8px;
+	      -webkit-overflow-scrolling: touch;
+	    }
 	    .activity-heatmap {
 	      display: grid;
 	      grid-auto-flow: column;
 	      grid-template-rows: repeat(7, 13px);
 	      grid-auto-columns: 13px;
 	      gap: 5px;
-	      overflow-x: auto;
-	      padding: 2px 0 8px;
-	      -webkit-overflow-scrolling: touch;
+	      width: max-content;
+	    }
+	    .activity-month-labels {
+	      display: grid;
+	      grid-template-columns: repeat(var(--activity-weeks, 53), 13px);
+	      column-gap: 5px;
+	      width: max-content;
+	      min-height: 18px;
+	      margin-top: 4px;
+	      color: rgba(255,250,243,.58);
+	      font-size: 11px;
+	      line-height: 1.2;
+	      user-select: none;
+	    }
+	    .activity-month-label {
+	      overflow: hidden;
+	      white-space: nowrap;
+	      text-overflow: clip;
 	    }
 	    .activity-day {
 	      width: 13px;
@@ -11251,14 +11271,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.10.1</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.10.2</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.10.1</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.10.2</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -11270,7 +11290,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.10.1</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.10.2</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -11296,7 +11316,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.10.1</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.10.2</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -11619,7 +11639,10 @@ INDEX_HTML = r'''<!doctype html>
 	            </div>
 	            <span class="activity-legend"><i></i><i></i><i></i><i></i><i></i></span>
 	          </div>
-	          <div class="activity-heatmap" id="activityHeatmap"></div>
+	          <div class="activity-heatmap-scroll">
+	            <div class="activity-heatmap" id="activityHeatmap"></div>
+	            <div class="activity-month-labels" id="activityMonthLabels"></div>
+	          </div>
 	          <div class="activity-day-detail" id="activityDayDetail"></div>
 	        </section>
 	        <div class="activity-lists">
@@ -11890,7 +11913,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong>v2.10.1</strong></div>
+	              <div><span>当前版本</span><strong>v2.10.2</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
 	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
 	            </div>
@@ -17322,11 +17345,54 @@ INDEX_HTML = r'''<!doctype html>
 	          heatmap.appendChild(button);
 	        }
 	      }
+	      renderActivityMonthLabels(data.days || []);
 	      renderActivityDayDetail(todayTextFromClient(data.days || []));
 	      renderActivityList("activityTopModels", data.top_models || [], "model");
 	      renderActivityList("activityTopConversations", data.top_conversations || [], "conversation");
 	      renderActivityMeta();
 	      queueLucideRefresh();
+	    }
+
+	    function renderActivityMonthLabels(days) {
+	      const box = $("activityMonthLabels");
+	      if (!box) return;
+	      const weekCount = Math.max(1, Math.ceil((days || []).length / 7));
+	      box.style.setProperty("--activity-weeks", String(weekCount));
+	      box.innerHTML = "";
+	      if (!days.length) return;
+	      const months = [];
+	      let currentKey = "";
+	      let startIndex = 0;
+	      const flushMonth = (endIndex) => {
+	        if (!currentKey) return;
+	        const [year, month] = currentKey.split("-");
+	        const startWeek = Math.floor(startIndex / 7) + 1;
+	        const endWeek = Math.floor(Math.max(startIndex, endIndex) / 7) + 1;
+	        months.push({
+	          label: Number(month) + "月",
+	          title: year + "年" + Number(month) + "月",
+	          startWeek,
+	          span: Math.max(1, endWeek - startWeek + 1)
+	        });
+	      };
+	      days.forEach((day, index) => {
+	        const key = String(day.date || "").slice(0, 7);
+	        if (!key) return;
+	        if (key !== currentKey) {
+	          flushMonth(index - 1);
+	          currentKey = key;
+	          startIndex = index;
+	        }
+	      });
+	      flushMonth(days.length - 1);
+	      for (const item of months) {
+	        const label = document.createElement("span");
+	        label.className = "activity-month-label";
+	        label.textContent = item.label;
+	        label.title = item.title;
+	        label.style.gridColumn = item.startWeek + " / span " + item.span;
+	        box.appendChild(label);
+	      }
 	    }
 
 	    function todayTextFromClient(days) {
