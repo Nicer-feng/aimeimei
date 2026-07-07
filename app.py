@@ -2091,6 +2091,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_admin(self.handle_admin_models)
         if path == "/api/admin/search":
             return self.require_admin(self.handle_admin_search)
+        if path == "/api/admin/cost-recalculate":
+            return self.require_admin(self.handle_admin_cost_recalculate)
         if path == "/api/admin/password":
             return self.require_admin(self.handle_admin_password)
         if path == "/api/admin/users":
@@ -3853,6 +3855,111 @@ class AppHandler(BaseHTTPRequestHandler):
                 },
                 "models": models,
                 "users": users,
+            }
+        )
+
+    def handle_admin_cost_recalculate(self):
+        try:
+            data = self.read_body()
+        except Exception:
+            data = {}
+        range_key = str(data.get("range") or "30d").strip().lower()
+        if range_key not in ("7d", "30d", "all"):
+            range_key = "30d"
+        cutoff = 0
+        if range_key == "7d":
+            cutoff = now() - 7 * 86400
+        elif range_key == "30d":
+            cutoff = now() - 30 * 86400
+        where_sql = "m.role='assistant' AND COALESCE(m.estimated_cost, 0)=0"
+        args = []
+        if cutoff:
+            where_sql += " AND m.created_at>=?"
+            args.append(cutoff)
+        with db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                  m.id,
+                  m.prompt_tokens,
+                  m.completion_tokens,
+                  m.total_tokens,
+                  m.created_at,
+                  c.model_id,
+                  mo.model AS model_code,
+                  mo.input_price_per_million,
+                  mo.output_price_per_million,
+                  mo.cost_enabled
+                FROM messages m
+                JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
+                JOIN models mo ON mo.id=c.model_id
+                WHERE {where_sql}
+                """,
+                args,
+            ).fetchall()
+            updated = 0
+            skipped = 0
+            total_cost = 0.0
+            for row in rows:
+                if not row["cost_enabled"]:
+                    skipped += 1
+                    continue
+                prompt_tokens = int(row["prompt_tokens"] or 0)
+                completion_tokens = int(row["completion_tokens"] or 0)
+                total_tokens = int(row["total_tokens"] or 0)
+                if not total_tokens and (prompt_tokens or completion_tokens):
+                    total_tokens = prompt_tokens + completion_tokens
+                input_price = parse_price(row["input_price_per_million"])
+                output_price = parse_price(row["output_price_per_million"])
+                cost = estimate_request_cost(prompt_tokens, completion_tokens, input_price, output_price, True)
+                if cost <= 0:
+                    skipped += 1
+                    continue
+                conn.execute(
+                    """
+                    UPDATE messages
+                    SET estimated_cost=?, cost_input_price=?, cost_output_price=?,
+                        cost_model_id=?, actual_model=?
+                    WHERE id=?
+                    """,
+                    (
+                        cost,
+                        input_price,
+                        output_price,
+                        row["model_id"],
+                        row["model_code"] or "",
+                        row["id"],
+                    ),
+                )
+                updated += 1
+                total_cost += cost
+            conn.execute("DELETE FROM daily_usage")
+            conn.execute(
+                """
+                INSERT INTO daily_usage
+                (user_id, date, request_count, input_tokens, output_tokens, total_tokens, estimated_cost, updated_at)
+                SELECT
+                  user_id,
+                  date(created_at, 'unixepoch', 'localtime') AS usage_date,
+                  COUNT(*) AS request_count,
+                  COALESCE(SUM(prompt_tokens), 0) AS input_tokens,
+                  COALESCE(SUM(completion_tokens), 0) AS output_tokens,
+                  COALESCE(SUM(CASE WHEN total_tokens>0 THEN total_tokens ELSE prompt_tokens+completion_tokens END), 0) AS total_tokens,
+                  COALESCE(SUM(estimated_cost), 0) AS estimated_cost,
+                  ?
+                FROM messages
+                WHERE role='assistant'
+                GROUP BY user_id, usage_date
+                """,
+                (now(),),
+            )
+        return self.json(
+            {
+                "ok": True,
+                "range": range_key,
+                "updated_messages": updated,
+                "skipped_messages": skipped,
+                "estimated_cost_added": round(total_cost, 8),
             }
         )
 
@@ -11144,14 +11251,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.10.0</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.10.1</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.10.0</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.10.1</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -11163,7 +11270,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.10.0</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.10.1</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -11189,7 +11296,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.10.0</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.10.1</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -11754,7 +11861,10 @@ INDEX_HTML = r'''<!doctype html>
 	              </label>
 	              <div></div>
 	              <div style="display:flex;align-items:end">
-	                <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshCostStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	                <div class="library-actions">
+	                  <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshCostStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	                  <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="recalculateCostStats" type="button"><i data-lucide="calculator" aria-hidden="true"></i><span>回算历史成本</span></button>
+	                </div>
 	              </div>
 	            </div>
 	            <div class="token-summary-grid" id="costSummaryGrid"></div>
@@ -11780,7 +11890,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong>v2.10.0</strong></div>
+	              <div><span>当前版本</span><strong>v2.10.1</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
 	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
 	            </div>
@@ -17118,6 +17228,39 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	    }
 
+	    async function recalculateCostStats() {
+	      if (!hasAdminAccess()) {
+	        setStatus("costStatsStatus", "需要管理员账号或管理密钥。", "err");
+	        return;
+	      }
+	      const range = $("costStatsRange")?.value || "30d";
+	      const label = range === "7d" ? "最近7天" : (range === "30d" ? "最近30天" : "全部时间");
+	      const ok = await confirmAction({
+	        title: "回算历史成本",
+	        message: "将按当前模型价格回算“" + label + "”内成本仍为 0 的历史回答，并重建每日统计。已固化过成本的请求不会被覆盖。",
+	        confirmText: "开始回算"
+	      });
+	      if (!ok) return;
+	      setStatus("costStatsStatus", "正在按当前模型价格回算历史成本...", "");
+	      const res = await adminApi("/api/admin/cost-recalculate", {
+	        method: "POST",
+	        body: JSON.stringify({ range })
+	      });
+	      if (!res.ok) {
+	        setStatus("costStatsStatus", await readError(res, "历史成本回算失败，稍后再试一下。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      setStatus(
+	        "costStatsStatus",
+	        "已回算 " + tokenNumber(data.updated_messages) + " 条，新增估算成本 " + moneyNumber(data.estimated_cost_added) + "。",
+	        "ok"
+	      );
+	      await loadCostStats();
+	      await loadTokenStats();
+	      if ($("tokenActivityDialog").classList.contains("show")) await loadTokenActivity();
+	    }
+
 	    function closeTokenActivity() {
 	      $("tokenActivityDialog").classList.remove("show");
 	      setDialogOpenState();
@@ -17352,7 +17495,14 @@ INDEX_HTML = r'''<!doctype html>
       $("outputPricePerMillion").value = model.output_price_per_million || "";
       $("costEnabled").value = model.cost_enabled ? "1" : "0";
       $("costNote").value = model.cost_note || "";
+      syncCostEnabledFromPrices();
       setStatus("modelStatus", "正在编辑：" + model.name, "");
+    }
+
+    function syncCostEnabledFromPrices() {
+      const inputPrice = Number($("inputPricePerMillion").value || 0);
+      const outputPrice = Number($("outputPricePerMillion").value || 0);
+      if (inputPrice > 0 || outputPrice > 0) $("costEnabled").value = "1";
     }
 
     function resetModelForm() {
@@ -17377,7 +17527,7 @@ INDEX_HTML = r'''<!doctype html>
         supports_vision: $("supportsVision").value === "1",
         input_price_per_million: Number($("inputPricePerMillion").value || 0),
         output_price_per_million: Number($("outputPricePerMillion").value || 0),
-        cost_enabled: $("costEnabled").value === "1",
+        cost_enabled: $("costEnabled").value === "1" || Number($("inputPricePerMillion").value || 0) > 0 || Number($("outputPricePerMillion").value || 0) > 0,
         cost_note: $("costNote").value.trim()
       };
       const res = await adminApi(id ? `/api/admin/models/${id}` : "/api/admin/models", {
@@ -17727,6 +17877,8 @@ INDEX_HTML = r'''<!doctype html>
 	    });
 	    $("saveModel").addEventListener("click", saveModel);
 	    $("resetModelForm").addEventListener("click", resetModelForm);
+	    $("inputPricePerMillion").addEventListener("input", syncCostEnabledFromPrices);
+	    $("outputPricePerMillion").addEventListener("input", syncCostEnabledFromPrices);
 		    $("changePassword").addEventListener("click", changePassword);
 		    $("saveAccount").addEventListener("click", saveAccount);
 		    $("resetAccountForm").addEventListener("click", resetAccountForm);
@@ -17749,6 +17901,7 @@ INDEX_HTML = r'''<!doctype html>
 	    $("refreshModelTokenStats").addEventListener("click", loadTokenStats);
 	    $("costStatsRange").addEventListener("change", loadCostStats);
 	    $("refreshCostStats").addEventListener("click", loadCostStats);
+	    $("recalculateCostStats").addEventListener("click", recalculateCostStats);
 	    $("openSide").addEventListener("click", openSidebar);
 	    $("closeSide").addEventListener("click", closeSidebar);
 	    $("webSearchToggle").addEventListener("change", () => {
