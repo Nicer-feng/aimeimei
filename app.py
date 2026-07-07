@@ -1909,6 +1909,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_admin(self.handle_admin_models)
         if path == "/api/admin/search":
             return self.require_admin(self.handle_admin_search)
+        if path == "/api/admin/token-stats":
+            return self.require_admin(self.handle_admin_token_stats)
         if path == "/api/admin/users":
             return self.require_admin(self.handle_admin_users)
         if path == "/api/conversations":
@@ -3283,6 +3285,157 @@ class AppHandler(BaseHTTPRequestHandler):
         }
         write_private(SECRETS_PATH, json.dumps(self.server.secrets, indent=2) + "\n")
         return self.json({"ok": True, "search": public_web_search_config(self.server.secrets)})
+
+    def handle_admin_token_stats(self):
+        params = parse_qs(urlparse(self.path).query)
+        query = str((params.get("q") or [""])[0] or "").strip().lower()[:80]
+        sort = str((params.get("sort") or ["tokens"])[0] or "tokens").strip().lower()
+        if sort not in ("tokens", "recent", "created"):
+            sort = "tokens"
+
+        order_sql = {
+            "tokens": "total_tokens DESC, request_count DESC, last_used_at DESC",
+            "recent": "last_used_at DESC, total_tokens DESC, request_count DESC",
+            "created": "u.created_at DESC",
+        }[sort]
+        where_sql = ""
+        args = []
+        if query:
+            where_sql = "WHERE lower(u.username) LIKE ? ESCAPE '\\' OR lower(u.display_name) LIKE ? ESCAPE '\\'"
+            like = "%" + like_escape(query) + "%"
+            args.extend([like, like])
+
+        with db() as conn:
+            summary = conn.execute(
+                """
+                SELECT
+                  COUNT(DISTINCT u.id) AS total_users,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN 1 ELSE 0 END), 0) AS total_requests,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN
+                    CASE WHEN COALESCE(m.total_tokens, 0) > 0
+                      THEN COALESCE(m.total_tokens, 0)
+                      ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
+                    END ELSE 0 END), 0) AS total_tokens
+                FROM users u
+                LEFT JOIN messages m ON m.user_id=u.id
+                """
+            ).fetchone()
+
+            rows = conn.execute(
+                f"""
+                SELECT
+                  u.id,
+                  u.username,
+                  u.display_name,
+                  u.role,
+                  u.is_active,
+                  u.created_at,
+                  COUNT(DISTINCT c.id) AS conversation_count,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN 1 ELSE 0 END), 0) AS request_count,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN
+                    CASE WHEN COALESCE(m.total_tokens, 0) > 0
+                      THEN COALESCE(m.total_tokens, 0)
+                      ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
+                    END ELSE 0 END), 0) AS total_tokens,
+                  MAX(CASE WHEN m.role='assistant' THEN m.created_at ELSE NULL END) AS last_used_at
+                FROM users u
+                LEFT JOIN conversations c ON c.user_id=u.id
+                LEFT JOIN messages m ON m.user_id=u.id AND m.conversation_id=c.id
+                {where_sql}
+                GROUP BY u.id
+                ORDER BY {order_sql}
+                LIMIT 200
+                """,
+                args,
+            ).fetchall()
+
+            details = {}
+            user_ids = [row["id"] for row in rows]
+            if user_ids:
+                placeholders = ",".join(["?"] * len(user_ids))
+                detail_rows = conn.execute(
+                    f"""
+                    SELECT
+                      m.id,
+                      m.user_id,
+                      m.conversation_id,
+                      m.created_at,
+                      m.prompt_tokens,
+                      m.completion_tokens,
+                      CASE WHEN COALESCE(m.total_tokens, 0) > 0
+                        THEN COALESCE(m.total_tokens, 0)
+                        ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
+                      END AS total_tokens,
+                      c.title AS conversation_title,
+                      mo.name AS model_name,
+                      mo.model AS model_code,
+                      EXISTS(SELECT 1 FROM message_sources s WHERE s.message_id=m.id) AS web_search
+                    FROM messages m
+                    LEFT JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
+                    LEFT JOIN models mo ON mo.id=c.model_id
+                    WHERE m.role='assistant' AND m.user_id IN ({placeholders})
+                    ORDER BY m.user_id ASC, m.created_at DESC, m.id DESC
+                    """,
+                    user_ids,
+                ).fetchall()
+                for detail in detail_rows:
+                    bucket = details.setdefault(detail["user_id"], [])
+                    if len(bucket) >= 20:
+                        continue
+                    bucket.append(
+                        {
+                            "message_id": detail["id"],
+                            "conversation_id": detail["conversation_id"],
+                            "conversation_title": detail["conversation_title"] or "未命名对话",
+                            "created_at": detail["created_at"],
+                            "model_name": detail["model_name"] or "",
+                            "model_code": detail["model_code"] or "",
+                            "prompt_tokens": int(detail["prompt_tokens"] or 0),
+                            "completion_tokens": int(detail["completion_tokens"] or 0),
+                            "total_tokens": int(detail["total_tokens"] or 0),
+                            "duration_ms": None,
+                            "web_search": bool(detail["web_search"]),
+                        }
+                    )
+
+        users = []
+        for row in rows:
+            users.append(
+                {
+                    "id": row["id"],
+                    "username": row["username"],
+                    "display_name": row["display_name"],
+                    "role": row["role"],
+                    "is_active": bool(row["is_active"]),
+                    "created_at": row["created_at"],
+                    "conversation_count": int(row["conversation_count"] or 0),
+                    "request_count": int(row["request_count"] or 0),
+                    "prompt_tokens": int(row["prompt_tokens"] or 0),
+                    "completion_tokens": int(row["completion_tokens"] or 0),
+                    "total_tokens": int(row["total_tokens"] or 0),
+                    "last_used_at": row["last_used_at"] or 0,
+                    "recent_requests": details.get(row["id"], []),
+                }
+            )
+
+        return self.json(
+            {
+                "summary": {
+                    "total_users": int(summary["total_users"] or 0),
+                    "total_requests": int(summary["total_requests"] or 0),
+                    "prompt_tokens": int(summary["prompt_tokens"] or 0),
+                    "completion_tokens": int(summary["completion_tokens"] or 0),
+                    "total_tokens": int(summary["total_tokens"] or 0),
+                },
+                "users": users,
+                "query": query,
+                "sort": sort,
+            }
+        )
 
     def handle_admin_models(self):
         if self.command == "GET":
@@ -7094,6 +7247,98 @@ INDEX_HTML = r'''<!doctype html>
       text-overflow: ellipsis;
     }
     .model-row span { color: var(--muted); font-size: 12px; }
+    .token-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .token-summary-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-soft);
+      padding: 10px;
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .token-summary-card span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .token-summary-card strong {
+      font-size: 18px;
+      letter-spacing: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .token-filter-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 180px auto;
+      gap: 10px;
+      align-items: end;
+    }
+    .token-user-row {
+      align-items: start;
+    }
+    .token-user-main {
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+    }
+    .token-user-main strong,
+    .token-user-main span {
+      display: block;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .token-user-main span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .token-user-stats {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .token-user-stats b {
+      color: var(--text);
+      font-weight: 720;
+    }
+    .token-detail {
+      grid-column: 1 / -1;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-soft);
+      padding: 8px;
+      overflow-x: auto;
+    }
+    .token-detail table {
+      width: 100%;
+      min-width: 720px;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .token-detail th,
+    .token-detail td {
+      padding: 7px 8px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+    }
+    .token-detail tr:last-child td { border-bottom: 0; }
+    .token-detail th {
+      color: var(--muted);
+      font-weight: 720;
+    }
+    @media (max-width: 900px) {
+      .token-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .token-filter-row { grid-template-columns: 1fr; }
+    }
     @media (max-width: 900px) {
       .app { grid-template-columns: 1fr; }
       .sidebar {
@@ -9623,14 +9868,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.8.8</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.8.9</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.8.8</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.8.9</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -9642,7 +9887,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.8.8</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.8.9</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -9667,7 +9912,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>模型管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.8.8</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.8.9</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -10003,6 +10248,26 @@ INDEX_HTML = r'''<!doctype html>
 	        <div id="accountList"></div>
 	      </section>
 
+	      <section class="panel" id="tokenStatsPanel">
+		        <h2 class="panel-title"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></h2>
+	        <div class="token-summary-grid" id="tokenSummaryGrid"></div>
+	        <div class="token-filter-row">
+	          <label>搜索用户名<input id="tokenStatsQuery" autocomplete="off" placeholder="输入账号或昵称"></label>
+	          <label>排序
+	            <select id="tokenStatsSort">
+	              <option value="tokens">Token最多</option>
+	              <option value="recent">最近使用</option>
+	              <option value="created">注册时间</option>
+	            </select>
+	          </label>
+	          <div style="display:flex;align-items:end">
+		            <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshTokenStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	          </div>
+	        </div>
+	        <div class="status" id="tokenStatsStatus"></div>
+	        <div id="tokenStatsList"></div>
+	      </section>
+
 	      <section class="panel">
 		        <h2 class="panel-title"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></h2>
 	        <div class="grid2">
@@ -10132,6 +10397,9 @@ INDEX_HTML = r'''<!doctype html>
 	      globalSearchError: "",
 	      globalSearchTimer: 0,
 	      globalSearchSeq: 0,
+	      tokenStats: null,
+	      tokenStatsExpandedUserId: "",
+	      tokenStatsTimer: 0,
 	      changelogEntries: [],
 	      changelogVersion: "",
 	      changelogHasMore: false,
@@ -14831,6 +15099,7 @@ INDEX_HTML = r'''<!doctype html>
 	      loadAdminModels();
 	      loadAdminSearch();
 	      loadAdminUsers();
+	      loadTokenStats();
 	    }
 
     function closeSettings() {
@@ -14898,6 +15167,127 @@ INDEX_HTML = r'''<!doctype html>
 	      setStatus("searchStatus", clearKey ? "搜索 Key 已清空" : "搜索配置已保存", "ok");
 	      await loadAdminSearch();
 	      await loadSearchConfig();
+	    }
+
+	    function tokenNumber(value) {
+	      return Number(value || 0).toLocaleString();
+	    }
+
+	    function renderTokenSummary(summary = {}) {
+	      const box = $("tokenSummaryGrid");
+	      if (!box) return;
+	      const cards = [
+	        ["总用户数", summary.total_users || 0],
+	        ["总请求数", summary.total_requests || 0],
+	        ["累计输入 Token", summary.prompt_tokens || 0],
+	        ["累计输出 Token", summary.completion_tokens || 0],
+	        ["累计 Token", summary.total_tokens || 0]
+	      ];
+	      box.innerHTML = cards.map(([label, value]) => (
+	        '<div class="token-summary-card"><span>' + escapeHTML(label) + '</span><strong>' + tokenNumber(value) + '</strong></div>'
+	      )).join("");
+	    }
+
+	    function scheduleTokenStatsLoad() {
+	      clearTimeout(state.tokenStatsTimer);
+	      state.tokenStatsTimer = setTimeout(loadTokenStats, 180);
+	    }
+
+	    async function loadTokenStats() {
+	      const list = $("tokenStatsList");
+	      if (!hasAdminAccess()) {
+	        if (list) list.innerHTML = '<div class="status">管理员账号或管理密钥可查看 Token 统计。</div>';
+	        renderTokenSummary({});
+	        setStatus("tokenStatsStatus", "");
+	        return;
+	      }
+	      const query = encodeURIComponent(($("tokenStatsQuery")?.value || "").trim());
+	      const sort = encodeURIComponent($("tokenStatsSort")?.value || "tokens");
+	      setStatus("tokenStatsStatus", "正在加载 Token 统计...", "");
+	      const res = await adminApi(`/api/admin/token-stats?q=${query}&sort=${sort}`);
+	      if (!res.ok) {
+	        if (list) list.innerHTML = "";
+	        renderTokenSummary({});
+	        setStatus("tokenStatsStatus", await readError(res, "Token 统计加载失败，稍后再试一下。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      state.tokenStats = data;
+	      renderTokenSummary(data.summary || {});
+	      renderTokenStatsList(data.users || []);
+	      setStatus("tokenStatsStatus", data.users?.length ? "" : "没有匹配的账号。", data.users?.length ? "" : "err");
+	    }
+
+	    function renderTokenStatsList(users) {
+	      const box = $("tokenStatsList");
+	      if (!box) return;
+	      box.innerHTML = "";
+	      if (!users.length) {
+	        box.appendChild(createEmptyState("bar-chart-3", "暂无 Token 记录", "有聊天请求后，这里会显示各账号用量。", { compact: true }));
+	        queueLucideRefresh();
+	        return;
+	      }
+	      for (const user of users) {
+	        const row = document.createElement("div");
+	        row.className = "model-row token-user-row";
+	        const main = document.createElement("div");
+	        main.className = "token-user-main";
+	        const title = document.createElement("strong");
+	        title.textContent = (user.display_name || user.username) + " · " + user.username + (user.is_active ? "" : "（已禁用）");
+	        const meta = document.createElement("span");
+	        meta.textContent = "注册 " + formatTime(user.created_at) + " · 最后使用 " + (user.last_used_at ? formatTime(user.last_used_at) : "暂无");
+	        const stats = document.createElement("div");
+	        stats.className = "token-user-stats";
+	        stats.innerHTML =
+	          '<span>对话 <b>' + tokenNumber(user.conversation_count) + '</b></span>' +
+	          '<span>请求 <b>' + tokenNumber(user.request_count) + '</b></span>' +
+	          '<span>输入 <b>' + tokenNumber(user.prompt_tokens) + '</b></span>' +
+	          '<span>输出 <b>' + tokenNumber(user.completion_tokens) + '</b></span>' +
+	          '<span>总计 <b>' + tokenNumber(user.total_tokens) + '</b></span>';
+	        main.append(title, meta, stats);
+	        const actions = document.createElement("div");
+	        actions.className = "library-actions";
+	        const expanded = state.tokenStatsExpandedUserId === user.id;
+	        const detailBtn = createIconButton(expanded ? "chevron-up" : "chevron-down", expanded ? "收起" : "详情", { fallback: expanded ? "收" : "详" });
+	        detailBtn.addEventListener("click", () => {
+	          state.tokenStatsExpandedUserId = expanded ? "" : user.id;
+	          renderTokenStatsList(state.tokenStats?.users || []);
+	        });
+	        actions.append(detailBtn);
+	        row.append(main, actions);
+	        if (expanded) row.appendChild(renderTokenUserDetail(user));
+	        box.appendChild(row);
+	      }
+	      queueLucideRefresh();
+	    }
+
+	    function renderTokenUserDetail(user) {
+	      const detail = document.createElement("div");
+	      detail.className = "token-detail";
+	      const rows = user.recent_requests || [];
+	      if (!rows.length) {
+	        detail.textContent = "最近还没有请求记录。";
+	        return detail;
+	      }
+	      const tableRows = rows.map((item) => {
+	        const model = [item.model_name, item.model_code].filter(Boolean).join(" · ") || "-";
+	        const web = item.web_search ? "是" : "否";
+	        const duration = item.duration_ms ? (Number(item.duration_ms) / 1000).toFixed(1) + "s" : "-";
+	        return '<tr>' +
+	          '<td>' + escapeHTML(formatTime(item.created_at)) + '</td>' +
+	          '<td title="' + escapeHTML(model) + '">' + escapeHTML(model) + '</td>' +
+	          '<td>' + tokenNumber(item.prompt_tokens) + '</td>' +
+	          '<td>' + tokenNumber(item.completion_tokens) + '</td>' +
+	          '<td>' + tokenNumber(item.total_tokens) + '</td>' +
+	          '<td>' + escapeHTML(duration) + '</td>' +
+	          '<td>' + web + '</td>' +
+	        '</tr>';
+	      }).join("");
+	      detail.innerHTML =
+	        '<table><thead><tr><th>时间</th><th>模型</th><th>输入Token</th><th>输出Token</th><th>总Token</th><th>耗时</th><th>联网</th></tr></thead><tbody>' +
+	        tableRows +
+	        '</tbody></table>';
+	      return detail;
 	    }
 
 	    function renderAdminModels(models) {
@@ -15299,7 +15689,11 @@ INDEX_HTML = r'''<!doctype html>
 		      loadAdminModels();
 		      loadAdminSearch();
 		      loadAdminUsers();
+		      loadTokenStats();
 		    });
+	    $("tokenStatsQuery").addEventListener("input", scheduleTokenStatsLoad);
+	    $("tokenStatsSort").addEventListener("change", loadTokenStats);
+	    $("refreshTokenStats").addEventListener("click", loadTokenStats);
 	    $("openSide").addEventListener("click", openSidebar);
 	    $("closeSide").addEventListener("click", closeSidebar);
 	    $("webSearchToggle").addEventListener("change", () => {
