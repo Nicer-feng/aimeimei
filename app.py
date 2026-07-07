@@ -3294,18 +3294,37 @@ class AppHandler(BaseHTTPRequestHandler):
         sort = str((params.get("sort") or ["tokens"])[0] or "tokens").strip().lower()
         if sort not in ("tokens", "recent", "created"):
             sort = "tokens"
+        model_query = str((params.get("model_q") or [""])[0] or "").strip().lower()[:80]
+        model_sort = str((params.get("model_sort") or ["tokens"])[0] or "tokens").strip().lower()
+        if model_sort not in ("tokens", "requests", "recent"):
+            model_sort = "tokens"
 
         order_sql = {
             "tokens": "total_tokens DESC, request_count DESC, last_used_at DESC",
             "recent": "last_used_at DESC, total_tokens DESC, request_count DESC",
             "created": "u.created_at DESC",
         }[sort]
+        model_order_sql = {
+            "tokens": "total_tokens DESC, request_count DESC, last_used_at DESC",
+            "requests": "request_count DESC, total_tokens DESC, last_used_at DESC",
+            "recent": "last_used_at DESC, total_tokens DESC, request_count DESC",
+        }[model_sort]
         where_sql = ""
         args = []
         if query:
             where_sql = "WHERE lower(u.username) LIKE ? ESCAPE '\\' OR lower(u.display_name) LIKE ? ESCAPE '\\'"
             like = "%" + like_escape(query) + "%"
             args.extend([like, like])
+        model_where_sql = ""
+        model_args = []
+        if model_query:
+            model_where_sql = """
+                WHERE lower(mo.name) LIKE ? ESCAPE '\\'
+                   OR lower(mo.model) LIKE ? ESCAPE '\\'
+                   OR lower(mo.provider) LIKE ? ESCAPE '\\'
+            """
+            model_like = "%" + like_escape(model_query) + "%"
+            model_args.extend([model_like, model_like, model_like])
 
         with db() as conn:
             summary = conn.execute(
@@ -3404,6 +3423,85 @@ class AppHandler(BaseHTTPRequestHandler):
                         }
                     )
 
+            model_rows = conn.execute(
+                f"""
+                SELECT
+                  mo.id,
+                  mo.name,
+                  mo.model,
+                  mo.provider,
+                  mo.enabled,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN 1 ELSE 0 END), 0) AS request_count,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN
+                    CASE WHEN COALESCE(m.total_tokens, 0) > 0
+                      THEN COALESCE(m.total_tokens, 0)
+                      ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
+                    END ELSE 0 END), 0) AS total_tokens,
+                  COUNT(DISTINCT CASE WHEN m.role='assistant' THEN c.user_id ELSE NULL END) AS user_count,
+                  MAX(CASE WHEN m.role='assistant' THEN m.created_at ELSE NULL END) AS last_used_at
+                FROM models mo
+                LEFT JOIN conversations c ON c.model_id=mo.id
+                LEFT JOIN messages m ON m.conversation_id=c.id AND m.user_id=c.user_id AND m.role='assistant'
+                {model_where_sql}
+                GROUP BY mo.id
+                ORDER BY {model_order_sql}
+                LIMIT 200
+                """,
+                model_args,
+            ).fetchall()
+
+            model_details = {}
+            model_ids = [row["id"] for row in model_rows]
+            if model_ids:
+                placeholders = ",".join(["?"] * len(model_ids))
+                model_detail_rows = conn.execute(
+                    f"""
+                    SELECT
+                      mo.id AS model_id,
+                      m.id AS message_id,
+                      m.conversation_id,
+                      m.created_at,
+                      m.prompt_tokens,
+                      m.completion_tokens,
+                      CASE WHEN COALESCE(m.total_tokens, 0) > 0
+                        THEN COALESCE(m.total_tokens, 0)
+                        ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
+                      END AS total_tokens,
+                      c.title AS conversation_title,
+                      u.username,
+                      u.display_name,
+                      EXISTS(SELECT 1 FROM message_sources s WHERE s.message_id=m.id) AS web_search
+                    FROM messages m
+                    JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
+                    JOIN models mo ON mo.id=c.model_id
+                    LEFT JOIN users u ON u.id=m.user_id
+                    WHERE m.role='assistant' AND mo.id IN ({placeholders})
+                    ORDER BY mo.id ASC, m.created_at DESC, m.id DESC
+                    """,
+                    model_ids,
+                ).fetchall()
+                for detail in model_detail_rows:
+                    bucket = model_details.setdefault(detail["model_id"], [])
+                    if len(bucket) >= 20:
+                        continue
+                    bucket.append(
+                        {
+                            "message_id": detail["message_id"],
+                            "conversation_id": detail["conversation_id"],
+                            "conversation_title": detail["conversation_title"] or "未命名对话",
+                            "created_at": detail["created_at"],
+                            "username": detail["username"] or "",
+                            "display_name": detail["display_name"] or detail["username"] or "",
+                            "prompt_tokens": int(detail["prompt_tokens"] or 0),
+                            "completion_tokens": int(detail["completion_tokens"] or 0),
+                            "total_tokens": int(detail["total_tokens"] or 0),
+                            "duration_ms": None,
+                            "web_search": bool(detail["web_search"]),
+                        }
+                    )
+
         users = []
         for row in rows:
             users.append(
@@ -3424,6 +3522,28 @@ class AppHandler(BaseHTTPRequestHandler):
                 }
             )
 
+        models = []
+        for row in model_rows:
+            models.append(
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "model": row["model"],
+                    "provider": row["provider"],
+                    "enabled": bool(row["enabled"]),
+                    "request_count": int(row["request_count"] or 0),
+                    "prompt_tokens": int(row["prompt_tokens"] or 0),
+                    "completion_tokens": int(row["completion_tokens"] or 0),
+                    "total_tokens": int(row["total_tokens"] or 0),
+                    "user_count": int(row["user_count"] or 0),
+                    "last_used_at": row["last_used_at"] or 0,
+                    "recent_requests": model_details.get(row["id"], []),
+                }
+            )
+
+        top_request_model = next((item for item in sorted(models, key=lambda value: value["request_count"], reverse=True) if item["request_count"] > 0), None)
+        top_token_model = next((item for item in sorted(models, key=lambda value: value["total_tokens"], reverse=True) if item["total_tokens"] > 0), None)
+
         return self.json(
             {
                 "summary": {
@@ -3433,9 +3553,19 @@ class AppHandler(BaseHTTPRequestHandler):
                     "completion_tokens": int(summary["completion_tokens"] or 0),
                     "total_tokens": int(summary["total_tokens"] or 0),
                 },
+                "model_summary": {
+                    "total_models": len(models),
+                    "total_requests": int(summary["total_requests"] or 0),
+                    "total_tokens": int(summary["total_tokens"] or 0),
+                    "top_request_model": top_request_model,
+                    "top_token_model": top_token_model,
+                },
                 "users": users,
+                "models": models,
                 "query": query,
                 "sort": sort,
+                "model_query": model_query,
+                "model_sort": model_sort,
             }
         )
 
@@ -7294,6 +7424,57 @@ INDEX_HTML = r'''<!doctype html>
       text-overflow: ellipsis;
     }
     .model-row span { color: var(--muted); font-size: 12px; }
+    .token-tabs {
+      width: fit-content;
+      max-width: 100%;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      margin-bottom: 12px;
+      border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface-soft) 55%, var(--surface));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .token-tab {
+      min-height: 36px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      padding: 0 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 760;
+      white-space: nowrap;
+      box-shadow: none;
+    }
+    .token-tab:hover,
+    .token-tab:focus-visible {
+      color: var(--text);
+      background: color-mix(in srgb, var(--surface) 74%, transparent);
+    }
+    .token-tab.active {
+      color: var(--accent-strong);
+      border-color: color-mix(in srgb, var(--accent) 36%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 64%, var(--surface));
+      box-shadow: 0 8px 18px rgba(138, 109, 90, .08);
+    }
+    .token-tab .lucide {
+      width: 16px;
+      height: 16px;
+      stroke-width: 2.2;
+    }
+    .token-panel {
+      display: none;
+    }
+    .token-panel.active {
+      display: block;
+    }
     .token-summary-grid {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -10251,14 +10432,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.9.0</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.9.1</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.9.0</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.9.1</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -10270,7 +10451,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.9.0</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.9.1</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -10295,7 +10476,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.9.0</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.9.1</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -10752,22 +10933,45 @@ INDEX_HTML = r'''<!doctype html>
 	        <section class="admin-page" data-admin-page="tokens">
 	          <section class="panel" id="tokenStatsPanel">
 		            <h2 class="panel-title"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></h2>
-	            <div class="token-summary-grid" id="tokenSummaryGrid"></div>
-	            <div class="token-filter-row">
-	              <label>搜索用户名<input id="tokenStatsQuery" autocomplete="off" placeholder="输入账号或昵称"></label>
-	              <label>排序
-	                <select id="tokenStatsSort">
-	                  <option value="tokens">Token最多</option>
-	                  <option value="recent">最近使用</option>
-	                  <option value="created">注册时间</option>
-	                </select>
-	              </label>
-	              <div style="display:flex;align-items:end">
-		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshTokenStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
-	              </div>
+	            <div class="token-tabs" role="tablist" aria-label="Token统计维度">
+	              <button class="token-tab active" type="button" data-token-tab="users" role="tab" aria-selected="true"><i data-lucide="users" aria-hidden="true"></i><span>按账号统计</span></button>
+	              <button class="token-tab" type="button" data-token-tab="models" role="tab" aria-selected="false"><i data-lucide="bot" aria-hidden="true"></i><span>按模型统计</span></button>
 	            </div>
+	            <section class="token-panel active" data-token-panel="users">
+	              <div class="token-summary-grid" id="tokenSummaryGrid"></div>
+	              <div class="token-filter-row">
+	                <label>搜索用户名<input id="tokenStatsQuery" autocomplete="off" placeholder="输入账号或昵称"></label>
+	                <label>排序
+	                  <select id="tokenStatsSort">
+	                    <option value="tokens">Token最多</option>
+	                    <option value="recent">最近使用</option>
+	                    <option value="created">注册时间</option>
+	                  </select>
+	                </label>
+	                <div style="display:flex;align-items:end">
+		                <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshTokenStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	                </div>
+	              </div>
+	              <div id="tokenStatsList"></div>
+	            </section>
+	            <section class="token-panel" data-token-panel="models">
+	              <div class="token-summary-grid" id="modelTokenSummaryGrid"></div>
+	              <div class="token-filter-row">
+	                <label>搜索模型<input id="modelTokenStatsQuery" autocomplete="off" placeholder="输入模型名、供应商或模型 ID"></label>
+	                <label>排序
+	                  <select id="modelTokenStatsSort">
+	                    <option value="tokens">Token最多</option>
+	                    <option value="requests">请求最多</option>
+	                    <option value="recent">最近调用</option>
+	                  </select>
+	                </label>
+	                <div style="display:flex;align-items:end">
+		                <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshModelTokenStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	                </div>
+	              </div>
+	              <div id="modelTokenStatsList"></div>
+	            </section>
 	            <div class="status" id="tokenStatsStatus"></div>
-	            <div id="tokenStatsList"></div>
 	          </section>
 	        </section>
 
@@ -10779,7 +10983,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong>v2.9.0</strong></div>
+	              <div><span>当前版本</span><strong>v2.9.1</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
 	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
 	            </div>
@@ -10847,7 +11051,9 @@ INDEX_HTML = r'''<!doctype html>
 	      adminUsers: [],
 	      adminSearch: null,
 	      tokenStats: null,
+	      tokenStatsTab: "users",
 	      tokenStatsExpandedUserId: "",
+	      tokenStatsExpandedModelId: "",
 	      tokenStatsTimer: 0,
 	      changelogEntries: [],
 	      changelogVersion: "",
@@ -15796,6 +16002,51 @@ INDEX_HTML = r'''<!doctype html>
 	      )).join("");
 	    }
 
+	    function renderModelTokenSummary(summary = {}) {
+	      const box = $("modelTokenSummaryGrid");
+	      if (!box) return;
+	      const topRequest = summary.top_request_model?.name || "暂无";
+	      const topToken = summary.top_token_model?.name || "暂无";
+	      const cards = [
+	        ["总模型数", summary.total_models || 0],
+	        ["总请求数", summary.total_requests || 0],
+	        ["累计 Token", summary.total_tokens || 0],
+	        ["使用最多模型", topRequest],
+	        ["Token最高模型", topToken]
+	      ];
+	      box.innerHTML = cards.map(([label, value]) => (
+	        '<div class="token-summary-card"><span>' + escapeHTML(label) + '</span><strong title="' + escapeHTML(String(value)) + '">' + escapeHTML(typeof value === "number" ? tokenNumber(value) : String(value)) + '</strong></div>'
+	      )).join("");
+	    }
+
+	    function switchTokenStatsTab(tab) {
+	      const key = tab === "models" ? "models" : "users";
+	      state.tokenStatsTab = key;
+	      document.querySelectorAll(".token-tab[data-token-tab]").forEach((button) => {
+	        const active = button.dataset.tokenTab === key;
+	        button.classList.toggle("active", active);
+	        button.setAttribute("aria-selected", active ? "true" : "false");
+	      });
+	      document.querySelectorAll(".token-panel[data-token-panel]").forEach((panel) => {
+	        panel.classList.toggle("active", panel.dataset.tokenPanel === key);
+	      });
+	      renderTokenStatsStatus();
+	      queueLucideRefresh();
+	    }
+
+	    function renderTokenStatsStatus() {
+	      const data = state.tokenStats;
+	      if (!data) {
+	        setStatus("tokenStatsStatus", "");
+	        return;
+	      }
+	      if (state.tokenStatsTab === "models") {
+	        setStatus("tokenStatsStatus", data.models?.length ? "" : "没有匹配的模型。", data.models?.length ? "" : "err");
+	      } else {
+	        setStatus("tokenStatsStatus", data.users?.length ? "" : "没有匹配的账号。", data.users?.length ? "" : "err");
+	      }
+	    }
+
 	    function scheduleTokenStatsLoad() {
 	      clearTimeout(state.tokenStatsTimer);
 	      state.tokenStatsTimer = setTimeout(loadTokenStats, 180);
@@ -15807,18 +16058,24 @@ INDEX_HTML = r'''<!doctype html>
 	        state.tokenStats = null;
 	        if (list) list.innerHTML = '<div class="status">管理员账号或管理密钥可查看 Token 统计。</div>';
 	        renderTokenSummary({});
+	        renderModelTokenSummary({});
+	        if ($("modelTokenStatsList")) $("modelTokenStatsList").innerHTML = '<div class="status">管理员账号或管理密钥可查看模型 Token 统计。</div>';
 	        renderAdminOverview();
 	        setStatus("tokenStatsStatus", "");
 	        return;
 	      }
 	      const query = encodeURIComponent(($("tokenStatsQuery")?.value || "").trim());
 	      const sort = encodeURIComponent($("tokenStatsSort")?.value || "tokens");
+	      const modelQuery = encodeURIComponent(($("modelTokenStatsQuery")?.value || "").trim());
+	      const modelSort = encodeURIComponent($("modelTokenStatsSort")?.value || "tokens");
 	      setStatus("tokenStatsStatus", "正在加载 Token 统计...", "");
-	      const res = await adminApi(`/api/admin/token-stats?q=${query}&sort=${sort}`);
+	      const res = await adminApi(`/api/admin/token-stats?q=${query}&sort=${sort}&model_q=${modelQuery}&model_sort=${modelSort}`);
 	      if (!res.ok) {
 	        if (list) list.innerHTML = "";
 	        state.tokenStats = null;
 	        renderTokenSummary({});
+	        renderModelTokenSummary({});
+	        if ($("modelTokenStatsList")) $("modelTokenStatsList").innerHTML = "";
 	        renderAdminOverview();
 	        setStatus("tokenStatsStatus", await readError(res, "Token 统计加载失败，稍后再试一下。"), "err");
 	        return;
@@ -15826,9 +16083,11 @@ INDEX_HTML = r'''<!doctype html>
 	      const data = await res.json();
 	      state.tokenStats = data;
 	      renderTokenSummary(data.summary || {});
+	      renderModelTokenSummary(data.model_summary || {});
 	      renderTokenStatsList(data.users || []);
+	      renderModelTokenStatsList(data.models || []);
 	      renderAdminOverview();
-	      setStatus("tokenStatsStatus", data.users?.length ? "" : "没有匹配的账号。", data.users?.length ? "" : "err");
+	      renderTokenStatsStatus();
 	    }
 
 	    function renderTokenStatsList(users) {
@@ -15898,6 +16157,80 @@ INDEX_HTML = r'''<!doctype html>
 	      }).join("");
 	      detail.innerHTML =
 	        '<table><thead><tr><th>时间</th><th>模型</th><th>输入Token</th><th>输出Token</th><th>总Token</th><th>耗时</th><th>联网</th></tr></thead><tbody>' +
+	        tableRows +
+	        '</tbody></table>';
+	      return detail;
+	    }
+
+	    function renderModelTokenStatsList(models) {
+	      const box = $("modelTokenStatsList");
+	      if (!box) return;
+	      box.innerHTML = "";
+	      if (!models.length) {
+	        box.appendChild(createEmptyState("bot", "暂无模型统计", "没有匹配的模型，或还没有模型调用记录。", { compact: true }));
+	        queueLucideRefresh();
+	        return;
+	      }
+	      for (const model of models) {
+	        const row = document.createElement("div");
+	        row.className = "model-row token-user-row";
+	        const main = document.createElement("div");
+	        main.className = "token-user-main";
+	        const title = document.createElement("strong");
+	        title.textContent = model.name + (model.enabled ? "" : "（停用）");
+	        const meta = document.createElement("span");
+	        meta.textContent = [model.provider || "未知供应商", model.model || "未知模型", "最后调用 " + (model.last_used_at ? formatTime(model.last_used_at) : "暂无")].join(" · ");
+	        const stats = document.createElement("div");
+	        stats.className = "token-user-stats";
+	        stats.innerHTML =
+	          '<span>请求 <b>' + tokenNumber(model.request_count) + '</b></span>' +
+	          '<span>账号 <b>' + tokenNumber(model.user_count) + '</b></span>' +
+	          '<span>输入 <b>' + tokenNumber(model.prompt_tokens) + '</b></span>' +
+	          '<span>输出 <b>' + tokenNumber(model.completion_tokens) + '</b></span>' +
+	          '<span>总计 <b>' + tokenNumber(model.total_tokens) + '</b></span>';
+	        main.append(title, meta, stats);
+	        const actions = document.createElement("div");
+	        actions.className = "library-actions";
+	        const expanded = state.tokenStatsExpandedModelId === model.id;
+	        const detailBtn = createIconButton(expanded ? "chevron-up" : "chevron-down", expanded ? "收起" : "详情", { fallback: expanded ? "收" : "详" });
+	        detailBtn.addEventListener("click", () => {
+	          state.tokenStatsExpandedModelId = expanded ? "" : model.id;
+	          renderModelTokenStatsList(state.tokenStats?.models || []);
+	        });
+	        actions.append(detailBtn);
+	        row.append(main, actions);
+	        if (expanded) row.appendChild(renderModelTokenDetail(model));
+	        box.appendChild(row);
+	      }
+	      queueLucideRefresh();
+	    }
+
+	    function renderModelTokenDetail(model) {
+	      const detail = document.createElement("div");
+	      detail.className = "token-detail";
+	      const rows = model.recent_requests || [];
+	      if (!rows.length) {
+	        detail.textContent = "这个模型最近还没有调用记录。";
+	        return detail;
+	      }
+	      const tableRows = rows.map((item) => {
+	        const account = [item.display_name, item.username].filter(Boolean).join(" · ") || "-";
+	        const title = item.conversation_title || "未命名对话";
+	        const web = item.web_search ? "是" : "否";
+	        const duration = item.duration_ms ? (Number(item.duration_ms) / 1000).toFixed(1) + "s" : "-";
+	        return '<tr>' +
+	          '<td>' + escapeHTML(formatTime(item.created_at)) + '</td>' +
+	          '<td title="' + escapeHTML(account) + '">' + escapeHTML(account) + '</td>' +
+	          '<td title="' + escapeHTML(title) + '">' + escapeHTML(title) + '</td>' +
+	          '<td>' + tokenNumber(item.prompt_tokens) + '</td>' +
+	          '<td>' + tokenNumber(item.completion_tokens) + '</td>' +
+	          '<td>' + tokenNumber(item.total_tokens) + '</td>' +
+	          '<td>' + web + '</td>' +
+	          '<td>' + escapeHTML(duration) + '</td>' +
+	        '</tr>';
+	      }).join("");
+	      detail.innerHTML =
+	        '<table><thead><tr><th>时间</th><th>账号</th><th>会话标题</th><th>输入Token</th><th>输出Token</th><th>总Token</th><th>联网</th><th>耗时</th></tr></thead><tbody>' +
 	        tableRows +
 	        '</tbody></table>';
 	      return detail;
@@ -16396,6 +16729,12 @@ INDEX_HTML = r'''<!doctype html>
 	    $("tokenStatsQuery").addEventListener("input", scheduleTokenStatsLoad);
 	    $("tokenStatsSort").addEventListener("change", loadTokenStats);
 	    $("refreshTokenStats").addEventListener("click", loadTokenStats);
+	    document.querySelectorAll(".token-tab[data-token-tab]").forEach((button) => {
+	      button.addEventListener("click", () => switchTokenStatsTab(button.dataset.tokenTab));
+	    });
+	    $("modelTokenStatsQuery").addEventListener("input", scheduleTokenStatsLoad);
+	    $("modelTokenStatsSort").addEventListener("change", loadTokenStats);
+	    $("refreshModelTokenStats").addEventListener("click", loadTokenStats);
 	    $("openSide").addEventListener("click", openSidebar);
 	    $("closeSide").addEventListener("click", closeSidebar);
 	    $("webSearchToggle").addEventListener("change", () => {
