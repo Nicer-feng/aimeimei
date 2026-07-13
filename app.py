@@ -8847,6 +8847,8 @@ INDEX_HTML = r'''<!doctype html>
         inset 0 1px 0 rgba(255,255,255,.82),
         inset 0 -1px 0 rgba(255,255,255,.38),
         0 20px 58px rgba(73, 54, 35, .16);
+      --composer-safe-space: clamp(190px, 24vh, 260px);
+      --composer-float-offset: calc(var(--composer-safe-space) - 16px);
       --scroll-latest-bottom: calc(max(12px, env(safe-area-inset-bottom, 0px)) + 160px);
     }
     [data-theme="dark"] {
@@ -10441,7 +10443,7 @@ INDEX_HTML = r'''<!doctype html>
       position: absolute;
       left: auto;
       right: 24px;
-      bottom: var(--scroll-latest-bottom);
+      bottom: var(--composer-float-offset, var(--scroll-latest-bottom));
       z-index: 11;
       width: 44px;
       min-width: 44px;
@@ -10775,7 +10777,7 @@ INDEX_HTML = r'''<!doctype html>
       }
       .scroll-latest {
         right: 16px;
-        bottom: var(--scroll-latest-bottom);
+        bottom: var(--composer-float-offset, var(--scroll-latest-bottom));
         width: 42px;
         min-width: 42px;
         height: 42px;
@@ -11699,7 +11701,8 @@ INDEX_HTML = r'''<!doctype html>
     }
     .messages {
       gap: 28px;
-      padding: 34px clamp(18px, 4vw, 56px) 34px;
+      padding: 34px clamp(18px, 4vw, 56px) var(--composer-safe-space);
+      scroll-padding-bottom: var(--composer-safe-space);
       background: linear-gradient(180deg, var(--color-surface-elevated), var(--color-page) 200px);
     }
     .messages-inner,
@@ -11873,16 +11876,20 @@ INDEX_HTML = r'''<!doctype html>
 
     .composer {
       padding: 10px clamp(12px, 4vw, 48px) 16px;
-      background: linear-gradient(180deg, transparent, var(--color-page) 42%);
+      background: transparent;
     }
     .composer-box {
       border-radius: var(--radius-xl);
       padding: 9px 10px 8px;
       row-gap: 5px;
-      box-shadow: var(--shadow-md);
+      border: 1px solid var(--glass-border);
+      background: var(--glass-bg);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+      box-shadow: var(--glass-shadow);
     }
     .composer-box:focus-within {
-      box-shadow: var(--shadow-md), 0 0 0 3px var(--focus-ring);
+      box-shadow: var(--glass-shadow-strong), 0 0 0 3px var(--focus-ring);
     }
     .composer-chip-row {
       gap: 5px;
@@ -12277,7 +12284,8 @@ INDEX_HTML = r'''<!doctype html>
       }
       .messages {
         gap: 24px;
-        padding: 18px 12px 202px;
+        padding: 18px 12px var(--composer-safe-space);
+        scroll-padding-bottom: var(--composer-safe-space);
       }
       .bubble.assistant .bubble-shell {
         padding: 3px 0 6px;
@@ -12387,14 +12395,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.0</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.1</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.11.0</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.11.1</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
       </footer>
     </form>
@@ -12406,7 +12414,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.0</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.1</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -12432,7 +12440,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.11.0</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.11.1</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         </footer>
       </div>
@@ -13029,7 +13037,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong>v2.11.0</strong></div>
+	              <div><span>当前版本</span><strong>v2.11.1</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
 	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
 	            </div>
@@ -13730,12 +13738,52 @@ INDEX_HTML = r'''<!doctype html>
     function showApp() {
       $("loginView").style.display = "none";
       $("appView").style.display = "grid";
+      requestAnimationFrame(syncComposerLayout);
       $("prompt").focus();
     }
 
     function syncViewportHeight() {
       const height = Math.round(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight);
       if (height > 0) document.documentElement.style.setProperty("--app-height", height + "px");
+    }
+
+    var composerLayoutFrame = 0;
+    var composerResizeObserver = null;
+
+    function syncComposerLayout() {
+      cancelAnimationFrame(composerLayoutFrame);
+      composerLayoutFrame = requestAnimationFrame(() => {
+        const composer = document.querySelector(".composer");
+        if (!composer) return;
+        const rect = composer.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+        const messages = $("messages");
+        const keepAtBottom = Boolean(messages && state.followOutput && isNearBottom(messages));
+        const style = getComputedStyle(composer);
+        const bottom = Math.max(0, Number.parseFloat(style.bottom) || 0);
+        const safeSpace = Math.ceil(rect.height + bottom + 28);
+        const floatOffset = Math.ceil(rect.height + bottom + 16);
+        const root = document.documentElement;
+        root.style.setProperty("--composer-safe-space", safeSpace + "px");
+        root.style.setProperty("--composer-float-offset", floatOffset + "px");
+        if (keepAtBottom) {
+          requestAnimationFrame(() => {
+            messages.scrollTop = messages.scrollHeight;
+            updateScrollLatestButton();
+            updateConversationMinimapViewport();
+          });
+        }
+      });
+    }
+
+    function observeComposerLayout() {
+      const composer = document.querySelector(".composer");
+      if (!composer || composerResizeObserver) return;
+      if (typeof ResizeObserver === "function") {
+        composerResizeObserver = new ResizeObserver(syncComposerLayout);
+        composerResizeObserver.observe(composer);
+      }
+      syncComposerLayout();
     }
 
     function setDialogOpenState() {
@@ -17269,6 +17317,7 @@ INDEX_HTML = r'''<!doctype html>
 		        row.appendChild(card);
 		      }
 		      queueLucideRefresh();
+		      syncComposerLayout();
 		    }
 
 	    function removeAttachment(clientId) {
@@ -18881,6 +18930,7 @@ INDEX_HTML = r'''<!doctype html>
       const el = $("prompt");
       el.style.height = "auto";
       el.style.height = Math.min(el.scrollHeight, 180) + "px";
+      syncComposerLayout();
     }
     function insertNewlineAtCursor() {
       const el = $("prompt");
@@ -19124,7 +19174,9 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	    });
 			    syncViewportHeight();
+			    observeComposerLayout();
 			    window.addEventListener("resize", syncViewportHeight, { passive: true });
+			    window.addEventListener("resize", syncComposerLayout, { passive: true });
 			    window.addEventListener("resize", () => applySidebarWidth(state.sidebarWidth, true), { passive: true });
 			    window.addEventListener("resize", updateChatUsage, { passive: true });
 			    window.addEventListener("resize", positionModelPickerPopover, { passive: true });
