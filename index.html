@@ -496,6 +496,17 @@
       color: var(--rose-deep);
       border-color: currentColor;
     }
+    footer .public-security {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    footer .public-security img {
+      width: 16px;
+      height: 17px;
+      flex: 0 0 auto;
+      object-fit: contain;
+    }
     @keyframes floatCat {
       0%, 100% { transform: translateY(0) rotate(-1deg); }
       50% { transform: translateY(-10px) rotate(1.4deg); }
@@ -711,8 +722,9 @@
 
     <footer>
       <span>© 2026 槑槑小记</span>
-      <span>v2.11.1</span>
+      <span>v2.11.2</span>
       <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
+      <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
     </footer>
   </div>
 
