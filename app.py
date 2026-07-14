@@ -12298,8 +12298,42 @@ INDEX_HTML = r'''<!doctype html>
         padding: 18px 12px var(--composer-safe-space);
         scroll-padding-bottom: var(--composer-safe-space);
       }
+      .messages-inner,
+      .bubble,
+      .bubble.assistant,
+      .bubble.assistant .bubble-shell,
+      .bubble.assistant .message-content,
+      .bubble.assistant .markdown {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+      }
+      .bubble.assistant {
+        justify-items: stretch;
+      }
       .bubble.assistant .bubble-shell {
         padding: 3px 0 6px;
+      }
+      .bubble.assistant .markdown,
+      .bubble.assistant .markdown p,
+      .bubble.assistant .markdown li,
+      .bubble.assistant .markdown h1,
+      .bubble.assistant .markdown h2,
+      .bubble.assistant .markdown h3,
+      .bubble.assistant .markdown blockquote,
+      .bubble.assistant .markdown a {
+        min-width: 0;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        word-break: normal;
+      }
+      .bubble.assistant .code-block,
+      .bubble.assistant .markdown-scroll,
+      .bubble.assistant .table-wrapper,
+      .bubble.assistant .media-wrapper {
+        min-width: 0;
+        max-width: 100%;
       }
       .bubble.assistant .message-time,
       .bubble.assistant .message-actions,
@@ -12406,14 +12440,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.2</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.3</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.11.2</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.11.3</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -12426,7 +12460,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.2</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.3</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -12452,7 +12486,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.11.2</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.11.3</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -13050,7 +13084,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong>v2.11.2</strong></div>
+	              <div><span>当前版本</span><strong>v2.11.3</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
 	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
 	            </div>
