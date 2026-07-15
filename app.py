@@ -7362,7 +7362,10 @@ INDEX_HTML = r'''<!doctype html>
     .markdown p { margin: 0 0 11px; }
     .markdown h1,
     .markdown h2,
-    .markdown h3 {
+    .markdown h3,
+    .markdown h4,
+    .markdown h5,
+    .markdown h6 {
       margin: 18px 0 9px;
       line-height: 1.28;
       letter-spacing: 0;
@@ -7370,6 +7373,15 @@ INDEX_HTML = r'''<!doctype html>
     .markdown h1 { font-size: 22px; }
     .markdown h2 { font-size: 19px; }
     .markdown h3 { font-size: 16px; }
+    .markdown h4 { font-size: 15px; }
+    .markdown h5 { font-size: 14px; }
+    .markdown h6 { font-size: 13px; }
+    .markdown hr {
+      height: 0;
+      margin: 20px 0;
+      border: 0;
+      border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+    }
     .markdown ul,
     .markdown ol {
       margin: 7px 0 13px;
@@ -10025,7 +10037,10 @@ INDEX_HTML = r'''<!doctype html>
     }
     .markdown h1,
     .markdown h2,
-    .markdown h3 {
+    .markdown h3,
+    .markdown h4,
+    .markdown h5,
+    .markdown h6 {
       margin: 26px 0 12px;
       font-weight: 780;
       color: var(--text);
@@ -10033,6 +10048,9 @@ INDEX_HTML = r'''<!doctype html>
     .markdown h1 { font-size: 28px; }
     .markdown h2 { font-size: 23px; }
     .markdown h3 { font-size: 18px; }
+    .markdown h4 { font-size: 16.5px; }
+    .markdown h5 { font-size: 15.5px; }
+    .markdown h6 { font-size: 14.5px; }
     .markdown ul,
     .markdown ol {
       margin: 10px 0 16px;
@@ -11967,7 +11985,10 @@ INDEX_HTML = r'''<!doctype html>
     }
     .markdown h1,
     .markdown h2,
-    .markdown h3 {
+    .markdown h3,
+    .markdown h4,
+    .markdown h5,
+    .markdown h6 {
       margin-top: 1.45em;
       margin-bottom: .55em;
       font-weight: 720;
@@ -12508,6 +12529,9 @@ INDEX_HTML = r'''<!doctype html>
       .bubble.assistant .markdown h1,
       .bubble.assistant .markdown h2,
       .bubble.assistant .markdown h3,
+      .bubble.assistant .markdown h4,
+      .bubble.assistant .markdown h5,
+      .bubble.assistant .markdown h6,
       .bubble.assistant .markdown blockquote,
       .bubble.assistant .markdown a {
         min-width: 0;
@@ -12627,14 +12651,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.5</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.6</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.11.5</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.11.6</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -12647,7 +12671,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.5</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.6</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -12673,7 +12697,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.11.5</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.11.6</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -13277,7 +13301,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong>v2.11.5</strong></div>
+	              <div><span>当前版本</span><strong>v2.11.6</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
 	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
 	            </div>
@@ -16644,7 +16668,14 @@ INDEX_HTML = r'''<!doctype html>
 	          continue;
 	        }
 
-	        const heading = line.match(/^(#{1,3})\s+(.+)$/);
+	        if (/^\s{0,3}(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$/.test(line)) {
+	          flushParagraph();
+	          flushList();
+	          html.push("<hr>");
+	          continue;
+	        }
+
+	        const heading = line.match(/^(#{1,6})\s+(.+)$/);
 	        if (heading) {
 	          flushParagraph();
 	          flushList();
