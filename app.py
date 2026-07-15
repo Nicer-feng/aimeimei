@@ -305,6 +305,7 @@ def init_db(secrets_data=None):
               model TEXT NOT NULL,
               system_prompt TEXT NOT NULL DEFAULT '',
               supports_vision INTEGER NOT NULL DEFAULT 0,
+              supports_native_web_search INTEGER NOT NULL DEFAULT 0,
               enabled INTEGER NOT NULL DEFAULT 1,
               input_price_per_million REAL NOT NULL DEFAULT 0,
               output_price_per_million REAL NOT NULL DEFAULT 0,
@@ -557,6 +558,21 @@ def init_db(secrets_data=None):
         model_columns = table_columns(conn, "models")
         if "supports_vision" not in model_columns:
             conn.execute("ALTER TABLE models ADD COLUMN supports_vision INTEGER NOT NULL DEFAULT 0")
+        if "supports_native_web_search" not in model_columns:
+            conn.execute(
+                "ALTER TABLE models ADD COLUMN supports_native_web_search INTEGER NOT NULL DEFAULT 0"
+            )
+            conn.execute(
+                """
+                UPDATE models
+                SET supports_native_web_search=1
+                WHERE lower(model) LIKE '%qwen%'
+                  AND (
+                    lower(base_url) LIKE '%dashscope.aliyuncs.com%'
+                    OR lower(base_url) LIKE '%.maas.aliyuncs.com%'
+                  )
+                """
+            )
         for column in ("input_price_per_million", "output_price_per_million"):
             if column not in model_columns:
                 conn.execute(f"ALTER TABLE models ADD COLUMN {column} REAL NOT NULL DEFAULT 0")
@@ -735,6 +751,7 @@ def public_model(row):
         "model": row["model"],
         "system_prompt": row["system_prompt"],
         "supports_vision": bool(row["supports_vision"]) if "supports_vision" in row.keys() else False,
+        "supports_native_web_search": bool(row["supports_native_web_search"]) if "supports_native_web_search" in row.keys() else False,
         "enabled": bool(row["enabled"]),
         "input_price_per_million": float(row["input_price_per_million"] or 0) if "input_price_per_million" in row.keys() else 0,
         "output_price_per_million": float(row["output_price_per_million"] or 0) if "output_price_per_million" in row.keys() else 0,
@@ -770,6 +787,7 @@ def conversation_row(row):
         "model_name": row["model_name"],
         "model": row["model"],
         "supports_vision": bool(row["supports_vision"]) if "supports_vision" in row.keys() else False,
+        "supports_native_web_search": bool(row["supports_native_web_search"]) if "supports_native_web_search" in row.keys() else False,
         "pinned": bool(row["pinned"]) if "pinned" in row.keys() else False,
         "pinned_at": row["pinned_at"] if "pinned_at" in row.keys() else 0,
         "updated_at": row["updated_at"],
@@ -1955,6 +1973,57 @@ def public_sources(results):
             }
         )
     return sources
+
+
+def responses_input_from_messages(messages):
+    converted = []
+    for message in messages or []:
+        role = str(message.get("role") or "user")
+        content = message.get("content")
+        if not isinstance(content, list):
+            converted.append({"role": role, "content": str(content or "")})
+            continue
+        parts = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "")
+            if item_type in ("text", "input_text"):
+                text = str(item.get("text") or "")
+                if text:
+                    parts.append({"type": "input_text", "text": text})
+            elif item_type in ("image_url", "input_image"):
+                image_url = item.get("image_url")
+                if isinstance(image_url, dict):
+                    image_url = image_url.get("url")
+                image_url = str(image_url or "")
+                if image_url:
+                    parts.append({"type": "input_image", "image_url": image_url})
+        converted.append({"role": role, "content": parts or str(content)})
+    return converted
+
+
+def native_search_results_from_item(item, limit=5):
+    if not isinstance(item, dict) or item.get("type") != "web_search_call":
+        return []
+    action = item.get("action") or {}
+    results = []
+    seen = set()
+    for source in action.get("sources") or []:
+        if not isinstance(source, dict):
+            continue
+        url = str(source.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        parsed = urlparse(url)
+        title = str(source.get("title") or parsed.netloc or "联网来源").strip()
+        result = search_result(title, url, source.get("snippet") or "")
+        if result["url"]:
+            results.append(result)
+        if len(results) >= limit:
+            break
+    return results
 
 
 def split_think_blocks(content):
@@ -4202,6 +4271,7 @@ class AppHandler(BaseHTTPRequestHandler):
         provider = str(data.get("provider") or "").strip()
         system_prompt = str(data.get("system_prompt") or "").strip()
         supports_vision = 1 if data.get("supports_vision") else 0
+        supports_native_web_search = 1 if data.get("supports_native_web_search") else 0
         enabled = 1 if data.get("enabled", True) else 0
         input_price = parse_price(data.get("input_price_per_million"))
         output_price = parse_price(data.get("output_price_per_million"))
@@ -4217,9 +4287,10 @@ class AppHandler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO models
-                (id, name, provider, base_url, api_key, model, system_prompt, supports_vision, enabled,
+                (id, name, provider, base_url, api_key, model, system_prompt, supports_vision,
+                 supports_native_web_search, enabled,
                  input_price_per_million, output_price_per_million, cost_enabled, cost_note, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     model_id,
@@ -4230,6 +4301,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     model,
                     system_prompt,
                     supports_vision,
+                    supports_native_web_search,
                     enabled,
                     input_price,
                     output_price,
@@ -4274,6 +4346,9 @@ class AppHandler(BaseHTTPRequestHandler):
             model = str(data.get("model", row["model"])).strip()
             system_prompt = str(data.get("system_prompt", row["system_prompt"])).strip()
             supports_vision = 1 if data.get("supports_vision", bool(row["supports_vision"])) else 0
+            supports_native_web_search = 1 if data.get(
+                "supports_native_web_search", bool(row["supports_native_web_search"])
+            ) else 0
             enabled = 1 if data.get("enabled", bool(row["enabled"])) else 0
             input_price = parse_price(data.get("input_price_per_million", row["input_price_per_million"]))
             output_price = parse_price(data.get("output_price_per_million", row["output_price_per_million"]))
@@ -4291,7 +4366,8 @@ class AppHandler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 UPDATE models
-                SET name=?, provider=?, base_url=?, api_key=?, model=?, system_prompt=?, supports_vision=?, enabled=?,
+                SET name=?, provider=?, base_url=?, api_key=?, model=?, system_prompt=?, supports_vision=?,
+                    supports_native_web_search=?, enabled=?,
                     input_price_per_million=?, output_price_per_million=?, cost_enabled=?, cost_note=?, updated_at=?
                 WHERE id=?
                 """,
@@ -4303,6 +4379,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     model,
                     system_prompt,
                     supports_vision,
+                    supports_native_web_search,
                     enabled,
                     input_price,
                     output_price,
@@ -5111,7 +5188,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return None
         return conn.execute(
             """
-            SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision
+            SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
+                   m.supports_native_web_search
             FROM conversations c
             JOIN models m ON m.id = c.model_id
             WHERE c.id=? AND c.user_id=? AND c.archived=0
@@ -5378,7 +5456,8 @@ mindmap_text 要求：
             with db() as conn:
                 rows = conn.execute(
                     """
-                    SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision
+                    SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
+                           m.supports_native_web_search
                     FROM conversations c
                     JOIN models m ON m.id = c.model_id
                     WHERE c.archived=0 AND c.user_id=?
@@ -5413,7 +5492,8 @@ mindmap_text 要求：
             )
             row = conn.execute(
                 """
-                SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision
+                SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
+                       m.supports_native_web_search
                 FROM conversations c JOIN models m ON m.id=c.model_id
                 WHERE c.id=? AND c.user_id=?
                 """,
@@ -5444,7 +5524,8 @@ mindmap_text 要求：
             )
             row = conn.execute(
                 """
-                SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision
+                SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
+                       m.supports_native_web_search
                 FROM conversations c
                 JOIN models m ON m.id = c.model_id
                 WHERE c.id=? AND c.user_id=?
@@ -5555,7 +5636,8 @@ mindmap_text 要求：
             )
             updated = conn.execute(
                 """
-                SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision
+                SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
+                       m.supports_native_web_search
                 FROM conversations c JOIN models m ON m.id=c.model_id
                 WHERE c.id=? AND c.user_id=?
                 """,
@@ -5685,7 +5767,8 @@ mindmap_text 要求：
             convo = conn.execute(
                 """
                 SELECT c.*, m.name AS model_name, m.base_url, m.api_key, m.model, m.system_prompt,
-                       m.supports_vision, m.enabled, m.input_price_per_million,
+                       m.supports_vision, m.supports_native_web_search, m.enabled,
+                       m.input_price_per_million,
                        m.output_price_per_million, m.cost_enabled
                 FROM conversations c JOIN models m ON m.id=c.model_id
                 WHERE c.id=? AND c.user_id=? AND c.archived=0
@@ -5720,7 +5803,10 @@ mindmap_text 要求：
                 if any(row is None for row in image_rows):
                     return self.error(HTTPStatus.BAD_REQUEST, "图片附件不存在或已被使用")
 
-            if use_web_search:
+            use_native_search = bool(
+                use_web_search and convo["supports_native_web_search"]
+            )
+            if use_web_search and not use_native_search:
                 if not search_config["enabled"] or not search_config["api_key"]:
                     return self.error(HTTPStatus.BAD_REQUEST, "web search is not configured")
                 try:
@@ -5818,9 +5904,15 @@ mindmap_text 要求：
                 return {"role": row["role"], "content": (row["content"] or "") + f"\n\n[图片附件：{names}]"}
             return {"role": row["role"], "content": row["content"]}
 
-        def make_payload(results, include_usage=True):
+        def make_upstream_messages(results):
+            runtime_context = build_runtime_context(bool(results))
+            if use_native_search:
+                runtime_context += (
+                    "\n本次请求已启用百炼 web_search 工具。必须先调用该工具检索最新资料，"
+                    "再依据检索结果回答；不要跳过搜索，也不要假装已经搜索。"
+                )
             upstream_messages = [
-                {"role": "system", "content": build_runtime_context(bool(results))}
+                {"role": "system", "content": runtime_context}
             ]
             if convo["system_prompt"].strip():
                 upstream_messages.append(
@@ -5836,18 +5928,30 @@ mindmap_text 要求：
                     {"role": "system", "content": build_search_context(results)}
                 )
             upstream_messages.extend(upstream_message_from_history(row) for row in history)
+            return upstream_messages
+
+        def make_payload(results, include_usage=True):
             payload = {
                 "model": convo["model"],
-                "messages": upstream_messages,
+                "messages": make_upstream_messages(results),
                 "stream": True,
             }
             if include_usage:
                 payload["stream_options"] = {"include_usage": True}
             return payload
 
-        def open_upstream(payload):
+        def make_native_search_payload():
+            return {
+                "model": convo["model"],
+                "input": responses_input_from_messages(make_upstream_messages([])),
+                "tools": [{"type": "web_search"}],
+                "stream": True,
+            }
+
+        def open_upstream(payload, native_search=False):
+            endpoint = "/responses" if native_search else "/chat/completions"
             request = urllib.request.Request(
-                convo["base_url"].rstrip("/") + "/chat/completions",
+                convo["base_url"].rstrip("/") + endpoint,
                 data=json.dumps(payload).encode(),
                 headers={
                     "Authorization": "Bearer " + convo["api_key"].strip(),
@@ -5872,10 +5976,15 @@ mindmap_text 要求：
                     exc.url, exc.code, exc.reason, exc.headers, io.BytesIO(detail.encode())
                 )
 
-        payload = make_payload(search_results)
+        payload = make_native_search_payload() if use_native_search else make_payload(search_results)
         search_fallback_notice = ""
 
         def upstream_error_message(code, detail):
+            if code == 403 and (
+                "free quota has been exhausted" in detail.lower()
+                or "use free tier only" in detail.lower()
+            ):
+                return "百炼免费额度已用完，请在对应阿里云账号完成付费配置或关闭仅使用免费额度。"
             if image_ids and (
                 "Unexpected item type in content" in detail
                 or "support image input" in detail
@@ -5887,10 +5996,14 @@ mindmap_text 要求：
             return f"upstream status {code}"
 
         try:
-            response = open_upstream_with_usage_fallback(search_results)
+            response = (
+                open_upstream(payload, native_search=True)
+                if use_native_search
+                else open_upstream_with_usage_fallback(search_results)
+            )
         except urllib.error.HTTPError as exc:
             detail = exc.read(65536).decode(errors="replace")
-            if search_results and exc.code == 400 and "data_inspection_failed" in detail:
+            if not use_native_search and search_results and exc.code == 400 and "data_inspection_failed" in detail:
                 search_results = []
                 payload = make_payload(search_results)
                 search_fallback_notice = "（联网资料被上游安全策略拦截，本次先按普通模式回答。）\n\n"
@@ -5934,6 +6047,17 @@ mindmap_text 要求：
         assistant_parts = []
         reasoning_parts = []
         usage_data = None
+
+        def emit_client_event(event):
+            try:
+                self.wfile.write(
+                    ("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode()
+                )
+                self.wfile.flush()
+                return True
+            except Exception:
+                return False
+
         if search_fallback_notice:
             notice_event = {
                 "choices": [
@@ -5958,8 +6082,9 @@ mindmap_text 要求：
                 chunk = response.read(8192)
                 if not chunk:
                     break
-                self.wfile.write(chunk)
-                self.wfile.flush()
+                if not use_native_search:
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
                 buffer += chunk.decode(errors="ignore")
                 lines = buffer.splitlines(keepends=True)
                 if lines and not lines[-1].endswith(("\n", "\r")):
@@ -5976,6 +6101,68 @@ mindmap_text 要求：
                     try:
                         event = json.loads(data_text)
                     except json.JSONDecodeError:
+                        continue
+                    if use_native_search:
+                        event_type = str(event.get("type") or "")
+                        if event_type == "response.output_text.delta":
+                            piece = str(event.get("delta") or "")
+                            if piece:
+                                assistant_parts.append(piece)
+                                emit_client_event(
+                                    {
+                                        "choices": [
+                                            {
+                                                "index": 0,
+                                                "delta": {"content": piece},
+                                                "finish_reason": None,
+                                            }
+                                        ]
+                                    }
+                                )
+                        elif event_type in (
+                            "response.reasoning_summary_text.delta",
+                            "response.reasoning_text.delta",
+                        ):
+                            reasoning_piece = str(event.get("delta") or "")
+                            if reasoning_piece:
+                                reasoning_parts.append(reasoning_piece)
+                                emit_client_event(
+                                    {
+                                        "choices": [
+                                            {
+                                                "index": 0,
+                                                "delta": {
+                                                    "reasoning_content": reasoning_piece
+                                                },
+                                                "finish_reason": None,
+                                            }
+                                        ]
+                                    }
+                                )
+                        elif event_type == "response.output_item.done":
+                            native_results = native_search_results_from_item(
+                                event.get("item"), search_config["result_count"]
+                            )
+                            known_urls = {item["url"] for item in search_results}
+                            for item in native_results:
+                                if item["url"] not in known_urls:
+                                    search_results.append(item)
+                                    known_urls.add(item["url"])
+                                if len(search_results) >= search_config["result_count"]:
+                                    break
+                            if search_results:
+                                emit_client_event(
+                                    {
+                                        "type": "search_status",
+                                        "status": "done",
+                                        "count": len(search_results),
+                                        "sources": public_sources(search_results),
+                                    }
+                                )
+                        elif event_type == "response.completed":
+                            completed = event.get("response") or {}
+                            if isinstance(completed.get("usage"), dict):
+                                usage_data = completed.get("usage")
                         continue
                     if isinstance(event.get("usage"), dict):
                         usage_data = event.get("usage")
@@ -12440,14 +12627,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.4</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.5</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.11.4</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.11.5</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -12460,7 +12647,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.4</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.5</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -12486,7 +12673,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.11.4</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.11.5</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -12909,6 +13096,12 @@ INDEX_HTML = r'''<!doctype html>
 	              <label>启用<select id="enabled"><option value="1">启用</option><option value="0">停用</option></select></label>
 	              <label>图片理解<select id="supportsVision"><option value="0">不支持</option><option value="1">支持图片理解</option></select></label>
 	            </div>
+	            <label>联网能力
+	              <select id="supportsNativeWebSearch">
+	                <option value="0">使用平台搜索（Tavily / Brave）</option>
+	                <option value="1">百炼原生联网（Responses API）</option>
+	              </select>
+	            </label>
 	            <div class="grid2">
 	              <label>输入价格（元 / 百万 Token）<input id="inputPricePerMillion" type="number" min="0" step="0.0001" placeholder="例如 2.4"></label>
 	              <label>输出价格（元 / 百万 Token）<input id="outputPricePerMillion" type="number" min="0" step="0.0001" placeholder="例如 9.6"></label>
@@ -13084,7 +13277,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong>v2.11.4</strong></div>
+	              <div><span>当前版本</span><strong>v2.11.5</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
 	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
 	            </div>
@@ -14008,7 +14201,8 @@ INDEX_HTML = r'''<!doctype html>
 
 	    function renderSearchToggle() {
 	      const config = state.searchConfig || {};
-	      const available = Boolean(config.enabled && config.configured);
+	      const nativeSearch = Boolean(selectedModel()?.supports_native_web_search || state.currentConversation?.supports_native_web_search);
+	      const available = Boolean(config.enabled && (config.configured || nativeSearch));
 	      const toggle = $("webSearchToggle");
 	      const label = $("webSearchLabel");
 	      const mode = config.mode || "auto";
@@ -14018,7 +14212,7 @@ INDEX_HTML = r'''<!doctype html>
 	      if (!available) {
 	        toggle.checked = false;
 	        if (text) text.textContent = "联网搜索";
-	        label.title = config.enabled ? "搜索 API Key 未配置" : "后台未启用联网搜索";
+	        label.title = config.enabled ? "当前模型需要配置平台搜索 API Key" : "后台未启用联网搜索";
 	      } else if (mode === "always") {
 	        toggle.checked = true;
 	        if (text) text.textContent = "强制联网";
@@ -14026,7 +14220,7 @@ INDEX_HTML = r'''<!doctype html>
 	      } else if (mode === "auto") {
 	        toggle.checked = false;
 	        if (text) text.textContent = "自动联网";
-	        label.title = "时效性问题会自动搜索；勾选后可强制本条联网";
+	        label.title = nativeSearch ? "时效性问题使用百炼原生联网；勾选后可强制本条联网" : "时效性问题会自动搜索；勾选后可强制本条联网";
 	      } else {
 		        const saved = getUserStorage("aiPlatformWebSearch", localStorage.getItem("aiPlatformWebSearch"));
 	        toggle.checked = saved === null ? true : saved === "1";
@@ -14081,6 +14275,7 @@ INDEX_HTML = r'''<!doctype html>
       const text = [model?.name, model?.provider, model?.model].join(" ").toLowerCase();
       const tags = [];
       if (model?.supports_vision) tags.push({ icon: "image", label: "可看图" });
+      if (model?.supports_native_web_search) tags.push({ icon: "globe-2", label: "原生联网" });
       if (/reason|thinking|r1|推理|思考|qwq/.test(text)) tags.push({ icon: "brain", label: "推理" });
       if (/flash|turbo|lite|mini|fast|快速|speed/.test(text)) tags.push({ icon: "zap", label: "快速" });
       if (/max|pro|主力|旗舰|plus/.test(text)) tags.push({ icon: "sparkles", label: "主力" });
@@ -14230,13 +14425,15 @@ INDEX_HTML = r'''<!doctype html>
         model_id: model.id,
         model_name: model.name,
         model: model.model,
-        supports_vision: Boolean(model.supports_vision)
+        supports_vision: Boolean(model.supports_vision),
+        supports_native_web_search: Boolean(model.supports_native_web_search)
       };
       upsertConversation(state.currentConversation);
       $("modelSelect").value = state.currentConversation.model_id;
       updateChatHeader();
       await loadConversationStats(state.currentConversation.id);
       updateVisionUI();
+      renderSearchToggle();
       return true;
     }
 
@@ -18677,7 +18874,12 @@ INDEX_HTML = r'''<!doctype html>
         info.innerHTML = `<strong></strong><span></span>`;
         info.querySelector("strong").textContent = model.name + (model.enabled ? "" : "（停用）");
         const costText = model.cost_enabled ? (" · 成本 " + model.input_price_per_million + "/" + model.output_price_per_million + " 元/百万") : " · 未计成本";
-        info.querySelector("span").textContent = model.model + (model.supports_vision ? " · 支持图片理解" : "") + " · " + model.base_url + (model.has_api_key ? " · Key 已保存" : " · 未配置 Key") + costText;
+        info.querySelector("span").textContent = model.model
+          + (model.supports_vision ? " · 支持图片理解" : "")
+          + (model.supports_native_web_search ? " · 百炼原生联网" : "")
+          + " · " + model.base_url
+          + (model.has_api_key ? " · Key 已保存" : " · 未配置 Key")
+          + costText;
 	        const actions = document.createElement("div");
 	        actions.className = "library-actions";
 	        const edit = createIconButton("pencil", "编辑", { fallback: "✎" });
@@ -18752,7 +18954,8 @@ INDEX_HTML = r'''<!doctype html>
 	        clear_api_key: clearKey,
 	        system_prompt: model.system_prompt || "",
 	        enabled: Boolean(model.enabled),
-	        supports_vision: Boolean(model.supports_vision)
+	        supports_vision: Boolean(model.supports_vision),
+	        supports_native_web_search: Boolean(model.supports_native_web_search)
 	      };
 	      const res = await adminApi(`/api/admin/models/${modelId}`, {
 	        method: "PUT",
@@ -18779,6 +18982,7 @@ INDEX_HTML = r'''<!doctype html>
       $("systemPrompt").value = model.system_prompt || "";
       $("enabled").value = model.enabled ? "1" : "0";
       $("supportsVision").value = model.supports_vision ? "1" : "0";
+      $("supportsNativeWebSearch").value = model.supports_native_web_search ? "1" : "0";
       $("inputPricePerMillion").value = model.input_price_per_million || "";
       $("outputPricePerMillion").value = model.output_price_per_million || "";
       $("costEnabled").value = model.cost_enabled ? "1" : "0";
@@ -18797,6 +19001,7 @@ INDEX_HTML = r'''<!doctype html>
       for (const id of ["editingModelId","modelName","provider","baseUrl","modelCode","apiKey","systemPrompt","inputPricePerMillion","outputPricePerMillion","costNote"]) $(id).value = "";
       $("enabled").value = "1";
       $("supportsVision").value = "0";
+      $("supportsNativeWebSearch").value = "0";
       $("costEnabled").value = "0";
       $("apiKey").placeholder = "留空则保持原值";
       setStatus("modelStatus", "");
@@ -18813,6 +19018,7 @@ INDEX_HTML = r'''<!doctype html>
         system_prompt: $("systemPrompt").value.trim(),
         enabled: $("enabled").value === "1",
         supports_vision: $("supportsVision").value === "1",
+        supports_native_web_search: $("supportsNativeWebSearch").value === "1",
         input_price_per_million: Number($("inputPricePerMillion").value || 0),
         output_price_per_million: Number($("outputPricePerMillion").value || 0),
         cost_enabled: $("costEnabled").value === "1" || Number($("inputPricePerMillion").value || 0) > 0 || Number($("outputPricePerMillion").value || 0) > 0,
