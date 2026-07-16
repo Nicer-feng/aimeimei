@@ -12560,6 +12560,198 @@ INDEX_HTML = r'''<!doctype html>
       min-width: 34px;
       height: 34px;
     }
+    .desktop-pet {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 19;
+      width: 68px;
+      height: 68px;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      opacity: 1;
+      transition:
+        left 220ms var(--ease-standard),
+        top 180ms var(--ease-standard),
+        opacity var(--motion-fast) ease,
+        transform var(--motion-base) var(--ease-standard);
+    }
+    .desktop-pet[hidden] {
+      display: none;
+    }
+    .desktop-pet.is-dragging {
+      transition: opacity var(--motion-fast) ease;
+      cursor: grabbing;
+    }
+    body.dialog-open .desktop-pet,
+    body.sidebar-open .desktop-pet,
+    body.admin-open .desktop-pet,
+    body.interface-open .desktop-pet {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .desktop-pet-handle {
+      position: relative;
+      display: block;
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      color: inherit;
+      background: transparent;
+      cursor: grab;
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .desktop-pet-handle:focus-visible {
+      box-shadow: 0 0 0 4px var(--focus-ring);
+    }
+    .desktop-pet-face {
+      position: relative;
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      border-radius: 50%;
+      filter: drop-shadow(0 9px 12px rgba(93, 66, 55, .18));
+      transform-origin: 50% 82%;
+    }
+    .desktop-pet-face img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      object-fit: cover;
+      pointer-events: none;
+    }
+    .desktop-pet-face::after {
+      content: "";
+      position: absolute;
+      top: 55%;
+      left: 31%;
+      width: 9px;
+      height: 2px;
+      border-radius: 999px;
+      background: rgba(70, 45, 38, .8);
+      box-shadow: 18px 0 0 rgba(70, 45, 38, .8);
+      opacity: 0;
+      pointer-events: none;
+    }
+    .desktop-pet.animation-enabled:not(.is-dragging) .desktop-pet-face {
+      animation: petBreathing 4.8s ease-in-out infinite;
+    }
+    .desktop-pet.animation-enabled:not(.is-dragging) .desktop-pet-face::after {
+      animation: petBlink 7.2s ease-in-out infinite;
+    }
+    .desktop-pet-handle:hover .desktop-pet-face {
+      transform: scale(1.06);
+    }
+    .desktop-pet.is-bouncing .desktop-pet-face {
+      animation: petBounce 320ms var(--ease-standard) !important;
+    }
+    @keyframes petBreathing {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-3px) scale(1.018); }
+    }
+    @keyframes petBlink {
+      0%, 46%, 50%, 100% { opacity: 0; transform: scaleX(.8); }
+      47.2%, 48.6% { opacity: .88; transform: scaleX(1); }
+    }
+    @keyframes petBounce {
+      0%, 100% { transform: translateY(0) scale(1); }
+      45% { transform: translateY(-8px) scale(1.07); }
+      72% { transform: translateY(1px) scale(.98); }
+    }
+    .desktop-pet-menu {
+      position: absolute;
+      bottom: 2px;
+      display: grid;
+      width: 184px;
+      padding: 7px;
+      border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
+      border-radius: var(--radius-md);
+      background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+      box-shadow: var(--shadow-lg);
+      -webkit-backdrop-filter: blur(18px) saturate(145%);
+      backdrop-filter: blur(18px) saturate(145%);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateY(5px) scale(.98);
+      transform-origin: bottom center;
+      transition:
+        opacity var(--motion-fast) ease,
+        transform var(--motion-base) var(--ease-standard),
+        visibility 0s linear var(--motion-base);
+      touch-action: auto;
+    }
+    .desktop-pet.side-right .desktop-pet-menu {
+      right: calc(100% + 10px);
+    }
+    .desktop-pet.side-left .desktop-pet-menu {
+      left: calc(100% + 10px);
+    }
+    .desktop-pet.menu-below .desktop-pet-menu {
+      top: 2px;
+      bottom: auto;
+      transform-origin: top center;
+    }
+    .desktop-pet.menu-open .desktop-pet-menu {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transform: translateY(0) scale(1);
+      transition-delay: 0s;
+    }
+    .desktop-pet-menu button {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      min-height: 38px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: var(--radius-sm);
+      color: var(--color-text-primary);
+      background: transparent;
+      font-size: 13px;
+      font-weight: 650;
+      text-align: left;
+      cursor: pointer;
+    }
+    .desktop-pet-menu button:hover,
+    .desktop-pet-menu button:focus-visible {
+      background: var(--color-surface-muted);
+      outline: none;
+    }
+    .desktop-pet-menu button.pet-hide-action {
+      color: var(--color-text-secondary);
+    }
+    .pet-settings-grid {
+      display: grid;
+      gap: 8px;
+    }
+    .pet-settings-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 42px;
+      padding: 7px 10px;
+      border: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--color-surface-muted) 48%, transparent);
+    }
+    .pet-settings-row span {
+      display: grid;
+      gap: 2px;
+    }
+    .pet-settings-row small {
+      color: var(--color-text-secondary);
+      font-size: 11px;
+    }
     .empty-state {
       border-color: color-mix(in srgb, var(--color-border) 72%, transparent);
       border-radius: var(--radius-lg);
@@ -12621,6 +12813,16 @@ INDEX_HTML = r'''<!doctype html>
       }
     }
     @media (max-width: 620px) {
+      .desktop-pet {
+        width: 48px;
+        height: 48px;
+      }
+      .desktop-pet-menu {
+        width: 176px;
+      }
+      .desktop-pet-menu button {
+        min-height: 44px;
+      }
       .version-update-toast {
         top: max(10px, calc(env(safe-area-inset-top) + 8px));
         right: 12px;
@@ -12799,14 +13001,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.7</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.8</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.11.7</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.11.8</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -12819,7 +13021,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.7</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.8</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -12845,7 +13047,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.11.7</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.11.8</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -12954,8 +13156,22 @@ INDEX_HTML = r'''<!doctype html>
 		                  <input id="composerBlurRange" type="range" min="0" max="30" step="1" value="18">
 		                  <small>实时调整底部输入区的 backdrop-filter blur。</small>
 		                </label>
-			              </section>
-			              <div class="interface-actions">
+		              </section>
+		              <section class="interface-section">
+		                <h2>桌面宠物</h2>
+		                <div class="pet-settings-grid">
+		                  <label class="pet-settings-row">
+		                    <span><strong>显示桌面宠物</strong><small>手机端默认关闭，可在这里手动开启。</small></span>
+		                    <input id="petEnabledToggle" type="checkbox">
+		                  </label>
+		                  <label class="pet-settings-row">
+		                    <span><strong>宠物动画</strong><small>轻微呼吸、眨眼和点击反馈。</small></span>
+		                    <input id="petAnimationToggle" type="checkbox" checked>
+		                  </label>
+		                  <button class="ui-btn ui-btn-secondary inline-flex items-center justify-center gap-2" id="resetPetPosition" type="button"><i data-lucide="locate-fixed" aria-hidden="true"></i><span>恢复默认位置</span></button>
+		                </div>
+		              </section>
+		              <div class="interface-actions">
 			                <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetInterfaceSettings" type="button"><i data-lucide="rotate-ccw" aria-hidden="true"></i><span>恢复默认设置</span></button>
 			                <span class="interface-hint">后续可继续加入深色模式、字体大小、气泡宽度和 AI 回复字号。</span>
 		              </div>
@@ -12975,6 +13191,19 @@ INDEX_HTML = r'''<!doctype html>
 	  </section>
     </main>
   </div>
+
+	<div class="desktop-pet side-right animation-enabled" id="desktopPet" aria-label="槑槑桌面宠物" hidden>
+	  <button class="desktop-pet-handle" id="desktopPetHandle" type="button" aria-label="打开槑槑快捷菜单" aria-expanded="false">
+	    <span class="desktop-pet-face"><img src="/res/meimei-avatar.png" alt="槑槑"></span>
+	  </button>
+	  <div class="desktop-pet-menu" id="desktopPetMenu" role="menu" aria-label="槑槑快捷操作">
+	    <button type="button" role="menuitem" data-pet-action="new-chat"><i data-lucide="message-square-plus" aria-hidden="true"></i><span>新建对话</span></button>
+	    <button type="button" role="menuitem" data-pet-action="scroll-bottom"><i data-lucide="arrow-down-to-line" aria-hidden="true"></i><span>回到底部</span></button>
+	    <button type="button" role="menuitem" data-pet-action="prompts"><i data-lucide="book-open" aria-hidden="true"></i><span>打开提示词库</span></button>
+	    <button type="button" role="menuitem" data-pet-action="profiles"><i data-lucide="user-round-cog" aria-hidden="true"></i><span>打开 AI档案</span></button>
+	    <button class="pet-hide-action" type="button" role="menuitem" data-pet-action="hide"><i data-lucide="eye-off" aria-hidden="true"></i><span>隐藏宠物</span></button>
+	  </div>
+	</div>
 
 	<section class="version-update-toast ui-toast" id="versionUpdateToast" role="status" aria-live="polite" aria-atomic="true" hidden>
 	  <span class="version-update-icon"><i data-lucide="sparkles" aria-hidden="true"></i></span>
@@ -13462,7 +13691,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.11.7</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.11.8</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -13562,9 +13791,23 @@ INDEX_HTML = r'''<!doctype html>
 		      theme: localStorage.getItem("aiPlatformTheme") || "",
 		      accent: localStorage.getItem("aiPlatformAccent") || "pink",
 		      fontSize: localStorage.getItem("aiPlatformFontSize") || "medium",
-		      composerOpacity: localStorage.getItem("aiPlatformComposerOpacity") || "80",
-		      composerBlur: localStorage.getItem("aiPlatformComposerBlur") || "18",
-		      sidebarWidth: localStorage.getItem("aiPlatformSidebarWidth") || "322"
+	      composerOpacity: localStorage.getItem("aiPlatformComposerOpacity") || "80",
+	      composerBlur: localStorage.getItem("aiPlatformComposerBlur") || "18",
+	      sidebarWidth: localStorage.getItem("aiPlatformSidebarWidth") || "322",
+	      petEnabled: false,
+	      petAnimationEnabled: true,
+	      petPositionX: null,
+	      petPositionY: null,
+	      petSide: "right",
+	      petDragging: false,
+	      petPointerId: null,
+	      petDragMoved: false,
+	      petDragStartX: 0,
+	      petDragStartY: 0,
+	      petStartX: 0,
+	      petStartY: 0,
+	      petSuppressClickUntil: 0,
+	      petCorrectionFrame: 0
 	    };
 	    let lucideRefreshQueued = false;
 	    $("adminKey").value = state.adminKey;
@@ -13686,11 +13929,20 @@ INDEX_HTML = r'''<!doctype html>
 	      state.composerOpacity = getUserStorage("aiPlatformComposerOpacity", localStorage.getItem("aiPlatformComposerOpacity") || "80");
 	      state.composerBlur = getUserStorage("aiPlatformComposerBlur", localStorage.getItem("aiPlatformComposerBlur") || "18");
 	      state.sidebarWidth = getUserStorage("aiPlatformSidebarWidth", localStorage.getItem("aiPlatformSidebarWidth") || "322");
+	      const savedPetEnabled = getUserStorage("pet_enabled", null);
+	      state.petEnabled = savedPetEnabled === null ? !isSmallScreen() : savedPetEnabled === "1";
+	      state.petAnimationEnabled = getUserStorage("pet_animation_enabled", "1") !== "0";
+	      const savedPetX = getUserStorage("pet_position_x", "");
+	      const savedPetY = getUserStorage("pet_position_y", "");
+	      state.petPositionX = savedPetX !== "" && Number.isFinite(Number(savedPetX)) ? Number(savedPetX) : null;
+	      state.petPositionY = savedPetY !== "" && Number.isFinite(Number(savedPetY)) ? Number(savedPetY) : null;
+	      state.petSide = getUserStorage("pet_side", "right") === "left" ? "left" : "right";
 	      loadProfileSessionPrefs();
 	      applyInterfaceSettings({ save: false });
 	      applyFontSize(state.fontSize);
 	      applyTheme(preferredTheme());
 	      applySidebarWidth(state.sidebarWidth, false);
+	      applyDesktopPetSettings({ save: false });
 	    }
 
     const accentPresets = {
@@ -14027,13 +14279,18 @@ INDEX_HTML = r'''<!doctype html>
 	    function openInterfaceSettings() {
 	      $("interfacePopover").classList.add("show");
 	      $("openInterfaceSettings").classList.add("active");
+	      document.body.classList.add("interface-open");
+	      closeDesktopPetMenu();
 	      setStatus("interfaceStatus", "");
 	      updateInterfaceControls(Number(state.composerOpacity), Number(state.composerBlur));
+	      updatePetSettingControls();
 	    }
 
 	    function closeInterfaceSettings() {
 	      $("interfacePopover").classList.remove("show");
 	      $("openInterfaceSettings").classList.remove("active");
+	      document.body.classList.remove("interface-open");
+	      schedulePetPositionCorrection();
 	    }
 
 	    function toggleInterfaceSettings(event) {
@@ -14055,6 +14312,254 @@ INDEX_HTML = r'''<!doctype html>
 	      if (!popover.classList.contains("show")) return;
 	      if (popover.contains(event.target) || $("openInterfaceSettings").contains(event.target)) return;
 	      closeInterfaceSettings();
+	    }
+
+	    function petViewportBounds() {
+	      const viewport = window.visualViewport;
+	      const left = Math.round(viewport?.offsetLeft || 0);
+	      const top = Math.round(viewport?.offsetTop || 0);
+	      const width = Math.round(viewport?.width || window.innerWidth || document.documentElement.clientWidth);
+	      const height = Math.round(viewport?.height || window.innerHeight || document.documentElement.clientHeight);
+	      const size = isSmallScreen() ? 48 : 68;
+	      const margin = isSmallScreen() ? 10 : 16;
+	      return {
+	        left: left + margin,
+	        top: top + margin,
+	        right: left + width - margin,
+	        bottom: top + height - margin,
+	        width,
+	        height,
+	        size,
+	        maxX: left + width - margin - size,
+	        maxY: top + height - margin - size
+	      };
+	    }
+
+	    function petElementIsVisible(element) {
+	      if (!element || element.hidden) return false;
+	      const style = getComputedStyle(element);
+	      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+	      const rect = element.getBoundingClientRect();
+	      return rect.width > 0 && rect.height > 0;
+	    }
+
+	    function petObstacleRects() {
+	      const obstacles = [];
+	      const composer = document.querySelector(".composer");
+	      if (petElementIsVisible(composer)) obstacles.push(composer.getBoundingClientRect());
+	      const latest = $("scrollLatest");
+	      if (latest?.classList.contains("show") && petElementIsVisible(latest)) obstacles.push(latest.getBoundingClientRect());
+	      return obstacles;
+	    }
+
+	    function petOverlapsRect(x, y, size, rect, padding = 10) {
+	      return x < rect.right + padding && x + size > rect.left - padding && y < rect.bottom + padding && y + size > rect.top - padding;
+	    }
+
+	    function avoidPetObstacles(position, bounds) {
+	      let { x, y } = position;
+	      for (const rect of petObstacleRects()) {
+	        if (!petOverlapsRect(x, y, bounds.size, rect)) continue;
+	        const above = rect.top - bounds.size - 14;
+	        const below = rect.bottom + 14;
+	        if (above >= bounds.top) y = above;
+	        else if (below <= bounds.maxY) y = below;
+	      }
+	      return {
+	        x: clampNumber(x, bounds.left, bounds.maxX, bounds.maxX),
+	        y: clampNumber(y, bounds.top, bounds.maxY, bounds.maxY)
+	      };
+	    }
+
+	    function defaultPetPosition(bounds = petViewportBounds()) {
+	      const composer = document.querySelector(".composer");
+	      let y = bounds.maxY;
+	      if (petElementIsVisible(composer)) {
+	        y = Math.min(y, composer.getBoundingClientRect().top - bounds.size - 18);
+	      }
+	      return {
+	        x: state.petSide === "left" ? bounds.left : bounds.maxX,
+	        y: clampNumber(y, bounds.top, bounds.maxY, bounds.maxY)
+	      };
+	    }
+
+	    function persistPetPosition() {
+	      if (!state.user || !Number.isFinite(state.petPositionX) || !Number.isFinite(state.petPositionY)) return;
+	      setUserStorage("pet_position_x", String(Math.round(state.petPositionX)));
+	      setUserStorage("pet_position_y", String(Math.round(state.petPositionY)));
+	      setUserStorage("pet_side", state.petSide);
+	    }
+
+	    function placeDesktopPet(x = state.petPositionX, y = state.petPositionY, options = {}) {
+	      const pet = $("desktopPet");
+	      if (!pet || pet.hidden) return;
+	      const bounds = petViewportBounds();
+	      const fallback = defaultPetPosition(bounds);
+	      const hasX = x !== null && x !== "" && Number.isFinite(Number(x));
+	      const hasY = y !== null && y !== "" && Number.isFinite(Number(y));
+	      let position = {
+	        x: hasX ? Number(x) : fallback.x,
+	        y: hasY ? Number(y) : fallback.y
+	      };
+	      position.x = clampNumber(position.x, bounds.left, bounds.maxX, fallback.x);
+	      position.y = clampNumber(position.y, bounds.top, bounds.maxY, fallback.y);
+	      if (options.snap) {
+	        const center = position.x + bounds.size / 2;
+	        const viewportCenter = bounds.left + bounds.width / 2;
+	        state.petSide = center <= viewportCenter ? "left" : "right";
+	        position.x = state.petSide === "left" ? bounds.left : bounds.maxX;
+	      }
+	      if (options.avoid !== false) position = avoidPetObstacles(position, bounds);
+	      state.petPositionX = Math.round(position.x);
+	      state.petPositionY = Math.round(position.y);
+	      pet.style.left = state.petPositionX + "px";
+	      pet.style.top = state.petPositionY + "px";
+	      pet.classList.toggle("side-left", state.petSide === "left");
+	      pet.classList.toggle("side-right", state.petSide !== "left");
+	      pet.classList.toggle("menu-below", state.petPositionY < bounds.top + 220);
+	      if (options.save) persistPetPosition();
+	    }
+
+	    function schedulePetPositionCorrection(options = {}) {
+	      if (state.petCorrectionFrame) cancelAnimationFrame(state.petCorrectionFrame);
+	      state.petCorrectionFrame = requestAnimationFrame(() => {
+	        state.petCorrectionFrame = 0;
+	        placeDesktopPet(state.petPositionX, state.petPositionY, { avoid: true, save: Boolean(options.save) });
+	      });
+	    }
+
+	    function updatePetSettingControls() {
+	      const enabled = $("petEnabledToggle");
+	      const animation = $("petAnimationToggle");
+	      if (enabled) enabled.checked = Boolean(state.petEnabled);
+	      if (animation) {
+	        animation.checked = Boolean(state.petAnimationEnabled);
+	        animation.disabled = !state.petEnabled;
+	      }
+	    }
+
+	    function closeDesktopPetMenu() {
+	      const pet = $("desktopPet");
+	      const handle = $("desktopPetHandle");
+	      pet?.classList.remove("menu-open");
+	      handle?.setAttribute("aria-expanded", "false");
+	    }
+
+	    function updateDesktopPetVisibility() {
+	      const pet = $("desktopPet");
+	      if (!pet) return;
+	      const appVisible = state.authed && $("appView")?.style.display !== "none";
+	      pet.hidden = !state.petEnabled || !appVisible;
+	      pet.classList.toggle("animation-enabled", Boolean(state.petAnimationEnabled));
+	      updatePetSettingControls();
+	      if (pet.hidden) {
+	        closeDesktopPetMenu();
+	        return;
+	      }
+	      requestAnimationFrame(() => placeDesktopPet(state.petPositionX, state.petPositionY, { avoid: true }));
+	    }
+
+	    function applyDesktopPetSettings(options = {}) {
+	      if (options.enabled !== undefined) state.petEnabled = Boolean(options.enabled);
+	      if (options.animation !== undefined) state.petAnimationEnabled = Boolean(options.animation);
+	      if (options.save !== false && state.user) {
+	        setUserStorage("pet_enabled", state.petEnabled ? "1" : "0");
+	        setUserStorage("pet_animation_enabled", state.petAnimationEnabled ? "1" : "0");
+	      }
+	      updateDesktopPetVisibility();
+	    }
+
+	    function resetDesktopPetPosition() {
+	      state.petSide = "right";
+	      state.petPositionX = null;
+	      state.petPositionY = null;
+	      if (state.user) {
+	        localStorage.removeItem(userStorageKey("pet_position_x"));
+	        localStorage.removeItem(userStorageKey("pet_position_y"));
+	        localStorage.removeItem(userStorageKey("pet_side"));
+	      }
+	      placeDesktopPet(null, null, { avoid: true, snap: true, save: true });
+	      setStatus("interfaceStatus", "已恢复宠物默认位置", "ok");
+	    }
+
+	    function toggleDesktopPetMenu() {
+	      const pet = $("desktopPet");
+	      if (!pet || pet.hidden) return;
+	      const opening = !pet.classList.contains("menu-open");
+	      pet.classList.toggle("menu-open", opening);
+	      $("desktopPetHandle")?.setAttribute("aria-expanded", opening ? "true" : "false");
+	      pet.classList.remove("is-bouncing");
+	      requestAnimationFrame(() => pet.classList.add("is-bouncing"));
+	      setTimeout(() => pet.classList.remove("is-bouncing"), 340);
+	      if (opening) queueLucideRefresh();
+	    }
+
+	    function startDesktopPetDrag(event) {
+	      if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+	      const pet = $("desktopPet");
+	      if (!pet || pet.hidden) return;
+	      state.petPointerId = event.pointerId;
+	      state.petDragMoved = false;
+	      state.petDragStartX = event.clientX;
+	      state.petDragStartY = event.clientY;
+	      state.petStartX = Number.isFinite(state.petPositionX) ? state.petPositionX : pet.getBoundingClientRect().left;
+	      state.petStartY = Number.isFinite(state.petPositionY) ? state.petPositionY : pet.getBoundingClientRect().top;
+	      $("desktopPetHandle")?.setPointerCapture?.(event.pointerId);
+	    }
+
+	    function moveDesktopPet(event) {
+	      if (state.petPointerId !== event.pointerId) return;
+	      const dx = event.clientX - state.petDragStartX;
+	      const dy = event.clientY - state.petDragStartY;
+	      if (!state.petDragMoved && Math.hypot(dx, dy) < 6) return;
+	      state.petDragMoved = true;
+	      state.petDragging = true;
+	      closeDesktopPetMenu();
+	      $("desktopPet")?.classList.add("is-dragging");
+	      event.preventDefault();
+	      placeDesktopPet(state.petStartX + dx, state.petStartY + dy, { avoid: false });
+	    }
+
+	    function finishDesktopPetDrag(event) {
+	      if (state.petPointerId !== event.pointerId) return;
+	      const handle = $("desktopPetHandle");
+	      if (handle?.hasPointerCapture?.(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+	      state.petPointerId = null;
+	      if (state.petDragMoved) {
+	        state.petSuppressClickUntil = Date.now() + 420;
+	        placeDesktopPet(state.petPositionX, state.petPositionY, { snap: true, avoid: true, save: true });
+	      }
+	      state.petDragging = false;
+	      state.petDragMoved = false;
+	      $("desktopPet")?.classList.remove("is-dragging");
+	    }
+
+	    function handleDesktopPetClick(event) {
+	      if (Date.now() < state.petSuppressClickUntil) {
+	        event.preventDefault();
+	        return;
+	      }
+	      toggleDesktopPetMenu();
+	    }
+
+	    function handleDesktopPetAction(event) {
+	      const button = event.target.closest("[data-pet-action]");
+	      if (!button) return;
+	      const action = button.dataset.petAction;
+	      closeDesktopPetMenu();
+	      if (action === "new-chat") $("newChat")?.click();
+	      if (action === "scroll-bottom") scrollToLatest("smooth");
+	      if (action === "prompts") openPromptLibrary();
+	      if (action === "profiles") openProfiles();
+	      if (action === "hide") {
+	        applyDesktopPetSettings({ enabled: false });
+	        setStatus("chatStatus", "桌面宠物已隐藏，可在界面设置中重新开启。", "ok");
+	      }
+	    }
+
+	    function handleDesktopPetOutsidePointer(event) {
+	      const pet = $("desktopPet");
+	      if (pet?.classList.contains("menu-open") && !pet.contains(event.target)) closeDesktopPetMenu();
 	    }
 
 	    function renderAccentOptions() {
@@ -14326,12 +14831,14 @@ INDEX_HTML = r'''<!doctype html>
 	    function showLogin() {
 	      $("loginView").style.display = "grid";
 	      $("appView").style.display = "none";
+	      updateDesktopPetVisibility();
 	      $("loginUsername").focus();
 	    }
 
     function showApp() {
       $("loginView").style.display = "none";
       $("appView").style.display = "grid";
+	  updateDesktopPetVisibility();
       requestAnimationFrame(syncComposerLayout);
       $("prompt").focus();
     }
@@ -14360,6 +14867,7 @@ INDEX_HTML = r'''<!doctype html>
         const root = document.documentElement;
         root.style.setProperty("--composer-safe-space", safeSpace + "px");
         root.style.setProperty("--composer-float-offset", floatOffset + "px");
+	    schedulePetPositionCorrection();
         if (keepAtBottom) {
           requestAnimationFrame(() => {
             messages.scrollTop = messages.scrollHeight;
@@ -14386,6 +14894,8 @@ INDEX_HTML = r'''<!doctype html>
         return el && el.classList.contains("show");
       });
       document.body.classList.toggle("dialog-open", open);
+	  if (open) closeDesktopPetMenu();
+	  else schedulePetPositionCorrection();
     }
 
 	    function isSmallScreen() {
@@ -17488,6 +17998,7 @@ INDEX_HTML = r'''<!doctype html>
 	      button.title = label;
 	      button.setAttribute("aria-label", label);
 	      button.classList.toggle("show", awayFromBottom && state.messages.length > 0);
+	      schedulePetPositionCorrection();
 	    }
 
 	    function scrollToLatest(behavior = "auto") {
@@ -18513,6 +19024,8 @@ INDEX_HTML = r'''<!doctype html>
 	      document.body.classList.remove("sidebar-open");
 	      $("drawerMask").classList.add("show");
 	      $("settingsDrawer").classList.add("show");
+	      document.body.classList.add("admin-open");
+	      closeDesktopPetMenu();
 	      switchAdminSection(state.adminSection || "overview");
 	      loadAdminOverview();
 	      loadAdminModels();
@@ -18525,6 +19038,8 @@ INDEX_HTML = r'''<!doctype html>
 	    function closeSettings() {
 	      $("drawerMask").classList.remove("show");
 	      $("settingsDrawer").classList.remove("show");
+	      document.body.classList.remove("admin-open");
+	      schedulePetPositionCorrection();
 	    }
 
 	    async function loadAdminOverview() {
@@ -19546,11 +20061,13 @@ INDEX_HTML = r'''<!doctype html>
       $("sidebar").classList.add("show");
       $("drawerMask").classList.add("show");
       document.body.classList.add("sidebar-open");
+	  closeDesktopPetMenu();
     }
     function closeSidebar() {
       $("sidebar").classList.remove("show");
       document.body.classList.remove("sidebar-open");
       if (!$("settingsDrawer").classList.contains("show")) $("drawerMask").classList.remove("show");
+	  schedulePetPositionCorrection();
     }
     function autosizePrompt() {
       const el = $("prompt");
@@ -19684,6 +20201,20 @@ INDEX_HTML = r'''<!doctype html>
 	      });
 	    });
 	    $("resetInterfaceSettings").addEventListener("click", resetInterfaceSettings);
+	    $("desktopPetHandle").addEventListener("pointerdown", startDesktopPetDrag);
+	    $("desktopPetHandle").addEventListener("pointermove", moveDesktopPet);
+	    $("desktopPetHandle").addEventListener("pointerup", finishDesktopPetDrag);
+	    $("desktopPetHandle").addEventListener("pointercancel", finishDesktopPetDrag);
+	    $("desktopPetHandle").addEventListener("click", handleDesktopPetClick);
+	    $("desktopPetMenu").addEventListener("click", handleDesktopPetAction);
+	    $("petEnabledToggle").addEventListener("change", () => {
+	      applyDesktopPetSettings({ enabled: $("petEnabledToggle").checked });
+	    });
+	    $("petAnimationToggle").addEventListener("change", () => {
+	      applyDesktopPetSettings({ animation: $("petAnimationToggle").checked });
+	    });
+	    $("resetPetPosition").addEventListener("click", resetDesktopPetPosition);
+	    document.addEventListener("pointerdown", handleDesktopPetOutsidePointer);
 	    document.addEventListener("click", handleInterfaceOutsideClick);
 	    document.addEventListener("keydown", (event) => {
 	      const key = String(event.key || "").toLowerCase();
@@ -19701,6 +20232,7 @@ INDEX_HTML = r'''<!doctype html>
 	        closeProfiles();
 	        closeTokenActivity();
 	        closeInterfaceSettings();
+	        closeDesktopPetMenu();
 	        closeImagePreview();
 	        closeSettings();
 	      }
@@ -19813,10 +20345,13 @@ INDEX_HTML = r'''<!doctype html>
 			    window.addEventListener("resize", positionChangelogPanel, { passive: true });
 			    window.addEventListener("resize", () => queueMarkdownOverflowRefresh($("messages")), { passive: true });
 			    window.addEventListener("resize", queueConversationMinimap, { passive: true });
+			    window.addEventListener("resize", () => schedulePetPositionCorrection({ save: true }), { passive: true });
 		    window.addEventListener("blur", endChatTextSelection);
 		    window.addEventListener("pagehide", saveCurrentDraft);
 		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
+	    window.visualViewport?.addEventListener("resize", () => schedulePetPositionCorrection({ save: true }), { passive: true });
 	    window.visualViewport?.addEventListener("scroll", syncViewportHeight, { passive: true });
+	    window.visualViewport?.addEventListener("scroll", schedulePetPositionCorrection, { passive: true });
 
 	    initializeVersionMonitoring();
 	    queueLucideRefresh();
