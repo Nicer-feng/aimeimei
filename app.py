@@ -26,6 +26,7 @@ HOME_PAGE_PATH = APP_DIR / "index.html"
 CAT_PAGE_PATH = APP_DIR / "cat.html"
 CHANGELOG_PATH = APP_DIR / "CHANGELOG.md"
 VERSION_PATH = APP_DIR / "VERSION"
+BUILD_ID_PATH = APP_DIR / "BUILD_ID"
 LISTEN = os.environ.get("AI_PLATFORM_LISTEN", ":8080")
 DB_PATH = DATA_DIR / "ai-platform.db"
 SECRETS_PATH = DATA_DIR / "secrets.json"
@@ -96,6 +97,32 @@ def current_app_version() -> str:
     if entries:
         return entries[0]["version"]
     return ""
+
+
+def current_build_info():
+    version = current_app_version()
+    build_id = ""
+    updated_at = ""
+    try:
+        build_id = BUILD_ID_PATH.read_text(encoding="utf-8").strip()
+        updated_at = time.strftime(
+            "%Y-%m-%d %H:%M:%S",
+            time.localtime(BUILD_ID_PATH.stat().st_mtime),
+        )
+    except OSError:
+        pass
+    if not build_id:
+        try:
+            stamp = int(Path(__file__).stat().st_mtime)
+        except OSError:
+            stamp = now()
+        build_id = f"{version or 'dev'}-{stamp}"
+        updated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stamp))
+    return {
+        "version": f"v{version}" if version else "",
+        "build_id": build_id,
+        "updated_at": updated_at,
+    }
 
 
 def parse_changelog(limit=None):
@@ -2083,6 +2110,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_cat_admin(self.handle_cat_admin_users)
         if path == "/api/health":
             return self.json({"status": "ok", "time": iso_now()})
+        if path == "/api/version":
+            return self.handle_version()
         if path == "/api/changelog":
             return self.handle_changelog()
         if path == "/api/me":
@@ -2297,6 +2326,18 @@ class AppHandler(BaseHTTPRequestHandler):
             }
         )
 
+    def handle_version(self):
+        raw = json.dumps(current_build_info(), ensure_ascii=False).encode()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.end_headers()
+        if not getattr(self, "_head_only", False):
+            self.wfile.write(raw)
+
     def handle_res_file(self, path):
         name = unquote(path.removeprefix("/res/"))
         if not name or name.startswith("/") or ".." in Path(name).parts:
@@ -2316,7 +2357,10 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "public, max-age=86400")
+        if target.suffix.lower() in {".css", ".js"}:
+            self.send_header("Cache-Control", "no-cache, must-revalidate")
+        else:
+            self.send_header("Cache-Control", "public, max-age=86400")
         self.end_headers()
         if not getattr(self, "_head_only", False):
             self.wfile.write(data)
@@ -12427,6 +12471,95 @@ INDEX_HTML = r'''<!doctype html>
       from { opacity: 0; transform: translateY(8px); }
       to { opacity: 1; transform: translateY(0); }
     }
+    .version-update-toast {
+      position: fixed;
+      top: max(18px, calc(env(safe-area-inset-top) + 12px));
+      right: 20px;
+      z-index: 33;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      width: min(440px, calc(100vw - 32px));
+      min-height: 56px;
+      padding: 10px 12px 10px 14px;
+      border-radius: var(--radius-lg);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateY(-10px) scale(.98);
+      animation: none;
+      transition:
+        opacity var(--motion-base) var(--ease-standard),
+        transform var(--motion-base) var(--ease-standard),
+        visibility 0s linear var(--motion-base);
+    }
+    .version-update-toast.show {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transform: translateY(0) scale(1);
+      transition-delay: 0s;
+    }
+    .version-update-icon {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      border-radius: 50%;
+      color: var(--accent-strong);
+      background: color-mix(in srgb, var(--accent-soft) 86%, var(--color-surface));
+    }
+    .version-update-copy {
+      min-width: 0;
+      flex: 1;
+      display: grid;
+      gap: 2px;
+    }
+    .version-update-copy strong {
+      font-size: 14px;
+      line-height: 1.35;
+      color: var(--color-text-primary);
+    }
+    .version-update-copy span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+    }
+    .version-update-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 0 auto;
+    }
+    .version-update-action {
+      min-height: 34px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: var(--radius-pill);
+      color: var(--color-text-secondary);
+      background: transparent;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .version-update-action:hover {
+      color: var(--color-text-primary);
+      background: var(--color-surface-muted);
+    }
+    .version-update-action.refresh {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent-strong);
+      background: color-mix(in srgb, var(--accent-soft) 72%, transparent);
+    }
+    .version-update-close {
+      width: 34px;
+      min-width: 34px;
+      height: 34px;
+    }
     .empty-state {
       border-color: color-mix(in srgb, var(--color-border) 72%, transparent);
       border-radius: var(--radius-lg);
@@ -12488,6 +12621,21 @@ INDEX_HTML = r'''<!doctype html>
       }
     }
     @media (max-width: 620px) {
+      .version-update-toast {
+        top: max(10px, calc(env(safe-area-inset-top) + 8px));
+        right: 12px;
+        left: 12px;
+        width: auto;
+        gap: 8px;
+        padding: 9px 9px 9px 12px;
+      }
+      .version-update-copy span {
+        display: none;
+      }
+      .version-update-action {
+        min-height: 38px;
+        padding-inline: 8px;
+      }
       .login {
         padding: 12px;
       }
@@ -12651,14 +12799,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.6</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.7</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.11.6</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.11.7</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -12671,7 +12819,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.6</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.7</button></h1>
 	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
           </div>
         </div>
@@ -12697,7 +12845,7 @@ INDEX_HTML = r'''<!doctype html>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.11.6</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.11.7</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -12827,6 +12975,19 @@ INDEX_HTML = r'''<!doctype html>
 	  </section>
     </main>
   </div>
+
+	<section class="version-update-toast ui-toast" id="versionUpdateToast" role="status" aria-live="polite" aria-atomic="true" hidden>
+	  <span class="version-update-icon"><i data-lucide="sparkles" aria-hidden="true"></i></span>
+	  <span class="version-update-copy">
+	    <strong>发现新版本，刷新后生效。</strong>
+	    <span id="versionUpdateMeta">新版本已准备好</span>
+	  </span>
+	  <span class="version-update-actions">
+	    <button class="version-update-action refresh" id="refreshForUpdate" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	    <button class="version-update-action" id="snoozeVersionUpdate" type="button">稍后</button>
+	    <button class="version-update-close ui-icon-btn" id="closeVersionUpdate" type="button" title="稍后提醒" aria-label="稍后提醒"><i data-lucide="x" aria-hidden="true"></i></button>
+	  </span>
+	</section>
 
 	  <div class="drawer-mask" id="drawerMask"></div>
 	  <section class="copy-dialog" id="copyDialog">
@@ -13301,7 +13462,9 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong>v2.11.6</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.11.7</strong></div>
+	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
+	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
 	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
 	            </div>
@@ -13380,6 +13543,15 @@ INDEX_HTML = r'''<!doctype html>
 	      changelogHasMore: false,
 	      changelogFull: false,
 	      changelogAnchor: null,
+	      versionInfo: null,
+	      initialBuildId: "",
+	      pendingBuildId: "",
+	      versionCheckTimer: 0,
+	      versionCheckInFlight: false,
+	      versionToastHideTimer: 0,
+	      versionSnoozedBuildId: "",
+	      versionSnoozedUntil: 0,
+	      versionChannel: null,
 	      modelPickerFilter: "",
 	      modelPickerSelectedIndex: 0,
 	      isComposing: false,
@@ -13464,6 +13636,39 @@ INDEX_HTML = r'''<!doctype html>
 
 	    function setUserStorage(key, value) {
 	      localStorage.setItem(userStorageKey(key), value);
+	    }
+
+	    function draftStorageKey(conversationId = state.currentConversation?.id || "new") {
+	      return userStorageKey("chatDraft:" + String(conversationId || "new"));
+	    }
+
+	    function saveCurrentDraft() {
+	      if (!state.user) return;
+	      const prompt = $("prompt");
+	      if (!prompt) return;
+	      const key = draftStorageKey();
+	      if (prompt.value) localStorage.setItem(key, prompt.value);
+	      else localStorage.removeItem(key);
+	      if (state.currentConversation?.id) {
+	        setUserStorage("lastConversationId", state.currentConversation.id);
+	      }
+	    }
+
+	    function restoreCurrentDraft() {
+	      const prompt = $("prompt");
+	      if (!prompt || !state.user) return;
+	      prompt.value = localStorage.getItem(draftStorageKey()) || "";
+	      autosizePrompt();
+	    }
+
+	    function clearCurrentDraft() {
+	      if (!state.user) return;
+	      localStorage.removeItem(draftStorageKey());
+	    }
+
+	    function handlePromptInput() {
+	      autosizePrompt();
+	      saveCurrentDraft();
 	    }
 
 	    function applyCurrentUser(user) {
@@ -13981,6 +14186,131 @@ INDEX_HTML = r'''<!doctype html>
       return res;
     }
 
+	    const versionBroadcastStorageKey = "aiPlatform:versionBroadcast";
+
+	    function updateVersionMetadata(info) {
+	      if (!info || typeof info !== "object") return;
+	      state.versionInfo = info;
+	      const version = $("systemVersionValue");
+	      const build = $("systemBuildValue");
+	      const updated = $("systemUpdatedValue");
+	      if (version && info.version) version.textContent = info.version;
+	      if (build) build.textContent = info.build_id || "未知";
+	      if (updated) updated.textContent = info.updated_at || "未知";
+	    }
+
+	    function hideVersionUpdateToast() {
+	      const toast = $("versionUpdateToast");
+	      if (!toast) return;
+	      toast.classList.remove("show");
+	      if (state.versionToastHideTimer) clearTimeout(state.versionToastHideTimer);
+	      state.versionToastHideTimer = setTimeout(() => {
+	        if (!toast.classList.contains("show")) toast.hidden = true;
+	      }, 220);
+	    }
+
+	    function snoozeVersionUpdate() {
+	      state.versionSnoozedBuildId = state.pendingBuildId;
+	      state.versionSnoozedUntil = Date.now() + 10 * 60 * 1000;
+	      hideVersionUpdateToast();
+	    }
+
+	    function showVersionUpdateToast(info) {
+	      const buildId = String(info?.build_id || "").trim();
+	      if (!buildId || buildId === state.initialBuildId) return;
+	      state.pendingBuildId = buildId;
+	      updateVersionMetadata(info);
+	      if (state.versionSnoozedBuildId === buildId && Date.now() < state.versionSnoozedUntil) return;
+	      const toast = $("versionUpdateToast");
+	      if (!toast || (toast.classList.contains("show") && toast.dataset.buildId === buildId)) return;
+	      toast.dataset.buildId = buildId;
+	      const meta = $("versionUpdateMeta");
+	      if (meta) meta.textContent = [info.version, buildId].filter(Boolean).join(" · ") || "新版本已准备好";
+	      if (state.versionToastHideTimer) clearTimeout(state.versionToastHideTimer);
+	      toast.hidden = false;
+	      requestAnimationFrame(() => toast.classList.add("show"));
+	      queueLucideRefresh();
+	    }
+
+	    function broadcastVersionUpdate(info) {
+	      const message = { type: "version-update", info, nonce: Date.now() + ":" + Math.random() };
+	      try {
+	        state.versionChannel?.postMessage(message);
+	      } catch {}
+	      try {
+	        localStorage.setItem(versionBroadcastStorageKey, JSON.stringify(message));
+	      } catch {}
+	    }
+
+	    function receiveVersionUpdate(message) {
+	      if (message?.type !== "version-update" || !message.info?.build_id) return;
+	      if (!state.initialBuildId) return;
+	      if (message.info.build_id !== state.initialBuildId) showVersionUpdateToast(message.info);
+	    }
+
+	    async function checkAppVersion() {
+	      if (state.versionCheckInFlight) return;
+	      state.versionCheckInFlight = true;
+	      const controller = new AbortController();
+	      const timeout = setTimeout(() => controller.abort(), 8000);
+	      try {
+	        const res = await request("/api/version?_=" + Date.now(), {
+	          cache: "no-store",
+	          signal: controller.signal
+	        });
+	        if (!res.ok) return;
+	        const info = await res.json();
+	        const buildId = String(info?.build_id || "").trim();
+	        if (!buildId) return;
+	        updateVersionMetadata(info);
+	        if (!state.initialBuildId) {
+	          state.initialBuildId = buildId;
+	          return;
+	        }
+	        if (buildId === state.initialBuildId) return;
+	        const firstDetection = state.pendingBuildId !== buildId;
+	        showVersionUpdateToast(info);
+	        if (firstDetection) broadcastVersionUpdate(info);
+	      } catch {
+	        // 网络错误、超时和临时接口失败都不提示更新。
+	      } finally {
+	        clearTimeout(timeout);
+	        state.versionCheckInFlight = false;
+	      }
+	    }
+
+	    function initializeVersionMonitoring() {
+	      if ("BroadcastChannel" in window) {
+	        try {
+	          state.versionChannel = new BroadcastChannel("ai-meimei-version");
+	          state.versionChannel.addEventListener("message", (event) => receiveVersionUpdate(event.data));
+	        } catch {
+	          state.versionChannel = null;
+	        }
+	      }
+	      window.addEventListener("storage", (event) => {
+	        if (event.key !== versionBroadcastStorageKey || !event.newValue) return;
+	        try {
+	          receiveVersionUpdate(JSON.parse(event.newValue));
+	        } catch {}
+	      });
+	      document.addEventListener("visibilitychange", () => {
+	        if (document.visibilityState === "visible") checkAppVersion();
+	      });
+	      window.addEventListener("focus", checkAppVersion);
+	      window.addEventListener("online", checkAppVersion);
+	      state.versionCheckTimer = window.setInterval(() => {
+	        if (document.visibilityState === "visible") checkAppVersion();
+	      }, 60000);
+	      checkAppVersion();
+	    }
+
+	    function refreshForVersionUpdate() {
+	      if (state.sending && !window.confirm("槑槑还在生成回答，刷新会中断本次生成，是否继续？")) return;
+	      saveCurrentDraft();
+	      window.location.reload();
+	    }
+
 	    async function adminApi(path, options = {}) {
 	      state.adminKey = $("adminKey").value.trim();
 	      localStorage.setItem("aiPlatformAdminKey", state.adminKey);
@@ -14181,6 +14511,7 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
     async function logout() {
+	  saveCurrentDraft();
       await request("/api/logout", { method: "POST" });
 	      state.authed = false;
 	      applyCurrentUser(null);
@@ -15824,9 +16155,12 @@ INDEX_HTML = r'''<!doctype html>
         sortConversations();
         renderConversations();
         if (!state.currentConversation && state.conversations.length) {
-          await selectConversation(state.conversations[0].id);
+          const savedId = getUserStorage("lastConversationId", "");
+          const initial = state.conversations.find((item) => item.id === savedId) || state.conversations[0];
+          await selectConversation(initial.id);
         } else if (!state.conversations.length) {
           renderEmpty();
+          restoreCurrentDraft();
         }
       } catch (err) {
         renderConversationError(friendlyError(err, "对话列表暂时加载失败。"));
@@ -16057,6 +16391,7 @@ INDEX_HTML = r'''<!doctype html>
         }
         await state.newConversationPromise.catch(() => null);
       }
+      saveCurrentDraft();
       const button = $("newChat");
       if (button) button.disabled = true;
       state.newConversationModelId = modelId;
@@ -16065,6 +16400,7 @@ INDEX_HTML = r'''<!doctype html>
         if (!res.ok) throw new Error(await readError(res, "新建对话失败，稍后再试一下。"));
         const data = await res.json();
         state.currentConversation = data.conversation;
+	      setUserStorage("lastConversationId", state.currentConversation.id);
         state.conversationStats = null;
         state.messages = [];
         await loadConversations();
@@ -16072,6 +16408,7 @@ INDEX_HTML = r'''<!doctype html>
         renderProfileStatus();
         renderProfilePopover();
         renderMessages({ forceScroll: true });
+        restoreCurrentDraft();
         return state.currentConversation;
       })();
       try {
@@ -16084,10 +16421,12 @@ INDEX_HTML = r'''<!doctype html>
     }
 
 	    async function selectConversation(id, options = {}) {
+	      if (state.currentConversation?.id !== id) saveCurrentDraft();
 	      state.editingConversationId = null;
 	      const conv = state.conversations.find((item) => item.id === id);
 	      if (!conv) return;
       state.currentConversation = conv;
+	      setUserStorage("lastConversationId", conv.id);
       $("modelSelect").value = conv.model_id;
       updateChatHeader();
       renderProfileStatus();
@@ -16098,6 +16437,7 @@ INDEX_HTML = r'''<!doctype html>
         if (!res.ok) throw new Error(await readError(res, "消息暂时加载失败。"));
         const data = await res.json();
         state.messages = data.messages || [];
+	      restoreCurrentDraft();
         const targetMessageId = Number(options.messageId || 0);
         renderMessages({ forceScroll: !targetMessageId });
         await loadConversationStats(id);
@@ -17974,6 +18314,8 @@ INDEX_HTML = r'''<!doctype html>
 	      setSendingUI(true);
 	      if (!hasOverride) {
 	        $("prompt").value = "";
+	        clearCurrentDraft();
+	        localStorage.removeItem(userStorageKey("chatDraft:new"));
 	        autosizePrompt();
 	      }
 	      const sentAt = Math.floor(Date.now() / 1000);
@@ -19321,8 +19663,11 @@ INDEX_HTML = r'''<!doctype html>
 	    $("conversationMinimap").addEventListener("focusout", scheduleCollapseConversationMinimap);
 	    document.addEventListener("pointerdown", handleMinimapOutsidePointer);
     $("scrollLatest").addEventListener("click", () => scrollToLatest("smooth"));
-	    $("prompt").addEventListener("input", autosizePrompt);
+	    $("prompt").addEventListener("input", handlePromptInput);
 	    $("prompt").addEventListener("focus", handlePromptFocus);
+	    $("refreshForUpdate").addEventListener("click", refreshForVersionUpdate);
+	    $("snoozeVersionUpdate").addEventListener("click", snoozeVersionUpdate);
+	    $("closeVersionUpdate").addEventListener("click", snoozeVersionUpdate);
 	    $("openInterfaceSettings").addEventListener("click", toggleInterfaceSettings);
 	    $("closeInterfaceSettings").addEventListener("click", closeInterfaceSettings);
 	    $("interfacePopover").addEventListener("click", (event) => event.stopPropagation());
@@ -19348,6 +19693,7 @@ INDEX_HTML = r'''<!doctype html>
 	        return;
 	      }
 	      if (event.key === "Escape") {
+	        if ($("versionUpdateToast")?.classList.contains("show")) snoozeVersionUpdate();
 	        closeModelPicker();
 	        closeGlobalSearch();
 	        closeChangelog();
@@ -19467,10 +19813,12 @@ INDEX_HTML = r'''<!doctype html>
 			    window.addEventListener("resize", positionChangelogPanel, { passive: true });
 			    window.addEventListener("resize", () => queueMarkdownOverflowRefresh($("messages")), { passive: true });
 			    window.addEventListener("resize", queueConversationMinimap, { passive: true });
-			    window.addEventListener("blur", endChatTextSelection);
+		    window.addEventListener("blur", endChatTextSelection);
+		    window.addEventListener("pagehide", saveCurrentDraft);
 		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
 	    window.visualViewport?.addEventListener("scroll", syncViewportHeight, { passive: true });
 
+	    initializeVersionMonitoring();
 	    queueLucideRefresh();
 	    bootstrap();
   </script>
