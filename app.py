@@ -12729,6 +12729,266 @@ INDEX_HTML = r'''<!doctype html>
     .desktop-pet-menu button.pet-hide-action {
       color: var(--color-text-secondary);
     }
+    .sidebar {
+      grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+    }
+    .side-head {
+      align-items: flex-start;
+      padding-block: 14px 10px;
+    }
+    .brand {
+      align-items: flex-start;
+    }
+    .brand-avatar {
+      width: 46px;
+      height: 46px;
+      border-radius: 15px;
+    }
+    .brand-copy {
+      display: grid;
+      gap: 1px;
+      padding-top: 1px;
+    }
+    .brand-copy h1 {
+      justify-content: space-between;
+      width: 100%;
+      font-size: 19px;
+      line-height: 1.25;
+    }
+    .brand-copy .app-version {
+      margin-left: 8px;
+      font-size: 10px;
+    }
+    .brand-user-name {
+      overflow: hidden;
+      color: var(--color-text-primary);
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.45;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .brand-user-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: var(--color-text-tertiary);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .brand-health {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .health-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #66b783;
+      box-shadow: 0 0 0 3px rgba(102, 183, 131, .12);
+    }
+    .brand-health.is-offline .health-dot {
+      background: var(--color-text-tertiary);
+      box-shadow: none;
+    }
+    .global-search-trigger {
+      transition:
+        color var(--motion-fast) ease,
+        border-color var(--motion-fast) ease,
+        background var(--motion-fast) ease,
+        box-shadow var(--motion-fast) ease,
+        transform var(--motion-fast) var(--ease-standard);
+    }
+    .global-search-trigger:active {
+      transform: scale(.99);
+    }
+    .side-actions .side-primary-action {
+      border-radius: 15px;
+      box-shadow: 0 8px 20px color-mix(in srgb, var(--accent-shadow) 68%, transparent);
+      transition:
+        transform var(--motion-fast) var(--ease-standard),
+        box-shadow var(--motion-fast) ease,
+        filter var(--motion-fast) ease;
+    }
+    .side-actions .side-primary-action:hover {
+      filter: saturate(1.06) brightness(1.025);
+      box-shadow: 0 12px 26px color-mix(in srgb, var(--accent-shadow) 84%, transparent);
+    }
+    .side-actions .side-primary-action:active {
+      transform: scale(.98);
+    }
+    .conversation-list {
+      scrollbar-width: none;
+      scrollbar-color: transparent transparent;
+    }
+    .sidebar:hover .conversation-list {
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--color-text-tertiary) 42%, transparent) transparent;
+    }
+    .conversation-list::-webkit-scrollbar {
+      width: 4px;
+    }
+    .conversation-list::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .conversation-list::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: transparent;
+    }
+    .sidebar:hover .conversation-list::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--color-text-tertiary) 38%, transparent);
+    }
+    .conv {
+      transition:
+        background var(--motion-fast) ease,
+        border-color var(--motion-fast) ease,
+        box-shadow var(--motion-fast) ease,
+        transform var(--motion-fast) var(--ease-standard);
+    }
+    .conv::before {
+      content: "";
+      position: absolute;
+      left: 2px;
+      top: 12px;
+      bottom: 12px;
+      width: 2px;
+      border-radius: 999px;
+      background: var(--accent);
+      opacity: 0;
+      transition: width var(--motion-fast) ease, opacity var(--motion-fast) ease;
+    }
+    .conv:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-xs);
+    }
+    .conv:hover::before {
+      width: 3px;
+      opacity: .5;
+    }
+    .conv.active::before {
+      width: 3px;
+      opacity: 1;
+    }
+    .conv-actions {
+      transform: translateX(3px);
+      transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-standard);
+    }
+    .conv:hover .conv-actions,
+    .conv.editing .conv-actions,
+    .conv:focus-within .conv-actions {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(0);
+    }
+    .conv.active:not(:hover):not(:focus-within) .conv-actions,
+    .conv.pinned:not(:hover):not(:focus-within) .conv-actions {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .side-foot {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 38px;
+      gap: 5px;
+      padding: 8px 10px 7px;
+    }
+    .side-foot .sidebar-action {
+      min-height: 36px;
+    }
+    .side-foot #logout {
+      justify-content: center;
+      padding: 0;
+    }
+    .side-foot #logout span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+    .sidebar-more-trigger {
+      grid-column: 1 / -1;
+      justify-content: space-between !important;
+      min-height: 32px !important;
+      padding-inline: 10px !important;
+    }
+    .sidebar-more-trigger .more-chevron {
+      margin-left: auto;
+      transition: transform var(--motion-base) var(--ease-standard);
+    }
+    .sidebar-more-trigger[aria-expanded="true"] .more-chevron {
+      transform: rotate(180deg);
+    }
+    .sidebar-tools-popover {
+      position: absolute;
+      right: 10px;
+      bottom: calc(100% - 6px);
+      left: 10px;
+      z-index: 24;
+      display: grid;
+      gap: 3px;
+      padding: 7px;
+      border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
+      border-radius: 15px;
+      background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+      box-shadow: var(--shadow-lg);
+      -webkit-backdrop-filter: blur(18px) saturate(145%);
+      backdrop-filter: blur(18px) saturate(145%);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateY(7px) scale(.975);
+      transform-origin: bottom center;
+      transition:
+        opacity var(--motion-base) ease,
+        transform 220ms var(--ease-standard),
+        visibility 0s linear 220ms;
+    }
+    .sidebar-tools-popover.show {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transform: translateY(0) scale(1);
+      transition-delay: 0s;
+    }
+    .sidebar-tools-popover .sidebar-action,
+    .sidebar-tools-popover #openFavorites {
+      width: 100%;
+      min-height: 39px;
+      justify-content: flex-start;
+      padding: 0 11px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 640;
+    }
+    .sidebar-tools-popover .sidebar-action:hover,
+    .sidebar-tools-popover #openFavorites:hover {
+      background: color-mix(in srgb, var(--sidebar-strong) 66%, transparent);
+      color: var(--color-text-primary);
+    }
+    .side-icp {
+      grid-column: 1 / -1;
+      margin-top: 1px !important;
+      padding-top: 2px !important;
+      gap: 2px 7px;
+      font-size: 9px;
+      line-height: 1.35;
+    }
+    @media (max-width: 900px) {
+      .sidebar-tools-popover {
+        right: 12px;
+        left: 12px;
+      }
+      .side-foot #logout {
+        min-height: 44px;
+      }
+    }
     .pet-settings-grid {
       display: grid;
       gap: 8px;
@@ -13001,14 +13261,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.8</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.9</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.11.8</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.11.9</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -13021,8 +13281,9 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.8</button></h1>
-	            <span><span id="health">连接中</span> · <span id="currentUserLabel">未登录</span></span>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.9</button></h1>
+	            <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
+	            <span class="brand-user-meta"><span id="currentUserRole">家庭成员</span><span class="brand-health is-offline" id="healthStatus"><span class="health-dot" aria-hidden="true"></span><span id="health">连接中</span></span></span>
           </div>
         </div>
         <button class="icon mobile-only ui-icon-btn" id="closeSide" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
@@ -13039,15 +13300,18 @@ INDEX_HTML = r'''<!doctype html>
       <div class="side-section-title">最近对话</div>
       <div class="conversation-list" id="conversationList"></div>
       <div class="side-foot">
-		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openPromptLibrary"><i data-lucide="book-open" aria-hidden="true"></i><span>提示词库</span></button>
-		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openFavorites"><i data-lucide="star" aria-hidden="true"></i><span>我的收藏</span> <span class="nav-count" id="favoriteCount">0</span></button>
-		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openProfiles"><i data-lucide="user-round-cog" aria-hidden="true"></i><span>AI档案</span></button>
-		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openMediaAnalysis"><i data-lucide="file-video" aria-hidden="true"></i><span>音视频分析</span></button>
 		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openTokenActivity"><i data-lucide="activity" aria-hidden="true"></i><span>Token活动</span></button>
-		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openSettings"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
-		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout"><i data-lucide="log-out" aria-hidden="true"></i><span>退出</span></button>
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout" title="退出登录" aria-label="退出登录"><i data-lucide="log-out" aria-hidden="true"></i><span>退出登录</span></button>
+		        <button class="sidebar-action sidebar-more-trigger inline-flex items-center gap-2" id="toggleSidebarTools" type="button" aria-expanded="false" aria-controls="sidebarToolsPopover"><i data-lucide="ellipsis" aria-hidden="true"></i><span>更多工具</span><i class="more-chevron" data-lucide="chevron-up" aria-hidden="true"></i></button>
+	        <div class="sidebar-tools-popover" id="sidebarToolsPopover" role="menu" aria-label="更多工具">
+		          <button class="sidebar-action inline-flex items-center gap-2" id="openPromptLibrary" role="menuitem"><i data-lucide="book-open" aria-hidden="true"></i><span>提示词库</span></button>
+		          <button class="sidebar-action inline-flex items-center gap-2" id="openFavorites" role="menuitem"><i data-lucide="star" aria-hidden="true"></i><span>我的收藏</span> <span class="nav-count" id="favoriteCount">0</span></button>
+		          <button class="sidebar-action inline-flex items-center gap-2" id="openProfiles" role="menuitem"><i data-lucide="user-round-cog" aria-hidden="true"></i><span>AI档案</span></button>
+		          <button class="sidebar-action inline-flex items-center gap-2" id="openMediaAnalysis" role="menuitem"><i data-lucide="file-video" aria-hidden="true"></i><span>音视频分析</span></button>
+		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
+	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.11.8</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.11.9</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -13691,7 +13955,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.11.8</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.11.9</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -13794,6 +14058,7 @@ INDEX_HTML = r'''<!doctype html>
 	      composerOpacity: localStorage.getItem("aiPlatformComposerOpacity") || "80",
 	      composerBlur: localStorage.getItem("aiPlatformComposerBlur") || "18",
 	      sidebarWidth: localStorage.getItem("aiPlatformSidebarWidth") || "322",
+	      sidebarToolsOpen: false,
 	      petEnabled: false,
 	      petAnimationEnabled: true,
 	      petPositionX: null,
@@ -13920,6 +14185,8 @@ INDEX_HTML = r'''<!doctype html>
 	      if (label) {
 	        label.textContent = state.user ? (state.user.display_name || state.user.username) : "未登录";
 	      }
+	      const role = $("currentUserRole");
+	      if (role) role.textContent = state.user?.role === "admin" ? "管理员" : "家庭成员";
 	    }
 
 	    function loadUserPreferences() {
@@ -13929,6 +14196,7 @@ INDEX_HTML = r'''<!doctype html>
 	      state.composerOpacity = getUserStorage("aiPlatformComposerOpacity", localStorage.getItem("aiPlatformComposerOpacity") || "80");
 	      state.composerBlur = getUserStorage("aiPlatformComposerBlur", localStorage.getItem("aiPlatformComposerBlur") || "18");
 	      state.sidebarWidth = getUserStorage("aiPlatformSidebarWidth", localStorage.getItem("aiPlatformSidebarWidth") || "322");
+	      state.sidebarToolsOpen = getUserStorage("sidebar_tools_open", "0") === "1";
 	      const savedPetEnabled = getUserStorage("pet_enabled", null);
 	      state.petEnabled = savedPetEnabled === null ? !isSmallScreen() : savedPetEnabled === "1";
 	      state.petAnimationEnabled = getUserStorage("pet_animation_enabled", "1") !== "0";
@@ -13942,6 +14210,7 @@ INDEX_HTML = r'''<!doctype html>
 	      applyFontSize(state.fontSize);
 	      applyTheme(preferredTheme());
 	      applySidebarWidth(state.sidebarWidth, false);
+	      applySidebarToolsState(state.sidebarToolsOpen, { save: false });
 	      applyDesktopPetSettings({ save: false });
 	    }
 
@@ -14990,8 +15259,10 @@ INDEX_HTML = r'''<!doctype html>
       try {
         const res = await request("/api/health");
         $("health").textContent = res.ok ? "在线" : "异常";
+		$("healthStatus")?.classList.toggle("is-offline", !res.ok);
       } catch {
         $("health").textContent = "离线";
+		$("healthStatus")?.classList.add("is-offline");
       }
     }
 
@@ -19020,6 +19291,7 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
 	    function openSettings() {
+	      closeSidebarTools();
 	      $("sidebar").classList.remove("show");
 	      document.body.classList.remove("sidebar-open");
 	      $("drawerMask").classList.add("show");
@@ -20057,6 +20329,37 @@ INDEX_HTML = r'''<!doctype html>
 	      setStatus("accountStatus", "账号已保存", "ok");
 	    }
 
+	function applySidebarToolsState(open, options = {}) {
+	  const popover = $("sidebarToolsPopover");
+	  const trigger = $("toggleSidebarTools");
+	  state.sidebarToolsOpen = Boolean(open);
+	  popover?.classList.toggle("show", state.sidebarToolsOpen);
+	  trigger?.setAttribute("aria-expanded", state.sidebarToolsOpen ? "true" : "false");
+	  if (options.save !== false && state.user) {
+	    setUserStorage("sidebar_tools_open", state.sidebarToolsOpen ? "1" : "0");
+	  }
+	  if (state.sidebarToolsOpen) queueLucideRefresh();
+	}
+
+	function openSidebarTools() {
+	  applySidebarToolsState(true);
+	}
+
+	function closeSidebarTools(options = {}) {
+	  applySidebarToolsState(false, options);
+	}
+
+	function toggleSidebarTools(event) {
+	  event?.stopPropagation();
+	  applySidebarToolsState(!state.sidebarToolsOpen);
+	}
+
+	function handleSidebarToolsOutsidePointer(event) {
+	  if (!state.sidebarToolsOpen) return;
+	  if ($("sidebarToolsPopover")?.contains(event.target) || $("toggleSidebarTools")?.contains(event.target)) return;
+	  closeSidebarTools();
+	}
+
 	    function openSidebar() {
       $("sidebar").classList.add("show");
       $("drawerMask").classList.add("show");
@@ -20142,6 +20445,11 @@ INDEX_HTML = r'''<!doctype html>
 	      if (event.target === $("mediaDialog")) closeMediaAnalysis();
 	    });
 	    $("openTokenActivity").addEventListener("click", openTokenActivity);
+	    $("toggleSidebarTools").addEventListener("click", toggleSidebarTools);
+	    $("sidebarToolsPopover").addEventListener("click", (event) => {
+	      if (event.target.closest("button")) closeSidebarTools();
+	    });
+	    document.addEventListener("pointerdown", handleSidebarToolsOutsidePointer);
 	    $("closeTokenActivity").addEventListener("click", closeTokenActivity);
 	    $("tokenActivityDialog").addEventListener("click", (event) => {
 	      if (event.target === $("tokenActivityDialog")) closeTokenActivity();
@@ -20233,6 +20541,7 @@ INDEX_HTML = r'''<!doctype html>
 	        closeTokenActivity();
 	        closeInterfaceSettings();
 	        closeDesktopPetMenu();
+	        closeSidebarTools();
 	        closeImagePreview();
 	        closeSettings();
 	      }
