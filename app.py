@@ -27,6 +27,8 @@ CAT_PAGE_PATH = APP_DIR / "cat.html"
 CHANGELOG_PATH = APP_DIR / "CHANGELOG.md"
 VERSION_PATH = APP_DIR / "VERSION"
 BUILD_ID_PATH = APP_DIR / "BUILD_ID"
+MARKDOWN_TEST_PATH = APP_DIR / "markdown-test.html"
+DEV_MODE = os.environ.get("AI_PLATFORM_DEV_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 LISTEN = os.environ.get("AI_PLATFORM_LISTEN", ":8080")
 DB_PATH = DATA_DIR / "ai-platform.db"
 SECRETS_PATH = DATA_DIR / "secrets.json"
@@ -2082,6 +2084,10 @@ class AppHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/":
             return self.html(INDEX_HTML)
+        if path in ("/dev/markdown", "/dev/markdown/"):
+            if not DEV_MODE:
+                return self.error(HTTPStatus.NOT_FOUND, "not found")
+            return self.static_file(MARKDOWN_TEST_PATH)
         if path in ("/xiaoji", "/xiaoji/"):
             return self.home_page()
         if path in ("/cat", "/cat/"):
@@ -6420,6 +6426,14 @@ INDEX_HTML = r'''<!doctype html>
       }
     };
   </script>
+  <script src="/res/vendor/markdown-it-14.3.0.min.js"></script>
+  <script src="/res/vendor/markdown-it-footnote-4.0.0.min.js"></script>
+  <script src="/res/vendor/markdown-it-task-lists-2.1.1.min.js"></script>
+  <script src="/res/vendor/dompurify-3.4.12.min.js"></script>
+  <script src="/res/vendor/highlight-11.11.1.min.js"></script>
+  <script src="/res/vendor/highlight-nginx-11.11.1.min.js"></script>
+  <script src="/res/vendor/highlight-dockerfile-11.11.1.min.js"></script>
+  <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
   <style>
@@ -13253,6 +13267,7 @@ INDEX_HTML = r'''<!doctype html>
       }
     }
   </style>
+  <link rel="stylesheet" href="/res/markdown.css">
 </head>
 <body>
   <div class="login" id="loginView">
@@ -13261,14 +13276,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.11.9</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.0</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.11.9</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.12.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -13281,7 +13296,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.11.9</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.0</button></h1>
 	            <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	            <span class="brand-user-meta"><span id="currentUserRole">家庭成员</span><span class="brand-health is-offline" id="healthStatus"><span class="health-dot" aria-hidden="true"></span><span id="health">连接中</span></span></span>
           </div>
@@ -13311,7 +13326,7 @@ INDEX_HTML = r'''<!doctype html>
 		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.11.9</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.12.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -13955,7 +13970,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.11.9</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.0</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -13967,7 +13982,7 @@ INDEX_HTML = r'''<!doctype html>
 	    </div>
 	  </section>
 
-  <script>
+	  <script>
     const $ = (id) => document.getElementById(id);
     const state = {
 	      authed: false,
@@ -14453,6 +14468,7 @@ INDEX_HTML = r'''<!doctype html>
         queueLucideRefresh();
       }
       applyAccent(state.accent || "pink");
+      window.AIMarkdown?.rerenderMermaid(document);
     }
 
     function toggleTheme() {
@@ -16278,7 +16294,7 @@ INDEX_HTML = r'''<!doctype html>
 	        content.className = "markdown";
 	        content.innerHTML = renderMarkdown(current.content || "");
 		        detail.append(meta, content);
-		        queueMarkdownOverflowRefresh(content);
+		        enhanceMarkdown(content);
 	      } else {
 	        state.selectedFavoriteId = null;
 	        detail.replaceChildren(createEmptyState("eye", "选择一条收藏", "在左侧选择一条收藏查看完整回答。"));
@@ -16770,7 +16786,7 @@ INDEX_HTML = r'''<!doctype html>
 	      del.addEventListener("click", () => deleteMediaTask(task.id));
 	      actions.append(copy, refresh, del);
 	      detail.append(head, aiPanel, tabBar, content, actions);
-	      queueMarkdownOverflowRefresh(content);
+	      enhanceMarkdown(content);
 	      queueLucideRefresh();
 	    }
 
@@ -17712,7 +17728,7 @@ INDEX_HTML = r'''<!doctype html>
 	      return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line || "");
 	    }
 
-	    function renderMarkdown(source) {
+	    function legacyRenderMarkdown(source) {
 	      const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
 	      const html = [];
 	      let paragraph = [];
@@ -17838,6 +17854,19 @@ INDEX_HTML = r'''<!doctype html>
 	      return html.join("");
 	    }
 
+	    function renderMarkdown(source) {
+	      if (window.AIMarkdown?.isReady()) return window.AIMarkdown.render(source);
+	      return legacyRenderMarkdown(source);
+	    }
+
+	    function enhanceMarkdown(root, options = {}) {
+	      if (window.AIMarkdown?.isReady()) {
+	        window.AIMarkdown.enhance(root, options);
+	        return;
+	      }
+	      queueMarkdownOverflowRefresh(root);
+	    }
+
 	    function refreshMarkdownOverflow(root = document) {
 	      const scope = root || document;
 	      scope.querySelectorAll(".table-wrapper").forEach((wrapper) => {
@@ -17901,7 +17930,7 @@ INDEX_HTML = r'''<!doctype html>
 	      body.hidden = !message.reasoning_open;
 	      body.innerHTML = '<div class="markdown">' + renderMarkdown(reasoningContent) + '</div>';
 	      panel.replaceChildren(toggle, body);
-	      queueMarkdownOverflowRefresh(body);
+	      enhanceMarkdown(body, { mermaid: !message.thinking });
 	    }
 
 	    function sourceDomain(value) {
@@ -18503,7 +18532,7 @@ INDEX_HTML = r'''<!doctype html>
 
 	      text.className = "message-content markdown";
 	      text.innerHTML = renderMarkdown(displayContent || "");
-	      queueMarkdownOverflowRefresh(text);
+	      enhanceMarkdown(text, { mermaid: !message.thinking });
 	      copy.hidden = !displayContent || message.role === "assistant";
 	      const canShowAssistantActions = message.role === "assistant" && Boolean(displayContent);
 	      const canShowUserActions = message.role === "user" && displayContent;
@@ -18746,6 +18775,10 @@ INDEX_HTML = r'''<!doctype html>
 	      $("imagePreviewFull").src = "";
 	      setDialogOpenState();
 	    }
+
+	    document.addEventListener("aimarkdown:image", (event) => {
+	      openImagePreview(event.detail?.src || "");
+	    });
 
 	    function uploadFormWithProgress(url, form, onProgress) {
 	      return new Promise((resolve, reject) => {

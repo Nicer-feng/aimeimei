@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Markdown 兼容性测试 - AI槑槑</title>
+  <link rel="icon" href="/res/meimei-avatar.png">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #faf8f4;
+      --surface: #fffdf9;
+      --surface-soft: #f6e9d6;
+      --text: #292522;
+      --muted: #8a7569;
+      --border: rgba(80, 60, 50, .12);
+      --accent-strong: #d98fa8;
+      --focus-ring: rgba(217, 143, 168, .2);
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow-sm: 0 4px 16px rgba(69, 50, 42, .06);
+    }
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #151416;
+      --surface: #1e1d20;
+      --surface-soft: #2a2527;
+      --text: #f2edeb;
+      --muted: #b5a8a2;
+      --border: rgba(255, 255, 255, .12);
+    }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; margin: 0; }
+    .test-header { align-items: center; backdrop-filter: blur(16px); background: color-mix(in srgb, var(--bg) 82%, transparent); border-bottom: 1px solid var(--border); display: flex; gap: 12px; justify-content: space-between; padding: 12px max(16px, calc((100vw - 1080px) / 2)); position: sticky; top: 0; z-index: 5; }
+    .test-brand { align-items: center; display: flex; gap: 10px; }
+    .test-brand img { border-radius: 12px; height: 38px; width: 38px; }
+    .test-brand strong { display: block; }
+    .test-brand span { color: var(--muted); display: block; font-size: 12px; margin-top: 2px; }
+    .test-actions { display: flex; gap: 8px; }
+    button { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); cursor: pointer; min-height: 38px; padding: 0 13px; }
+    button:hover { border-color: var(--accent-strong); }
+    main { margin: 0 auto; max-width: 1080px; padding: 28px 20px 80px; }
+    .test-note { background: color-mix(in srgb, var(--surface-soft) 55%, transparent); border: 1px solid var(--border); border-radius: 14px; color: var(--muted); margin-bottom: 22px; padding: 14px 16px; }
+    .preview-shell { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 18px 50px rgba(66, 47, 39, .08); margin: 0 auto; padding: clamp(18px, 4vw, 46px); transition: max-width 180ms ease; }
+    .preview-shell.is-mobile { max-width: 390px; }
+    .image-lightbox { align-items: center; background: rgba(15, 13, 14, .8); display: none; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 20; }
+    .image-lightbox.show { display: flex; }
+    .image-lightbox img { border-radius: 16px; max-height: 90vh; max-width: 92vw; }
+  </style>
+  <link rel="stylesheet" href="/res/markdown.css">
+</head>
+<body>
+  <header class="test-header">
+    <div class="test-brand">
+      <img src="/res/meimei-avatar.png" alt="槑槑">
+      <div><strong>Markdown 兼容性测试</strong><span>仅 AI_PLATFORM_DEV_MODE=1 时开放</span></div>
+    </div>
+    <div class="test-actions">
+      <button id="viewportToggle" type="button">手机宽度</button>
+      <button id="themeToggle" type="button">深色模式</button>
+    </div>
+  </header>
+  <main>
+    <div class="test-note">此页面使用与聊天、收藏和音视频分析完全相同的渲染器。请同时检查浅色、深色、桌面和 390px 手机宽度。</div>
+    <article class="preview-shell"><div class="markdown" id="preview"></div></article>
+  </main>
+  <div class="image-lightbox" id="lightbox"><img id="lightboxImage" alt="预览图片"></div>
+
+  <textarea id="markdownSource" hidden># 一级标题：Markdown 回归页
+
+## 二级标题
+### 三级标题
+#### 四级标题
+##### 五级标题
+###### 六级标题
+
+普通正文支持 **加粗**、*斜体*、~~删除线~~、`tmutil` 行内代码、Emoji 🐾 和自动链接 https://feng.asia/ai 。
+
+---
+
+> 这是引用块。
+>
+> 它可以包含 **强调内容** 和多行段落，视觉应当统一且清晰。
+
+### 列表与任务
+
+- 无序列表
+  - 嵌套项目
+- 第二项
+
+1. 有序列表
+2. 第二项
+
+- [x] 已完成：支持 GFM Task List
+- [ ] 待完成：未来接入正式数学公式引擎
+
+### 表格
+
+| 功能 | 桌面端 | 手机端 | environmental sounds long column | 超长链接 |
+| --- | --- | --- | --- | --- |
+| Markdown | 完整显示 | 左右滑动 | environmental sounds should not break | https://example.com/a/very/very/very/long/path/that/should/not/crush/the/layout |
+| Mermaid | 自动渲染 | 可横向查看 | sequenceDiagram and mindmap | https://feng.asia/ai |
+
+### 图片与链接
+
+[访问 AI槑槑](https://feng.asia/ai)
+
+![槑槑头像](/res/meimei-avatar.png)
+
+### Bash
+
+```bash
+tmutil listlocalsnapshots /
+for snapshot in "${snapshots[@]}"; do
+  echo "Removing: $snapshot"
+done
+```
+
+### JSON / YAML / XML
+
+```json
+{"name":"AI槑槑","features":["GFM","Mermaid"],"enabled":true}
+```
+
+```yaml
+service:
+  name: ai-platform
+  ports: [8080]
+```
+
+```xml
+<assistant name="槑槑"><status>ready</status></assistant>
+```
+
+### HTML / CSS / JavaScript / TypeScript
+
+```html
+<button class="send-button" aria-label="发送">发送</button>
+```
+
+```css
+.composer { backdrop-filter: blur(18px) saturate(160%); }
+```
+
+```javascript
+const greet = (name) => `你好，${name}`;
+console.log(greet("槑槑"));
+```
+
+```typescript
+type Model = { id: string; supportsVision: boolean };
+const model: Model = { id: "qwen", supportsVision: true };
+```
+
+### Go / Java / Python / SQL
+
+```go
+package main
+import "fmt"
+func main() { fmt.Println("AI槑槑") }
+```
+
+```java
+public class Main { public static void main(String[] args) { System.out.println("AI槑槑"); } }
+```
+
+```python
+def summarize(text: str) -> str:
+    return text.strip()
+```
+
+```sql
+SELECT model, SUM(total_tokens) FROM messages GROUP BY model ORDER BY 2 DESC;
+```
+
+### C / C++ / Rust / Kotlin / Swift / PHP
+
+```c
+#include <stdio.h>
+int main(void) { puts("AI Meimei"); return 0; }
+```
+
+```cpp
+#include <iostream>
+int main() { std::cout << "AI Meimei"; }
+```
+
+```rust
+fn main() { println!("AI Meimei"); }
+```
+
+```kotlin
+fun main() = println("AI Meimei")
+```
+
+```swift
+print("AI Meimei")
+```
+
+```php
+<?php echo "AI Meimei"; ?>
+```
+
+### Nginx / Dockerfile / Markdown
+
+```nginx
+location /ai/ { reverse_proxy 127.0.0.1:8000; }
+```
+
+```dockerfile
+FROM python:3.13-slim
+CMD ["python", "app.py"]
+```
+
+```markdown
+## 标题
+- **重点**
+```
+
+### Mermaid Flowchart
+
+```mermaid
+flowchart LR
+  A[上传音视频] --> B[听悟转写]
+  B --> C[AI增强分析]
+  C --> D[继续对话]
+```
+
+### Mermaid Mindmap
+
+```mermaid
+mindmap
+  root((AI槑槑))
+    聊天
+      Markdown
+      图片理解
+    分析
+      音视频
+      思维导图
+```
+
+### Mermaid Sequence / Class
+
+```mermaid
+sequenceDiagram
+  用户->>槑槑: 提交问题
+  槑槑-->>用户: 流式回答
+```
+
+```mermaid
+classDiagram
+  class Message {
+    +String role
+    +String content
+  }
+```
+
+### 脚注
+
+这是一条带脚注的说明。[^1]
+
+[^1]: 脚注内容支持链接和 **Markdown**。
+
+### 安全 HTML
+
+<details><summary>允许的安全 HTML</summary><p>这段内容可以展开，危险脚本会被清理。</p></details>
+<script>alert("这段脚本不应执行")</script>
+
+### 数学公式预留
+
+行内公式：$a^2+b^2=c^2$
+
+$$
+E=mc^2
+$$
+
+### 超长代码
+
+```text
+THIS_IS_A_VERY_LONG_LINE_WITHOUT_WRAPPING_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789
+```
+  </textarea>
+
+  <script src="/res/vendor/lucide-1.21.0.min.js"></script>
+  <script src="/res/vendor/markdown-it-14.3.0.min.js"></script>
+  <script src="/res/vendor/markdown-it-footnote-4.0.0.min.js"></script>
+  <script src="/res/vendor/markdown-it-task-lists-2.1.1.min.js"></script>
+  <script src="/res/vendor/dompurify-3.4.12.min.js"></script>
+  <script src="/res/vendor/highlight-11.11.1.min.js"></script>
+  <script src="/res/vendor/highlight-nginx-11.11.1.min.js"></script>
+  <script src="/res/vendor/highlight-dockerfile-11.11.1.min.js"></script>
+  <script src="/res/markdown-renderer.js"></script>
+  <script>
+    const preview = document.getElementById("preview");
+    preview.innerHTML = window.AIMarkdown.render(document.getElementById("markdownSource").value.trim());
+    window.AIMarkdown.enhance(preview);
+
+    document.getElementById("themeToggle").addEventListener("click", (event) => {
+      const dark = document.documentElement.dataset.theme !== "dark";
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+      event.currentTarget.textContent = dark ? "浅色模式" : "深色模式";
+      window.AIMarkdown.rerenderMermaid(preview);
+    });
+    document.getElementById("viewportToggle").addEventListener("click", (event) => {
+      const mobile = document.querySelector(".preview-shell").classList.toggle("is-mobile");
+      event.currentTarget.textContent = mobile ? "桌面宽度" : "手机宽度";
+      window.AIMarkdown.refreshOverflow(preview);
+    });
+    document.addEventListener("aimarkdown:image", (event) => {
+      document.getElementById("lightboxImage").src = event.detail.src;
+      document.getElementById("lightbox").classList.add("show");
+    });
+    document.getElementById("lightbox").addEventListener("click", (event) => event.currentTarget.classList.remove("show"));
+  </script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实现。项目保持单文件应用形态，无 Docker、无前端框架、无外部 Python 依赖。
 
-当前版本：`2.11.9`
+当前版本：`2.12.0`
 
 ## 目录说明
 
@@ -15,6 +15,8 @@ AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实
 - `deploy/caddy/Caddyfile`：Caddy HTTPS 配置示例，自动申请证书并将 `/cat/` 反向代理到本机应用。
 - `verify.sh`：线上健康检查和基础接口验证脚本。
 - `res/`：项目资源文件，包括无文字槑槑头像、登录插画、空状态插画、favicon 和原始猫咪照片。
+- `res/markdown-renderer.js`、`res/markdown.css`：聊天、收藏和音视频分析共用的 Markdown 渲染与视觉层。
+- `markdown-test.html`：Markdown 兼容性回归页，仅在开发模式下开放。
 - `VERSION`：当前项目版本号。
 - `BUILD_ID`：当前部署构建编号，发布新版本时必须更新，用于已打开页面的更新检测。
 - `CHANGELOG.md`：版本变更记录。
@@ -30,6 +32,14 @@ AI_PLATFORM_DATA=/tmp/ai-platform AI_PLATFORM_LISTEN=127.0.0.1:8080 python3 app.
 ```text
 http://127.0.0.1:8080
 ```
+
+需要回归 Markdown 时启用开发模式：
+
+```bash
+AI_PLATFORM_DATA=/tmp/ai-platform AI_PLATFORM_LISTEN=127.0.0.1:8080 AI_PLATFORM_DEV_MODE=1 python3 app.py
+```
+
+然后访问 `http://127.0.0.1:8080/dev/markdown`。未启用开发模式时该路径返回 404。
 
 ## 线上部署
 
