@@ -237,7 +237,9 @@
   border-spacing: 0;
   display: table;
   margin: 0 !important;
-  min-width: max-content;
+  max-width: none;
+  min-width: 100%;
+  table-layout: auto;
   width: max-content !important;
 }
 .markdown .table-wrapper th,
@@ -245,10 +247,28 @@
   border: 0 !important;
   border-bottom: 1px solid var(--md-border) !important;
   border-right: 1px solid var(--md-border) !important;
+  box-sizing: border-box;
   max-width: 360px;
+  min-width: 120px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   padding: .72em .9em;
   text-align: left;
   vertical-align: top;
+  white-space: normal;
+  word-break: break-word;
+}
+.markdown .table-wrapper th:first-child,
+.markdown .table-wrapper td:first-child { min-width: 80px; }
+.markdown .table-wrapper th > *,
+.markdown .table-wrapper td > * { max-width: 100%; }
+.markdown .table-wrapper .table-nowrap,
+.markdown .table-wrapper .is-nowrap,
+.markdown .table-wrapper .col-number,
+.markdown .table-wrapper .col-date,
+.markdown .table-wrapper .col-duration {
+  min-width: max-content;
+  overflow-wrap: normal;
   white-space: nowrap;
   word-break: normal;
 }

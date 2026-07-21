@@ -101,6 +101,21 @@
 | Markdown | 完整显示 | 左右滑动 | environmental sounds should not break | https://example.com/a/very/very/very/long/path/that/should/not/crush/the/layout |
 | Mermaid | 自动渲染 | 可横向查看 | sequenceDiagram and mindmap | https://feng.asia/ai |
 
+### 中文长段落表格
+
+| 编号 | 场景 | 说明 |
+| --- | --- | --- |
+| 01 | 中文长文 | 这是一段用于验证中文自动换行的长内容。单元格应在合理宽度内自然换行，不能越过右侧边框，也不能与相邻列的文字重叠。即使内容继续增长，仍应保持边界清楚、行高自然。 |
+| 02 | 中英文混排 | AI槑槑 Markdown renderer 应正确处理 environmental sounds、OpenAI Compatible API 与中文说明混合出现的情况。 |
+| 03 | 长 URL | https://example.com/articles/2026/very-long-address-without-natural-break-points-and-query?source=aimeimei&amp;mode=regression |
+
+### 十列表格
+
+| 编号 | 日期 | 时长 | 模型 | 状态 | 输入 Token | 输出 Token | 联网 | 附件 | 备注说明 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 001 | 2026-07-21 | 12分35秒 | qwen3.7-max | 已完成 | 12800 | 6400 | 是 | screenshot-with-a-very-long-filename.png | 这是十列表格中的长中文备注，应当在自己的单元格内部换行；表格整体在屏幕不够宽时由外层容器横向滚动。 |
+| 002 | 2026-07-20 | 1小时05分 | mimo-v2.5-pro | 处理中 | 32000 | 0 | 否 | `analysis-result.json` | 中英文、行内代码和数字都不能越过单元格边框。 |
+
 ### 图片与链接
 
 [访问 AI槑槑](https://feng.asia/ai)
