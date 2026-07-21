@@ -249,10 +249,10 @@
 
   function enhance(root, options) {
     const scope = root || document;
-    const settings = Object.assign({ mermaid: true }, options || {});
+    const settings = Object.assign({ mermaid: true, icons: true }, options || {});
     requestAnimationFrame(function () { refreshOverflow(scope); });
     if (settings.mermaid) renderMermaid(scope);
-    if (window.lucide?.createIcons) requestAnimationFrame(function () { window.lucide.createIcons(); });
+    if (settings.icons && window.lucide?.createIcons) requestAnimationFrame(function () { window.lucide.createIcons(); });
   }
 
   function rerenderMermaid(root) {

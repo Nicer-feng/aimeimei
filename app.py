@@ -13278,14 +13278,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.1</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.2</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.12.1</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.12.2</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -13298,7 +13298,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.1</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.2</button></h1>
 	            <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	            <span class="brand-user-meta"><span id="currentUserRole">家庭成员</span><span class="brand-health is-offline" id="healthStatus"><span class="health-dot" aria-hidden="true"></span><span id="health">连接中</span></span></span>
           </div>
@@ -13328,7 +13328,7 @@ INDEX_HTML = r'''<!doctype html>
 		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.12.1</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.12.2</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -13972,7 +13972,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.1</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.2</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -14024,6 +14024,10 @@ INDEX_HTML = r'''<!doctype html>
 	      hasNewWhilePaused: false,
 	      programmaticScroll: false,
 	      minimapQueued: false,
+	      minimapLayoutTimer: 0,
+	      messageScrollFrame: 0,
+	      pendingMessageScroll: null,
+	      messagesScrollFrame: 0,
 	      minimapFadeTimer: 0,
 	      minimapCollapseTimer: 0,
 	      minimapTooltipTimer: 0,
@@ -16327,7 +16331,7 @@ INDEX_HTML = r'''<!doctype html>
 	        const message = state.messages.find((item) => item.id === removed.message_id);
 	        if (message) {
 	          message.favorite_id = null;
-	          updateStreamingMessage(message);
+	          updateStreamingMessage(message, { forceFull: true, final: true });
 	        }
 	      }
 	      if (state.selectedFavoriteId === id) state.selectedFavoriteId = null;
@@ -16355,7 +16359,7 @@ INDEX_HTML = r'''<!doctype html>
 	          message.favorite_id = data.favorite?.id || null;
 	          setStatus("chatStatus", "已收藏", "ok");
 	        }
-	        updateStreamingMessage(message);
+	        updateStreamingMessage(message, { forceFull: true, final: true });
 	        await loadFavorites();
 	      } catch (err) {
 	        setStatus("chatStatus", friendlyError(err, "收藏操作失败，稍后再试一下。"), "err");
@@ -16912,7 +16916,7 @@ INDEX_HTML = r'''<!doctype html>
 		    function toggleReasoning(message) {
 	      if (!message) return;
 	      message.reasoning_open = !message.reasoning_open;
-	      updateStreamingMessage(message);
+	      updateStreamingMessage(message, { forceFull: true, final: !message.thinking });
 	    }
 
 	    function messageIndexOf(message) {
@@ -17861,6 +17865,19 @@ INDEX_HTML = r'''<!doctype html>
 	      return legacyRenderMarkdown(source);
 	    }
 
+	    function renderMessageMarkdown(message, source, slot = "content") {
+	      const value = String(source || "");
+	      const sourceKey = slot === "reasoning" ? "_reasoningMarkdownSource" : "_contentMarkdownSource";
+	      const htmlKey = slot === "reasoning" ? "_reasoningMarkdownHtml" : "_contentMarkdownHtml";
+	      if (message?.[sourceKey] === value && typeof message?.[htmlKey] === "string") return message[htmlKey];
+	      const html = renderMarkdown(value);
+	      if (message) {
+	        message[sourceKey] = value;
+	        message[htmlKey] = html;
+	      }
+	      return html;
+	    }
+
 	    function enhanceMarkdown(root, options = {}) {
 	      if (window.AIMarkdown?.isReady()) {
 	        window.AIMarkdown.enhance(root, options);
@@ -17930,9 +17947,11 @@ INDEX_HTML = r'''<!doctype html>
 	      const body = document.createElement("div");
 	      body.className = "reasoning-body";
 	      body.hidden = !message.reasoning_open;
-	      body.innerHTML = '<div class="markdown">' + renderMarkdown(reasoningContent) + '</div>';
+	      if (message.reasoning_open) {
+	        body.innerHTML = '<div class="markdown">' + renderMessageMarkdown(message, reasoningContent, "reasoning") + '</div>';
+	      }
 	      panel.replaceChildren(toggle, body);
-	      enhanceMarkdown(body, { mermaid: !message.thinking });
+	      if (message.reasoning_open) enhanceMarkdown(body, { mermaid: !message.thinking });
 	    }
 
 	    function sourceDomain(value) {
@@ -18260,6 +18279,7 @@ INDEX_HTML = r'''<!doctype html>
 	        const marker = document.createElement("button");
 	        marker.type = "button";
 	        marker.className = minimapMarkerClass(message, flags);
+	        marker.dataset.messageKey = messageKey(message);
 	        marker.setAttribute("aria-label", messageMinimapTitle(message, flags));
 	        marker.style.top = clampNumber((wrap.offsetTop / scrollHeight) * trackHeight, 0, trackHeight - 2, 0) + "px";
 	        const rawHeight = (Math.max(wrap.offsetHeight, 24) / scrollHeight) * trackHeight;
@@ -18279,6 +18299,25 @@ INDEX_HTML = r'''<!doctype html>
 	      updateConversationMinimapViewport();
 	    }
 
+	    function updateConversationMinimapLayout() {
+	      const minimap = $("conversationMinimap");
+	      const track = $("minimapTrack");
+	      const box = $("messages");
+	      if (!minimap || minimap.hidden || !track || !box) return;
+	      const scrollHeight = Math.max(box.scrollHeight, box.clientHeight, 1);
+	      const trackHeight = track.clientHeight;
+	      if (!trackHeight) return;
+	      track.querySelectorAll(".minimap-marker[data-message-key]").forEach((marker) => {
+	        const key = marker.dataset.messageKey;
+	        const wrap = box.querySelector(`[data-message-key="${key}"]`);
+	        if (!wrap) return;
+	        marker.style.top = clampNumber((wrap.offsetTop / scrollHeight) * trackHeight, 0, trackHeight - 2, 0) + "px";
+	        const rawHeight = (Math.max(wrap.offsetHeight, 24) / scrollHeight) * trackHeight;
+	        marker.style.height = clampNumber(rawHeight, 2, Math.max(2, Math.min(28, trackHeight)), 2) + "px";
+	      });
+	      updateConversationMinimapViewport();
+	    }
+
 	    function queueConversationMinimap() {
 	      if (state.minimapQueued) return;
 	      state.minimapQueued = true;
@@ -18286,6 +18325,14 @@ INDEX_HTML = r'''<!doctype html>
 	        state.minimapQueued = false;
 	        renderConversationMinimap();
 	      });
+	    }
+
+	    function queueConversationMinimapLayout() {
+	      if (state.minimapLayoutTimer) return;
+	      state.minimapLayoutTimer = window.setTimeout(() => {
+	        state.minimapLayoutTimer = 0;
+	        requestAnimationFrame(updateConversationMinimapLayout);
+	      }, 160);
 	    }
 
 	    function isNearBottom(box = $("messages")) {
@@ -18297,10 +18344,12 @@ INDEX_HTML = r'''<!doctype html>
 	      if (!button) return;
 	      const awayFromBottom = !isNearBottom();
 	      const label = state.hasNewWhilePaused || state.sending ? "查看新内容" : "回到底部";
+	      const shouldShow = awayFromBottom && state.messages.length > 0;
+	      const visibilityChanged = button.classList.contains("show") !== shouldShow;
 	      button.title = label;
 	      button.setAttribute("aria-label", label);
-	      button.classList.toggle("show", awayFromBottom && state.messages.length > 0);
-	      schedulePetPositionCorrection();
+	      button.classList.toggle("show", shouldShow);
+	      if (visibilityChanged) schedulePetPositionCorrection();
 	    }
 
 	    function scrollToLatest(behavior = "auto") {
@@ -18393,7 +18442,8 @@ INDEX_HTML = r'''<!doctype html>
 	      clampChatSelectionToMessages();
 	    }
 
-	    function handleMessagesScroll() {
+	    function flushMessagesScroll() {
+	      state.messagesScrollFrame = 0;
 	      updateConversationMinimapViewport();
 	      pulseConversationMinimap();
 	      if (state.programmaticScroll) return;
@@ -18404,6 +18454,11 @@ INDEX_HTML = r'''<!doctype html>
 	        state.followOutput = false;
 	      }
 	      updateScrollLatestButton();
+	    }
+
+	    function handleMessagesScroll() {
+	      if (state.messagesScrollFrame) return;
+	      state.messagesScrollFrame = requestAnimationFrame(flushMessagesScroll);
 	    }
 
 	    function messageKey(message) {
@@ -18456,6 +18511,8 @@ INDEX_HTML = r'''<!doctype html>
 	      const favorite = document.createElement("button");
 	      favorite.className = "message-action favorite-action";
 	      favorite.type = "button";
+	      favorite.innerHTML = iconLabel("star", "收藏", "☆");
+	      favorite.title = "收藏这条回答";
 	      favorite.addEventListener("click", () => toggleFavoriteMessage(message, favorite));
 	      const regenerate = document.createElement("button");
 	      regenerate.className = "message-action regenerate-action";
@@ -18519,6 +18576,7 @@ INDEX_HTML = r'''<!doctype html>
 	      renderMessageImages(imagePanel, messageImages(message));
 
 	      if (message.role === "assistant" && message.thinking && !displayContent) {
+	        wrap.dataset.liveState = "thinking";
 	        text.className = "message-content";
 	        text.innerHTML = `
 	          <div class="thinking">
@@ -18532,8 +18590,9 @@ INDEX_HTML = r'''<!doctype html>
 	        return;
 	      }
 
+	      wrap.dataset.liveState = "static";
 	      text.className = "message-content markdown";
-	      text.innerHTML = renderMarkdown(displayContent || "");
+	      text.innerHTML = renderMessageMarkdown(message, displayContent || "");
 	      enhanceMarkdown(text, { mermaid: !message.thinking });
 	      copy.hidden = !displayContent || message.role === "assistant";
 	      const canShowAssistantActions = message.role === "assistant" && Boolean(displayContent);
@@ -18558,28 +18617,154 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	    }
 
-	    function settleMessageScroll(previousTop, shouldFollow) {
-	      if (shouldFollow) {
-	        scrollToLatest("auto");
-	      } else {
-	        $("messages").scrollTop = previousTop;
-	        state.hasNewWhilePaused = true;
-	        updateScrollLatestButton();
+	    function updateLiveReasoningPanel(panel, message, reasoningContent, options = {}) {
+	      if (!panel) return false;
+	      if (!reasoningContent) {
+	        panel.hidden = true;
+	        return false;
 	      }
+	      const existingToggle = panel.querySelector(".reasoning-toggle");
+	      if (!existingToggle || message.reasoning_open || options.final) {
+	        renderReasoningPanel(panel, message, reasoningContent);
+	        return false;
+	      }
+	      panel.hidden = false;
+	      panel.classList.remove("open");
+	      const label = existingToggle.querySelector("span:last-child");
+	      if (label) label.textContent = message.thinking ? "槑槑正在思考" : "查看思考过程";
+	      existingToggle.title = "展开思考过程";
+	      const body = panel.querySelector(".reasoning-body");
+	      if (body) body.hidden = true;
+	      return false;
 	    }
 
-	    function updateStreamingMessage(message) {
+	    function updateLiveMessageElement(wrap, message, options = {}) {
+	      const role = wrap.querySelector(".role");
+	      const text = wrap.querySelector(".message-content");
+	      const time = wrap.querySelector(".message-time");
+	      const copy = wrap.querySelector(".copy-btn");
+	      const actions = wrap.querySelector(".message-actions");
+	      const sourcesPanel = wrap.querySelector(".sources-panel");
+	      const copyAction = wrap.querySelector(".copy-action");
+	      const favorite = wrap.querySelector(".favorite-action");
+	      const regenerate = wrap.querySelector(".regenerate-action");
+	      const continueWrite = wrap.querySelector(".continue-action");
+	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
+	      const displayContent = visibleMessageContent(message);
+	      const reasoningContent = messageReasoningContent(message);
+	      let iconsChanged = updateLiveReasoningPanel(reasoningPanel, message, reasoningContent, options);
+
+	      if (options.sources) renderSourcesPanel(sourcesPanel, message.sources || []);
+	      if (options.usage || options.final) {
+	        const tokens = messageTotalTokens(message);
+	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
+	      }
+
+	      if (message.thinking && !displayContent) {
+	        if (wrap.dataset.liveState !== "thinking") {
+	          wrap.dataset.liveState = "thinking";
+	          text.className = "message-content";
+	          text.innerHTML = `
+	            <div class="thinking">
+	              <img class="thinking-avatar" src="/res/meimei-avatar.png" alt="">
+	              <span class="thinking-dots"><span></span><span></span><span></span></span>
+	              <span><strong>槑槑</strong>正在整理思路...</span>
+	            </div>`;
+	        }
+	        copy.hidden = true;
+	        if (actions) actions.hidden = true;
+	        return iconsChanged;
+	      }
+
+	      if (wrap.dataset.liveState === "thinking" && role) {
+	        role.replaceChildren();
+	        const avatar = document.createElement("img");
+	        avatar.className = "role-avatar";
+	        avatar.src = "/res/meimei-avatar.png";
+	        avatar.alt = "";
+	        role.append(avatar, document.createTextNode("槑槑"));
+	      }
+	      wrap.dataset.liveState = "streaming";
+	      text.className = "message-content markdown";
+	      if (text._markdownSource !== displayContent || options.final) {
+	        text.innerHTML = renderMessageMarkdown(message, displayContent);
+	        text._markdownSource = displayContent;
+	        enhanceMarkdown(text, { mermaid: Boolean(options.final), icons: Boolean(options.final) });
+	      }
+	      copy.hidden = true;
+	      const hasContent = Boolean(displayContent);
+	      if (actions) actions.hidden = !hasContent;
+	      if (copyAction) copyAction.hidden = !hasContent;
+	      if (favorite) {
+	        favorite.hidden = !(message.id && hasContent);
+	        favorite.classList.toggle("active", Boolean(message.favorite_id));
+	      }
+	      if (regenerate) regenerate.hidden = !hasContent;
+	      if (continueWrite) continueWrite.hidden = !hasContent;
+	      return iconsChanged;
+	    }
+
+	    function settleMessageScroll(previousTop, shouldFollow) {
+	      const pending = state.pendingMessageScroll;
+	      state.pendingMessageScroll = {
+	        previousTop,
+	        shouldFollow: Boolean(shouldFollow || pending?.shouldFollow)
+	      };
+	      if (state.messageScrollFrame) return;
+	      state.messageScrollFrame = requestAnimationFrame(() => {
+	        state.messageScrollFrame = 0;
+	        const next = state.pendingMessageScroll;
+	        state.pendingMessageScroll = null;
+	        const box = $("messages");
+	        if (!box || !next) return;
+	        if (next.shouldFollow) {
+	          box.scrollTop = box.scrollHeight;
+	          state.hasNewWhilePaused = false;
+	        } else {
+	          state.hasNewWhilePaused = true;
+	        }
+	        updateScrollLatestButton();
+	        updateConversationMinimapViewport();
+	      });
+	    }
+
+	    function updateStreamingMessage(message, options = {}) {
 	      const box = $("messages");
+	      let wrap = box.querySelector(`[data-message-key="${messageKey(message)}"]`);
+	      if (options.reasoning && wrap && !message.reasoning_open && wrap.querySelector(".reasoning-toggle")) return;
 	      const previousTop = box.scrollTop;
 	      const shouldFollow = state.followOutput || isNearBottom(box);
-	      let wrap = box.querySelector(`[data-message-key="${messageKey(message)}"]`);
+	      let structureChanged = false;
+	      let iconsChanged = false;
 	      if (!wrap) {
 	        wrap = createMessageElement(message);
 	        box.appendChild(wrap);
-	      } else {
+	        structureChanged = true;
+	        iconsChanged = true;
+	      } else if (options.forceFull) {
 	        updateMessageElement(wrap, message);
+	        iconsChanged = true;
+	      } else {
+	        iconsChanged = updateLiveMessageElement(wrap, message, options);
 	      }
 	      settleMessageScroll(previousTop, shouldFollow);
+	      if (options.usage || options.final) updateChatUsage();
+	      if (iconsChanged) queueLucideRefresh();
+	      if (structureChanged) queueConversationMinimap();
+	      else queueConversationMinimapLayout();
+	    }
+
+	    function appendMessageElements(messages, options = {}) {
+	      const box = $("messages");
+	      const fragment = document.createDocumentFragment();
+	      for (const message of messages) fragment.appendChild(createMessageElement(message));
+	      box.appendChild(fragment);
+	      if (options.forceScroll) {
+	        state.followOutput = true;
+	        state.hasNewWhilePaused = false;
+	        box.scrollTop = box.scrollHeight;
+	      }
+	      updateScrollLatestButton();
 	      updateChatUsage();
 	      queueLucideRefresh();
 	      queueConversationMinimap();
@@ -18603,6 +18788,7 @@ INDEX_HTML = r'''<!doctype html>
 	        fragment.appendChild(createMessageElement(msg));
 	      }
 	      box.replaceChildren(fragment);
+	      if (!shouldFollow) box.scrollTop = previousTop;
 	      settleMessageScroll(previousTop, shouldFollow);
 	      updateChatUsage();
 	      queueLucideRefresh();
@@ -19023,7 +19209,7 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
 	    function scheduleStreamTick() {
-	      state.streamTimer = setTimeout(streamTick, 32);
+	      state.streamTimer = setTimeout(streamTick, 50);
 	    }
 
 	    function streamTick() {
@@ -19041,16 +19227,17 @@ INDEX_HTML = r'''<!doctype html>
 	      const count = streamChunkSize(state.streamQueue.length);
 	      message.content += state.streamQueue.slice(0, count);
 	      state.streamQueue = state.streamQueue.slice(count);
-	      updateStreamingMessage(message);
+	      updateStreamingMessage(message, { stream: true });
 	      scheduleStreamTick();
 	    }
 
 	    function streamChunkSize(length) {
-	      if (length > 1200) return 24;
-	      if (length > 600) return 16;
-	      if (length > 220) return 10;
-	      if (length > 80) return 6;
-	      return 3;
+	      if (length > 1200) return 240;
+	      if (length > 600) return 160;
+	      if (length > 220) return 96;
+	      if (length > 80) return 48;
+	      if (length > 24) return 24;
+	      return length;
 	    }
 
 	    function resolveStreamDrain() {
@@ -19150,7 +19337,7 @@ INDEX_HTML = r'''<!doctype html>
 	      state.messages.push(assistant);
 	      state.followOutput = true;
 	      state.hasNewWhilePaused = false;
-	      renderMessages({ forceScroll: true });
+	      appendMessageElements(state.messages.slice(-2), { forceScroll: true });
 	      const searchStatusText = options.statusText || (
 	        mode === "always" ? "正在联网搜索..." :
 	        mode === "auto" ? (useWebSearch ? "正在联网搜索..." : "AI 思考中，必要时会自动联网...") :
@@ -19184,18 +19371,18 @@ INDEX_HTML = r'''<!doctype html>
 	              if (event.type === "search_status") {
 	                assistant.sources = event.sources || [];
 	                if (event.count) setStatus("chatStatus", "找到 " + event.count + " 个来源，正在生成...", "ok");
-	                updateStreamingMessage(assistant);
+	                updateStreamingMessage(assistant, { sources: true });
 	                continue;
 	              }
 	              if (event.usage) {
 	                assistant.usage = event.usage;
-	                updateStreamingMessage(assistant);
+	                updateStreamingMessage(assistant, { usage: true });
 	              }
 	              if (event.type === "message_saved" && event.message_id) {
 	                assistant.id = event.message_id;
 	                assistant.favorite_id = null;
 	                assistant.usage = event.usage || assistant.usage || null;
-	                updateStreamingMessage(assistant);
+	                updateStreamingMessage(assistant, { saved: true, usage: true });
 	                continue;
 	              }
 	              const choice = event.choices?.[0] || {};
@@ -19210,7 +19397,7 @@ INDEX_HTML = r'''<!doctype html>
 	                "";
 	              if (reasoningPiece) {
 	                assistant.reasoning_content = (assistant.reasoning_content || "") + reasoningPiece;
-	                updateStreamingMessage(assistant);
+	                updateStreamingMessage(assistant, { reasoning: true });
 	              }
 	              if (piece) {
 	                enqueueAssistantText(assistant, piece);
@@ -19222,8 +19409,8 @@ INDEX_HTML = r'''<!doctype html>
 	        await drainAssistantQueue();
 	        if (!assistant.content) {
 	          assistant.content = "没有收到可显示的内容。";
-	          updateStreamingMessage(assistant);
 	        }
+	        updateStreamingMessage(assistant, { final: true, usage: true, sources: true });
 	        await loadConversations();
 	        await loadConversationStats(state.currentConversation?.id);
 	        setStatus("chatStatus", "");
@@ -19235,19 +19422,20 @@ INDEX_HTML = r'''<!doctype html>
 	            await drainAssistantQueue();
 	          } else {
 	            assistant.content = "已停止生成。";
-	            updateStreamingMessage(assistant);
 	          }
+	          updateStreamingMessage(assistant, { final: true });
 	          setStatus("chatStatus", "已停止生成", "");
 	        } else {
 	          const message = friendlyError(err, "发送失败，稍后再试一下。");
 	          enqueueAssistantText(assistant, "\n" + message);
 	          await drainAssistantQueue();
+	          updateStreamingMessage(assistant, { final: true });
 	          setStatus("chatStatus", message, "err");
 	        }
 	      } finally {
 	        if (assistant.thinking) {
 	          assistant.thinking = false;
-	          updateStreamingMessage(assistant);
+	          updateStreamingMessage(assistant, { final: true });
 	        }
 	        state.abortController = null;
 	        state.userStopped = false;
