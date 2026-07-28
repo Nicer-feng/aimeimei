@@ -387,6 +387,36 @@ def init_db(secrets_data=None):
               FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS side_discussions (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              source_message_id INTEGER NOT NULL,
+              source_role TEXT NOT NULL,
+              source_created_at INTEGER NOT NULL DEFAULT 0,
+              selected_text TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active',
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS side_discussion_messages (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              discussion_id TEXT NOT NULL,
+              role TEXT NOT NULL,
+              content TEXT NOT NULL,
+              reasoning_content TEXT NOT NULL DEFAULT '',
+              input_tokens INTEGER NOT NULL DEFAULT 0,
+              output_tokens INTEGER NOT NULL DEFAULT 0,
+              total_tokens INTEGER NOT NULL DEFAULT 0,
+              estimated_cost REAL NOT NULL DEFAULT 0,
+              actual_model TEXT NOT NULL DEFAULT '',
+              created_at INTEGER NOT NULL,
+              FOREIGN KEY (discussion_id) REFERENCES side_discussions(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS daily_usage (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               user_id TEXT NOT NULL,
@@ -696,6 +726,8 @@ def init_db(secrets_data=None):
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations(user_id, archived, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_conversation ON messages(user_id, conversation_id, id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_side_discussions_user_session ON side_discussions(user_id, session_id, updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_side_discussion_messages_discussion ON side_discussion_messages(discussion_id, id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_images_user_session ON chat_message_images(user_id, session_id, message_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_favorites_user_created ON favorite_messages(user_id, created_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_usage_user_date ON daily_usage(user_id, date)")
@@ -834,6 +866,41 @@ def visible_user_question(content):
         if separator and question.strip():
             return question.strip()
     return value
+
+
+def side_discussion_public(row):
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "source_message_id": row["source_message_id"],
+        "source_role": row["source_role"],
+        "source_created_at": row["source_created_at"],
+        "selected_text": row["selected_text"],
+        "model_id": row["model_id"],
+        "model_name": row["model_name"] if "model_name" in row.keys() else "",
+        "model": row["model"] if "model" in row.keys() else "",
+        "title": row["title"],
+        "status": row["status"],
+        "message_count": int(row["message_count"] or 0) if "message_count" in row.keys() else 0,
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def side_discussion_message_public(row):
+    return {
+        "id": row["id"],
+        "role": row["role"],
+        "content": row["content"],
+        "reasoning_content": row["reasoning_content"],
+        "created_at": row["created_at"],
+        "usage": {
+            "prompt_tokens": int(row["input_tokens"] or 0),
+            "completion_tokens": int(row["output_tokens"] or 0),
+            "total_tokens": int(row["total_tokens"] or 0),
+            "estimated_cost": float(row["estimated_cost"] or 0),
+        },
+    }
 
 
 def estimate_profile_tokens(text) -> int:
@@ -2166,6 +2233,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_admin(self.handle_admin_users)
         if path == "/api/token-activity":
             return self.require_user(self.handle_token_activity)
+        if path == "/api/side-discussions":
+            return self.require_user(self.handle_side_discussions)
+        if path.startswith("/api/side-discussions/"):
+            return self.require_user(self.handle_side_discussion_item)
         if path == "/api/conversations":
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
@@ -2235,6 +2306,12 @@ class AppHandler(BaseHTTPRequestHandler):
             return self.require_user(self.handle_media_task_enhance)
         if path.startswith("/api/media/tasks/") and path.endswith("/conversation"):
             return self.require_user(self.handle_media_task_conversation)
+        if path == "/api/side-discussions":
+            return self.require_user(self.handle_side_discussions)
+        if path.startswith("/api/side-discussions/") and path.endswith("/messages"):
+            return self.require_user(self.handle_side_discussion_send)
+        if path.startswith("/api/side-discussions/") and path.endswith("/conversation"):
+            return self.require_user(self.handle_side_discussion_conversation)
         if path.startswith("/api/conversations/") and (path.endswith("/pin") or path.endswith("/unpin")):
             return self.require_user(self.handle_conversation_pin)
         if path.startswith("/api/sessions/") and (path.endswith("/pin") or path.endswith("/unpin")):
@@ -5510,6 +5587,462 @@ mindmap_text 要求：
                 if conversation:
                     self.upsert_media_context_message(conn, updated, conversation["id"], user_id)
         return self.json({"task": media_task_public(updated), "cached": False})
+
+    def side_discussion_id_from_path(self):
+        parts = urllib.parse.urlparse(self.path).path.strip("/").split("/")
+        return urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
+
+    def side_discussion_row(self, conn, discussion_id, user_id):
+        return conn.execute(
+            """
+            SELECT d.*, m.name AS model_name, m.model AS model,
+                   COUNT(dm.id) AS message_count
+            FROM side_discussions d
+            JOIN models m ON m.id=d.model_id
+            LEFT JOIN side_discussion_messages dm ON dm.discussion_id=d.id
+            WHERE d.id=? AND d.user_id=?
+            GROUP BY d.id
+            """,
+            (discussion_id, user_id),
+        ).fetchone()
+
+    def handle_side_discussions(self):
+        user_id = self.current_user()["id"]
+        if self.command == "GET":
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            session_id = str((query.get("session_id") or [""])[0]).strip()
+            if not session_id:
+                return self.error(HTTPStatus.BAD_REQUEST, "session_id required")
+            with db() as conn:
+                conversation = conn.execute(
+                    "SELECT id FROM conversations WHERE id=? AND user_id=? AND archived=0",
+                    (session_id, user_id),
+                ).fetchone()
+                if not conversation:
+                    return self.error(HTTPStatus.NOT_FOUND, "conversation not found")
+                rows = conn.execute(
+                    """
+                    SELECT d.*, m.name AS model_name, m.model AS model,
+                           COUNT(dm.id) AS message_count
+                    FROM side_discussions d
+                    JOIN models m ON m.id=d.model_id
+                    LEFT JOIN side_discussion_messages dm ON dm.discussion_id=d.id
+                    WHERE d.session_id=? AND d.user_id=?
+                    GROUP BY d.id
+                    ORDER BY d.updated_at DESC
+                    LIMIT 50
+                    """,
+                    (session_id, user_id),
+                ).fetchall()
+            return self.json({"discussions": [side_discussion_public(row) for row in rows]})
+
+        try:
+            data = self.read_body(limit=256 * 1024)
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+        session_id = str(data.get("session_id") or "").strip()
+        selected_text = str(data.get("selected_text") or "").strip()
+        try:
+            source_message_id = int(data.get("source_message_id") or 0)
+        except (TypeError, ValueError):
+            source_message_id = 0
+        if not session_id or not source_message_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "引用来源不完整")
+        if len(selected_text) < 2:
+            return self.error(HTTPStatus.BAD_REQUEST, "请至少选择 2 个字符")
+        selected_text = selected_text[:12000]
+        with db() as conn:
+            source = conn.execute(
+                """
+                SELECT c.id AS session_id, c.title AS conversation_title, c.model_id,
+                       msg.role AS source_role, msg.created_at AS source_created_at
+                FROM conversations c
+                JOIN messages msg ON msg.conversation_id=c.id AND msg.user_id=c.user_id
+                WHERE c.id=? AND c.user_id=? AND c.archived=0
+                  AND msg.id=? AND msg.role IN ('user', 'assistant')
+                """,
+                (session_id, user_id, source_message_id),
+            ).fetchone()
+            if not source:
+                return self.error(HTTPStatus.NOT_FOUND, "引用消息不存在")
+            discussion_id = b64_token(12)
+            title = re.sub(r"\s+", " ", selected_text).strip()[:36] or "侧边讨论"
+            ts = now()
+            conn.execute(
+                """
+                INSERT INTO side_discussions(
+                  id, user_id, session_id, source_message_id, source_role,
+                  source_created_at, selected_text, model_id, title, status,
+                  created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                """,
+                (
+                    discussion_id,
+                    user_id,
+                    session_id,
+                    source_message_id,
+                    source["source_role"],
+                    source["source_created_at"],
+                    selected_text,
+                    source["model_id"],
+                    title,
+                    ts,
+                    ts,
+                ),
+            )
+            row = self.side_discussion_row(conn, discussion_id, user_id)
+        return self.json({"discussion": side_discussion_public(row)}, status=HTTPStatus.CREATED)
+
+    def handle_side_discussion_item(self):
+        user_id = self.current_user()["id"]
+        discussion_id = self.side_discussion_id_from_path()
+        with db() as conn:
+            row = self.side_discussion_row(conn, discussion_id, user_id)
+            if not row:
+                return self.error(HTTPStatus.NOT_FOUND, "side discussion not found")
+            messages = conn.execute(
+                """
+                SELECT *
+                FROM side_discussion_messages
+                WHERE discussion_id=?
+                ORDER BY id ASC
+                LIMIT 200
+                """,
+                (discussion_id,),
+            ).fetchall()
+        return self.json(
+            {
+                "discussion": side_discussion_public(row),
+                "messages": [side_discussion_message_public(message) for message in messages],
+            }
+        )
+
+    def handle_side_discussion_send(self):
+        user_id = self.current_user()["id"]
+        discussion_id = self.side_discussion_id_from_path()
+        try:
+            data = self.read_body(limit=1024 * 1024)
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+        content = str(data.get("content") or "").strip()
+        if not content:
+            return self.error(HTTPStatus.BAD_REQUEST, "请输入想继续讨论的问题")
+
+        with db() as conn:
+            discussion = conn.execute(
+                """
+                SELECT d.*, c.title AS conversation_title,
+                       m.name AS model_name, m.model, m.base_url, m.api_key,
+                       m.system_prompt, m.enabled, m.input_price_per_million,
+                       m.output_price_per_million, m.cost_enabled
+                FROM side_discussions d
+                JOIN conversations c ON c.id=d.session_id AND c.user_id=d.user_id
+                JOIN models m ON m.id=d.model_id
+                WHERE d.id=? AND d.user_id=?
+                """,
+                (discussion_id, user_id),
+            ).fetchone()
+            if not discussion:
+                return self.error(HTTPStatus.NOT_FOUND, "side discussion not found")
+            if not discussion["enabled"]:
+                return self.error(HTTPStatus.BAD_REQUEST, "当前讨论使用的模型已停用")
+            if not str(discussion["api_key"] or "").strip():
+                return self.error(HTTPStatus.BAD_REQUEST, "当前模型尚未配置 API Key")
+            ts = now()
+            conn.execute(
+                """
+                INSERT INTO side_discussion_messages(discussion_id, role, content, created_at)
+                VALUES (?, 'user', ?, ?)
+                """,
+                (discussion_id, content, ts),
+            )
+            conn.execute(
+                "UPDATE side_discussions SET updated_at=? WHERE id=? AND user_id=?",
+                (ts, discussion_id, user_id),
+            )
+            history = conn.execute(
+                """
+                SELECT role, content
+                FROM side_discussion_messages
+                WHERE discussion_id=?
+                ORDER BY id ASC
+                LIMIT 60
+                """,
+                (discussion_id,),
+            ).fetchall()
+
+        source_role = "槑槑回复" if discussion["source_role"] == "assistant" else "用户消息"
+        system_context = (
+            "你正在围绕主会话中的一段引用内容进行独立讨论。\n"
+            f"主会话标题：{discussion['conversation_title']}\n"
+            f"来源：{source_role}\n\n"
+            "引用内容：\n"
+            f"{discussion['selected_text']}\n\n"
+            "请只依据这段引用内容和用户在侧边栏提出的问题回答。"
+            "不要假设你已经看过完整主会话；如果材料不足，请明确说明。"
+        )
+        upstream_messages = [{"role": "system", "content": system_context}]
+        if str(discussion["system_prompt"] or "").strip():
+            upstream_messages.append(
+                {"role": "system", "content": str(discussion["system_prompt"]).strip()}
+            )
+        upstream_messages.extend(
+            {"role": row["role"], "content": row["content"]} for row in history
+        )
+
+        def make_payload(include_usage):
+            payload = {
+                "model": discussion["model"],
+                "messages": upstream_messages,
+                "stream": True,
+            }
+            if include_usage:
+                payload["stream_options"] = {"include_usage": True}
+            return payload
+
+        def open_upstream(payload):
+            request = urllib.request.Request(
+                str(discussion["base_url"]).rstrip("/") + "/chat/completions",
+                data=json.dumps(payload, ensure_ascii=False).encode(),
+                headers={
+                    "Authorization": "Bearer " + str(discussion["api_key"]).strip(),
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                    "User-Agent": "ai-platform/2.0",
+                },
+                method="POST",
+            )
+            return urllib.request.urlopen(request, timeout=120)
+
+        try:
+            response = open_upstream(make_payload(True))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(65536).decode(errors="replace")
+            if exc.code == 400 and usage_option_rejected(detail):
+                try:
+                    response = open_upstream(make_payload(False))
+                except urllib.error.HTTPError as retry:
+                    retry_detail = retry.read(65536).decode(errors="replace")
+                    return self.error(
+                        HTTPStatus.BAD_GATEWAY,
+                        f"侧边讨论模型请求失败（{retry.code}）",
+                        retry_detail,
+                    )
+                except Exception as retry:
+                    return self.error(HTTPStatus.BAD_GATEWAY, "侧边讨论模型请求失败", str(retry))
+            else:
+                return self.error(
+                    HTTPStatus.BAD_GATEWAY,
+                    f"侧边讨论模型请求失败（{exc.code}）",
+                    detail,
+                )
+        except Exception as exc:
+            return self.error(HTTPStatus.BAD_GATEWAY, "侧边讨论模型请求失败", str(exc))
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        assistant_parts = []
+        reasoning_parts = []
+        usage_data = None
+        buffer = ""
+        try:
+            while True:
+                chunk = response.read(8192)
+                if not chunk:
+                    break
+                try:
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                except Exception:
+                    pass
+                buffer += chunk.decode(errors="ignore")
+                lines = buffer.splitlines(keepends=True)
+                if lines and not lines[-1].endswith(("\n", "\r")):
+                    buffer = lines.pop()
+                else:
+                    buffer = ""
+                for line in lines:
+                    text = line.strip()
+                    if not text.startswith("data:"):
+                        continue
+                    data_text = text[5:].strip()
+                    if not data_text or data_text == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(data_text)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(event.get("usage"), dict):
+                        usage_data = event["usage"]
+                    choice = (event.get("choices") or [{}])[0]
+                    if isinstance(choice.get("usage"), dict):
+                        usage_data = choice["usage"]
+                    delta = choice.get("delta") or {}
+                    message = choice.get("message") or {}
+                    piece = delta.get("content") or message.get("content") or ""
+                    reasoning_piece = (
+                        delta.get("reasoning_content")
+                        or message.get("reasoning_content")
+                        or delta.get("reasoning")
+                        or message.get("reasoning")
+                        or ""
+                    )
+                    if piece:
+                        assistant_parts.append(str(piece))
+                    if reasoning_piece:
+                        reasoning_parts.append(str(reasoning_piece))
+        finally:
+            response.close()
+
+        assistant_text = "".join(assistant_parts).strip()
+        reasoning_text = "".join(reasoning_parts).strip()
+        assistant_text, think_reasoning = split_think_blocks(assistant_text)
+        if think_reasoning:
+            reasoning_text = (reasoning_text + "\n\n" + think_reasoning).strip()
+        if not assistant_text:
+            return
+        prompt_tokens, completion_tokens, total_tokens = parse_usage_tokens(usage_data)
+        input_price = parse_price(discussion["input_price_per_million"])
+        output_price = parse_price(discussion["output_price_per_million"])
+        estimated_cost = estimate_request_cost(
+            prompt_tokens,
+            completion_tokens,
+            input_price,
+            output_price,
+            bool(discussion["cost_enabled"]),
+        )
+        created_at = now()
+        with db() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO side_discussion_messages(
+                  discussion_id, role, content, reasoning_content,
+                  input_tokens, output_tokens, total_tokens,
+                  estimated_cost, actual_model, created_at
+                )
+                VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    discussion_id,
+                    assistant_text,
+                    reasoning_text,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost,
+                    discussion["model"],
+                    created_at,
+                ),
+            )
+            conn.execute(
+                "UPDATE side_discussions SET updated_at=? WHERE id=? AND user_id=?",
+                (created_at, discussion_id, user_id),
+            )
+            add_daily_usage(
+                conn,
+                user_id,
+                created_at,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                estimated_cost,
+            )
+        event = {
+            "type": "message_saved",
+            "discussion_id": discussion_id,
+            "message_id": cursor.lastrowid,
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "estimated_cost": estimated_cost,
+            },
+        }
+        try:
+            self.wfile.write(("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode())
+            self.wfile.flush()
+        except Exception:
+            pass
+
+    def handle_side_discussion_conversation(self):
+        user_id = self.current_user()["id"]
+        discussion_id = self.side_discussion_id_from_path()
+        with db() as conn:
+            discussion = self.side_discussion_row(conn, discussion_id, user_id)
+            if not discussion:
+                return self.error(HTTPStatus.NOT_FOUND, "side discussion not found")
+            model = conn.execute(
+                "SELECT id FROM models WHERE id=? AND enabled=1",
+                (discussion["model_id"],),
+            ).fetchone()
+            if not model:
+                return self.error(HTTPStatus.BAD_REQUEST, "当前讨论使用的模型已停用")
+            side_messages = conn.execute(
+                """
+                SELECT *
+                FROM side_discussion_messages
+                WHERE discussion_id=?
+                ORDER BY id ASC
+                """,
+                (discussion_id,),
+            ).fetchall()
+            conversation_id = b64_token(12)
+            ts = now()
+            title = ("侧边讨论：" + discussion["title"])[:80]
+            conn.execute(
+                """
+                INSERT INTO conversations(id, user_id, title, model_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (conversation_id, user_id, title, discussion["model_id"], ts, ts),
+            )
+            source_role = "槑槑回复" if discussion["source_role"] == "assistant" else "用户消息"
+            source_message = (
+                f"围绕以下{source_role}继续讨论：\n\n"
+                f"> {discussion['selected_text'].replace(chr(10), chr(10) + '> ')}"
+            )
+            conn.execute(
+                """
+                INSERT INTO messages(user_id, conversation_id, role, content, created_at)
+                VALUES (?, ?, 'user', ?, ?)
+                """,
+                (user_id, conversation_id, source_message, ts),
+            )
+            for message in side_messages:
+                conn.execute(
+                    """
+                    INSERT INTO messages(
+                      user_id, conversation_id, role, content, reasoning_content,
+                      actual_model, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        conversation_id,
+                        message["role"],
+                        message["content"],
+                        message["reasoning_content"],
+                        message["actual_model"],
+                        message["created_at"],
+                    ),
+                )
+            row = conn.execute(
+                """
+                SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
+                       m.supports_native_web_search
+                FROM conversations c
+                JOIN models m ON m.id=c.model_id
+                WHERE c.id=? AND c.user_id=?
+                """,
+                (conversation_id, user_id),
+            ).fetchone()
+        return self.json({"conversation": conversation_row(row)}, status=HTTPStatus.CREATED)
 
     def handle_conversations(self):
         user = self.current_user()
@@ -13612,6 +14145,230 @@ INDEX_HTML = r'''<!doctype html>
         min-height: 44px;
       }
     }
+    .side-discussion-trigger {
+      width: auto;
+      min-width: 0;
+      padding: 0 10px;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--color-text-secondary);
+    }
+    .side-discussion-trigger[hidden] { display: none !important; }
+    .app.side-discussion-open .side-discussion-trigger {
+      width: 38px;
+      padding: 0;
+    }
+    .app.side-discussion-open .side-discussion-trigger span { display: none; }
+    .app.side-discussion-open {
+      grid-template-columns: var(--sidebar-width) minmax(560px, 1fr) var(--side-discussion-width, 440px);
+    }
+    .side-discussion-panel {
+      position: relative;
+      z-index: 24;
+      min-width: 0;
+      height: 100dvh;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      border-left: 1px solid var(--color-border);
+      background: color-mix(in srgb, var(--color-surface-elevated) 94%, transparent);
+      box-shadow: -14px 0 34px rgba(72, 51, 45, .08);
+      overflow: hidden;
+    }
+    .side-discussion-panel[hidden] { display: none !important; }
+    .side-discussion-resizer {
+      position: absolute;
+      z-index: 3;
+      inset: 0 auto 0 -5px;
+      width: 10px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      cursor: col-resize;
+      touch-action: none;
+    }
+    .side-discussion-resizer::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 4px;
+      width: 1px;
+      background: transparent;
+      transition: background var(--motion-fast) var(--ease-standard);
+    }
+    .side-discussion-resizer:hover::after,
+    .side-discussion-resizer.is-dragging::after { background: var(--primary); }
+    .side-discussion-head {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 16px 12px 18px;
+      border-bottom: 1px solid var(--color-border);
+    }
+    .side-discussion-heading { min-width: 0; }
+    .side-discussion-heading strong {
+      display: block;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+    .side-discussion-heading span {
+      display: block;
+      margin-top: 3px;
+      overflow: hidden;
+      color: var(--color-text-tertiary);
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .side-discussion-source {
+      margin: 12px 16px 0 18px;
+      padding: 11px 12px;
+      border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--color-border));
+      border-radius: var(--radius-md);
+      background: color-mix(in srgb, var(--primary) 7%, var(--color-surface));
+    }
+    .side-discussion-source-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 5px;
+      color: var(--color-text-tertiary);
+      font-size: 11px;
+    }
+    .side-discussion-source p {
+      display: -webkit-box;
+      margin: 0;
+      overflow: hidden;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      line-height: 1.55;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+    }
+    .side-discussion-messages {
+      min-width: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 18px 16px 24px 18px;
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--primary) 28%, transparent) transparent;
+    }
+    .side-discussion-empty {
+      min-height: 100%;
+      display: grid;
+      place-content: center;
+      gap: 8px;
+      padding: 28px;
+      color: var(--color-text-tertiary);
+      text-align: center;
+    }
+    .side-discussion-empty i { width: 24px; height: 24px; margin: auto; color: var(--primary); }
+    .side-message {
+      min-width: 0;
+      margin-bottom: 18px;
+    }
+    .side-message.user {
+      max-width: 88%;
+      margin-left: auto;
+      padding: 10px 12px;
+      border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+      border-radius: 15px 15px 4px 15px;
+      background: color-mix(in srgb, var(--primary) 10%, var(--color-surface));
+    }
+    .side-message.assistant { padding-right: 4px; }
+    .side-message-role {
+      margin-bottom: 6px;
+      color: var(--color-text-tertiary);
+      font-size: 11px;
+    }
+    .side-message-content {
+      min-width: 0;
+      color: var(--color-text-primary);
+      font-size: 14px;
+      line-height: 1.72;
+      overflow-wrap: anywhere;
+    }
+    .side-message-content > :first-child { margin-top: 0; }
+    .side-message-content > :last-child { margin-bottom: 0; }
+    .side-message-time {
+      margin-top: 6px;
+      color: var(--color-text-tertiary);
+      font-size: 10px;
+    }
+    .side-discussion-composer {
+      padding: 10px 14px max(14px, env(safe-area-inset-bottom)) 16px;
+      border-top: 1px solid var(--color-border);
+      background: color-mix(in srgb, var(--color-surface-elevated) 88%, transparent);
+      backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+    }
+    .side-discussion-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .side-discussion-actions button {
+      min-height: 30px;
+      padding: 0 9px;
+      font-size: 11px;
+    }
+    .side-discussion-input-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 38px;
+      align-items: end;
+      gap: 8px;
+      padding: 7px;
+      border: 1px solid var(--color-border);
+      border-radius: 18px;
+      background: color-mix(in srgb, var(--color-surface) 84%, transparent);
+      transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
+    }
+    .side-discussion-input-row:focus-within {
+      border-color: color-mix(in srgb, var(--primary) 50%, var(--color-border));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent);
+    }
+    .side-discussion-input-row textarea {
+      width: 100%;
+      min-height: 38px;
+      max-height: 160px;
+      resize: none;
+      padding: 9px 10px;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--color-text-primary);
+      font: inherit;
+      line-height: 1.5;
+    }
+    .side-discussion-send {
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      border-radius: 50%;
+    }
+    .side-discussion-status {
+      min-height: 18px;
+      padding: 5px 3px 0;
+      color: var(--color-text-tertiary);
+      font-size: 11px;
+    }
+    body.side-discussion-active .desktop-pet {
+      opacity: 0;
+      pointer-events: none;
+    }
+    @media (max-width: 1219px), (hover: none), (pointer: coarse) {
+      .side-discussion-trigger,
+      .side-discussion-panel,
+      #discussSelection { display: none !important; }
+      .app.side-discussion-open {
+        grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+      }
+    }
     @media (prefers-reduced-motion: reduce) {
       *,
       *::before,
@@ -13632,14 +14389,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.6</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.13.0</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.12.6</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.13.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -13652,7 +14409,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.6</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.13.0</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -13687,7 +14444,7 @@ INDEX_HTML = r'''<!doctype html>
 		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.12.6</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.13.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -13705,6 +14462,7 @@ INDEX_HTML = r'''<!doctype html>
           <button class="profile-status-chip" id="profileStatus" type="button"><i data-lucide="brain" aria-hidden="true"></i><span>AI档案未加载</span></button>
         </div>
         <div class="top-actions">
+          <button class="icon side-discussion-trigger ui-btn ui-btn-ghost" id="reopenSideDiscussion" type="button" hidden title="打开侧边讨论"><i data-lucide="panel-right-open" aria-hidden="true"></i><span id="sideDiscussionCount">侧边讨论</span></button>
           <button class="icon accent-toggle ui-icon-btn" id="accentToggle" title="主色调" aria-label="主色调"><i data-lucide="palette" aria-hidden="true"></i><span class="icon-fallback">●</span></button>
           <button class="icon font-toggle" id="fontSizeToggle" title="字体大小：中">中</button>
           <button class="icon ui-icon-btn" id="themeToggle" title="切换深浅色" aria-label="切换深浅色"><i data-lucide="moon" aria-hidden="true"></i><span class="icon-fallback">◐</span></button>
@@ -13831,6 +14589,32 @@ INDEX_HTML = r'''<!doctype html>
 	    </div>
 	  </section>
     </main>
+    <aside class="side-discussion-panel" id="sideDiscussionPanel" aria-label="侧边讨论" hidden>
+      <button class="side-discussion-resizer" id="sideDiscussionResizer" type="button" aria-label="调整侧边讨论宽度" title="拖动调整宽度，双击恢复默认"></button>
+      <header class="side-discussion-head">
+        <div class="side-discussion-heading">
+          <strong>侧边讨论</strong>
+          <span id="sideDiscussionModel">使用当前会话模型</span>
+        </div>
+        <button class="icon ui-icon-btn" id="closeSideDiscussion" type="button" title="收起侧边讨论"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+      </header>
+      <section class="side-discussion-source">
+        <div class="side-discussion-source-meta"><span id="sideDiscussionSourceRole">引用内容</span><time id="sideDiscussionSourceTime"></time></div>
+        <p id="sideDiscussionSourceText"></p>
+      </section>
+      <section class="side-discussion-messages" id="sideDiscussionMessages"></section>
+      <footer class="side-discussion-composer">
+        <div class="side-discussion-actions">
+          <button class="ui-btn ui-btn-ghost inline-flex items-center gap-2" id="quoteSideAnswer" type="button" title="把最后一条槑槑回答引用到主输入框"><i data-lucide="quote" aria-hidden="true"></i><span>引用到主输入框</span></button>
+          <button class="ui-btn ui-btn-ghost inline-flex items-center gap-2" id="saveSideConversation" type="button"><i data-lucide="message-square-plus" aria-hidden="true"></i><span>保存为新对话</span></button>
+        </div>
+        <div class="side-discussion-input-row">
+          <textarea id="sideDiscussionPrompt" rows="1" placeholder="围绕这段内容继续提问..."></textarea>
+          <button class="primary side-discussion-send ui-icon-btn" id="sideDiscussionSend" type="button" title="发送" aria-label="发送"><i data-lucide="arrow-up" aria-hidden="true"></i><span class="icon-fallback">↑</span></button>
+        </div>
+        <div class="side-discussion-status" id="sideDiscussionStatus"></div>
+      </footer>
+    </aside>
   </div>
 
 	<div class="desktop-pet side-right animation-enabled" id="desktopPet" aria-label="槑槑桌面宠物" hidden>
@@ -13860,6 +14644,7 @@ INDEX_HTML = r'''<!doctype html>
 	</section>
 	<div class="selection-toolbar" id="selectionToolbar" role="toolbar" aria-label="选中文字操作">
 	  <button class="inline-flex items-center gap-2" id="quoteSelection" type="button"><i data-lucide="quote" aria-hidden="true"></i><span>引用提问</span></button>
+	  <button class="inline-flex items-center gap-2" id="discussSelection" type="button"><i data-lucide="panel-right-open" aria-hidden="true"></i><span>侧边讨论</span></button>
 	  <button class="inline-flex items-center gap-2" id="copySelection" type="button"><i data-lucide="copy" aria-hidden="true"></i><span>复制</span></button>
 	</div>
 
@@ -14336,7 +15121,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.6</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.13.0</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -14401,6 +15186,14 @@ INDEX_HTML = r'''<!doctype html>
 	      activeTextSelection: null,
 	      selectionToolbarTimer: 0,
 	      pendingQuotes: [],
+	      sideDiscussions: [],
+	      activeSideDiscussion: null,
+	      sideDiscussionMessages: [],
+	      sideDiscussionSending: false,
+	      sideDiscussionAbortController: null,
+	      sideDiscussionWidth: 440,
+	      sideDiscussionResize: null,
+	      sideDiscussionSeq: 0,
 	      globalSearchResults: [],
 	      globalSearchQuery: "",
 	      globalSearchSelected: 0,
@@ -15718,6 +16511,7 @@ INDEX_HTML = r'''<!doctype html>
 	      state.sidebarWidth = String(width);
 	      document.documentElement.style.setProperty("--sidebar-width", width + "px");
 		      if (save) setUserStorage("aiPlatformSidebarWidth", String(width));
+	      if (typeof handleSideDiscussionViewportChange === "function") handleSideDiscussionViewportChange();
 	    }
 
 	    function startSidebarResize(event) {
@@ -17707,11 +18501,16 @@ INDEX_HTML = r'''<!doctype html>
         await state.newConversationPromise.catch(() => null);
       }
       saveCurrentDraft();
-      const button = $("newChat");
-      if (button) button.disabled = true;
-      state.newConversationModelId = modelId;
-      state.newConversationPromise = (async () => {
-        const res = await api("/api/conversations", { method: "POST", body: JSON.stringify({ model_id: modelId }) });
+	      const button = $("newChat");
+	      if (button) button.disabled = true;
+	      state.newConversationModelId = modelId;
+	      state.newConversationPromise = (async () => {
+	        closeSideDiscussion();
+	        state.sideDiscussions = [];
+	        state.activeSideDiscussion = null;
+	        state.sideDiscussionMessages = [];
+	        updateSideDiscussionEntry();
+	        const res = await api("/api/conversations", { method: "POST", body: JSON.stringify({ model_id: modelId }) });
         if (!res.ok) throw new Error(await readError(res, "新建对话失败，稍后再试一下。"));
         const data = await res.json();
         state.currentConversation = data.conversation;
@@ -17736,7 +18535,14 @@ INDEX_HTML = r'''<!doctype html>
     }
 
 	    async function selectConversation(id, options = {}) {
-	      if (state.currentConversation?.id !== id) saveCurrentDraft();
+	      if (state.currentConversation?.id !== id) {
+	        saveCurrentDraft();
+	        closeSideDiscussion();
+	        state.sideDiscussions = [];
+	        state.activeSideDiscussion = null;
+	        state.sideDiscussionMessages = [];
+	        updateSideDiscussionEntry();
+	      }
 	      state.editingConversationId = null;
 	      const conv = state.conversations.find((item) => item.id === id);
 	      if (!conv) return;
@@ -17755,7 +18561,7 @@ INDEX_HTML = r'''<!doctype html>
 	      restoreCurrentDraft();
         const targetMessageId = Number(options.messageId || 0);
         renderMessages({ forceScroll: !targetMessageId });
-        await loadConversationStats(id);
+	        await Promise.all([loadConversationStats(id), loadSideDiscussions(id)]);
         closeSidebar();
         if (targetMessageId) {
           requestAnimationFrame(() => scrollToMessageId(targetMessageId));
@@ -19071,6 +19877,7 @@ INDEX_HTML = r'''<!doctype html>
 	      const context = selectedMessageContext();
 	      if (!context) return hideSelectionToolbar();
 	      state.activeTextSelection = context;
+	      if ($("discussSelection")) $("discussSelection").hidden = !sideDiscussionAvailable();
 	      positionSelectionToolbar(context);
 	      queueLucideRefresh();
 	    }
@@ -19109,6 +19916,390 @@ INDEX_HTML = r'''<!doctype html>
 	        openManualCopy(text);
 	      }
 	      hideSelectionToolbar({ clearSelection: true });
+	    }
+
+	    function sideDiscussionAvailable() {
+	      if (!desktopSelectionToolsEnabled()) return false;
+	      const sidebarWidth = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-width")) || Number(state.sidebarWidth) || 322;
+	      const available = window.innerWidth - sidebarWidth;
+	      return window.innerWidth >= 1220 && available >= 920;
+	    }
+
+	    function sideDiscussionWidthBounds() {
+	      const sidebarWidth = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-width")) || Number(state.sidebarWidth) || 322;
+	      const available = Math.max(0, window.innerWidth - sidebarWidth);
+	      return {
+	        min: 360,
+	        max: Math.max(360, Math.min(560, available * .5, available - 560))
+	      };
+	    }
+
+	    function applySideDiscussionWidth(value, options = {}) {
+	      const bounds = sideDiscussionWidthBounds();
+	      const width = Math.round(clampNumber(Number(value), bounds.min, bounds.max, 440));
+	      state.sideDiscussionWidth = width;
+	      document.documentElement.style.setProperty("--side-discussion-width", width + "px");
+	      if (options.save !== false && state.user) setUserStorage("sideDiscussionWidth", String(width));
+	      return width;
+	    }
+
+	    function updateSideDiscussionEntry() {
+	      const count = state.sideDiscussions.length;
+	      const button = $("reopenSideDiscussion");
+	      if (!button) return;
+	      button.hidden = !count || !sideDiscussionAvailable();
+	      $("sideDiscussionCount").textContent = `侧边讨论 (${count})`;
+	      button.title = count ? `打开最近的侧边讨论，共 ${count} 个` : "暂无侧边讨论";
+	    }
+
+	    async function loadSideDiscussions(sessionId = state.currentConversation?.id || "") {
+	      if (!sessionId) {
+	        state.sideDiscussions = [];
+	        updateSideDiscussionEntry();
+	        return [];
+	      }
+	      try {
+	        const res = await api(`/api/side-discussions?session_id=${encodeURIComponent(sessionId)}`);
+	        if (!res.ok) throw new Error(await readError(res, "侧边讨论加载失败。"));
+	        const data = await res.json();
+	        if (state.currentConversation?.id !== sessionId) return [];
+	        state.sideDiscussions = data.discussions || [];
+	      } catch (err) {
+	        state.sideDiscussions = [];
+	        console.warn("side discussion list failed", err);
+	      }
+	      updateSideDiscussionEntry();
+	      return state.sideDiscussions;
+	    }
+
+	    function sideDiscussionMessageKey(message) {
+	      if (!message._sideClientKey) {
+	        Object.defineProperty(message, "_sideClientKey", {
+	          value: "side_msg_" + (++state.sideDiscussionSeq),
+	          enumerable: false
+	        });
+	      }
+	      return message._sideClientKey;
+	    }
+
+	    function sideDiscussionScrollBottom(behavior = "auto") {
+	      const box = $("sideDiscussionMessages");
+	      if (!box) return;
+	      if (behavior === "smooth") box.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
+	      else box.scrollTop = box.scrollHeight;
+	    }
+
+	    function createSideDiscussionMessage(message) {
+	      const wrap = document.createElement("article");
+	      wrap.className = "side-message " + message.role;
+	      wrap.dataset.sideMessageKey = sideDiscussionMessageKey(message);
+	      const role = document.createElement("div");
+	      role.className = "side-message-role";
+	      role.textContent = message.role === "assistant" ? "槑槑" : "你";
+	      const content = document.createElement("div");
+	      content.className = "side-message-content markdown-body";
+	      if (message.thinking && !message.content) {
+	        content.innerHTML = '<span class="thinking-dots"><span></span><span></span><span></span></span> 槑槑正在整理思路...';
+	      } else {
+	        content.innerHTML = renderMarkdown(message.content || "");
+	        enhanceMarkdown(content, { mermaid: true, icons: true });
+	      }
+	      const time = document.createElement("div");
+	      time.className = "side-message-time";
+	      const tokens = Number(message.usage?.total_tokens || 0);
+	      time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
+	      wrap.append(role, content, time);
+	      return wrap;
+	    }
+
+	    function renderSideDiscussionMessages(options = {}) {
+	      const box = $("sideDiscussionMessages");
+	      if (!box) return;
+	      box.replaceChildren();
+	      if (!state.sideDiscussionMessages.length) {
+	        const empty = document.createElement("div");
+	        empty.className = "side-discussion-empty";
+	        empty.innerHTML = iconMarkup("messages-square", "") + "<strong>从这段引用开始聊</strong><span>这里的讨论不会写入主会话上下文。</span>";
+	        box.appendChild(empty);
+	      } else {
+	        state.sideDiscussionMessages.forEach((message) => box.appendChild(createSideDiscussionMessage(message)));
+	      }
+	      queueLucideRefresh();
+	      if (options.scroll !== false) requestAnimationFrame(() => sideDiscussionScrollBottom());
+	    }
+
+	    function updateSideDiscussionStream(message, options = {}) {
+	      const box = $("sideDiscussionMessages");
+	      let wrap = box?.querySelector(`[data-side-message-key="${sideDiscussionMessageKey(message)}"]`);
+	      if (!wrap) {
+	        box?.querySelector(".side-discussion-empty")?.remove();
+	        wrap = createSideDiscussionMessage(message);
+	        box?.appendChild(wrap);
+	      }
+	      const content = wrap?.querySelector(".side-message-content");
+	      const time = wrap?.querySelector(".side-message-time");
+	      if (!content) return;
+	      content.className = "side-message-content markdown-body";
+	      if (message.thinking && !message.content) {
+	        content.innerHTML = '<span class="thinking-dots"><span></span><span></span><span></span></span> 槑槑正在整理思路...';
+	      } else {
+	        renderStreamingMarkdown(content, message, message.content || "", { final: Boolean(options.final) });
+	        if (options.final) enhanceMarkdown(content, { mermaid: true, icons: true });
+	      }
+	      if (time) {
+	        const tokens = Number(message.usage?.total_tokens || 0);
+	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
+	      }
+	      sideDiscussionScrollBottom();
+	    }
+
+	    function renderSideDiscussionHeader() {
+	      const discussion = state.activeSideDiscussion;
+	      if (!discussion) return;
+	      $("sideDiscussionModel").textContent = [discussion.model_name, discussion.model].filter(Boolean).join(" · ");
+	      $("sideDiscussionSourceRole").textContent = discussion.source_role === "assistant" ? "来自槑槑回复" : "来自你的消息";
+	      $("sideDiscussionSourceTime").textContent = formatMessageTime(discussion.source_created_at);
+	      $("sideDiscussionSourceText").textContent = discussion.selected_text || "";
+	    }
+
+	    async function openSideDiscussion(discussionId) {
+	      if (!sideDiscussionAvailable()) {
+	        setStatus("chatStatus", "请扩大浏览器窗口后使用侧边讨论。", "err");
+	        return;
+	      }
+	      const res = await api(`/api/side-discussions/${encodeURIComponent(discussionId)}`);
+	      if (!res.ok) {
+	        setStatus("chatStatus", await readError(res, "侧边讨论打开失败。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      if (data.discussion?.session_id !== state.currentConversation?.id) return;
+	      state.activeSideDiscussion = data.discussion;
+	      state.sideDiscussionMessages = data.messages || [];
+	      applySideDiscussionWidth(getUserStorage("sideDiscussionWidth", state.sideDiscussionWidth), { save: false });
+	      $("sideDiscussionPanel").hidden = false;
+	      $("appView").classList.add("side-discussion-open");
+	      document.body.classList.add("side-discussion-active");
+	      renderSideDiscussionHeader();
+	      renderSideDiscussionMessages();
+	      updateSideDiscussionEntry();
+	      syncComposerLayout();
+	      queueConversationMinimap();
+	    }
+
+	    function closeSideDiscussion() {
+	      if (state.sideDiscussionSending && state.sideDiscussionAbortController) {
+	        state.sideDiscussionAbortController.abort();
+	      }
+	      state.sideDiscussionSending = false;
+	      state.sideDiscussionAbortController = null;
+	      $("sideDiscussionPanel").hidden = true;
+	      $("appView").classList.remove("side-discussion-open");
+	      document.body.classList.remove("side-discussion-active");
+	      syncComposerLayout();
+	      queueConversationMinimap();
+	    }
+
+	    async function createSideDiscussionFromSelection() {
+	      const context = state.activeTextSelection;
+	      if (!context) return;
+	      if (!sideDiscussionAvailable()) {
+	        setStatus("chatStatus", "请扩大浏览器窗口后使用侧边讨论。", "err");
+	        return;
+	      }
+	      if (!context.message_id) {
+	        setStatus("chatStatus", "这条消息还没有保存，完成后再开启侧边讨论。", "err");
+	        return;
+	      }
+	      const res = await api("/api/side-discussions", {
+	        method: "POST",
+	        body: JSON.stringify({
+	          session_id: context.session_id,
+	          source_message_id: context.message_id,
+	          selected_text: context.selected_text
+	        })
+	      });
+	      if (!res.ok) {
+	        setStatus("chatStatus", await readError(res, "创建侧边讨论失败。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      state.sideDiscussions = [data.discussion, ...state.sideDiscussions.filter((item) => item.id !== data.discussion.id)];
+	      hideSelectionToolbar({ clearSelection: true });
+	      updateSideDiscussionEntry();
+	      await openSideDiscussion(data.discussion.id);
+	      $("sideDiscussionPrompt").focus();
+	    }
+
+	    function parseSideDiscussionSSE(buffer, onEvent) {
+	      const blocks = buffer.split(/\r?\n\r?\n/);
+	      const rest = blocks.pop() || "";
+	      for (const block of blocks) {
+	        const line = block.split(/\r?\n/).find((item) => item.startsWith("data:"));
+	        if (!line) continue;
+	        const raw = line.slice(5).trim();
+	        if (!raw || raw === "[DONE]") continue;
+	        try { onEvent(JSON.parse(raw)); } catch {}
+	      }
+	      return rest;
+	    }
+
+	    async function sendSideDiscussionMessage() {
+	      if (!state.activeSideDiscussion) return;
+	      if (state.sideDiscussionSending) {
+	        state.sideDiscussionAbortController?.abort();
+	        return;
+	      }
+	      const prompt = $("sideDiscussionPrompt");
+	      const content = prompt.value.trim();
+	      if (!content) return;
+	      prompt.value = "";
+	      prompt.style.height = "";
+	      const userMessage = { role: "user", content, created_at: Math.floor(Date.now() / 1000), usage: {} };
+	      const assistant = { role: "assistant", content: "", created_at: Math.floor(Date.now() / 1000), usage: {}, thinking: true };
+	      state.sideDiscussionMessages.push(userMessage, assistant);
+	      renderSideDiscussionMessages();
+	      state.sideDiscussionSending = true;
+	      state.sideDiscussionAbortController = new AbortController();
+	      $("sideDiscussionSend").innerHTML = iconMarkup("square", "■");
+	      $("sideDiscussionSend").title = "停止生成";
+	      $("sideDiscussionStatus").textContent = "槑槑正在整理思路...";
+	      queueLucideRefresh();
+	      let buffer = "";
+	      try {
+	        const res = await api(`/api/side-discussions/${encodeURIComponent(state.activeSideDiscussion.id)}/messages`, {
+	          method: "POST",
+	          body: JSON.stringify({ content }),
+	          signal: state.sideDiscussionAbortController.signal
+	        });
+	        if (!res.ok) throw new Error(await readError(res, "侧边讨论发送失败。"));
+	        const reader = res.body.getReader();
+	        const decoder = new TextDecoder();
+	        while (true) {
+	          const { value, done } = await reader.read();
+	          if (done) break;
+	          buffer += decoder.decode(value, { stream: true });
+	          buffer = parseSideDiscussionSSE(buffer, (event) => {
+	            if (event.type === "message_saved") {
+	              assistant.id = event.message_id;
+	              assistant.usage = event.usage || {};
+	              return;
+	            }
+	            const choice = (event.choices || [{}])[0];
+	            const delta = choice.delta || choice.message || {};
+	            const piece = delta.content || "";
+	            if (piece) {
+	              assistant.content += piece;
+	              assistant.thinking = false;
+	              updateSideDiscussionStream(assistant);
+	            }
+	          });
+	        }
+	        assistant.thinking = false;
+	        updateSideDiscussionStream(assistant, { final: true });
+	        state.activeSideDiscussion.updated_at = Math.floor(Date.now() / 1000);
+	        state.activeSideDiscussion.message_count = state.sideDiscussionMessages.length;
+	        state.sideDiscussions = [
+	          state.activeSideDiscussion,
+	          ...state.sideDiscussions.filter((item) => item.id !== state.activeSideDiscussion.id)
+	        ];
+	        updateSideDiscussionEntry();
+	        $("sideDiscussionStatus").textContent = "";
+	      } catch (err) {
+	        assistant.thinking = false;
+	        if (err?.name === "AbortError") {
+	          if (!assistant.content) state.sideDiscussionMessages = state.sideDiscussionMessages.filter((item) => item !== assistant);
+	          $("sideDiscussionStatus").textContent = "已停止生成";
+	        } else {
+	          if (!assistant.content) state.sideDiscussionMessages = state.sideDiscussionMessages.filter((item) => item !== assistant);
+	          $("sideDiscussionStatus").textContent = friendlyError(err, "侧边讨论发送失败。");
+	        }
+	        renderSideDiscussionMessages();
+	      } finally {
+	        state.sideDiscussionSending = false;
+	        state.sideDiscussionAbortController = null;
+	        $("sideDiscussionSend").innerHTML = iconMarkup("arrow-up", "↑");
+	        $("sideDiscussionSend").title = "发送";
+	        queueLucideRefresh();
+	      }
+	    }
+
+	    function quoteLastSideAnswer() {
+	      const message = [...state.sideDiscussionMessages].reverse().find((item) => item.role === "assistant" && String(item.content || "").trim());
+	      if (!message) {
+	        $("sideDiscussionStatus").textContent = "还没有可以引用的槑槑回答。";
+	        return;
+	      }
+	      if (state.pendingQuotes.length >= 3) {
+	        $("sideDiscussionStatus").textContent = "主输入框已经有 3 段引用了。";
+	        return;
+	      }
+	      const quote = normalizedDraftQuote({
+	        session_id: state.currentConversation?.id || "",
+	        message_id: 0,
+	        message_key: "",
+	        role: "assistant",
+	        selected_text: message.content,
+	        created_at: message.created_at
+	      });
+	      state.pendingQuotes.push(quote);
+	      saveCurrentQuotes();
+	      renderComposerQuotes();
+	      $("prompt").focus();
+	      $("sideDiscussionStatus").textContent = "已引用到主输入框。";
+	    }
+
+	    async function saveSideDiscussionAsConversation() {
+	      if (!state.activeSideDiscussion) return;
+	      const button = $("saveSideConversation");
+	      button.disabled = true;
+	      $("sideDiscussionStatus").textContent = "正在保存为新对话...";
+	      try {
+	        const res = await api(`/api/side-discussions/${encodeURIComponent(state.activeSideDiscussion.id)}/conversation`, {
+	          method: "POST",
+	          body: "{}"
+	        });
+	        if (!res.ok) throw new Error(await readError(res, "保存为新对话失败。"));
+	        const data = await res.json();
+	        upsertConversation(data.conversation);
+	        closeSideDiscussion();
+	        await selectConversation(data.conversation.id);
+	        setStatus("chatStatus", "侧边讨论已保存为独立会话。", "ok");
+	      } catch (err) {
+	        $("sideDiscussionStatus").textContent = friendlyError(err, "保存为新对话失败。");
+	      } finally {
+	        button.disabled = false;
+	      }
+	    }
+
+	    function handleSideDiscussionResizePointerDown(event) {
+	      if (!sideDiscussionAvailable()) return;
+	      event.preventDefault();
+	      state.sideDiscussionResize = { pointerId: event.pointerId };
+	      $("sideDiscussionResizer").setPointerCapture?.(event.pointerId);
+	      $("sideDiscussionResizer").classList.add("is-dragging");
+	      document.body.style.cursor = "col-resize";
+	      document.body.style.userSelect = "none";
+	    }
+
+	    function handleSideDiscussionResizePointerMove(event) {
+	      if (!state.sideDiscussionResize || event.pointerId !== state.sideDiscussionResize.pointerId) return;
+	      applySideDiscussionWidth(window.innerWidth - event.clientX, { save: false });
+	    }
+
+	    function handleSideDiscussionResizePointerUp(event) {
+	      if (!state.sideDiscussionResize || event.pointerId !== state.sideDiscussionResize.pointerId) return;
+	      state.sideDiscussionResize = null;
+	      $("sideDiscussionResizer").classList.remove("is-dragging");
+	      document.body.style.cursor = "";
+	      document.body.style.userSelect = "";
+	      applySideDiscussionWidth(state.sideDiscussionWidth, { save: true });
+	    }
+
+	    function handleSideDiscussionViewportChange() {
+	      updateSideDiscussionEntry();
+	      if (!$("sideDiscussionPanel").hidden && !sideDiscussionAvailable()) closeSideDiscussion();
+	      else if (!$("sideDiscussionPanel").hidden) applySideDiscussionWidth(state.sideDiscussionWidth, { save: false });
 	    }
 
 	    function lastMessageSelectionBoundary() {
@@ -21563,7 +22754,32 @@ INDEX_HTML = r'''<!doctype html>
 	    document.addEventListener("selectionchange", handleSelectionChange);
 	    $("selectionToolbar").addEventListener("pointerdown", (event) => event.preventDefault());
 	    $("quoteSelection").addEventListener("click", addActiveSelectionQuote);
+	    $("discussSelection").addEventListener("click", () => createSideDiscussionFromSelection().catch((err) => setStatus("chatStatus", friendlyError(err, "创建侧边讨论失败。"), "err")));
 	    $("copySelection").addEventListener("click", copyActiveSelection);
+	    $("reopenSideDiscussion").addEventListener("click", () => {
+	      const discussion = state.sideDiscussions[0];
+	      if (discussion) openSideDiscussion(discussion.id);
+	    });
+	    $("closeSideDiscussion").addEventListener("click", closeSideDiscussion);
+	    $("quoteSideAnswer").addEventListener("click", quoteLastSideAnswer);
+	    $("saveSideConversation").addEventListener("click", saveSideDiscussionAsConversation);
+	    $("sideDiscussionSend").addEventListener("click", sendSideDiscussionMessage);
+	    $("sideDiscussionPrompt").addEventListener("input", () => {
+	      const field = $("sideDiscussionPrompt");
+	      field.style.height = "auto";
+	      field.style.height = Math.min(160, field.scrollHeight) + "px";
+	    });
+	    $("sideDiscussionPrompt").addEventListener("keydown", (event) => {
+	      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+	        event.preventDefault();
+	        sendSideDiscussionMessage();
+	      }
+	    });
+	    $("sideDiscussionResizer").addEventListener("pointerdown", handleSideDiscussionResizePointerDown);
+	    $("sideDiscussionResizer").addEventListener("pointermove", handleSideDiscussionResizePointerMove);
+	    $("sideDiscussionResizer").addEventListener("pointerup", handleSideDiscussionResizePointerUp);
+	    $("sideDiscussionResizer").addEventListener("pointercancel", handleSideDiscussionResizePointerUp);
+	    $("sideDiscussionResizer").addEventListener("dblclick", () => applySideDiscussionWidth(440, { save: true }));
 	    document.addEventListener("pointerdown", handleSelectionToolbarOutsidePointer);
 	    document.addEventListener("pointerdown", handleMessageQuoteOutsidePointer);
 	    document.querySelector(".composer")?.addEventListener("selectstart", handleComposerSelectStart);
@@ -21619,6 +22835,7 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	      if (event.key === "Escape") {
 	        hideSelectionToolbar({ clearSelection: true });
+	        if (!$("sideDiscussionPanel").hidden) closeSideDiscussion();
 	        closeMessageQuotePreviews();
 	        if ($("versionUpdateToast")?.classList.contains("show")) snoozeVersionUpdate();
 	        closeModelPicker();
@@ -21744,6 +22961,7 @@ INDEX_HTML = r'''<!doctype html>
 			    window.addEventListener("resize", queueConversationMinimap, { passive: true });
 			    window.addEventListener("resize", () => schedulePetPositionCorrection({ save: true }), { passive: true });
 			    window.addEventListener("resize", hideSelectionToolbar, { passive: true });
+			    window.addEventListener("resize", handleSideDiscussionViewportChange, { passive: true });
 		    window.addEventListener("blur", endChatTextSelection);
 		    window.addEventListener("pagehide", saveCurrentDraft);
 		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
