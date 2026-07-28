@@ -12753,45 +12753,57 @@ INDEX_HTML = r'''<!doctype html>
       padding-block: 14px 10px;
     }
     .brand {
-      align-items: flex-start;
+      align-items: center;
     }
     .brand-avatar {
-      width: 46px;
-      height: 46px;
-      border-radius: 15px;
+      width: 38px;
+      height: 38px;
+      border-radius: 13px;
     }
     .brand-copy {
       display: grid;
-      gap: 1px;
-      padding-top: 1px;
+      gap: 2px;
+      min-width: 0;
     }
     .brand-copy h1 {
-      justify-content: space-between;
-      width: 100%;
-      font-size: 19px;
-      line-height: 1.25;
+      justify-content: flex-start;
+      width: auto;
+      min-width: 0;
+      font-size: 18px;
+      line-height: 1.2;
     }
     .brand-copy .app-version {
-      margin-left: 8px;
+      margin-left: 5px;
       font-size: 10px;
     }
     .brand-user-name {
+      min-width: 0;
       overflow: hidden;
       color: var(--color-text-primary);
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 700;
-      line-height: 1.45;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .brand-user-meta {
+    .brand .brand-user-meta {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 5px;
       min-width: 0;
       color: var(--color-text-tertiary);
       font-size: 11px;
-      line-height: 1.4;
+      line-height: 1.25;
+      overflow: hidden;
+      white-space: nowrap;
+      margin-top: 0;
+    }
+    .brand .brand-user-meta > span {
+      display: inline-flex;
+      margin-top: 0;
+    }
+    .brand-separator {
+      color: color-mix(in srgb, var(--color-text-tertiary) 58%, transparent);
+      flex: 0 0 auto;
     }
     .brand-health {
       display: inline-flex;
@@ -12857,6 +12869,10 @@ INDEX_HTML = r'''<!doctype html>
       background: color-mix(in srgb, var(--color-text-tertiary) 38%, transparent);
     }
     .conv {
+      display: block;
+      min-height: 46px;
+      margin-bottom: 2px;
+      padding: 2px;
       transition:
         background var(--motion-fast) ease,
         border-color var(--motion-fast) ease,
@@ -12876,8 +12892,7 @@ INDEX_HTML = r'''<!doctype html>
       transition: width var(--motion-fast) ease, opacity var(--motion-fast) ease;
     }
     .conv:hover {
-      transform: translateY(-1px);
-      box-shadow: var(--shadow-xs);
+      box-shadow: 0 5px 14px rgba(73, 54, 35, .055);
     }
     .conv:hover::before {
       width: 3px;
@@ -12888,7 +12903,15 @@ INDEX_HTML = r'''<!doctype html>
       opacity: 1;
     }
     .conv-actions {
+      position: absolute;
+      top: 50%;
+      right: 6px;
+      z-index: 2;
+      padding: 3px;
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--sidebar-strong) 94%, transparent);
       transform: translateX(3px);
+      translate: 0 -50%;
       transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-standard);
     }
     .conv:hover .conv-actions,
@@ -12902,6 +12925,89 @@ INDEX_HTML = r'''<!doctype html>
     .conv.pinned:not(:hover):not(:focus-within) .conv-actions {
       opacity: 0;
       pointer-events: none;
+    }
+    .conv-main {
+      width: 100%;
+      min-height: 38px;
+      padding: 4px 10px 4px 13px;
+      gap: 2px;
+    }
+    .conv-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+      font-size: 11px;
+      transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-standard);
+    }
+    .conv-model {
+      flex: 1 1 auto;
+    }
+    .conv-time {
+      flex: 0 0 auto;
+      max-width: 42%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .conv-time::before {
+      content: none;
+    }
+    .conv:hover .conv-meta,
+    .conv:focus-within .conv-meta {
+      opacity: 0;
+      transform: translateX(-3px);
+    }
+    .conv-mobile-more {
+      display: none;
+    }
+    .conversation-group {
+      margin-top: 10px;
+      margin-bottom: 4px;
+    }
+    @media (max-width: 900px), (hover: none) {
+      .conv:hover .conv-meta,
+      .conv:focus-within .conv-meta {
+        opacity: 1;
+        transform: none;
+      }
+      .conv-mobile-more {
+        position: absolute;
+        top: 50%;
+        right: 6px;
+        z-index: 3;
+        display: inline-grid;
+        width: 32px;
+        min-width: 32px;
+        height: 32px;
+        min-height: 32px;
+        padding: 0;
+        place-items: center;
+        opacity: .72;
+        translate: 0 -50%;
+      }
+      .conv-main {
+        padding-right: 42px;
+      }
+      .conv .conv-actions {
+        top: calc(50% + 33px);
+        right: 5px;
+        z-index: 5;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        translate: 0 -50%;
+        transform: translateY(-4px) scale(.97);
+        background: var(--color-surface-elevated);
+        border: 1px solid var(--color-border);
+        box-shadow: var(--shadow-md);
+      }
+      .conv.mobile-actions-open .conv-actions {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transform: translateY(0) scale(1);
+      }
     }
     .side-foot {
       position: relative;
@@ -13278,14 +13384,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.2</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.3</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.12.2</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.12.3</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -13298,9 +13404,14 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.2</button></h1>
-	            <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
-	            <span class="brand-user-meta"><span id="currentUserRole">家庭成员</span><span class="brand-health is-offline" id="healthStatus"><span class="health-dot" aria-hidden="true"></span><span id="health">连接中</span></span></span>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.3</button></h1>
+	            <span class="brand-user-meta" id="currentUserMeta" title="">
+	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
+	              <span class="brand-separator" aria-hidden="true">·</span>
+	              <span id="currentUserRole">家庭成员</span>
+	              <span class="brand-separator" aria-hidden="true">·</span>
+	              <span class="brand-health is-offline" id="healthStatus"><span class="health-dot" aria-hidden="true"></span><span id="health">连接中</span></span>
+	            </span>
           </div>
         </div>
         <button class="icon mobile-only ui-icon-btn" id="closeSide" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
@@ -13328,7 +13439,7 @@ INDEX_HTML = r'''<!doctype html>
 		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.12.2</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.12.3</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -13972,7 +14083,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.2</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.3</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -14208,6 +14319,11 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	      const role = $("currentUserRole");
 	      if (role) role.textContent = state.user?.role === "admin" ? "管理员" : "家庭成员";
+	      const meta = $("currentUserMeta");
+	      if (meta) {
+	        const userName = state.user ? (state.user.display_name || state.user.username) : "未登录";
+	        meta.title = `${userName} · ${state.user?.role === "admin" ? "管理员" : "家庭成员"}`;
+	      }
 	    }
 
 	    function loadUserPreferences() {
@@ -17051,6 +17167,7 @@ INDEX_HTML = r'''<!doctype html>
 		            main.querySelector(".conv-title").appendChild(pin);
 		          }
 		          main.querySelector(".conv-model").textContent = conv.model_name || "未命名模型";
+		          main.querySelector(".conv-model").title = conv.model_name || "未命名模型";
 		          main.querySelector(".conv-time").textContent = formatTime(conv.updated_at);
 		          main.addEventListener("click", () => selectConversation(conv.id));
 
@@ -17063,7 +17180,16 @@ INDEX_HTML = r'''<!doctype html>
 	          const del = createIconOnlyButton("trash-2", "删除", { className: "conv-action ui-icon-btn", danger: true, fallback: "⌫" });
 	          del.addEventListener("click", () => deleteConversationById(conv.id));
 	          actions.append(pinToggle, edit, del);
-	          row.append(main, actions);
+	          const mobileMore = createIconOnlyButton("ellipsis", "更多会话操作", { className: "conv-mobile-more ui-icon-btn", fallback: "···" });
+	          mobileMore.addEventListener("click", (event) => {
+	            event.stopPropagation();
+	            const willOpen = !row.classList.contains("mobile-actions-open");
+	            box.querySelectorAll(".conv.mobile-actions-open").forEach((item) => item.classList.remove("mobile-actions-open"));
+	            row.classList.toggle("mobile-actions-open", willOpen);
+	            mobileMore.setAttribute("aria-expanded", willOpen ? "true" : "false");
+	          });
+	          actions.addEventListener("click", () => row.classList.remove("mobile-actions-open"));
+	          row.append(main, mobileMore, actions);
 	        }
 	        box.appendChild(row);
 	      }
