@@ -13632,14 +13632,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.5</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.6</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.12.5</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.12.6</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -13652,7 +13652,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.5</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.6</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -13687,7 +13687,7 @@ INDEX_HTML = r'''<!doctype html>
 		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.12.5</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.12.6</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -14336,7 +14336,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.5</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.6</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -14389,6 +14389,7 @@ INDEX_HTML = r'''<!doctype html>
 	      programmaticScroll: false,
 	      minimapQueued: false,
 	      minimapLayoutTimer: 0,
+	      lastStreamMinimapAt: 0,
 	      messageScrollFrame: 0,
 	      pendingMessageScroll: null,
 	      messagesScrollFrame: 0,
@@ -19395,6 +19396,89 @@ INDEX_HTML = r'''<!doctype html>
 	      return false;
 	    }
 
+	    function streamingStableBoundary(source) {
+	      const value = String(source || "");
+	      let cursor = 0;
+	      let boundary = 0;
+	      let fenceChar = "";
+	      let fenceLength = 0;
+	      while (cursor < value.length) {
+	        const newline = value.indexOf("\n", cursor);
+	        const end = newline < 0 ? value.length : newline + 1;
+	        const line = value.slice(cursor, newline < 0 ? end : newline);
+	        const trimmed = line.trim();
+	        const fence = trimmed.match(/^(`{3,}|~{3,})/);
+	        if (fence) {
+	          const token = fence[1];
+	          if (!fenceChar) {
+	            fenceChar = token[0];
+	            fenceLength = token.length;
+	          } else if (token[0] === fenceChar && token.length >= fenceLength) {
+	            fenceChar = "";
+	            fenceLength = 0;
+	          }
+	        } else if (!fenceChar && !trimmed) {
+	          boundary = end;
+	        }
+	        cursor = end;
+	      }
+	      return boundary;
+	    }
+
+	    function resetStreamingMarkdownState(text) {
+	      delete text._streamStableLength;
+	      delete text._streamStableSource;
+	      delete text._streamRenderedSource;
+	      delete text._streamStableNode;
+	      delete text._streamTailNode;
+	    }
+
+	    function ensureStreamingMarkdownNodes(text) {
+	      if (text._streamStableNode?.isConnected && text._streamTailNode?.isConnected) return;
+	      const stable = document.createElement("div");
+	      stable.className = "stream-markdown-stable";
+	      const tail = document.createElement("div");
+	      tail.className = "stream-markdown-tail";
+	      text.replaceChildren(stable, tail);
+	      text._streamStableNode = stable;
+	      text._streamTailNode = tail;
+	      text._streamStableLength = 0;
+	      text._streamStableSource = "";
+	      text._streamRenderedSource = "";
+	    }
+
+	    function renderStreamingMarkdown(text, message, source, options = {}) {
+	      const value = String(source || "");
+	      if (options.final) {
+	        resetStreamingMarkdownState(text);
+	        text.innerHTML = renderMessageMarkdown(message, value);
+	        text._markdownSource = value;
+	        enhanceMarkdown(text, { mermaid: true, icons: true });
+	        return true;
+	      }
+	      ensureStreamingMarkdownNodes(text);
+	      if (text._streamRenderedSource === value) return false;
+	      const boundary = streamingStableBoundary(value);
+	      const stableLength = Number(text._streamStableLength || 0);
+	      const stableSource = String(text._streamStableSource || "");
+	      if (boundary < stableLength || !value.startsWith(stableSource)) {
+	        text._streamStableNode.replaceChildren();
+	        text._streamStableLength = 0;
+	        text._streamStableSource = "";
+	      }
+	      const nextStableLength = Number(text._streamStableLength || 0);
+	      if (boundary > nextStableLength) {
+	        const completed = value.slice(nextStableLength, boundary);
+	        text._streamStableNode.insertAdjacentHTML("beforeend", renderMarkdown(completed));
+	        text._streamStableLength = boundary;
+	        text._streamStableSource = value.slice(0, boundary);
+	      }
+	      const tailSource = value.slice(Number(text._streamStableLength || 0));
+	      text._streamTailNode.innerHTML = tailSource ? renderMarkdown(tailSource) : "";
+	      text._streamRenderedSource = value;
+	      return true;
+	    }
+
 	    function updateLiveMessageElement(wrap, message, options = {}) {
 	      const role = wrap.querySelector(".role");
 	      const text = wrap.querySelector(".message-content");
@@ -19443,11 +19527,7 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	      wrap.dataset.liveState = "streaming";
 	      text.className = "message-content markdown";
-	      if (text._markdownSource !== displayContent || options.final) {
-	        text.innerHTML = renderMessageMarkdown(message, displayContent);
-	        text._markdownSource = displayContent;
-	        enhanceMarkdown(text, { mermaid: Boolean(options.final), icons: Boolean(options.final) });
-	      }
+	      renderStreamingMarkdown(text, message, displayContent, options);
 	      copy.hidden = true;
 	      const hasContent = Boolean(displayContent);
 	      if (actions) actions.hidden = !hasContent;
@@ -19508,7 +19588,13 @@ INDEX_HTML = r'''<!doctype html>
 	      if (options.usage || options.final) updateChatUsage();
 	      if (iconsChanged) queueLucideRefresh();
 	      if (structureChanged) queueConversationMinimap();
-	      else queueConversationMinimapLayout();
+	      else {
+	        const now = performance.now();
+	        if (options.final || now - state.lastStreamMinimapAt >= 240) {
+	          state.lastStreamMinimapAt = now;
+	          queueConversationMinimapLayout();
+	        }
+	      }
 	    }
 
 	    function appendMessageElements(messages, options = {}) {
@@ -19925,6 +20011,7 @@ INDEX_HTML = r'''<!doctype html>
 	      state.streamTimer = null;
 	      state.streamResolve = null;
 	      state.firstTokenAt = null;
+	      state.lastStreamMinimapAt = 0;
 	    }
 
 	    function setSendingUI(isSending) {
@@ -19966,7 +20053,7 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
 	    function scheduleStreamTick() {
-	      state.streamTimer = setTimeout(streamTick, 50);
+	      state.streamTimer = setTimeout(streamTick, 32);
 	    }
 
 	    function streamTick() {
@@ -19985,15 +20072,22 @@ INDEX_HTML = r'''<!doctype html>
 	      message.content += state.streamQueue.slice(0, count);
 	      state.streamQueue = state.streamQueue.slice(count);
 	      updateStreamingMessage(message, { stream: true });
-	      scheduleStreamTick();
+	      if (state.streamQueue) {
+	        scheduleStreamTick();
+	      } else {
+	        state.streamTimer = null;
+	        resolveStreamDrain();
+	      }
 	    }
 
 	    function streamChunkSize(length) {
-	      if (length > 1200) return 240;
-	      if (length > 600) return 160;
-	      if (length > 220) return 96;
-	      if (length > 80) return 48;
-	      if (length > 24) return 24;
+	      if (length > 4000) return 160;
+	      if (length > 1800) return 112;
+	      if (length > 800) return 72;
+	      if (length > 320) return 44;
+	      if (length > 120) return 28;
+	      if (length > 40) return 16;
+	      if (length > 16) return 10;
 	      return length;
 	    }
 
