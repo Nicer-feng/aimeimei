@@ -824,6 +824,18 @@ def conversation_row(row):
     }
 
 
+def visible_user_question(content):
+    value = str(content or "").strip()
+    prefix = "以下是用户从当前会话中引用的内容："
+    if not value.startswith(prefix):
+        return value
+    for marker in ("\n\n用户的新问题：", "\n用户的新问题："):
+        _, separator, question = value.rpartition(marker)
+        if separator and question.strip():
+            return question.strip()
+    return value
+
+
 def estimate_profile_tokens(text) -> int:
     value = str(text or "")
     cjk = sum(1 for char in value if "\u4e00" <= char <= "\u9fff")
@@ -5888,7 +5900,7 @@ mindmap_text 要求：
                     [(conversation_id, user_message_id, row["id"], user_id) for row in image_rows],
                 )
             if convo["title"] == "新对话":
-                title = user_message_content.replace("\n", " ")[:28] or "图片理解"
+                title = visible_user_question(user_message_content).replace("\n", " ")[:28] or "图片理解"
                 conn.execute(
                     "UPDATE conversations SET title=?, updated_at=? WHERE id=? AND user_id=?",
                     (title, ts, conversation_id, user_id),
@@ -13294,6 +13306,98 @@ INDEX_HTML = r'''<!doctype html>
         transform var(--motion-base) var(--ease-standard),
         top var(--motion-fast) ease;
     }
+    .message-quote-reference {
+      position: relative;
+      width: fit-content;
+      max-width: 100%;
+      margin: 0 0 8px auto;
+      user-select: none;
+    }
+    .message-quote-trigger {
+      min-height: 26px;
+      padding: 0 9px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--color-border));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--color-surface) 58%, transparent);
+      color: var(--color-text-secondary);
+      box-shadow: none;
+      font-size: 11px;
+      font-weight: 670;
+      line-height: 1;
+    }
+    .message-quote-trigger .lucide {
+      width: 12px;
+      height: 12px;
+      stroke-width: 2.2;
+    }
+    .message-quote-trigger:hover,
+    .message-quote-trigger:focus-visible,
+    .message-quote-reference.open .message-quote-trigger {
+      border-color: color-mix(in srgb, var(--accent) 38%, var(--color-border));
+      background: color-mix(in srgb, var(--accent-soft) 44%, var(--color-surface));
+      color: var(--accent-strong);
+      transform: none;
+      box-shadow: none;
+    }
+    .message-quote-preview {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 8px);
+      z-index: 35;
+      width: min(380px, calc(100vw - 40px));
+      max-height: min(320px, 52vh);
+      padding: 12px;
+      overflow: auto;
+      border: 1px solid color-mix(in srgb, var(--color-border) 86%, transparent);
+      border-radius: var(--radius-md);
+      background: var(--color-surface);
+      color: var(--color-text-primary);
+      box-shadow: var(--shadow-md);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateY(5px) scale(.985);
+      transform-origin: bottom right;
+      transition:
+        opacity var(--motion-fast) ease,
+        transform var(--motion-base) var(--ease-standard),
+        visibility 0s linear var(--motion-base);
+    }
+    .message-quote-reference:hover .message-quote-preview,
+    .message-quote-reference:focus-within .message-quote-preview,
+    .message-quote-reference.open .message-quote-preview {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transform: translateY(0) scale(1);
+      transition-delay: 0s;
+    }
+    .message-quote-preview-item {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+    .message-quote-preview-item + .message-quote-preview-item {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+    }
+    .message-quote-preview-role {
+      color: var(--accent-strong);
+      font-size: 11px;
+      font-weight: 720;
+    }
+    .message-quote-preview-text {
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      line-height: 1.62;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      user-select: text;
+    }
 
     @media (hover: none) {
       .message-actions,
@@ -13410,6 +13514,28 @@ INDEX_HTML = r'''<!doctype html>
         padding: 12px 15px;
         border-radius: 17px 17px 5px 17px;
       }
+      .message-quote-reference {
+        margin-bottom: 7px;
+      }
+      .message-quote-trigger {
+        min-height: 28px;
+      }
+      .message-quote-preview {
+        position: relative;
+        right: auto;
+        bottom: auto;
+        width: min(360px, 76vw);
+        max-height: 240px;
+        margin-top: 6px;
+        display: none;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transform: none;
+      }
+      .message-quote-reference.open .message-quote-preview {
+        display: block;
+      }
       .composer {
         padding: 0 8px;
       }
@@ -13506,14 +13632,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.4</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.5</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.12.4</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.12.5</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -13526,7 +13652,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.4</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.5</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -13561,7 +13687,7 @@ INDEX_HTML = r'''<!doctype html>
 		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.12.4</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.12.5</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -14210,7 +14336,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.4</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.5</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -18308,6 +18434,107 @@ INDEX_HTML = r'''<!doctype html>
 	      return splitThinkContent(message.content || "").content;
 	    }
 
+	    function parseQuotedUserContent(source) {
+	      const value = String(source || "").trim();
+	      const prefix = "以下是用户从当前会话中引用的内容：";
+	      if (!value.startsWith(prefix)) return null;
+	      const questionMarkers = ["\n\n用户的新问题：", "\n用户的新问题："];
+	      let marker = "";
+	      let markerIndex = -1;
+	      for (const candidate of questionMarkers) {
+	        const index = value.lastIndexOf(candidate);
+	        if (index > markerIndex) {
+	          marker = candidate;
+	          markerIndex = index;
+	        }
+	      }
+	      if (markerIndex < prefix.length) return null;
+	      const quoteSource = value.slice(prefix.length, markerIndex).trim();
+	      const question = value.slice(markerIndex + marker.length).trim();
+	      const quotes = [];
+	      const quotePattern = /【来源：([^】]+)】\s*([\s\S]*?)\s*【引用结束】/g;
+	      let match;
+	      while ((match = quotePattern.exec(quoteSource)) !== null) {
+	        const text = String(match[2] || "")
+	          .split(/\r?\n/)
+	          .map((line) => line.replace(/^>\s?/, ""))
+	          .join("\n")
+	          .trim();
+	        if (!text) continue;
+	        quotes.push({
+	          role: String(match[1] || "引用内容").trim(),
+	          text
+	        });
+	      }
+	      if (!quotes.length) return null;
+	      return {
+	        question: question || "请基于引用内容进行分析。",
+	        quotes: quotes.slice(0, 3)
+	      };
+	    }
+
+	    function quotedUserMessage(message) {
+	      if (message?.role !== "user") return null;
+	      const source = visibleMessageContent(message);
+	      if (message._quotedUserSource === source) return message._quotedUserContent || null;
+	      const parsed = parseQuotedUserContent(source);
+	      message._quotedUserSource = source;
+	      message._quotedUserContent = parsed;
+	      return parsed;
+	    }
+
+	    function displayMessageContent(message) {
+	      return quotedUserMessage(message)?.question || visibleMessageContent(message);
+	    }
+
+	    function copyableMessageContent(message) {
+	      return displayMessageContent(message);
+	    }
+
+	    function closeMessageQuotePreviews(except = null) {
+	      document.querySelectorAll(".message-quote-reference.open").forEach((node) => {
+	        if (node === except) return;
+	        node.classList.remove("open");
+	        node.querySelector(".message-quote-trigger")?.setAttribute("aria-expanded", "false");
+	      });
+	    }
+
+	    function renderMessageQuoteReference(panel, message) {
+	      if (!panel) return;
+	      const parsed = quotedUserMessage(message);
+	      panel.replaceChildren();
+	      panel.hidden = !parsed;
+	      if (!parsed) return;
+	      const trigger = document.createElement("button");
+	      trigger.type = "button";
+	      trigger.className = "message-quote-trigger";
+	      trigger.setAttribute("aria-expanded", "false");
+	      trigger.innerHTML = iconMarkup("quote", "⌜") + `<span>${parsed.quotes.length} 个引用</span>`;
+	      const preview = document.createElement("div");
+	      preview.className = "message-quote-preview";
+	      preview.setAttribute("role", "tooltip");
+	      parsed.quotes.forEach((quote) => {
+	        const item = document.createElement("div");
+	        item.className = "message-quote-preview-item";
+	        const role = document.createElement("div");
+	        role.className = "message-quote-preview-role";
+	        role.textContent = quote.role;
+	        const text = document.createElement("div");
+	        text.className = "message-quote-preview-text";
+	        text.textContent = quote.text;
+	        item.append(role, text);
+	        preview.appendChild(item);
+	      });
+	      trigger.addEventListener("click", (event) => {
+	        event.stopPropagation();
+	        const willOpen = !panel.classList.contains("open");
+	        closeMessageQuotePreviews(panel);
+	        panel.classList.toggle("open", willOpen);
+	        trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+	      });
+	      panel.append(trigger, preview);
+	    }
+
 	    function messageReasoningContent(message) {
 	      const parts = [];
 	      if (message.reasoning_content) parts.push(String(message.reasoning_content).trim());
@@ -18961,6 +19188,11 @@ INDEX_HTML = r'''<!doctype html>
 	      hideSelectionToolbar();
 	    }
 
+	    function handleMessageQuoteOutsidePointer(event) {
+	      if (event.target.closest?.(".message-quote-reference")) return;
+	      closeMessageQuotePreviews();
+	    }
+
 	    function flushMessagesScroll() {
 	      state.messagesScrollFrame = 0;
 	      updateConversationMinimapViewport();
@@ -19015,19 +19247,22 @@ INDEX_HTML = r'''<!doctype html>
 	      const imagePanel = document.createElement("div");
 	      imagePanel.className = "message-images";
 	      imagePanel.hidden = true;
+	      const quotePanel = document.createElement("div");
+	      quotePanel.className = "message-quote-reference";
+	      quotePanel.hidden = true;
 	      const copy = document.createElement("button");
 	      copy.className = "copy-btn";
 	      copy.type = "button";
 	      copy.title = "复制";
 	      copy.innerHTML = '<i data-lucide="copy" aria-hidden="true"></i><span class="icon-fallback">⧉</span>';
-	      copy.addEventListener("click", () => copyText(visibleMessageContent(message), copy));
+	      copy.addEventListener("click", () => copyText(copyableMessageContent(message), copy));
 	      const copyAction = document.createElement("button");
 	      copyAction.className = "message-action copy-action";
 	      copyAction.type = "button";
 	      copyAction.innerHTML = '<i data-lucide="copy" aria-hidden="true"></i><span class="icon-fallback">⧉</span>';
 	      copyAction.setAttribute("aria-label", "复制");
 	      copyAction.title = "复制这条消息";
-	      copyAction.addEventListener("click", () => copyText(visibleMessageContent(message), copyAction));
+	      copyAction.addEventListener("click", () => copyText(copyableMessageContent(message), copyAction));
 	      const favorite = document.createElement("button");
 	      favorite.className = "message-action favorite-action";
 	      favorite.type = "button";
@@ -19052,7 +19287,7 @@ INDEX_HTML = r'''<!doctype html>
 	      reason.addEventListener("click", () => toggleReasoning(message));
 	      actions.append(favorite, regenerate, continueWrite, copyAction);
 
-	      shell.append(reasoningPanel, imagePanel, text, copy);
+	      shell.append(reasoningPanel, imagePanel, quotePanel, text, copy);
 	      wrap.append(role, shell, sourcesPanel, time, actions);
 	      updateMessageElement(wrap, message);
 	      return wrap;
@@ -19074,6 +19309,7 @@ INDEX_HTML = r'''<!doctype html>
 	      const reason = wrap.querySelector(".reason-action");
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
 	      const imagePanel = wrap.querySelector(".message-images");
+	      const quotePanel = wrap.querySelector(".message-quote-reference");
 	      role.replaceChildren();
 	      if (message.role === "user") {
 	        role.textContent = "你";
@@ -19090,10 +19326,11 @@ INDEX_HTML = r'''<!doctype html>
 	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
 	      }
 
-	      const displayContent = visibleMessageContent(message);
+	      const displayContent = displayMessageContent(message);
 	      const reasoningContent = messageReasoningContent(message);
 	      renderReasoningPanel(reasoningPanel, message, reasoningContent);
 	      renderMessageImages(imagePanel, messageImages(message));
+	      renderMessageQuoteReference(quotePanel, message);
 
 	      if (message.role === "assistant" && message.thinking && !displayContent) {
 	        wrap.dataset.liveState = "thinking";
@@ -21234,6 +21471,7 @@ INDEX_HTML = r'''<!doctype html>
 	    $("quoteSelection").addEventListener("click", addActiveSelectionQuote);
 	    $("copySelection").addEventListener("click", copyActiveSelection);
 	    document.addEventListener("pointerdown", handleSelectionToolbarOutsidePointer);
+	    document.addEventListener("pointerdown", handleMessageQuoteOutsidePointer);
 	    document.querySelector(".composer")?.addEventListener("selectstart", handleComposerSelectStart);
 	    $("scrollLatest").addEventListener("selectstart", (event) => event.preventDefault());
 	    $("conversationMinimap").addEventListener("pointerenter", expandConversationMinimap);
@@ -21287,6 +21525,7 @@ INDEX_HTML = r'''<!doctype html>
 	      }
 	      if (event.key === "Escape") {
 	        hideSelectionToolbar({ clearSelection: true });
+	        closeMessageQuotePreviews();
 	        if ($("versionUpdateToast")?.classList.contains("show")) snoozeVersionUpdate();
 	        closeModelPicker();
 	        closeGlobalSearch();
