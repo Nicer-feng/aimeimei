@@ -10467,6 +10467,128 @@ INDEX_HTML = r'''<!doctype html>
       -webkit-user-select: text;
       user-select: text;
     }
+    .selection-toolbar {
+      position: fixed;
+      z-index: 38;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 5px;
+      border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      -webkit-backdrop-filter: blur(16px) saturate(145%);
+      backdrop-filter: blur(16px) saturate(145%);
+      box-shadow: 0 14px 36px rgba(73, 54, 35, .16);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateY(4px) scale(.97);
+      transform-origin: center bottom;
+      transition:
+        opacity 150ms ease,
+        transform 170ms var(--ease-standard),
+        visibility 0s linear 170ms;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .selection-toolbar.show {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transform: translateY(0) scale(1);
+      transition-delay: 0s;
+    }
+    .selection-toolbar button {
+      min-height: 34px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 680;
+    }
+    .selection-toolbar button:hover,
+    .selection-toolbar button:focus-visible {
+      color: var(--text);
+      background: color-mix(in srgb, var(--accent-soft) 64%, transparent);
+    }
+    .selection-toolbar button .lucide {
+      width: 15px;
+      height: 15px;
+    }
+    .composer-quote-list {
+      display: grid;
+      gap: 7px;
+      padding: 0 2px;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .composer-quote-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px 12px;
+      align-items: start;
+      padding: 9px 10px 9px 12px;
+      border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+      border-left: 3px solid color-mix(in srgb, var(--accent) 72%, var(--accent-strong));
+      border-radius: 13px;
+      background: color-mix(in srgb, var(--accent-soft) 38%, transparent);
+      color: var(--text);
+    }
+    .composer-quote-copy {
+      min-width: 0;
+      display: grid;
+      gap: 3px;
+    }
+    .composer-quote-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .composer-quote-text {
+      display: -webkit-box;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+    }
+    .composer-quote-actions {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .composer-quote-actions button {
+      width: 30px;
+      min-width: 30px;
+      height: 30px;
+      min-height: 30px;
+      padding: 0;
+      border-radius: 9px;
+      color: var(--muted);
+      background: transparent;
+    }
+    .composer-quote-actions button:hover {
+      color: var(--text);
+      background: color-mix(in srgb, var(--surface) 72%, transparent);
+    }
+    .composer-quote-limit {
+      color: var(--muted-2);
+      font-size: 10px;
+      text-align: right;
+    }
+    @media (max-width: 1023px), (hover: none), (pointer: coarse) {
+      .selection-toolbar {
+        display: none !important;
+      }
+    }
 	    .model-select {
 	      min-width: 270px;
 	    }
@@ -13384,14 +13506,14 @@ INDEX_HTML = r'''<!doctype html>
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.3</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.12.4</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.12.3</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.12.4</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -13404,7 +13526,7 @@ INDEX_HTML = r'''<!doctype html>
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.3</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.12.4</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -13439,7 +13561,7 @@ INDEX_HTML = r'''<!doctype html>
 		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.12.3</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.12.4</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -13492,6 +13614,7 @@ INDEX_HTML = r'''<!doctype html>
 			            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我精简下面这段内容，保留重点，表达更利落：">精简</button>
 		            <button class="prompt-chip ui-badge inline-flex items-center" id="openPrompts" type="button">更多</button>
 	          </div>
+	          <div class="composer-quote-list" id="composerQuoteList" hidden></div>
 	          <div class="attachment-preview-row" id="attachmentPreviewRow" hidden></div>
 		          <div class="input-row">
 		            <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
@@ -13609,6 +13732,10 @@ INDEX_HTML = r'''<!doctype html>
 	    <button class="version-update-close ui-icon-btn" id="closeVersionUpdate" type="button" title="稍后提醒" aria-label="稍后提醒"><i data-lucide="x" aria-hidden="true"></i></button>
 	  </span>
 	</section>
+	<div class="selection-toolbar" id="selectionToolbar" role="toolbar" aria-label="选中文字操作">
+	  <button class="inline-flex items-center gap-2" id="quoteSelection" type="button"><i data-lucide="quote" aria-hidden="true"></i><span>引用提问</span></button>
+	  <button class="inline-flex items-center gap-2" id="copySelection" type="button"><i data-lucide="copy" aria-hidden="true"></i><span>复制</span></button>
+	</div>
 
 	  <div class="drawer-mask" id="drawerMask"></div>
 	  <section class="copy-dialog" id="copyDialog">
@@ -14083,7 +14210,7 @@ INDEX_HTML = r'''<!doctype html>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.3</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.12.4</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -14144,6 +14271,9 @@ INDEX_HTML = r'''<!doctype html>
 	      minimapTooltipTimer: 0,
 	      chatSelectionActive: false,
 	      chatSelectionStartedInMessages: false,
+	      activeTextSelection: null,
+	      selectionToolbarTimer: 0,
+	      pendingQuotes: [],
 	      globalSearchResults: [],
 	      globalSearchQuery: "",
 	      globalSearchSelected: 0,
@@ -14282,6 +14412,53 @@ INDEX_HTML = r'''<!doctype html>
 	      return userStorageKey("chatDraft:" + String(conversationId || "new"));
 	    }
 
+	    function quoteDraftStorageKey(conversationId = state.currentConversation?.id || "new") {
+	      return userStorageKey("chatQuotes:" + String(conversationId || "new"));
+	    }
+
+	    function normalizedDraftQuote(value) {
+	      if (!value || typeof value !== "object") return null;
+	      const selectedText = String(value.selected_text || "").trim();
+	      const role = value.role === "assistant" ? "assistant" : "user";
+	      if (!selectedText) return null;
+	      return {
+	        session_id: String(value.session_id || state.currentConversation?.id || ""),
+	        message_id: Number(value.message_id || 0),
+	        message_key: String(value.message_key || ""),
+	        role,
+	        selected_text: selectedText.slice(0, 12000),
+	        created_at: Number(value.created_at || 0)
+	      };
+	    }
+
+	    function saveCurrentQuotes() {
+	      if (!state.user) return;
+	      const key = quoteDraftStorageKey();
+	      if (state.pendingQuotes.length) {
+	        localStorage.setItem(key, JSON.stringify(state.pendingQuotes.slice(0, 3)));
+	      } else {
+	        localStorage.removeItem(key);
+	      }
+	    }
+
+	    function restoreCurrentQuotes() {
+	      state.pendingQuotes = [];
+	      if (!state.user) return renderComposerQuotes();
+	      try {
+	        const values = JSON.parse(localStorage.getItem(quoteDraftStorageKey()) || "[]");
+	        if (Array.isArray(values)) {
+	          state.pendingQuotes = values.map(normalizedDraftQuote).filter(Boolean).slice(0, 3);
+	        }
+	      } catch {}
+	      renderComposerQuotes();
+	    }
+
+	    function clearCurrentQuotes() {
+	      if (state.user) localStorage.removeItem(quoteDraftStorageKey());
+	      state.pendingQuotes = [];
+	      renderComposerQuotes();
+	    }
+
 	    function saveCurrentDraft() {
 	      if (!state.user) return;
 	      const prompt = $("prompt");
@@ -14292,18 +14469,100 @@ INDEX_HTML = r'''<!doctype html>
 	      if (state.currentConversation?.id) {
 	        setUserStorage("lastConversationId", state.currentConversation.id);
 	      }
+	      saveCurrentQuotes();
 	    }
 
 	    function restoreCurrentDraft() {
 	      const prompt = $("prompt");
 	      if (!prompt || !state.user) return;
 	      prompt.value = localStorage.getItem(draftStorageKey()) || "";
+	      restoreCurrentQuotes();
 	      autosizePrompt();
 	    }
 
 	    function clearCurrentDraft() {
 	      if (!state.user) return;
 	      localStorage.removeItem(draftStorageKey());
+	    }
+
+	    function quoteRoleLabel(role) {
+	      return role === "assistant" ? "槑槑回复" : "用户消息";
+	    }
+
+	    function removePendingQuote(index) {
+	      if (index < 0 || index >= state.pendingQuotes.length) return;
+	      state.pendingQuotes.splice(index, 1);
+	      saveCurrentQuotes();
+	      renderComposerQuotes();
+	    }
+
+	    function findQuoteMessage(quote) {
+	      if (!quote) return null;
+	      if (quote.message_id) {
+	        const byId = state.messages.find((item) => Number(item.id || 0) === Number(quote.message_id));
+	        if (byId) return byId;
+	      }
+	      if (quote.message_key) {
+	        return state.messages.find((item) => messageKey(item) === quote.message_key) || null;
+	      }
+	      return null;
+	    }
+
+	    function viewPendingQuote(index) {
+	      const quote = state.pendingQuotes[index];
+	      const message = findQuoteMessage(quote);
+	      if (!message) {
+	        setStatus("chatStatus", "原消息暂时无法定位，引用内容仍可正常使用。", "");
+	        return;
+	      }
+	      scrollToMessageId(message.id || 0, messageKey(message));
+	    }
+
+	    function renderComposerQuotes() {
+	      const box = $("composerQuoteList");
+	      if (!box) return;
+	      box.replaceChildren();
+	      box.hidden = !state.pendingQuotes.length;
+	      state.pendingQuotes.forEach((quote, index) => {
+	        const card = document.createElement("article");
+	        card.className = "composer-quote-card";
+	        const copy = document.createElement("div");
+	        copy.className = "composer-quote-copy";
+	        const meta = document.createElement("div");
+	        meta.className = "composer-quote-meta";
+	        meta.textContent = `${quoteRoleLabel(quote.role)} · ${formatMessageTime(quote.created_at)}`;
+	        const text = document.createElement("div");
+	        text.className = "composer-quote-text";
+	        text.textContent = quote.selected_text;
+	        copy.append(meta, text);
+	        const actions = document.createElement("div");
+	        actions.className = "composer-quote-actions";
+	        const view = createIconOnlyButton("locate-fixed", "查看原文", { className: "ui-icon-btn", fallback: "↗" });
+	        view.addEventListener("click", () => viewPendingQuote(index));
+	        const remove = createIconOnlyButton("x", "移除引用", { className: "ui-icon-btn", fallback: "×" });
+	        remove.addEventListener("click", () => removePendingQuote(index));
+	        actions.append(view, remove);
+	        card.append(copy, actions);
+	        box.appendChild(card);
+	      });
+	      if (state.pendingQuotes.length) {
+	        const limit = document.createElement("div");
+	        limit.className = "composer-quote-limit";
+	        limit.textContent = `${state.pendingQuotes.length}/3 段引用`;
+	        box.appendChild(limit);
+	      }
+	      queueLucideRefresh();
+	      syncComposerLayout();
+	    }
+
+	    function buildQuotedMessage(question, quotes = state.pendingQuotes) {
+	      const cleanQuestion = String(question || "").trim() || "请基于以上引用内容进行分析。";
+	      if (!quotes.length) return cleanQuestion;
+	      const blocks = quotes.map((quote) => {
+	        const body = String(quote.selected_text || "").split(/\r?\n/).map((line) => "> " + line).join("\n");
+	        return `【来源：${quoteRoleLabel(quote.role)}】\n${body}\n【引用结束】`;
+	      });
+	      return `以下是用户从当前会话中引用的内容：\n\n${blocks.join("\n\n")}\n\n用户的新问题：\n${cleanQuestion}`;
 	    }
 
 	    function handlePromptInput() {
@@ -17379,10 +17638,13 @@ INDEX_HTML = r'''<!doctype html>
       }
     }
 
-    function scrollToMessageId(messageId) {
+    function scrollToMessageId(messageId, fallbackMessageKey = "") {
       const box = $("messages");
-      if (!box || !messageId) return false;
-      const message = state.messages.find((item) => Number(item.id || 0) === Number(messageId));
+      if (!box || (!messageId && !fallbackMessageKey)) return false;
+      const message = state.messages.find((item) => (
+        (messageId && Number(item.id || 0) === Number(messageId)) ||
+        (fallbackMessageKey && messageKey(item) === fallbackMessageKey)
+      ));
       if (!message) return false;
       const wrap = box.querySelector(`[data-message-key="${messageKey(message)}"]`);
       if (!wrap) return false;
@@ -18508,6 +18770,119 @@ INDEX_HTML = r'''<!doctype html>
 	      return Boolean(element?.closest("textarea, input, [contenteditable='true']"));
 	    }
 
+	    function desktopSelectionToolsEnabled() {
+	      return Boolean(
+	        window.matchMedia &&
+	        window.matchMedia("(min-width: 1024px)").matches &&
+	        window.matchMedia("(hover: hover)").matches &&
+	        window.matchMedia("(pointer: fine)").matches
+	      );
+	    }
+
+	    function hideSelectionToolbar(options = {}) {
+	      clearTimeout(state.selectionToolbarTimer);
+	      state.selectionToolbarTimer = 0;
+	      $("selectionToolbar")?.classList.remove("show");
+	      state.activeTextSelection = null;
+	      if (options.clearSelection) window.getSelection?.()?.removeAllRanges();
+	    }
+
+	    function selectedMessageContext() {
+	      if (!desktopSelectionToolsEnabled() || document.body.classList.contains("dialog-open")) return null;
+	      const selection = window.getSelection?.();
+	      if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
+	      const text = selection.toString().replace(/\u00a0/g, " ").trim();
+	      if (text.length < 2) return null;
+	      const range = selection.getRangeAt(0);
+	      const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+	      const endElement = range.endContainer.nodeType === Node.ELEMENT_NODE ? range.endContainer : range.endContainer.parentElement;
+	      const startContent = startElement?.closest(".message-content");
+	      const endContent = endElement?.closest(".message-content");
+	      if (!startContent || startContent !== endContent || !$("messages")?.contains(startContent)) return null;
+	      const bubble = startContent.closest(".bubble");
+	      if (!bubble || !["user", "assistant"].some((role) => bubble.classList.contains(role))) return null;
+	      const key = bubble.dataset.messageKey || "";
+	      const message = state.messages.find((item) => messageKey(item) === key);
+	      if (!message) return null;
+	      const rect = range.getBoundingClientRect();
+	      if (!rect || (!rect.width && !rect.height)) return null;
+	      return {
+	        session_id: state.currentConversation?.id || "",
+	        message_id: Number(message.id || 0),
+	        message_key: key,
+	        role: message.role === "assistant" ? "assistant" : "user",
+	        selected_text: text.slice(0, 12000),
+	        created_at: Number(message.created_at || 0),
+	        rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width }
+	      };
+	    }
+
+	    function positionSelectionToolbar(selectionContext) {
+	      const toolbar = $("selectionToolbar");
+	      if (!toolbar || !selectionContext) return;
+	      toolbar.classList.add("show");
+	      requestAnimationFrame(() => {
+	        if (state.activeTextSelection !== selectionContext) return;
+	        const rect = selectionContext.rect;
+	        const toolbarRect = toolbar.getBoundingClientRect();
+	        const margin = 10;
+	        const left = clampNumber(
+	          rect.left + rect.width / 2 - toolbarRect.width / 2,
+	          margin,
+	          Math.max(margin, window.innerWidth - toolbarRect.width - margin),
+	          margin
+	        );
+	        const above = rect.top - toolbarRect.height - 10;
+	        const top = above >= margin ? above : Math.min(window.innerHeight - toolbarRect.height - margin, rect.bottom + 10);
+	        toolbar.style.left = Math.round(left) + "px";
+	        toolbar.style.top = Math.round(top) + "px";
+	      });
+	    }
+
+	    function showSelectionToolbar() {
+	      const context = selectedMessageContext();
+	      if (!context) return hideSelectionToolbar();
+	      state.activeTextSelection = context;
+	      positionSelectionToolbar(context);
+	      queueLucideRefresh();
+	    }
+
+	    function scheduleSelectionToolbar(delay = 70) {
+	      clearTimeout(state.selectionToolbarTimer);
+	      state.selectionToolbarTimer = setTimeout(() => {
+	        state.selectionToolbarTimer = 0;
+	        showSelectionToolbar();
+	      }, delay);
+	    }
+
+	    function addActiveSelectionQuote() {
+	      const context = state.activeTextSelection;
+	      if (!context) return;
+	      if (state.pendingQuotes.length >= 3) {
+	        setStatus("chatStatus", "一条消息最多引用 3 段内容。", "err");
+	        return;
+	      }
+	      const quote = normalizedDraftQuote(context);
+	      if (!quote) return;
+	      state.pendingQuotes.push(quote);
+	      saveCurrentQuotes();
+	      renderComposerQuotes();
+	      hideSelectionToolbar({ clearSelection: true });
+	      $("prompt").focus();
+	      setStatus("chatStatus", "已加入引用，可以继续输入问题。", "ok");
+	    }
+
+	    async function copyActiveSelection() {
+	      const text = state.activeTextSelection?.selected_text || "";
+	      if (!text) return;
+	      if (await writeClipboard(text) || fallbackCopy(text)) {
+	        setStatus("chatStatus", "已复制选中文字", "ok");
+	      } else {
+	        openManualCopy(text);
+	      }
+	      hideSelectionToolbar({ clearSelection: true });
+	    }
+
 	    function lastMessageSelectionBoundary() {
 	      const box = $("messages");
 	      if (!box) return null;
@@ -18545,13 +18920,17 @@ INDEX_HTML = r'''<!doctype html>
 	      if (event.button !== undefined && event.button !== 0) return;
 	      if (editableSelectionNode(event.target)) return;
 	      if (!selectionNodeInside(event.target, $("messages"))) return;
+	      hideSelectionToolbar();
 	      state.chatSelectionActive = true;
 	      state.chatSelectionStartedInMessages = true;
 	    }
 
-	    function endChatTextSelection() {
+	    function endChatTextSelection(event) {
 	      if (!state.chatSelectionStartedInMessages) return;
 	      clampChatSelectionToMessages();
+	      if (event?.type === "pointerup" && (!event.pointerType || event.pointerType === "mouse")) {
+	        scheduleSelectionToolbar();
+	      }
 	      setTimeout(() => {
 	        state.chatSelectionActive = false;
 	        state.chatSelectionStartedInMessages = false;
@@ -18566,6 +18945,20 @@ INDEX_HTML = r'''<!doctype html>
 
 	    function handleSelectionChange() {
 	      clampChatSelectionToMessages();
+	      const selection = window.getSelection?.();
+	      if (!selection || selection.isCollapsed) {
+	        clearTimeout(state.selectionToolbarTimer);
+	        state.selectionToolbarTimer = setTimeout(() => {
+	          if (window.getSelection?.()?.isCollapsed) hideSelectionToolbar();
+	        }, 80);
+	      }
+	    }
+
+	    function handleSelectionToolbarOutsidePointer(event) {
+	      const toolbar = $("selectionToolbar");
+	      if (!toolbar?.classList.contains("show")) return;
+	      if (event.target.closest?.("#selectionToolbar")) return;
+	      hideSelectionToolbar();
 	    }
 
 	    function flushMessagesScroll() {
@@ -18583,6 +18976,7 @@ INDEX_HTML = r'''<!doctype html>
 	    }
 
 	    function handleMessagesScroll() {
+	      hideSelectionToolbar();
 	      if (state.messagesScrollFrame) return;
 	      state.messagesScrollFrame = requestAnimationFrame(flushMessagesScroll);
 	    }
@@ -19383,7 +19777,10 @@ INDEX_HTML = r'''<!doctype html>
 
 	    async function sendMessage(contentOverride = "", options = {}) {
 	      const hasOverride = typeof contentOverride === "string" && contentOverride.trim();
-	      const content = (hasOverride ? contentOverride : $("prompt").value).trim();
+	      const rawContent = (hasOverride ? contentOverride : $("prompt").value).trim();
+	      const quoteSnapshot = hasOverride ? [] : state.pendingQuotes.map((quote) => ({ ...quote }));
+	      const content = quoteSnapshot.length ? buildQuotedMessage(rawContent, quoteSnapshot) : rawContent;
+	      const draftConversationId = state.currentConversation?.id || "new";
 	      const readyAttachments = hasOverride ? [] : state.attachments.filter((item) => item.status === "ready" && item.id);
 	      const failedAttachments = hasOverride ? [] : state.attachments.filter((item) => item.status === "error");
 	      const uploadingAttachments = hasOverride ? [] : state.attachments.filter((item) => item.status === "uploading");
@@ -19446,6 +19843,10 @@ INDEX_HTML = r'''<!doctype html>
 	        $("prompt").value = "";
 	        clearCurrentDraft();
 	        localStorage.removeItem(userStorageKey("chatDraft:new"));
+	        localStorage.removeItem(quoteDraftStorageKey(draftConversationId));
+	        localStorage.removeItem(userStorageKey("chatQuotes:new"));
+	        state.pendingQuotes = [];
+	        renderComposerQuotes();
 	        autosizePrompt();
 	      }
 	      const sentAt = Math.floor(Date.now() / 1000);
@@ -19475,7 +19876,7 @@ INDEX_HTML = r'''<!doctype html>
 	        const useProfile = !profileDisabledForConversation(state.currentConversation.id);
 	        const res = await api(`/api/conversations/${state.currentConversation.id}/messages`, {
 	          method: "POST",
-	          body: JSON.stringify({ content, web_search: useWebSearch, use_profile: useProfile, image_ids: readyAttachments.map((item) => item.id) }),
+	          body: JSON.stringify({ content: userContent, web_search: useWebSearch, use_profile: useProfile, image_ids: readyAttachments.map((item) => item.id) }),
 	          signal: state.abortController.signal
 	        });
         if (!res.ok) throw new Error(await readError(res, "发送失败，稍后再试一下。"));
@@ -20829,6 +21230,10 @@ INDEX_HTML = r'''<!doctype html>
 	    document.addEventListener("pointerup", endChatTextSelection);
 	    document.addEventListener("pointercancel", endChatTextSelection);
 	    document.addEventListener("selectionchange", handleSelectionChange);
+	    $("selectionToolbar").addEventListener("pointerdown", (event) => event.preventDefault());
+	    $("quoteSelection").addEventListener("click", addActiveSelectionQuote);
+	    $("copySelection").addEventListener("click", copyActiveSelection);
+	    document.addEventListener("pointerdown", handleSelectionToolbarOutsidePointer);
 	    document.querySelector(".composer")?.addEventListener("selectstart", handleComposerSelectStart);
 	    $("scrollLatest").addEventListener("selectstart", (event) => event.preventDefault());
 	    $("conversationMinimap").addEventListener("pointerenter", expandConversationMinimap);
@@ -20881,6 +21286,7 @@ INDEX_HTML = r'''<!doctype html>
 	        return;
 	      }
 	      if (event.key === "Escape") {
+	        hideSelectionToolbar({ clearSelection: true });
 	        if ($("versionUpdateToast")?.classList.contains("show")) snoozeVersionUpdate();
 	        closeModelPicker();
 	        closeGlobalSearch();
@@ -21004,6 +21410,7 @@ INDEX_HTML = r'''<!doctype html>
 			    window.addEventListener("resize", () => queueMarkdownOverflowRefresh($("messages")), { passive: true });
 			    window.addEventListener("resize", queueConversationMinimap, { passive: true });
 			    window.addEventListener("resize", () => schedulePetPositionCorrection({ save: true }), { passive: true });
+			    window.addEventListener("resize", hideSelectionToolbar, { passive: true });
 		    window.addEventListener("blur", endChatTextSelection);
 		    window.addEventListener("pagehide", saveCurrentDraft);
 		    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
