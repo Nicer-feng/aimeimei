@@ -2,12 +2,13 @@
 
 AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实现。项目保持轻量模块化形态，无 Docker、无前端框架、无外部 Python 依赖。
 
-当前版本：`2.17.0`
+当前版本：`2.18.0`
 
 ## 目录说明
 
 - `app.py`：后端入口，包含 HTTP 接口、SQLite 迁移和第三方模型调用。
 - `ai_platform/`：后端模块，包含运行配置、数据库、数据转换、用量统计、OSS、听悟和联网搜索能力。
+- `ai_platform/handlers/`：按账号、小猫书、后台、资料库、音视频和聊天划分的 HTTP Handler。
 - `ai.html`：AI槑槑聊天页结构。
 - `res/ai.css`：AI槑槑聊天页设计系统与组件样式。
 - `res/ai.js`：AI槑槑聊天页状态、交互和接口调用。
