@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI槑槑</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="16x16" href="/res/favicon-16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/res/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="64x64" href="/res/favicon-64.png">
+  <script>
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = {
+      corePlugins: { preflight: false },
+      theme: {
+        extend: {
+          colors: {
+            primary: "var(--primary)",
+            secondary: "var(--secondary)",
+            page: "var(--color-page)",
+            surface: "var(--surface)",
+            "surface-muted": "var(--color-surface-muted)",
+            "surface-elevated": "var(--color-surface-elevated)",
+            border: "var(--border)",
+            muted: "var(--muted)",
+            text: "var(--text)",
+            "text-secondary": "var(--color-text-secondary)",
+            "text-tertiary": "var(--color-text-tertiary)"
+          },
+          borderRadius: {
+            ui: "var(--radius)",
+            card: "var(--radius-card)",
+            modal: "var(--radius-modal)",
+            "ds-sm": "var(--radius-sm)",
+            "ds-md": "var(--radius-md)",
+            "ds-lg": "var(--radius-lg)",
+            "ds-xl": "var(--radius-xl)"
+          },
+          boxShadow: {
+            ui: "var(--shadow)",
+            soft: "var(--soft-shadow)",
+            glass: "var(--glass-shadow)",
+            "ds-sm": "var(--shadow-sm)",
+            "ds-md": "var(--shadow-md)",
+            "ds-lg": "var(--shadow-lg)"
+          }
+        }
+      }
+    };
+  </script>
+  <script src="/res/vendor/markdown-it-14.3.0.min.js"></script>
+  <script src="/res/vendor/markdown-it-footnote-4.0.0.min.js"></script>
+  <script src="/res/vendor/markdown-it-task-lists-2.1.1.min.js"></script>
+  <script src="/res/vendor/dompurify-3.4.12.min.js"></script>
+  <script src="/res/vendor/highlight-11.11.1.min.js"></script>
+  <script src="/res/vendor/highlight-nginx-11.11.1.min.js"></script>
+  <script src="/res/vendor/highlight-dockerfile-11.11.1.min.js"></script>
+  <script src="/res/markdown-renderer.js"></script>
+  <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
+  <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
+  <link rel="stylesheet" href="/res/ai.css?v=2.14.0">
+
+  <link rel="stylesheet" href="/res/markdown.css">
+</head>
+<body>
+  <div class="login" id="loginView">
+    <form class="login-panel ui-card" id="loginForm">
+      <img class="login-mascot" src="/res/meimei-login.png" alt="槑槑猫咪">
+      <div class="login-copy">
+        <h1>欢迎回家</h1>
+	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.14.0</button>
+      </div>
+	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
+	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
+      <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
+      <div class="status err" id="loginStatus"></div>
+      <footer class="site-icp">
+        <button class="version-trigger" type="button" data-version-trigger>v2.14.0</button>
+        <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
+        <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
+      </footer>
+    </form>
+  </div>
+
+  <div class="app" id="appView" style="display:none">
+    <aside class="sidebar" id="sidebar">
+      <div class="side-head">
+        <div class="brand">
+          <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
+          <div class="brand-copy">
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.14.0</button></h1>
+	            <span class="brand-user-meta" id="currentUserMeta" title="">
+	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
+	              <span class="brand-separator" aria-hidden="true">·</span>
+	              <span id="currentUserRole">家庭成员</span>
+	              <span class="brand-separator" aria-hidden="true">·</span>
+	              <span class="brand-health is-offline" id="healthStatus"><span class="health-dot" aria-hidden="true"></span><span id="health">连接中</span></span>
+	            </span>
+          </div>
+        </div>
+        <button class="icon mobile-only ui-icon-btn" id="closeSide" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+      </div>
+      <button class="global-search-trigger inline-flex items-center" id="openGlobalSearch" type="button">
+        <i data-lucide="search" aria-hidden="true"></i>
+        <span>搜索历史对话...</span>
+        <span class="shortcut" id="globalSearchShortcut">⌘K</span>
+      </button>
+      <div class="side-actions">
+		        <button class="primary side-primary-action inline-flex items-center justify-center gap-2" id="newChat"><i data-lucide="plus" aria-hidden="true"></i><span>新对话</span></button>
+        <button class="icon ui-icon-btn" id="refreshConversations" title="刷新"><i data-lucide="rotate-cw" aria-hidden="true"></i><span class="icon-fallback">↻</span></button>
+      </div>
+      <div class="side-section-title">最近对话</div>
+      <div class="conversation-list" id="conversationList"></div>
+      <div class="side-foot">
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="openTokenActivity"><i data-lucide="activity" aria-hidden="true"></i><span>Token活动</span></button>
+		        <button class="sidebar-action inline-flex items-center justify-center gap-2" id="logout" title="退出登录" aria-label="退出登录"><i data-lucide="log-out" aria-hidden="true"></i><span>退出登录</span></button>
+		        <button class="sidebar-action sidebar-more-trigger inline-flex items-center gap-2" id="toggleSidebarTools" type="button" aria-expanded="false" aria-controls="sidebarToolsPopover"><i data-lucide="ellipsis" aria-hidden="true"></i><span>更多工具</span><i class="more-chevron" data-lucide="chevron-up" aria-hidden="true"></i></button>
+	        <div class="sidebar-tools-popover" id="sidebarToolsPopover" role="menu" aria-label="更多工具">
+		          <button class="sidebar-action inline-flex items-center gap-2" id="openPromptLibrary" role="menuitem"><i data-lucide="book-open" aria-hidden="true"></i><span>提示词库</span></button>
+		          <button class="sidebar-action inline-flex items-center gap-2" id="openFavorites" role="menuitem"><i data-lucide="star" aria-hidden="true"></i><span>我的收藏</span> <span class="nav-count" id="favoriteCount">0</span></button>
+		          <button class="sidebar-action inline-flex items-center gap-2" id="openProfiles" role="menuitem"><i data-lucide="user-round-cog" aria-hidden="true"></i><span>AI档案</span></button>
+		          <button class="sidebar-action inline-flex items-center gap-2" id="openMediaAnalysis" role="menuitem"><i data-lucide="file-video" aria-hidden="true"></i><span>音视频分析</span></button>
+		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
+	        </div>
+	        <footer class="site-icp side-icp">
+	          <button class="version-trigger" type="button" data-version-trigger>v2.14.0</button>
+          <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
+          <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
+        </footer>
+      </div>
+      <button class="sidebar-resizer" id="sidebarResizer" type="button" aria-label="调整侧边栏宽度" title="拖动调整侧边栏宽度"></button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon mobile-only ui-icon-btn" id="openSide" title="对话"><i data-lucide="menu" aria-hidden="true"></i><span class="icon-fallback">☰</span></button>
+        <div class="top-title">
+          <strong id="chatTitle">新对话</strong>
+          <span id="chatModel">请选择模型</span>
+          <span class="chat-usage" id="chatUsage"></span>
+          <button class="profile-status-chip" id="profileStatus" type="button"><i data-lucide="brain" aria-hidden="true"></i><span>AI档案未加载</span></button>
+        </div>
+        <div class="top-actions">
+          <button class="icon side-discussion-trigger ui-btn ui-btn-ghost" id="reopenSideDiscussion" type="button" hidden title="打开侧边讨论"><i data-lucide="panel-right-open" aria-hidden="true"></i><span id="sideDiscussionCount">侧边讨论</span></button>
+          <button class="icon accent-toggle ui-icon-btn" id="accentToggle" title="主色调" aria-label="主色调"><i data-lucide="palette" aria-hidden="true"></i><span class="icon-fallback">●</span></button>
+          <button class="icon font-toggle" id="fontSizeToggle" title="字体大小：中">中</button>
+          <button class="icon ui-icon-btn" id="themeToggle" title="切换深浅色" aria-label="切换深浅色"><i data-lucide="moon" aria-hidden="true"></i><span class="icon-fallback">◐</span></button>
+          <button class="icon danger ui-icon-btn" id="deleteConversation" title="删除当前对话"><i data-lucide="trash-2" aria-hidden="true"></i><span class="icon-fallback">⌫</span></button>
+        </div>
+      </header>
+
+      <div class="profile-popover" id="profilePopover" role="dialog" aria-label="本次聊天 AI档案">
+        <div class="profile-popover-head">
+          <strong>本次 AI档案</strong>
+          <div class="library-card-meta" id="profilePopoverMeta">0 条</div>
+        </div>
+        <div class="profile-popover-list" id="profileLoadedList"></div>
+        <label class="profile-popover-foot profile-switch"><input id="disableProfileForConversation" type="checkbox"><span>本次聊天不加载 AI档案</span></label>
+      </div>
+      <section class="messages" id="messages"></section>
+      <nav class="conversation-minimap" id="conversationMinimap" aria-label="对话缩略导航" hidden>
+        <div class="minimap-track" id="minimapTrack">
+          <div class="minimap-viewport" id="minimapViewport"></div>
+        </div>
+        <div class="minimap-tooltip" id="minimapTooltip" role="tooltip"></div>
+      </nav>
+      <button class="scroll-latest" id="scrollLatest" type="button" title="回到底部" aria-label="回到底部">
+        <i data-lucide="arrow-down" aria-hidden="true"></i><span class="icon-fallback">↓</span>
+      </button>
+
+	      <footer class="composer">
+	        <div class="composer-box ui-card">
+	          <div class="composer-chip-row" aria-label="常用提示词">
+		            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我润色下面这段文字，让它更自然、更清楚：">润色</button>
+		            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我深度改写下面这段内容，保留原意，但让表达更有条理：">改写</button>
+		            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我扩写下面这段内容，补充细节，让它更完整：">扩写</button>
+			            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我精简下面这段内容，保留重点，表达更利落：">精简</button>
+		            <button class="prompt-chip ui-badge inline-flex items-center" id="openPrompts" type="button">更多</button>
+	          </div>
+	          <div class="composer-quote-list" id="composerQuoteList" hidden></div>
+	          <div class="attachment-preview-row" id="attachmentPreviewRow" hidden></div>
+		          <div class="input-row">
+		            <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+		            <button class="composer-action ui-icon-btn" id="attachImage" type="button" title="上传图片" aria-label="上传图片"><i data-lucide="image-plus" aria-hidden="true"></i><span class="icon-fallback">＋</span></button>
+		            <textarea id="prompt" placeholder="和 AI槑槑聊点什么..."></textarea>
+		            <button class="composer-action ui-icon-btn" id="insertNewline" type="button" title="换行（Shift+Enter）" aria-label="换行"><i data-lucide="corner-down-left" aria-hidden="true"></i><span class="icon-fallback">↵</span></button>
+		            <button class="composer-action ui-icon-btn" id="openInterfaceSettings" type="button" title="界面设置" aria-label="界面设置"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span class="icon-fallback">⚙</span></button>
+		            <button class="primary ui-icon-btn" id="send" title="发送" aria-label="发送"><i data-lucide="arrow-up" aria-hidden="true"></i><span class="icon-fallback">↑</span></button>
+		          </div>
+	          <div class="composer-tools">
+	            <div class="composer-left">
+	              <div class="model-picker">
+	                <button class="model-picker-button" id="modelPickerButton" type="button" aria-haspopup="listbox" aria-expanded="false">
+	                  <i data-lucide="sparkles" aria-hidden="true"></i><span class="icon-fallback">✦</span>
+	                  <span class="model-picker-main">
+	                    <span class="model-picker-name" id="modelPickerName">选择模型</span>
+	                    <span class="model-picker-code" id="modelPickerCode">暂无可用模型</span>
+	                  </span>
+	                  <i class="chevron" data-lucide="chevron-down" aria-hidden="true"></i>
+	                </button>
+	                <select class="model-select ui-select is-native-hidden" id="modelSelect" tabindex="-1" aria-hidden="true"></select>
+	              </div>
+		              <label class="search-toggle inline-flex items-center gap-2" id="webSearchLabel" title="联网搜索">
+		                <input id="webSearchToggle" type="checkbox">
+		                <i data-lucide="globe-2" aria-hidden="true"></i><span class="icon-fallback">⌁</span>
+		                <span>联网搜索</span>
+		              </label>
+	            </div>
+		            <div class="status" id="chatStatus"></div>
+		          </div>
+		        </div>
+			        <div class="interface-popover" id="interfacePopover" role="dialog" aria-modal="false" aria-labelledby="interfacePopoverTitle">
+			          <div class="interface-panel ui-modal">
+			            <div class="dialog-head">
+			              <strong class="interface-title" id="interfacePopoverTitle"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>界面设置</span></strong>
+			              <button class="icon ui-icon-btn" id="closeInterfaceSettings" type="button" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+			            </div>
+		            <div class="dialog-body">
+		              <section class="interface-section">
+		                <h2>输入区</h2>
+		                <label class="range-field">
+		                  <span class="range-field-head">
+		                    <strong>输入框透明度</strong>
+		                    <span id="composerOpacityValue">80%</span>
+		                  </span>
+		                  <input id="composerOpacityRange" type="range" min="0" max="100" step="1" value="80">
+		                  <small>推荐 20% ~ 90%，越高越不透明。</small>
+		                </label>
+		                <label class="range-field">
+		                  <span class="range-field-head">
+		                    <strong>毛玻璃强度</strong>
+		                    <span id="composerBlurValue">18px</span>
+		                  </span>
+		                  <input id="composerBlurRange" type="range" min="0" max="30" step="1" value="18">
+		                  <small>实时调整底部输入区的 backdrop-filter blur。</small>
+		                </label>
+		              </section>
+		              <section class="interface-section">
+		                <h2>桌面宠物</h2>
+		                <div class="pet-settings-grid">
+		                  <label class="pet-settings-row">
+		                    <span><strong>显示桌面宠物</strong><small>手机端默认关闭，可在这里手动开启。</small></span>
+		                    <input id="petEnabledToggle" type="checkbox">
+		                  </label>
+		                  <label class="pet-settings-row">
+		                    <span><strong>宠物动画</strong><small>轻微呼吸、眨眼和点击反馈。</small></span>
+		                    <input id="petAnimationToggle" type="checkbox" checked>
+		                  </label>
+		                  <button class="ui-btn ui-btn-secondary inline-flex items-center justify-center gap-2" id="resetPetPosition" type="button"><i data-lucide="locate-fixed" aria-hidden="true"></i><span>恢复默认位置</span></button>
+		                </div>
+		              </section>
+		              <div class="interface-actions">
+			                <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetInterfaceSettings" type="button"><i data-lucide="rotate-ccw" aria-hidden="true"></i><span>恢复默认设置</span></button>
+			                <span class="interface-hint">后续可继续加入深色模式、字体大小、气泡宽度和 AI 回复字号。</span>
+		              </div>
+		              <div class="status" id="interfaceStatus"></div>
+		            </div>
+		          </div>
+			        </div>
+		      </footer>
+	  <section class="model-picker-dialog" id="modelPickerDialog">
+	    <div class="model-picker-popover" id="modelPickerPopover" role="dialog" aria-label="选择模型">
+	      <div class="model-picker-search">
+	        <i data-lucide="search" aria-hidden="true"></i>
+	        <input id="modelPickerSearch" autocomplete="off" placeholder="搜索模型、供应商或能力...">
+	      </div>
+	      <div class="model-picker-list" id="modelPickerList" role="listbox"></div>
+	    </div>
+	  </section>
+    </main>
+    <aside class="side-discussion-panel" id="sideDiscussionPanel" aria-label="侧边讨论" hidden>
+      <button class="side-discussion-resizer" id="sideDiscussionResizer" type="button" aria-label="调整侧边讨论宽度" title="拖动调整宽度，双击恢复默认"></button>
+      <header class="side-discussion-head">
+        <div class="side-discussion-heading">
+          <strong>侧边讨论</strong>
+          <span id="sideDiscussionModel">使用当前会话模型</span>
+        </div>
+        <button class="icon ui-icon-btn" id="closeSideDiscussion" type="button" title="收起侧边讨论"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+      </header>
+      <section class="side-discussion-source">
+        <div class="side-discussion-source-meta"><span id="sideDiscussionSourceRole">引用内容</span><time id="sideDiscussionSourceTime"></time></div>
+        <p id="sideDiscussionSourceText"></p>
+      </section>
+      <section class="side-discussion-messages" id="sideDiscussionMessages"></section>
+      <footer class="side-discussion-composer">
+        <div class="side-discussion-actions">
+          <button class="ui-btn ui-btn-ghost inline-flex items-center gap-2" id="quoteSideAnswer" type="button" title="把最后一条槑槑回答引用到主输入框"><i data-lucide="quote" aria-hidden="true"></i><span>引用到主输入框</span></button>
+          <button class="ui-btn ui-btn-ghost inline-flex items-center gap-2" id="saveSideConversation" type="button"><i data-lucide="message-square-plus" aria-hidden="true"></i><span>保存为新对话</span></button>
+        </div>
+        <div class="side-discussion-input-row">
+          <textarea id="sideDiscussionPrompt" rows="1" placeholder="围绕这段内容继续提问..."></textarea>
+          <button class="primary side-discussion-send ui-icon-btn" id="sideDiscussionSend" type="button" title="发送" aria-label="发送"><i data-lucide="arrow-up" aria-hidden="true"></i><span class="icon-fallback">↑</span></button>
+        </div>
+        <div class="side-discussion-status" id="sideDiscussionStatus"></div>
+      </footer>
+    </aside>
+  </div>
+
+	<div class="desktop-pet side-right animation-enabled" id="desktopPet" aria-label="槑槑桌面宠物" hidden>
+	  <button class="desktop-pet-handle" id="desktopPetHandle" type="button" aria-label="打开槑槑快捷菜单" aria-expanded="false">
+	    <span class="desktop-pet-face"><img src="/res/meimei-avatar.png" alt="槑槑"></span>
+	  </button>
+	  <div class="desktop-pet-menu" id="desktopPetMenu" role="menu" aria-label="槑槑快捷操作">
+	    <button type="button" role="menuitem" data-pet-action="new-chat"><i data-lucide="message-square-plus" aria-hidden="true"></i><span>新建对话</span></button>
+	    <button type="button" role="menuitem" data-pet-action="scroll-bottom"><i data-lucide="arrow-down-to-line" aria-hidden="true"></i><span>回到底部</span></button>
+	    <button type="button" role="menuitem" data-pet-action="prompts"><i data-lucide="book-open" aria-hidden="true"></i><span>打开提示词库</span></button>
+	    <button type="button" role="menuitem" data-pet-action="profiles"><i data-lucide="user-round-cog" aria-hidden="true"></i><span>打开 AI档案</span></button>
+	    <button class="pet-hide-action" type="button" role="menuitem" data-pet-action="hide"><i data-lucide="eye-off" aria-hidden="true"></i><span>隐藏宠物</span></button>
+	  </div>
+	</div>
+
+	<section class="version-update-toast ui-toast" id="versionUpdateToast" role="status" aria-live="polite" aria-atomic="true" hidden>
+	  <span class="version-update-icon"><i data-lucide="sparkles" aria-hidden="true"></i></span>
+	  <span class="version-update-copy">
+	    <strong>发现新版本，刷新后生效。</strong>
+	    <span id="versionUpdateMeta">新版本已准备好</span>
+	  </span>
+	  <span class="version-update-actions">
+	    <button class="version-update-action refresh" id="refreshForUpdate" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	    <button class="version-update-action" id="snoozeVersionUpdate" type="button">稍后</button>
+	    <button class="version-update-close ui-icon-btn" id="closeVersionUpdate" type="button" title="稍后提醒" aria-label="稍后提醒"><i data-lucide="x" aria-hidden="true"></i></button>
+	  </span>
+	</section>
+	<div class="selection-toolbar" id="selectionToolbar" role="toolbar" aria-label="选中文字操作">
+	  <button class="inline-flex items-center gap-2" id="quoteSelection" type="button"><i data-lucide="quote" aria-hidden="true"></i><span>引用提问</span></button>
+	  <button class="inline-flex items-center gap-2" id="discussSelection" type="button"><i data-lucide="panel-right-open" aria-hidden="true"></i><span>侧边讨论</span></button>
+	  <button class="inline-flex items-center gap-2" id="copySelection" type="button"><i data-lucide="copy" aria-hidden="true"></i><span>复制</span></button>
+	</div>
+
+	  <div class="drawer-mask" id="drawerMask"></div>
+	  <section class="copy-dialog" id="copyDialog">
+	    <div class="copy-panel ui-modal">
+	      <div class="copy-panel-head">
+	        <strong>手动复制</strong>
+	        <button class="icon ui-icon-btn" id="closeCopyDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <textarea id="manualCopyText" readonly></textarea>
+	      <div class="copy-panel-actions">
+	        <button id="selectManualCopy">全选</button>
+	        <button class="primary" id="retryManualCopy">再试一次复制</button>
+	      </div>
+	    </div>
+	  </section>
+	  <section class="image-preview-dialog" id="imagePreviewDialog">
+	    <div class="image-preview-panel">
+	      <button class="icon ui-icon-btn" id="closeImagePreview" type="button" title="关闭" style="justify-self:end;background:rgba(255,255,255,.86)"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      <img id="imagePreviewFull" alt="图片预览">
+	    </div>
+	  </section>
+	  <section class="global-search-dialog" id="globalSearchDialog">
+	    <div class="global-search-panel ui-modal" role="dialog" aria-modal="true" aria-label="搜索历史对话">
+	      <div class="global-search-head">
+	        <i data-lucide="search" aria-hidden="true"></i>
+	        <input id="globalSearchInput" autocomplete="off" placeholder="搜索历史对话、消息、收藏、音视频...">
+	        <span class="global-search-key">Esc</span>
+	      </div>
+	      <div class="global-search-list" id="globalSearchResults" role="listbox"></div>
+	    </div>
+	  </section>
+	  <section class="changelog-dialog" id="changelogDialog" aria-label="更新日志">
+	    <div class="changelog-panel ui-modal" id="changelogPanel" role="dialog" aria-modal="false" aria-labelledby="changelogTitle">
+	      <div class="changelog-head">
+	        <strong class="changelog-title" id="changelogTitle"><i data-lucide="history" aria-hidden="true"></i><span id="changelogTitleText">最近更新</span></strong>
+	        <button class="icon ui-icon-btn" id="closeChangelog" type="button" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <div class="changelog-list" id="changelogList"></div>
+	      <div class="changelog-foot">
+	        <button class="changelog-more ui-btn ui-btn-secondary inline-flex items-center gap-2" id="openFullChangelog" type="button"><i data-lucide="list" aria-hidden="true"></i><span>查看更多更新</span><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+	      </div>
+	    </div>
+	  </section>
+	  <section class="confirm-dialog" id="confirmDialog">
+	    <div class="confirm-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+	      <div>
+	        <h2 id="confirmTitle">确认操作</h2>
+	        <p id="confirmMessage">确定要继续吗？</p>
+	      </div>
+      <div class="confirm-actions">
+        <button id="cancelConfirm">取消</button>
+        <button id="secondaryConfirm" hidden>新建对话</button>
+        <button class="primary" id="confirmOk">确定</button>
+      </div>
+	    </div>
+	  </section>
+	  <section class="theme-dialog" id="accentDialog">
+	    <div class="accent-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="accentDialogTitle">
+	      <div class="dialog-head">
+		        <strong class="dialog-title" id="accentDialogTitle"><i data-lucide="palette" aria-hidden="true"></i><span>主色调</span></strong>
+	        <button class="icon ui-icon-btn" id="closeAccentDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <div class="dialog-body">
+	        <div class="accent-grid" id="accentPresetList"></div>
+	        <label class="color-field">自定义颜色<input id="customAccentColor" type="color" value="#e58aa6"></label>
+	        <div class="library-actions">
+		          <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="applyCustomAccent" type="button"><i data-lucide="check" aria-hidden="true"></i><span>应用</span></button>
+		          <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetAccent" type="button"><i data-lucide="rotate-ccw" aria-hidden="true"></i><span>恢复粉色</span></button>
+	        </div>
+	        <div class="status" id="accentStatus"></div>
+	      </div>
+	    </div>
+	  </section>
+	  <section class="prompt-dialog" id="promptDialog">
+	    <div class="library-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="promptDialogTitle">
+	      <div class="dialog-head">
+		        <strong class="dialog-title" id="promptDialogTitle"><i data-lucide="book-open" aria-hidden="true"></i><span>提示词库</span></strong>
+	        <button class="icon ui-icon-btn" id="closePromptDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <div class="dialog-body">
+	        <div class="library-grid">
+	          <div class="item-list" id="promptLibraryList"></div>
+	          <section class="library-editor">
+		            <h2 class="library-editor-title"><i data-lucide="pencil" aria-hidden="true"></i><span>新增/编辑提示词</span></h2>
+	            <input id="editingPromptId" type="hidden">
+	            <label>标题<input id="promptTitle" placeholder="例如：朋友圈文案"></label>
+	            <label>内容<textarea id="promptContent" rows="6" placeholder="写下点击后要填入输入框的内容"></textarea></label>
+	            <label>排序<input id="promptSortOrder" type="number" value="100"></label>
+	            <div class="library-actions">
+		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="savePromptTemplate"><i data-lucide="save" aria-hidden="true"></i><span>保存提示词</span></button>
+		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetPromptTemplate"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
+	            </div>
+	            <div class="status" id="promptLibraryStatus"></div>
+	          </section>
+	        </div>
+	      </div>
+	    </div>
+	  </section>
+	  <section class="profile-dialog" id="profileDialog">
+	    <div class="profile-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="profileDialogTitle">
+	      <div class="dialog-head">
+		        <strong class="dialog-title" id="profileDialogTitle"><i data-lucide="user-round-cog" aria-hidden="true"></i><span>AI档案</span></strong>
+	        <button class="icon ui-icon-btn" id="closeProfileDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <div class="dialog-body">
+	        <div class="profile-summary">
+	          <span id="profileSummary">当前 Profile：约 0 Token</span>
+	          <span id="profileWarning" class="profile-token-warning" hidden>AI档案较长，会增加每次模型调用成本。</span>
+	        </div>
+	        <div class="profile-layout">
+	          <div class="item-list" id="profileList"></div>
+	          <section class="library-editor">
+		            <h2 class="library-editor-title"><i data-lucide="pencil" aria-hidden="true"></i><span>新增/编辑档案</span></h2>
+	            <input id="editingProfileId" type="hidden">
+	            <label>标题<input id="profileTitle" placeholder="例如：输出风格"></label>
+	            <label>内容<textarea id="profileContent" rows="8" placeholder="写下希望槑槑长期参考的信息"></textarea></label>
+	            <div class="grid2">
+	              <label>类型<select id="profileType"><option value="profile">profile</option><option value="style">style</option><option value="project">project</option><option value="memory">memory</option></select></label>
+	              <label>排序<input id="profileSortOrder" type="number" value="100"></label>
+	            </div>
+	            <label class="profile-switch"><input id="profileEnabled" type="checkbox" checked><span>启用，聊天时自动加载</span></label>
+	            <div class="library-card-meta" id="profileEditorMeta">0 字 · 约 0 Token</div>
+	            <div class="library-actions">
+		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveProfile"><i data-lucide="save" aria-hidden="true"></i><span>保存档案</span></button>
+		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetProfile"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
+	            </div>
+	            <div class="status" id="profileStatusText"></div>
+	          </section>
+	        </div>
+	      </div>
+	    </div>
+	  </section>
+	      <section class="favorite-dialog" id="favoriteDialog">
+	    <div class="library-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="favoriteDialogTitle">
+	      <div class="dialog-head">
+		        <strong class="dialog-title" id="favoriteDialogTitle"><i data-lucide="star" aria-hidden="true"></i><span>我的收藏</span></strong>
+	        <button class="icon ui-icon-btn" id="closeFavoriteDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <div class="dialog-body">
+	        <div class="favorite-layout">
+	          <div class="item-list" id="favoriteList"></div>
+	          <section class="favorite-detail" id="favoriteDetail"></section>
+	        </div>
+	      </div>
+	    </div>
+	  </section>
+	  <section class="media-dialog" id="mediaDialog">
+	    <div class="library-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="mediaDialogTitle">
+	      <div class="dialog-head">
+	        <strong class="media-dialog-title" id="mediaDialogTitle"><i data-lucide="file-video" aria-hidden="true"></i><span>音视频分析</span></strong>
+	        <button class="icon ui-icon-btn" id="closeMediaDialog" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <div class="dialog-body">
+	        <section class="media-upload">
+	          <div>
+		            <strong class="media-upload-title"><i data-lucide="upload" aria-hidden="true"></i><span>上传音频/视频</span></strong>
+		            <p class="library-card-meta">支持 mp3、mp4、m4a、wav 等格式，文件会上传到 OSS 后交给通义听悟处理。</p>
+	          </div>
+	          <div class="media-upload-row">
+	            <label>选择文件<input id="mediaFile" type="file" accept=".mp3,.mp4,.m4a,.wav,.aac,.flac,.mov,.avi,.mkv,.webm,audio/*,video/*"></label>
+		            <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="uploadMediaTask" type="button"><i data-lucide="upload" aria-hidden="true"></i><span>开始分析</span></button>
+	          </div>
+	          <div class="status" id="mediaStatus"></div>
+	        </section>
+	        <div class="media-layout">
+	          <div class="item-list" id="mediaTaskList"></div>
+	          <section class="media-detail" id="mediaTaskDetail"></section>
+	        </div>
+	      </div>
+	    </div>
+	  </section>
+	  <section class="token-activity-dialog" id="tokenActivityDialog">
+	    <div class="token-activity-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="tokenActivityTitle">
+	      <div class="dialog-head">
+	        <strong class="dialog-title" id="tokenActivityTitle"><i data-lucide="activity" aria-hidden="true"></i><span>Token Activity</span></strong>
+	        <button class="icon ui-icon-btn" id="closeTokenActivity" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </div>
+	      <div class="token-activity-body">
+	        <div class="activity-hero">
+	          <div>
+	            <span class="admin-kicker">Personal Dashboard</span>
+	            <h2>Token Activity</h2>
+	            <p>查看自己的 Token 使用节奏、连续使用和模型分布。</p>
+	          </div>
+	          <div class="activity-summary-grid" id="activitySummaryGrid"></div>
+	        </div>
+	        <section class="activity-card">
+	          <div class="activity-section-head">
+	            <div>
+	              <h3>Activity Heatmap</h3>
+	              <p>颜色越深，代表当天 Token 使用量越高。</p>
+	            </div>
+	            <span class="activity-legend"><i></i><i></i><i></i><i></i><i></i></span>
+	          </div>
+	          <div class="activity-heatmap-scroll">
+	            <div class="activity-heatmap" id="activityHeatmap"></div>
+	            <div class="activity-month-labels" id="activityMonthLabels"></div>
+	          </div>
+	          <div class="activity-day-detail" id="activityDayDetail"></div>
+	        </section>
+	        <div class="activity-lists">
+	          <section class="activity-card">
+	            <h3>Top5 模型</h3>
+	            <div id="activityTopModels"></div>
+	          </section>
+	          <section class="activity-card">
+	            <h3>Top5 对话</h3>
+	            <div id="activityTopConversations"></div>
+	          </section>
+	          <section class="activity-card">
+	            <h3>Top5 Prompt / Agent</h3>
+	            <div id="activityTopMeta"></div>
+	          </section>
+	        </div>
+	        <div class="status" id="tokenActivityStatus"></div>
+	      </div>
+	    </div>
+	  </section>
+	  <section class="drawer admin-workspace" id="settingsDrawer" data-admin-section="overview">
+	    <aside class="admin-nav" aria-label="后台导航">
+	      <div class="admin-brand">
+	        <strong><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></strong>
+	        <small>AI槑槑 Admin Workspace</small>
+	      </div>
+	      <div class="admin-nav-list">
+	        <button class="admin-nav-item active" type="button" data-admin-section="overview"><i data-lucide="layout-dashboard" aria-hidden="true"></i><span>概览</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="accounts"><i data-lucide="users" aria-hidden="true"></i><span>账号管理</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="models"><i data-lucide="bot" aria-hidden="true"></i><span>模型管理</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="keys"><i data-lucide="key-round" aria-hidden="true"></i><span>密钥管理</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="search"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="plugins"><i data-lucide="puzzle" aria-hidden="true"></i><span>插件管理</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="tokens"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="costs"><i data-lucide="coins" aria-hidden="true"></i><span>成本统计</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="system"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>系统设置</span></button>
+	      </div>
+	    </aside>
+	    <div class="admin-main">
+	      <header class="admin-head">
+	        <div>
+	          <span class="admin-kicker">Admin Workspace</span>
+	          <h2 id="adminModuleTitle">概览</h2>
+	          <p id="adminModuleDesc">查看平台状态、用量和关键配置。</p>
+	        </div>
+	        <button class="icon ui-icon-btn" id="closeSettings" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+	      </header>
+	      <div class="admin-content">
+	        <section class="admin-page active" data-admin-page="overview">
+	          <div class="admin-overview-grid" id="adminOverviewGrid"></div>
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="activity" aria-hidden="true"></i><span>运行状态</span></h2>
+	            <div class="admin-status-grid" id="adminOverviewStatusGrid"></div>
+	            <div class="status" id="adminOverviewStatus"></div>
+	          </section>
+	        </section>
+
+	        <section class="admin-page" data-admin-page="accounts">
+	          <section class="panel" id="accountAdminPanel">
+		            <h2 class="panel-title"><i data-lucide="users" aria-hidden="true"></i><span>账号管理</span></h2>
+	            <input id="editingUserId" type="hidden">
+	            <div class="grid2">
+	              <label>账号<input id="accountUsername" autocomplete="off" placeholder="只能用字母、数字、_、-"></label>
+	              <label>显示名<input id="accountDisplayName" placeholder="家人昵称"></label>
+	            </div>
+	            <div class="grid2">
+	              <label>角色<select id="accountRole"><option value="family">家庭成员</option><option value="admin">管理员</option></select></label>
+	              <label>状态<select id="accountActive"><option value="1">启用</option><option value="0">禁用</option></select></label>
+	            </div>
+	            <label>密码<input id="accountPassword" type="password" autocomplete="new-password" placeholder="新增账号必填，编辑时留空保持原密码"></label>
+	            <div class="library-actions">
+		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveAccount"><i data-lucide="save" aria-hidden="true"></i><span>保存账号</span></button>
+		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetAccountForm"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
+	            </div>
+	            <div class="status" id="accountStatus"></div>
+	            <div id="accountList"></div>
+	          </section>
+	        </section>
+
+	        <section class="admin-page" data-admin-page="models">
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="bot" aria-hidden="true"></i><span>新增/编辑模型</span></h2>
+	            <input id="editingModelId" type="hidden">
+	            <input id="apiKey" type="password" autocomplete="off" hidden>
+	            <div class="grid2">
+	              <label>显示名称<input id="modelName" placeholder="DeepSeek Chat"></label>
+	              <label>供应商<input id="provider" placeholder="DeepSeek"></label>
+	            </div>
+	            <label>API Base URL<input id="baseUrl" placeholder="https://api.deepseek.com/v1"></label>
+	            <label>Model<input id="modelCode" placeholder="deepseek-chat"></label>
+	            <label>System Prompt<textarea id="systemPrompt" rows="4"></textarea></label>
+	            <div class="grid2">
+	              <label>启用<select id="enabled"><option value="1">启用</option><option value="0">停用</option></select></label>
+	              <label>图片理解<select id="supportsVision"><option value="0">不支持</option><option value="1">支持图片理解</option></select></label>
+	            </div>
+	            <label>联网能力
+	              <select id="supportsNativeWebSearch">
+	                <option value="0">使用平台搜索（Tavily / Brave）</option>
+	                <option value="1">百炼原生联网（Responses API）</option>
+	              </select>
+	            </label>
+	            <div class="grid2">
+	              <label>输入价格（元 / 百万 Token）<input id="inputPricePerMillion" type="number" min="0" step="0.0001" placeholder="例如 2.4"></label>
+	              <label>输出价格（元 / 百万 Token）<input id="outputPricePerMillion" type="number" min="0" step="0.0001" placeholder="例如 9.6"></label>
+	            </div>
+	            <div class="grid2">
+	              <label>成本统计<select id="costEnabled"><option value="0">不参与成本统计</option><option value="1">参与成本统计</option></select></label>
+	              <label>成本备注<input id="costNote" placeholder="例如：百炼官方阶梯价"></label>
+	            </div>
+	            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+		            <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveModel"><i data-lucide="save" aria-hidden="true"></i><span>保存模型</span></button>
+		            <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetModelForm"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
+	            </div>
+	            <div class="status" id="modelStatus"></div>
+	          </section>
+	          <section class="panel">
+		          <h2 class="panel-title"><i data-lucide="list" aria-hidden="true"></i><span>已配置模型</span></h2>
+	            <div id="adminModelList"></div>
+	          </section>
+	        </section>
+
+	        <section class="admin-page" data-admin-page="keys">
+	          <section class="panel">
+		            <h2 class="panel-title"><i data-lucide="shield" aria-hidden="true"></i><span>管理密钥</span></h2>
+	            <label>管理密钥<input id="adminKey" type="password" autocomplete="off"></label>
+	            <p class="library-card-meta">管理员账号登录时可不填；使用管理密钥时，所有后台接口都会通过它鉴权。</p>
+	            <div class="status" id="adminStatus"></div>
+	          </section>
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="key-round" aria-hidden="true"></i><span>模型 API Key</span></h2>
+	            <div id="modelKeyList"></div>
+	          </section>
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="search" aria-hidden="true"></i><span>搜索 API Key</span></h2>
+	            <label>搜索 API Key<input id="searchApiKey" type="password" autocomplete="off" placeholder="留空则保持原值"></label>
+	            <div class="library-actions">
+		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveSearchKey" type="button"><i data-lucide="save" aria-hidden="true"></i><span>保存搜索 Key</span></button>
+		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="clearSearchKey" type="button"><i data-lucide="key-round" aria-hidden="true"></i><span>清空搜索 Key</span></button>
+	            </div>
+	          </section>
+	        </section>
+
+	        <section class="admin-page" data-admin-page="search">
+	          <section class="panel">
+		            <h2 class="panel-title"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></h2>
+	            <div class="grid2">
+	              <label>搜索服务
+	                <select id="searchProvider">
+	                  <option value="tavily">Tavily</option>
+	                  <option value="brave">Brave Search</option>
+	                </select>
+	              </label>
+	              <label>启用搜索
+	                <select id="searchEnabled">
+	                  <option value="0">关闭</option>
+	                  <option value="1">开启</option>
+	                </select>
+	              </label>
+	            </div>
+	            <div class="grid2">
+	              <label>搜索策略
+	                <select id="searchMode">
+	                  <option value="auto">自动联网</option>
+	                  <option value="manual">手动开关</option>
+	                  <option value="always">强制联网</option>
+	                </select>
+	              </label>
+	              <label>搜索深度
+	                <select id="searchDepth">
+	                  <option value="advanced">更准</option>
+	                  <option value="basic">更快</option>
+	                </select>
+	              </label>
+	            </div>
+	            <label>结果数量<input id="searchResultCount" type="number" min="1" max="8" value="5"></label>
+	            <div class="library-actions">
+		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveSearch"><i data-lucide="save" aria-hidden="true"></i><span>保存搜索配置</span></button>
+	            </div>
+	            <div class="status" id="searchStatus"></div>
+	          </section>
+	        </section>
+
+	        <section class="admin-page" data-admin-page="plugins">
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="puzzle" aria-hidden="true"></i><span>插件管理</span></h2>
+	            <div class="admin-plugin-grid" id="pluginStatusList"></div>
+	          </section>
+	        </section>
+
+	        <section class="admin-page" data-admin-page="tokens">
+	          <section class="panel" id="tokenStatsPanel">
+		            <h2 class="panel-title"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></h2>
+	            <div class="token-tabs" role="tablist" aria-label="Token统计维度">
+	              <button class="token-tab active" type="button" data-token-tab="users" role="tab" aria-selected="true"><i data-lucide="users" aria-hidden="true"></i><span>按账号统计</span></button>
+	              <button class="token-tab" type="button" data-token-tab="models" role="tab" aria-selected="false"><i data-lucide="bot" aria-hidden="true"></i><span>按模型统计</span></button>
+	            </div>
+	            <section class="token-panel active" data-token-panel="users">
+	              <div class="token-summary-grid" id="tokenSummaryGrid"></div>
+	              <div class="token-filter-row">
+	                <label>搜索用户名<input id="tokenStatsQuery" autocomplete="off" placeholder="输入账号或昵称"></label>
+	                <label>排序
+	                  <select id="tokenStatsSort">
+	                    <option value="tokens">Token最多</option>
+	                    <option value="recent">最近使用</option>
+	                    <option value="created">注册时间</option>
+	                  </select>
+	                </label>
+	                <div style="display:flex;align-items:end">
+		                <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshTokenStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	                </div>
+	              </div>
+	              <div id="tokenStatsList"></div>
+	            </section>
+	            <section class="token-panel" data-token-panel="models">
+	              <div class="token-summary-grid" id="modelTokenSummaryGrid"></div>
+	              <div class="token-filter-row">
+	                <label>搜索模型<input id="modelTokenStatsQuery" autocomplete="off" placeholder="输入模型名、供应商或模型 ID"></label>
+	                <label>排序
+	                  <select id="modelTokenStatsSort">
+	                    <option value="tokens">Token最多</option>
+	                    <option value="requests">请求最多</option>
+	                    <option value="recent">最近调用</option>
+	                  </select>
+	                </label>
+	                <div style="display:flex;align-items:end">
+		                <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshModelTokenStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	                </div>
+	              </div>
+	              <div id="modelTokenStatsList"></div>
+	            </section>
+	            <div class="status" id="tokenStatsStatus"></div>
+	          </section>
+	        </section>
+
+	        <section class="admin-page" data-admin-page="costs">
+	          <section class="panel" id="costStatsPanel">
+	            <h2 class="panel-title"><i data-lucide="coins" aria-hidden="true"></i><span>成本统计</span></h2>
+	            <div class="token-filter-row">
+	              <label>时间范围
+	                <select id="costStatsRange">
+	                  <option value="7d">最近7天</option>
+	                  <option value="30d" selected>最近30天</option>
+	                  <option value="all">全部时间</option>
+	                </select>
+	              </label>
+	              <div></div>
+	              <div style="display:flex;align-items:end">
+	                <div class="library-actions">
+	                  <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="refreshCostStats" type="button"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+	                  <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="recalculateCostStats" type="button"><i data-lucide="calculator" aria-hidden="true"></i><span>回算历史成本</span></button>
+	                </div>
+	              </div>
+	            </div>
+	            <div class="token-summary-grid" id="costSummaryGrid"></div>
+	            <div class="grid2">
+	              <section class="panel">
+	                <h2 class="panel-title"><i data-lucide="bot" aria-hidden="true"></i><span>最烧钱模型</span></h2>
+	                <div id="costModelList"></div>
+	              </section>
+	              <section class="panel">
+	                <h2 class="panel-title"><i data-lucide="users" aria-hidden="true"></i><span>最烧钱用户</span></h2>
+	                <div id="costUserList"></div>
+	              </section>
+	            </div>
+	            <div class="status" id="costStatsStatus"></div>
+	          </section>
+	        </section>
+
+	        <section class="admin-page" data-admin-page="system">
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>登录与系统</span></h2>
+	            <div class="grid2">
+	              <label>新的家用登录密码<input id="familyPassword" type="password" autocomplete="new-password" placeholder="至少 8 位"></label>
+	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
+	            </div>
+	            <div class="admin-system-list">
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.14.0</strong></div>
+	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
+	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
+	              <div><span>数据存储</span><strong>SQLite</strong></div>
+	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
+	            </div>
+	          </section>
+	        </section>
+	      </div>
+	    </div>
+	  </section>
+
+	  <script src="/res/ai.js?v=2.14.0"></script>
+
+</body>
+</html>

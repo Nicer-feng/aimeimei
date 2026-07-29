@@ -1,12 +1,15 @@
 # AI槑槑
 
-AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实现。项目保持单文件应用形态，无 Docker、无前端框架、无外部 Python 依赖。
+AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实现。项目保持轻量模块化形态，无 Docker、无前端框架、无外部 Python 依赖。
 
-当前版本：`2.12.6`
+当前版本：`2.14.0`
 
 ## 目录说明
 
-- `app.py`：主应用文件，包含后端接口、SQLite 迁移逻辑和前端页面。
+- `app.py`：后端入口，包含 HTTP 接口、SQLite 迁移和第三方模型调用。
+- `ai.html`：AI槑槑聊天页结构。
+- `res/ai.css`：AI槑槑聊天页设计系统与组件样式。
+- `res/ai.js`：AI槑槑聊天页状态、交互和接口调用。
 - `index.html`：槑槑小记个人首页，当前可通过 `/xiaoji` 预览，备案通过后可作为主域名首页。
 - `cat.html`：小猫书前端页面，当前挂载在 `/cat`。
 - `app.server.py`：服务器旧版/备份应用文件，保留用于对照。
@@ -106,8 +109,10 @@ MEDIA_MAX_UPLOAD_MB
 
 ```bash
 python3 -m py_compile app.py
-scp app.py aliyun_3129:/tmp/ai-platform-build/app.py
-ssh aliyun_3129 'sudo install -o ai-platform -g ai-platform -m 0644 /tmp/ai-platform-build/app.py /opt/ai-platform/app.py && sudo systemctl restart ai-platform && systemctl is-active ai-platform'
+node --check res/ai.js
+scp app.py ai.html VERSION BUILD_ID CHANGELOG.md aliyun_3129:/tmp/ai-platform-build/
+scp res/ai.css res/ai.js aliyun_3129:/tmp/ai-platform-build/res/
+ssh aliyun_3129 'sudo install -o ai-platform -g ai-platform -m 0644 /tmp/ai-platform-build/app.py /opt/ai-platform/app.py && sudo install -o ai-platform -g ai-platform -m 0644 /tmp/ai-platform-build/ai.html /opt/ai-platform/ai.html && sudo install -o ai-platform -g ai-platform -m 0644 /tmp/ai-platform-build/res/ai.css /opt/ai-platform/res/ai.css && sudo install -o ai-platform -g ai-platform -m 0644 /tmp/ai-platform-build/res/ai.js /opt/ai-platform/res/ai.js && sudo systemctl restart ai-platform && systemctl is-active ai-platform'
 ```
 
 ## 敏感文件
