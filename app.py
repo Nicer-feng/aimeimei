@@ -18,306 +18,61 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
-
-DATA_DIR = Path(os.environ.get("AI_PLATFORM_DATA", "/opt/ai-platform"))
-APP_DIR = Path(__file__).resolve().parent
-RES_DIR = APP_DIR / "res"
-AI_PAGE_PATH = APP_DIR / "ai.html"
-HOME_PAGE_PATH = APP_DIR / "index.html"
-CAT_PAGE_PATH = APP_DIR / "cat.html"
-CHANGELOG_PATH = APP_DIR / "CHANGELOG.md"
-VERSION_PATH = APP_DIR / "VERSION"
-BUILD_ID_PATH = APP_DIR / "BUILD_ID"
-MARKDOWN_TEST_PATH = APP_DIR / "markdown-test.html"
-DEV_MODE = os.environ.get("AI_PLATFORM_DEV_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
-LISTEN = os.environ.get("AI_PLATFORM_LISTEN", ":8080")
-DB_PATH = DATA_DIR / "ai-platform.db"
-SECRETS_PATH = DATA_DIR / "secrets.json"
-ADMIN_KEY_PATH = DATA_DIR / "admin.key"
-FAMILY_PASSWORD_PATH = DATA_DIR / "family_password.txt"
-LEGACY_CONFIG_PATH = DATA_DIR / "config.json"
-SESSION_COOKIE = "ap_session"
-SESSION_TTL_SECONDS = 60 * 60 * 24 * 14
-CAT_SESSION_COOKIE = "cat_session"
-CAT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
-CAT_OSS_DIR = "cat"
-CAT_MAX_IMAGE_BYTES = 12 * 1024 * 1024
-CHAT_IMAGE_OSS_DIR = "chat-images"
-CHAT_IMAGE_MAX_BYTES = 20 * 1024 * 1024
-CHAT_IMAGE_MAX_COUNT = 5
-CHAT_IMAGE_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-CHAT_IMAGE_ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
-MEDIA_OSS_DIR = "tingwu"
-MEDIA_MAX_UPLOAD_BYTES = int(os.environ.get("MEDIA_MAX_UPLOAD_MB", "500") or "500") * 1024 * 1024
-MEDIA_ALLOWED_EXTENSIONS = {".mp3", ".mp4", ".m4a", ".wav", ".aac", ".flac", ".mov", ".avi", ".mkv", ".webm"}
-CAT_GUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
-USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{2,32}$")
-DEFAULT_AI_USER_ID = "default"
-
-
-def now() -> int:
-    return int(time.time())
-
-
-def iso_now() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-
-
-def today_text() -> str:
-    return time.strftime("%Y-%m-%d", time.localtime())
-
-
-def local_day_start(ts=None) -> int:
-    t = time.localtime(now() if ts is None else int(ts))
-    return int(time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, t.tm_wday, t.tm_yday, t.tm_isdst)))
-
-
-def local_month_start(ts=None) -> int:
-    t = time.localtime(now() if ts is None else int(ts))
-    return int(time.mktime((t.tm_year, t.tm_mon, 1, 0, 0, 0, t.tm_wday, t.tm_yday, t.tm_isdst)))
-
-
-def date_text_from_ts(ts) -> str:
-    try:
-        value = int(ts or now())
-    except (TypeError, ValueError):
-        value = now()
-    return time.strftime("%Y-%m-%d", time.localtime(value))
-
-
-def current_year() -> str:
-    return time.strftime("%Y", time.localtime())
-
-
-def current_app_version() -> str:
-    try:
-        value = VERSION_PATH.read_text(encoding="utf-8").strip()
-        if value:
-            return value.lstrip("v")
-    except OSError:
-        pass
-    entries = parse_changelog()
-    if entries:
-        return entries[0]["version"]
-    return ""
-
-
-def current_build_info():
-    version = current_app_version()
-    build_id = ""
-    updated_at = ""
-    try:
-        build_id = BUILD_ID_PATH.read_text(encoding="utf-8").strip()
-        updated_at = time.strftime(
-            "%Y-%m-%d %H:%M:%S",
-            time.localtime(BUILD_ID_PATH.stat().st_mtime),
-        )
-    except OSError:
-        pass
-    if not build_id:
-        try:
-            stamp = int(Path(__file__).stat().st_mtime)
-        except OSError:
-            stamp = now()
-        build_id = f"{version or 'dev'}-{stamp}"
-        updated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stamp))
-    return {
-        "version": f"v{version}" if version else "",
-        "build_id": build_id,
-        "updated_at": updated_at,
-    }
-
-
-def parse_changelog(limit=None):
-    try:
-        text = CHANGELOG_PATH.read_text(encoding="utf-8")
-    except OSError:
-        return []
-    entries = []
-    current = None
-
-    def finish_entry():
-        if not current:
-            return
-        points = current["points"]
-        title = ""
-        for point in points:
-            if "版本号同步" not in point and "全站版本号" not in point:
-                title = point.rstrip("。")
-                break
-        if not title and points:
-            title = points[0].rstrip("。")
-        current["title"] = title or "更新内容"
-        entries.append(current.copy())
-
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        match = re.match(r"^##\s+v?([0-9][^\s]*)\s*(?:-\s*(.+?))?\s*$", line)
-        if match:
-            finish_entry()
-            date_text = (match.group(2) or "").strip()
-            current = {
-                "version": match.group(1).strip().lstrip("v"),
-                "date": date_text,
-                "title": "",
-                "points": [],
-                "commit": "",
-            }
-            continue
-        if not current:
-            continue
-        bullet = re.match(r"^[-*]\s+(.+)$", line)
-        if bullet:
-            point = bullet.group(1).strip()
-            if point:
-                current["points"].append(point)
-            continue
-        commit = re.search(r"\b([0-9a-f]{7,40})\b", line, re.I)
-        if commit and not current.get("commit"):
-            current["commit"] = commit.group(1)[:12]
-    finish_entry()
-    if limit is not None:
-        return entries[: max(0, int(limit))]
-    return entries
-
-
-def b64_token(size: int = 32) -> str:
-    return base64.urlsafe_b64encode(secrets.token_bytes(size)).decode().rstrip("=")
-
-
-def password_hash(password: str) -> str:
-    salt = secrets.token_hex(16)
-    rounds = 260000
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), rounds)
-    return f"pbkdf2_sha256${rounds}${salt}${digest.hex()}"
-
-
-def verify_password(password: str, encoded: str) -> bool:
-    try:
-        algo, rounds, salt, digest = encoded.split("$", 3)
-        if algo != "pbkdf2_sha256":
-            return False
-        candidate = hashlib.pbkdf2_hmac(
-            "sha256", password.encode(), salt.encode(), int(rounds)
-        ).hex()
-        return hmac.compare_digest(candidate, digest)
-    except Exception:
-        return False
-
-
-def token_hash(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
-def read_json(path: Path, fallback):
-    try:
-        return json.loads(path.read_text())
-    except FileNotFoundError:
-        return fallback
-    except json.JSONDecodeError:
-        return fallback
-
-
-def write_private(path: Path, content: str):
-    path.write_text(content)
-    os.chmod(path, 0o600)
-
-
-def ensure_secrets():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    os.chmod(DATA_DIR, 0o700)
-
-    data = read_json(SECRETS_PATH, {})
-    changed = False
-
-    if not data.get("admin_key"):
-        if ADMIN_KEY_PATH.exists():
-            data["admin_key"] = ADMIN_KEY_PATH.read_text().strip()
-        else:
-            data["admin_key"] = b64_token()
-        changed = True
-
-    if not data.get("family_password_hash"):
-        family_password = "home-" + b64_token(12)
-        data["family_password_hash"] = password_hash(family_password)
-        write_private(FAMILY_PASSWORD_PATH, family_password + "\n")
-        changed = True
-    elif not FAMILY_PASSWORD_PATH.exists():
-        FAMILY_PASSWORD_PATH.write_text(
-            "Password already initialized. Change it from the admin panel.\n"
-        )
-        os.chmod(FAMILY_PASSWORD_PATH, 0o600)
-
-    web_search = data.get("web_search")
-    if not isinstance(web_search, dict):
-        data["web_search"] = {
-            "provider": "tavily",
-            "api_key": "",
-            "enabled": False,
-            "result_count": 5,
-            "mode": "auto",
-            "depth": "advanced",
-        }
-        changed = True
-    else:
-        if web_search.get("mode") not in ("manual", "auto", "always"):
-            web_search["mode"] = "auto"
-            changed = True
-        if web_search.get("depth") not in ("basic", "advanced"):
-            web_search["depth"] = "advanced"
-            changed = True
-
-    if changed:
-        write_private(SECRETS_PATH, json.dumps(data, indent=2) + "\n")
-
-    if not ADMIN_KEY_PATH.exists():
-        write_private(ADMIN_KEY_PATH, data["admin_key"] + "\n")
-
-    return data
-
-
-def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
-
-
-def table_columns(conn, table):
-    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-
-
-def ensure_default_ai_user(conn, secrets_data):
-    count = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
-    if count == 0:
-        ts = now()
-        conn.execute(
-            """
-            INSERT INTO users
-            (id, username, display_name, password_hash, role, is_active, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'admin', 1, ?, ?)
-            """,
-            (
-                DEFAULT_AI_USER_ID,
-                "admin",
-                "默认账号",
-                secrets_data.get("family_password_hash") or password_hash("admin-" + b64_token(8)),
-                ts,
-                ts,
-            ),
-        )
-        return DEFAULT_AI_USER_ID
-
-    row = conn.execute(
-        """
-        SELECT id
-        FROM users
-        ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, created_at ASC
-        LIMIT 1
-        """
-    ).fetchone()
-    return row["id"] if row else DEFAULT_AI_USER_ID
+from ai_platform.database import db, ensure_default_ai_user, table_columns
+from ai_platform.runtime import (
+    b64_token,
+    current_app_version,
+    current_build_info,
+    current_year,
+    date_text_from_ts,
+    ensure_secrets,
+    iso_now,
+    local_day_start,
+    local_month_start,
+    now,
+    parse_changelog,
+    password_hash,
+    read_json,
+    today_text,
+    token_hash,
+    verify_password,
+    write_private,
+)
+from ai_platform.settings import (
+    ADMIN_KEY_PATH,
+    AI_PAGE_PATH,
+    APP_DIR,
+    BUILD_ID_PATH,
+    CAT_GUEST_ID_RE,
+    CAT_MAX_IMAGE_BYTES,
+    CAT_OSS_DIR,
+    CAT_PAGE_PATH,
+    CAT_SESSION_COOKIE,
+    CAT_SESSION_TTL_SECONDS,
+    CHANGELOG_PATH,
+    CHAT_IMAGE_ALLOWED_EXTENSIONS,
+    CHAT_IMAGE_ALLOWED_MIME_TYPES,
+    CHAT_IMAGE_MAX_BYTES,
+    CHAT_IMAGE_MAX_COUNT,
+    CHAT_IMAGE_OSS_DIR,
+    DATA_DIR,
+    DB_PATH,
+    DEFAULT_AI_USER_ID,
+    DEV_MODE,
+    FAMILY_PASSWORD_PATH,
+    HOME_PAGE_PATH,
+    LEGACY_CONFIG_PATH,
+    LISTEN,
+    MARKDOWN_TEST_PATH,
+    MEDIA_ALLOWED_EXTENSIONS,
+    MEDIA_MAX_UPLOAD_BYTES,
+    MEDIA_OSS_DIR,
+    RES_DIR,
+    SECRETS_PATH,
+    SESSION_COOKIE,
+    SESSION_TTL_SECONDS,
+    USERNAME_RE,
+)
 
 
 def init_db(secrets_data=None):

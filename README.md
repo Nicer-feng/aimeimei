@@ -2,11 +2,12 @@
 
 AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实现。项目保持轻量模块化形态，无 Docker、无前端框架、无外部 Python 依赖。
 
-当前版本：`2.14.0`
+当前版本：`2.15.0`
 
 ## 目录说明
 
 - `app.py`：后端入口，包含 HTTP 接口、SQLite 迁移和第三方模型调用。
+- `ai_platform/`：后端基础模块，包含运行配置、版本与安全工具、SQLite 连接管理。
 - `ai.html`：AI槑槑聊天页结构。
 - `res/ai.css`：AI槑槑聊天页设计系统与组件样式。
 - `res/ai.js`：AI槑槑聊天页状态、交互和接口调用。
@@ -111,6 +112,7 @@ MEDIA_MAX_UPLOAD_MB
 python3 -m py_compile app.py
 node --check res/ai.js
 scp app.py ai.html VERSION BUILD_ID CHANGELOG.md aliyun_3129:/tmp/ai-platform-build/
+scp -r ai_platform aliyun_3129:/tmp/ai-platform-build/
 scp res/ai.css res/ai.js aliyun_3129:/tmp/ai-platform-build/res/
 ssh aliyun_3129 'sudo install -o ai-platform -g ai-platform -m 0644 /tmp/ai-platform-build/app.py /opt/ai-platform/app.py && sudo install -o ai-platform -g ai-platform -m 0644 /tmp/ai-platform-build/ai.html /opt/ai-platform/ai.html && sudo install -o ai-platform -g ai-platform -m 0644 /tmp/ai-platform-build/res/ai.css /opt/ai-platform/res/ai.css && sudo install -o ai-platform -g ai-platform -m 0644 /tmp/ai-platform-build/res/ai.js /opt/ai-platform/res/ai.js && sudo systemctl restart ai-platform && systemctl is-active ai-platform'
 ```
