@@ -28,6 +28,8 @@
 	      streamQueue: "",
 	      streamTimer: null,
       streamResolve: null,
+	      reasoningClockTimer: 0,
+	      activeReasoningMessage: null,
 	      newConversationPromise: null,
 	      newConversationModelId: "",
 	      firstTokenAt: null,
@@ -3076,7 +3078,14 @@
 		    function toggleReasoning(message) {
 	      if (!message) return;
 	      message.reasoning_open = !message.reasoning_open;
-	      updateStreamingMessage(message, { forceFull: true, final: !message.thinking });
+	      const box = $("messages");
+	      const wrap = box?.querySelector(`[data-message-key="${messageKey(message)}"]`);
+	      const panel = wrap?.querySelector(".reasoning-panel");
+	      if (!panel) return;
+	      renderReasoningPanel(panel, message, messageReasoningContent(message), {
+	        final: !message.thinking
+	      });
+	      queueLucideRefresh();
 	    }
 
 	    function messageIndexOf(message) {
@@ -4093,12 +4102,20 @@
 
 	    function splitThinkContent(value) {
 	      const reasoning = [];
-	      const content = String(value || "").replace(/<think>\s*([\s\S]*?)\s*<\/think>/gi, (_, text) => {
+	      let content = String(value || "").replace(/<think>\s*([\s\S]*?)\s*<\/think>/gi, (_, text) => {
 	        const clean = String(text || "").trim();
 	        if (clean) reasoning.push(clean);
 	        return "";
-	      }).trim();
-	      return { content, reasoning: reasoning.join("\n\n") };
+	      });
+	      let reasoningOpen = false;
+	      const openIndex = content.toLowerCase().lastIndexOf("<think>");
+	      if (openIndex >= 0) {
+	        const trailing = content.slice(openIndex + 7).trim();
+	        if (trailing) reasoning.push(trailing);
+	        content = content.slice(0, openIndex);
+	        reasoningOpen = true;
+	      }
+	      return { content: content.trim(), reasoning: reasoning.join("\n\n"), reasoningOpen };
 	    }
 
 	    function visibleMessageContent(message) {
@@ -4214,7 +4231,74 @@
 	      return parts.filter(Boolean).join("\n\n").trim();
 	    }
 
-	    function renderReasoningPanel(panel, message, reasoningContent) {
+	    function reasoningPreview(reasoningContent) {
+	      const lines = String(reasoningContent || "")
+	        .replace(/<\/?(?:think|thinking|reasoning)>/gi, "\n")
+	        .split(/\r?\n/)
+	        .map((line) => line
+	          .replace(/^\s{0,3}(?:#{1,6}|>|[-*+] |\d+[.)] )\s*/, "")
+	          .replace(/```[a-z0-9_-]*|```/gi, "")
+	          .replace(/[*_~`]+/g, "")
+	          .replace(/\s+/g, " ")
+	          .trim())
+	        .filter((line) => line && /[\p{L}\p{N}]/u.test(line));
+	      if (!lines.length) return "正在梳理信息与回答思路…";
+	      let preview = lines[lines.length - 1];
+	      if (preview.length < 28 && lines.length > 1) {
+	        preview = lines.slice(-2).join(" ");
+	      }
+	      return preview.length > 96 ? preview.slice(-96).replace(/^\S*\s/, "") + "…" : preview;
+	    }
+
+	    function reasoningElapsedSeconds(message) {
+	      const startedAt = Number(message?._reasoningStartedAt || message?._thinkingStartedAt || 0);
+	      if (!startedAt) return 0;
+	      const endedAt = Number(message?._reasoningCompletedAt || Date.now());
+	      return Math.max(1, Math.round((endedAt - startedAt) / 1000));
+	    }
+
+	    function reasoningTokenCount(message) {
+	      const usage = message?.usage || {};
+	      return Number(
+	        usage.reasoning_tokens ||
+	        usage.completion_tokens_details?.reasoning_tokens ||
+	        usage.output_tokens_details?.reasoning_tokens ||
+	        0
+	      );
+	    }
+
+	    function updateReasoningHeader(panel, message, reasoningContent) {
+	      const isLive = Boolean(message.thinking && !message._reasoningCompletedAt);
+	      const status = panel.querySelector(".reasoning-status");
+	      const duration = panel.querySelector(".reasoning-duration");
+	      const preview = panel.querySelector(".reasoning-preview");
+	      const cursor = panel.querySelector(".reasoning-cursor");
+	      const icon = panel.querySelector(".reasoning-state-icon");
+	      if (status) status.textContent = isLive ? "正在思考" : "已思考";
+	      if (duration) {
+	        const seconds = reasoningElapsedSeconds(message);
+	        const tokens = reasoningTokenCount(message);
+	        duration.textContent = (seconds ? ` · ${seconds}秒` : "") + (tokens ? ` · ${formatTokens(tokens)}` : "");
+	      }
+	      if (preview) {
+	        const nextPreview = reasoningPreview(reasoningContent);
+	        if (preview.textContent !== nextPreview) {
+	          preview.classList.add("updating");
+	          preview.textContent = nextPreview;
+	          requestAnimationFrame(() => requestAnimationFrame(() => preview.classList.remove("updating")));
+	        }
+	      }
+	      if (cursor) cursor.hidden = !isLive;
+	      if (icon) {
+	        const nextIcon = isLive ? "sparkles" : "check";
+	        if (icon.dataset.lucide !== nextIcon) {
+	          icon.dataset.lucide = nextIcon;
+	          queueLucideRefresh();
+	        }
+	      }
+	    }
+
+	    function renderReasoningPanel(panel, message, reasoningContent, options = {}) {
 	      if (!panel) return;
 	      if (message.role !== "assistant" || !reasoningContent) {
 	        panel.hidden = true;
@@ -4226,18 +4310,49 @@
 	      const toggle = document.createElement("button");
 	      toggle.className = "reasoning-toggle";
 	      toggle.type = "button";
-	      const toggleLabel = message.reasoning_open ? "收起思考过程" : (message.thinking ? "槑槑正在思考" : "查看思考过程");
-	      toggle.innerHTML = iconLabel(message.thinking ? "loader" : "brain", toggleLabel, "思") + '<i class="reasoning-chevron" data-lucide="chevron-down" aria-hidden="true"></i>';
+	      toggle.innerHTML = `
+	        <i class="reasoning-state-icon" data-lucide="${message.thinking ? "sparkles" : "check"}" aria-hidden="true"></i>
+	        <span class="reasoning-status">${message.thinking ? "正在思考" : "已思考"}</span>
+	        <span class="reasoning-duration"></span>
+	        <span class="reasoning-preview"></span>
+	        <span class="reasoning-cursor" aria-hidden="true">▌</span>
+	        <i class="reasoning-chevron" data-lucide="chevron-down" aria-hidden="true"></i>`;
 	      toggle.title = message.reasoning_open ? "收起思考过程" : "展开思考过程";
 	      toggle.addEventListener("click", () => toggleReasoning(message));
 	      const body = document.createElement("div");
 	      body.className = "reasoning-body";
 	      body.hidden = !message.reasoning_open;
 	      if (message.reasoning_open) {
-	        body.innerHTML = '<div class="markdown">' + renderMessageMarkdown(message, reasoningContent, "reasoning") + '</div>';
+	        const markdown = document.createElement("div");
+	        markdown.className = "markdown reasoning-markdown";
+	        body.appendChild(markdown);
+	        renderStreamingMarkdown(markdown, message, reasoningContent, {
+	          final: Boolean(options.final || !message.thinking),
+	          slot: "reasoning"
+	        });
+	        const footer = document.createElement("div");
+	        footer.className = "reasoning-actions";
+	        const copy = document.createElement("button");
+	        copy.type = "button";
+	        copy.className = "reasoning-action";
+	        copy.innerHTML = iconLabel("copy", "复制思考内容", "⧉");
+	        copy.addEventListener("click", (event) => {
+	          event.stopPropagation();
+	          copyText(messageReasoningContent(message), copy);
+	        });
+	        const collapse = document.createElement("button");
+	        collapse.type = "button";
+	        collapse.className = "reasoning-action";
+	        collapse.innerHTML = iconLabel("chevron-up", "收起", "⌃");
+	        collapse.addEventListener("click", (event) => {
+	          event.stopPropagation();
+	          toggleReasoning(message);
+	        });
+	        footer.append(copy, collapse);
+	        body.appendChild(footer);
 	      }
 	      panel.replaceChildren(toggle, body);
-	      if (message.reasoning_open) enhanceMarkdown(body, { mermaid: !message.thinking });
+	      updateReasoningHeader(panel, message, reasoningContent);
 	    }
 
 	    function sourceDomain(value) {
@@ -5391,6 +5506,7 @@
 	      if (message.role === "assistant" && message.thinking && !displayContent) {
 	        wrap.dataset.liveState = "thinking";
 	        text.className = "message-content";
+	        text.hidden = Boolean(reasoningContent);
 	        text.innerHTML = `
 	          <div class="thinking">
 	            <img class="thinking-avatar" src="/res/meimei-avatar.png" alt="">
@@ -5404,6 +5520,7 @@
 	      }
 
 	      wrap.dataset.liveState = "static";
+	      text.hidden = false;
 	      text.className = "message-content markdown";
 	      text.innerHTML = renderMessageMarkdown(message, displayContent || "");
 	      enhanceMarkdown(text, { mermaid: !message.thinking });
@@ -5437,18 +5554,79 @@
 	        return false;
 	      }
 	      const existingToggle = panel.querySelector(".reasoning-toggle");
-	      if (!existingToggle || message.reasoning_open || options.final) {
+	      if (!existingToggle || options.final) {
 	        renderReasoningPanel(panel, message, reasoningContent);
-	        return false;
+	        return true;
 	      }
 	      panel.hidden = false;
-	      panel.classList.remove("open");
-	      const label = existingToggle.querySelector("span:last-child");
-	      if (label) label.textContent = message.thinking ? "槑槑正在思考" : "查看思考过程";
-	      existingToggle.title = "展开思考过程";
+	      panel.classList.toggle("open", Boolean(message.reasoning_open));
+	      existingToggle.title = message.reasoning_open ? "收起思考过程" : "展开思考过程";
+	      updateReasoningHeader(panel, message, reasoningContent);
 	      const body = panel.querySelector(".reasoning-body");
-	      if (body) body.hidden = true;
+	      if (body) body.hidden = !message.reasoning_open;
+	      if (message.reasoning_open) {
+	        const markdown = body?.querySelector(".reasoning-markdown");
+	        if (markdown) renderStreamingMarkdown(markdown, message, reasoningContent, { slot: "reasoning" });
+	      }
 	      return false;
+	    }
+
+	    function stopReasoningClock(message) {
+	      if (message && state.activeReasoningMessage !== message) return;
+	      if (state.reasoningClockTimer) clearTimeout(state.reasoningClockTimer);
+	      state.reasoningClockTimer = 0;
+	      state.activeReasoningMessage = null;
+	    }
+
+	    function ensureReasoningClock(message) {
+	      state.activeReasoningMessage = message;
+	      if (state.reasoningClockTimer) return;
+	      const tick = () => {
+	        state.reasoningClockTimer = 0;
+	        if (state.activeReasoningMessage !== message || !message.thinking || message._reasoningCompletedAt) return;
+	        const wrap = $("messages")?.querySelector(`[data-message-key="${messageKey(message)}"]`);
+	        const panel = wrap?.querySelector(".reasoning-panel");
+	        if (panel && !panel.hidden) updateReasoningHeader(panel, message, messageReasoningContent(message));
+	        state.reasoningClockTimer = setTimeout(tick, 1000);
+	      };
+	      state.reasoningClockTimer = setTimeout(tick, 1000);
+	    }
+
+	    function completeReasoning(message) {
+	      if (!message || !messageReasoningContent(message)) return;
+	      if (!message._reasoningCompletedAt) message._reasoningCompletedAt = Date.now();
+	      stopReasoningClock(message);
+	      flushReasoningPreview(message, { final: true });
+	    }
+
+	    function flushReasoningPreview(message, options = {}) {
+	      if (!message) return;
+	      if (message._reasoningUiTimer) {
+	        clearTimeout(message._reasoningUiTimer);
+	        message._reasoningUiTimer = 0;
+	      }
+	      const box = $("messages");
+	      const wrap = box?.querySelector(`[data-message-key="${messageKey(message)}"]`);
+	      if (!wrap) return;
+	      const panel = wrap.querySelector(".reasoning-panel");
+	      const layoutMayChange = Boolean(panel?.hidden || message.reasoning_open);
+	      const previousTop = layoutMayChange ? box.scrollTop : 0;
+	      const shouldFollow = layoutMayChange && (state.followOutput || isNearBottom(box));
+	      updateLiveReasoningPanel(panel, message, messageReasoningContent(message), options);
+	      const text = wrap.querySelector(".message-content");
+	      if (message.thinking && !visibleMessageContent(message) && text) {
+	        text.hidden = true;
+	      }
+	      if (layoutMayChange) settleMessageScroll(previousTop, shouldFollow);
+	    }
+
+	    function scheduleReasoningPreview(message) {
+	      if (!message || message._reasoningUiTimer) return;
+	      message._reasoningUiTimer = setTimeout(() => {
+	        message._reasoningUiTimer = 0;
+	        flushReasoningPreview(message);
+	      }, 160);
+	      ensureReasoningClock(message);
 	    }
 
 	    function streamingStableBoundary(source) {
@@ -5506,7 +5684,7 @@
 	      const value = String(source || "");
 	      if (options.final) {
 	        resetStreamingMarkdownState(text);
-	        text.innerHTML = renderMessageMarkdown(message, value);
+	        text.innerHTML = renderMessageMarkdown(message, value, options.slot || "content");
 	        text._markdownSource = value;
 	        enhanceMarkdown(text, { mermaid: true, icons: true });
 	        return true;
@@ -5548,7 +5726,12 @@
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
 	      const displayContent = visibleMessageContent(message);
 	      const reasoningContent = messageReasoningContent(message);
-	      let iconsChanged = updateLiveReasoningPanel(reasoningPanel, message, reasoningContent, options);
+	      const shouldUpdateReasoning = Boolean(
+	        options.reasoning || options.final || !reasoningPanel?.querySelector(".reasoning-toggle")
+	      );
+	      let iconsChanged = shouldUpdateReasoning
+	        ? updateLiveReasoningPanel(reasoningPanel, message, reasoningContent, options)
+	        : false;
 
 	      if (options.sources) renderSourcesPanel(sourcesPanel, message.sources || []);
 	      if (options.usage || options.final) {
@@ -5572,6 +5755,7 @@
 	        return iconsChanged;
 	      }
 
+	      text.hidden = false;
 	      if (wrap.dataset.liveState === "thinking" && role) {
 	        role.replaceChildren();
 	        const avatar = document.createElement("img");
@@ -5623,7 +5807,10 @@
 	    function updateStreamingMessage(message, options = {}) {
 	      const box = $("messages");
 	      let wrap = box.querySelector(`[data-message-key="${messageKey(message)}"]`);
-	      if (options.reasoning && wrap && !message.reasoning_open && wrap.querySelector(".reasoning-toggle")) return;
+	      if (options.reasoning && wrap) {
+	        scheduleReasoningPreview(message);
+	        return;
+	      }
 	      const previousTop = box.scrollTop;
 	      const shouldFollow = state.followOutput || isNearBottom(box);
 	      let structureChanged = false;
@@ -6094,7 +6281,13 @@
 	    function enqueueAssistantText(message, piece) {
 	      const text = String(piece || "");
 	      if (!text) return;
-	      if (message.thinking) {
+	      const pendingContent = String(message.content || "") + (state.streamMessage === message ? state.streamQueue : "") + text;
+	      const parsedPending = splitThinkContent(pendingContent);
+	      if (message.thinking && parsedPending.reasoning && !message._reasoningStartedAt) {
+	        message._reasoningStartedAt = Date.now();
+	      }
+	      if (message.thinking && parsedPending.content) {
+	        completeReasoning(message);
 	        message.thinking = false;
 	        state.firstTokenAt = Date.now();
 	        setStatus("chatStatus", "正在生成...", "");
@@ -6126,6 +6319,10 @@
 	      const count = streamChunkSize(state.streamQueue.length);
 	      message.content += state.streamQueue.slice(0, count);
 	      state.streamQueue = state.streamQueue.slice(count);
+	      const parsed = splitThinkContent(message.content);
+	      if (parsed.reasoning && message.thinking) {
+	        scheduleReasoningPreview(message);
+	      }
 	      updateStreamingMessage(message, { stream: true });
 	      if (state.streamQueue) {
 	        scheduleStreamTick();
@@ -6246,7 +6443,7 @@
 	      if (!hasOverride) clearAttachments();
 	      const userContent = content || "请分析这些图片。";
 	      state.messages.push({ role: "user", content: userContent, images: sentImages, created_at: sentAt });
-	      const assistant = { role: "assistant", content: "", reasoning_content: "", sources: [], thinking: true, created_at: sentAt };
+	      const assistant = { role: "assistant", content: "", reasoning_content: "", sources: [], thinking: true, created_at: sentAt, _thinkingStartedAt: Date.now() };
 	      state.messages.push(assistant);
 	      state.followOutput = true;
 	      state.hasNewWhilePaused = false;
@@ -6300,6 +6497,10 @@
 	              }
 	              const choice = event.choices?.[0] || {};
 	              const piece = choice.delta?.content || choice.message?.content || "";
+	              const responseReasoningValue = event.delta || event.text || event.content || "";
+	              const responseEventReasoning = /reasoning|thinking/i.test(String(event.type || ""))
+	                ? (typeof responseReasoningValue === "string" ? responseReasoningValue : (responseReasoningValue?.text || ""))
+	                : "";
 	              const reasoningPiece =
 	                choice.delta?.reasoning_content ||
 	                choice.message?.reasoning_content ||
@@ -6307,8 +6508,13 @@
 	                choice.message?.reasoning ||
 	                choice.delta?.thinking ||
 	                choice.message?.thinking ||
+	                event.reasoning_content ||
+	                event.reasoning ||
+	                event.thinking ||
+	                responseEventReasoning ||
 	                "";
 	              if (reasoningPiece) {
+	                if (!assistant._reasoningStartedAt) assistant._reasoningStartedAt = Date.now();
 	                assistant.reasoning_content = (assistant.reasoning_content || "") + reasoningPiece;
 	                updateStreamingMessage(assistant, { reasoning: true });
 	              }
@@ -6318,6 +6524,7 @@
 	            } catch {}
 	          }
 	        }
+	        completeReasoning(assistant);
 	        assistant.thinking = false;
 	        await drainAssistantQueue();
 	        if (!assistant.content) {
@@ -6328,6 +6535,7 @@
 	        await loadConversationStats(state.currentConversation?.id);
 	        setStatus("chatStatus", "");
 	      } catch (err) {
+	        completeReasoning(assistant);
 	        assistant.thinking = false;
 	        if (state.userStopped || err?.name === "AbortError") {
 	          if (assistant.content) {
@@ -6347,6 +6555,7 @@
 	        }
 	      } finally {
 	        if (assistant.thinking) {
+	          completeReasoning(assistant);
 	          assistant.thinking = false;
 	          updateStreamingMessage(assistant, { final: true });
 	        }
