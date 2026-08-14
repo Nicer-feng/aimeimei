@@ -5824,7 +5824,7 @@
       font-weight: 500;
       opacity: 1;
       transform: translateY(0);
-      transition: opacity 150ms var(--ease-standard), transform 150ms var(--ease-standard);
+      transition: opacity 65ms var(--ease-standard), transform 65ms var(--ease-standard);
     }
     .reasoning-preview::before {
       content: "·";
@@ -5832,8 +5832,8 @@
       color: var(--color-text-tertiary, var(--muted-2));
     }
     .reasoning-preview.updating {
-      opacity: .42;
-      transform: translateY(3px);
+      opacity: .72;
+      transform: translateY(2px);
     }
     .reasoning-cursor {
       width: 5px;

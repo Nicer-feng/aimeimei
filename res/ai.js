@@ -4281,7 +4281,7 @@
 	        duration.textContent = (seconds ? ` · ${seconds}秒` : "") + (tokens ? ` · ${formatTokens(tokens)}` : "");
 	      }
 	      if (preview) {
-	        const nextPreview = reasoningPreview(reasoningContent);
+	        const nextPreview = message?._reasoningFrozenPreview || reasoningPreview(reasoningContent);
 	        if (preview.textContent !== nextPreview) {
 	          preview.classList.add("updating");
 	          preview.textContent = nextPreview;
@@ -5594,7 +5594,15 @@
 
 	    function completeReasoning(message) {
 	      if (!message || !messageReasoningContent(message)) return;
+	      if (message._reasoningPreviewFrozen) {
+	        if (message._reasoningUiTimer) clearTimeout(message._reasoningUiTimer);
+	        message._reasoningUiTimer = 0;
+	        stopReasoningClock(message);
+	        return;
+	      }
 	      if (!message._reasoningCompletedAt) message._reasoningCompletedAt = Date.now();
+	      message._reasoningFrozenPreview = reasoningPreview(messageReasoningContent(message));
+	      message._reasoningPreviewFrozen = true;
 	      stopReasoningClock(message);
 	      flushReasoningPreview(message, { final: true });
 	    }
@@ -5605,6 +5613,7 @@
 	        clearTimeout(message._reasoningUiTimer);
 	        message._reasoningUiTimer = 0;
 	      }
+	      message._reasoningLastPaintAt = performance.now();
 	      const box = $("messages");
 	      const wrap = box?.querySelector(`[data-message-key="${messageKey(message)}"]`);
 	      if (!wrap) return;
@@ -5621,11 +5630,18 @@
 	    }
 
 	    function scheduleReasoningPreview(message) {
-	      if (!message || message._reasoningUiTimer) return;
+	      if (!message || message._reasoningPreviewFrozen || message._reasoningUiTimer) return;
+	      const nowValue = performance.now();
+	      const elapsed = nowValue - Number(message._reasoningLastPaintAt || 0);
+	      if (!message._reasoningLastPaintAt || elapsed >= 90) {
+	        flushReasoningPreview(message);
+	        ensureReasoningClock(message);
+	        return;
+	      }
 	      message._reasoningUiTimer = setTimeout(() => {
 	        message._reasoningUiTimer = 0;
 	        flushReasoningPreview(message);
-	      }, 160);
+	      }, Math.max(16, 90 - elapsed));
 	      ensureReasoningClock(message);
 	    }
 
