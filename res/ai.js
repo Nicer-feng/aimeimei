@@ -4106,8 +4106,16 @@
 	    }
 
 	    function renderMarkdown(source) {
-	      if (window.AIMarkdown?.isReady()) return window.AIMarkdown.render(source);
-	      return legacyRenderMarkdown(source);
+	      const value = String(source || "");
+	      try {
+	        if (window.AIMarkdown?.isReady()) {
+	          const html = window.AIMarkdown.render(value);
+	          if (html || !value.trim()) return html;
+	        }
+	      } catch {
+	        // A single malformed Markdown message must not blank the conversation.
+	      }
+	      return legacyRenderMarkdown(value);
 	    }
 
 	    function renderMessageMarkdown(message, source, slot = "content") {
@@ -4124,9 +4132,13 @@
 	    }
 
 	    function enhanceMarkdown(root, options = {}) {
-	      if (window.AIMarkdown?.isReady()) {
-	        window.AIMarkdown.enhance(root, options);
-	        return;
+	      try {
+	        if (window.AIMarkdown?.isReady()) {
+	          window.AIMarkdown.enhance(root, options);
+	          return;
+	        }
+	      } catch {
+	        // The rendered text remains readable when optional enhancements fail.
 	      }
 	      queueMarkdownOverflowRefresh(root);
 	    }
