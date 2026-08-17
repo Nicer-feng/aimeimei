@@ -76,6 +76,8 @@ from ..storage import (
     media_oss_prefix,
     media_upload_policy,
     oss_signed_get_url,
+    oss_put_bytes,
+    tts_oss_config,
 )
 from ..tingwu import (
     extract_tingwu_task_id,
@@ -88,6 +90,7 @@ from ..tingwu import (
     tingwu_create_task,
     tingwu_get_task_info,
 )
+from ..tts import public_tts_config, tts_config
 from ..usage import (
     add_daily_usage,
     estimate_request_cost,

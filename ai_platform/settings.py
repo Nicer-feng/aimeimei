@@ -38,6 +38,7 @@ CHAT_IMAGE_MAX_COUNT = 5
 CHAT_IMAGE_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 CHAT_IMAGE_ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MEDIA_OSS_DIR = "tingwu"
+TTS_OSS_DIR = "tts"
 MEDIA_MAX_UPLOAD_BYTES = (
     int(os.environ.get("MEDIA_MAX_UPLOAD_MB", "500") or "500") * 1024 * 1024
 )

@@ -4,7 +4,9 @@ import hmac
 import json
 import os
 import time
-from urllib.parse import quote
+from email.utils import formatdate
+from urllib.parse import quote, urlencode
+import urllib.request
 
 from .runtime import now
 from .settings import (
@@ -18,6 +20,7 @@ from .settings import (
     MEDIA_ALLOWED_EXTENSIONS,
     MEDIA_MAX_UPLOAD_BYTES,
     MEDIA_OSS_DIR,
+    TTS_OSS_DIR,
 )
 
 
@@ -257,3 +260,36 @@ def oss_signed_get_url(config, oss_key, expires_seconds=21600):
     )
     base = config["public_base"].rstrip("/")
     return f"{base}/{quote(oss_key, safe='/-_.~')}?{query}", expires
+
+
+def tts_oss_config(secrets_data):
+    base = media_oss_config(secrets_data)
+    config = secrets_data.get("tts_oss") or {}
+    directory = str(
+        os.environ.get("TTS_OSS_DIR") or config.get("dir") or TTS_OSS_DIR
+    ).strip("/") or TTS_OSS_DIR
+    return {**base, "directory": directory}
+
+
+def oss_put_bytes(config, oss_key, data, content_type="application/octet-stream"):
+    date_value = formatdate(timeval=None, localtime=False, usegmt=True)
+    canonical_resource = f"/{config['bucket']}/{oss_key}"
+    string_to_sign = f"PUT\n\n{content_type}\n{date_value}\n{canonical_resource}"
+    signature = base64.b64encode(
+        hmac.new(config["access_key_secret"].encode(), string_to_sign.encode(), hashlib.sha1).digest()
+    ).decode()
+    url = config["endpoint"].rstrip("/") + "/" + quote(oss_key, safe="/-_.~")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": content_type,
+            "Date": date_value,
+            "Authorization": f"OSS {config['access_key_id']}:{signature}",
+        },
+        method="PUT",
+    )
+    with urllib.request.urlopen(request, timeout=90) as response:
+        if response.status not in (200, 201):
+            raise RuntimeError("OSS audio upload failed")
+    return oss_key

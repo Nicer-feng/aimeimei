@@ -936,6 +936,7 @@ class AdminHandlersMixin:
         chat_oss = chat_image_oss_config(self.server.secrets)
         cat_oss = cat_oss_config(self.server.secrets)
         tingwu = tingwu_config(self.server.secrets)
+        tts = tts_config(self.server.secrets)
         with db() as conn:
             user_count = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
             active_user_count = conn.execute("SELECT COUNT(*) AS n FROM users WHERE is_active=1").fetchone()["n"]
@@ -970,6 +971,11 @@ class AdminHandlersMixin:
                     },
                     "tingwu": {
                         "configured": bool(tingwu_configured(tingwu)),
+                    },
+                    "tts": {
+                        "enabled": bool(tts["enabled"]),
+                        "configured": bool(tts["configured"]),
+                        "voice_count": len(tts["voices"]),
                     },
                 }
             }

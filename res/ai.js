@@ -72,6 +72,12 @@
 	      adminModels: [],
 	      adminUsers: [],
 	      adminSearch: null,
+	      ttsConfig: null,
+	      adminTts: null,
+	      ttsAudio: null,
+	      ttsMessage: null,
+	      ttsVoice: "",
+	      ttsSpeed: 1,
 	      tokenStats: null,
 	      tokenStatsTab: "users",
 	      tokenStatsExpandedUserId: "",
@@ -387,6 +393,8 @@
 	      state.petPositionX = savedPetX !== "" && Number.isFinite(Number(savedPetX)) ? Number(savedPetX) : null;
 	      state.petPositionY = savedPetY !== "" && Number.isFinite(Number(savedPetY)) ? Number(savedPetY) : null;
 	      state.petSide = getUserStorage("pet_side", "right") === "left" ? "left" : "right";
+	      state.ttsVoice = getUserStorage("tts_voice", "") || "";
+	      state.ttsSpeed = clampNumber(getUserStorage("tts_speed", "1"), 0.5, 2, 1);
 	      loadProfileSessionPrefs();
 	      applyInterfaceSettings({ save: false });
 	      applyFontSize(state.fontSize);
@@ -1433,7 +1441,7 @@
 	        loadUserPreferences();
 		        state.authed = true;
 		        showApp();
-		        await Promise.all([loadModels(), loadSearchConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
+		        await Promise.all([loadModels(), loadSearchConfig(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
 	      } catch {
 	        showLogin();
 	      }
@@ -1472,11 +1480,12 @@
 		      loadUserPreferences();
 		      state.authed = true;
 	      showApp();
-	      await Promise.all([loadModels(), loadSearchConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
+	      await Promise.all([loadModels(), loadSearchConfig(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
 	    }
 
     async function logout() {
 	  saveCurrentDraft();
+	  stopCurrentTts();
       await request("/api/logout", { method: "POST" });
 	      state.authed = false;
 	      applyCurrentUser(null);
@@ -1517,6 +1526,46 @@
 	        state.searchConfig = null;
 	      }
 	      renderSearchToggle();
+	    }
+
+	    async function loadTtsConfig() {
+	      try {
+	        const res = await api("/api/tts/config");
+	        if (!res.ok) throw new Error();
+	        const data = await res.json();
+	        state.ttsConfig = data.tts || null;
+	      } catch {
+	        state.ttsConfig = null;
+	      }
+	      const voices = state.ttsConfig?.voices || [];
+	      if (!voices.some((item) => item.id === state.ttsVoice)) {
+	        state.ttsVoice = state.ttsConfig?.default_voice || voices[0]?.id || "";
+	      }
+	      renderTtsUserSettings();
+	    }
+
+	    function renderTtsUserSettings() {
+	      const section = $("ttsUserSettings");
+	      const select = $("ttsUserVoice");
+	      const speed = $("ttsUserSpeed");
+	      if (!section || !select || !speed) return;
+	      const config = state.ttsConfig || {};
+	      const voices = Array.isArray(config.voices) ? config.voices : [];
+	      section.hidden = !(config.enabled && config.configured && voices.length);
+	      select.innerHTML = voices.map((item) => (
+	        `<option value="${escapeHTML(item.id)}">${escapeHTML(item.name || item.id)}</option>`
+	      )).join("");
+	      if (voices.some((item) => item.id === state.ttsVoice)) select.value = state.ttsVoice;
+	      speed.value = String(state.ttsSpeed || config.default_speed || 1);
+	      $("ttsUserSpeedValue").textContent = Number(speed.value).toFixed(1) + "x";
+	    }
+
+	    function saveTtsUserSettings() {
+	      state.ttsVoice = $("ttsUserVoice").value || state.ttsConfig?.default_voice || "";
+	      state.ttsSpeed = clampNumber($("ttsUserSpeed").value, 0.5, 2, 1);
+	      setUserStorage("tts_voice", state.ttsVoice);
+	      setUserStorage("tts_speed", String(state.ttsSpeed));
+	      $("ttsUserSpeedValue").textContent = Number(state.ttsSpeed).toFixed(1) + "x";
 	    }
 
 	    function renderSearchToggle() {
@@ -3378,6 +3427,7 @@
 	      if (button) button.disabled = true;
 	      state.newConversationModelId = modelId;
 	      state.newConversationPromise = (async () => {
+	        stopCurrentTts();
 	        closeSideDiscussion();
 	        state.sideDiscussions = [];
 	        state.activeSideDiscussion = null;
@@ -3409,6 +3459,7 @@
 
 	    async function selectConversation(id, options = {}) {
 	      if (state.currentConversation?.id !== id) {
+	        stopCurrentTts();
 	        saveCurrentDraft();
 	        closeSideDiscussion();
 	        state.sideDiscussions = [];
@@ -5394,6 +5445,108 @@
 	      return message._clientKey;
 	    }
 
+	    function formatAudioTime(value) {
+	      const seconds = Math.max(0, Math.floor(Number(value) || 0));
+	      return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+	    }
+
+	    function setTtsActionState(button, mode, audio = null) {
+	      if (!button) return;
+	      const states = {
+	        idle: ["volume-2", "朗读"],
+	        loading: ["loader-circle", "正在生成语音…"],
+	        playing: ["pause", "暂停"],
+	        paused: ["play", "继续"],
+	      };
+	      const [icon, label] = states[mode] || states.idle;
+	      const progress = audio && Number.isFinite(audio.duration) && audio.duration > 0
+	        ? `${formatAudioTime(audio.currentTime)} / ${formatAudioTime(audio.duration)}`
+	        : "";
+	      button.dataset.ttsState = mode;
+	      button.classList.toggle("is-loading", mode === "loading");
+	      button.classList.toggle("is-playing", mode === "playing");
+	      button.innerHTML = iconMarkup(icon, "") + `<span>${escapeHTML(mode === "idle" ? "" : (progress || label))}</span>`;
+	      button.title = mode === "idle" ? "朗读这条回答" : label;
+	      button.setAttribute("aria-label", button.title);
+	      queueLucideRefresh();
+	    }
+
+	    function ttsButtonForMessage(message) {
+	      if (!message?.id) return null;
+	      return $("messages")?.querySelector(`.tts-action[data-message-id="${message.id}"]`) || null;
+	    }
+
+	    function stopCurrentTts(options = {}) {
+	      const audio = state.ttsAudio;
+	      const message = state.ttsMessage;
+	      if (audio) {
+	        audio.pause();
+	        audio.removeAttribute("src");
+	        try { audio.load(); } catch {}
+	      }
+	      if (message) setTtsActionState(ttsButtonForMessage(message), "idle");
+	      state.ttsAudio = null;
+	      state.ttsMessage = null;
+	      if (options.status) setStatus("chatStatus", options.status, "");
+	    }
+
+	    function playMessageTts(message, button) {
+	      if (!message?.id || message.thinking) return;
+	      const config = state.ttsConfig || {};
+	      if (!config.enabled || !config.configured) {
+	        setStatus("chatStatus", "语音服务还没有配置好。", "err");
+	        return;
+	      }
+	      if (state.ttsMessage === message && state.ttsAudio) {
+	        if (state.ttsAudio.paused) {
+	          state.ttsAudio.play().catch(() => setStatus("chatStatus", "浏览器暂时无法播放语音。", "err"));
+	        } else {
+	          state.ttsAudio.pause();
+	        }
+	        return;
+	      }
+	      stopCurrentTts();
+	      const voice = state.ttsVoice || config.default_voice;
+	      const speed = clampNumber(state.ttsSpeed, 0.5, 2, config.default_speed || 1);
+	      const url = `/api/messages/${encodeURIComponent(message.id)}/tts/audio?voice=${encodeURIComponent(voice)}&speed=${encodeURIComponent(speed)}`;
+	      const audio = new Audio(url);
+	      audio.preload = "auto";
+	      state.ttsAudio = audio;
+	      state.ttsMessage = message;
+	      button.dataset.messageId = String(message.id);
+	      setTtsActionState(button, "loading");
+	      let lastProgressAt = 0;
+	      audio.addEventListener("playing", () => setTtsActionState(button, "playing", audio));
+	      audio.addEventListener("pause", () => {
+	        if (!audio.ended && state.ttsAudio === audio) setTtsActionState(button, "paused", audio);
+	      });
+	      audio.addEventListener("waiting", () => {
+	        if (state.ttsAudio === audio && audio.currentTime <= 0) setTtsActionState(button, "loading");
+	      });
+	      audio.addEventListener("timeupdate", () => {
+	        const nowValue = performance.now();
+	        if (nowValue - lastProgressAt < 250 || state.ttsAudio !== audio) return;
+	        lastProgressAt = nowValue;
+	        setTtsActionState(button, audio.paused ? "paused" : "playing", audio);
+	      });
+	      audio.addEventListener("ended", () => {
+	        if (state.ttsAudio !== audio) return;
+	        state.ttsAudio = null;
+	        state.ttsMessage = null;
+	        setTtsActionState(button, "idle");
+	      });
+	      audio.addEventListener("error", () => {
+	        if (state.ttsAudio !== audio) return;
+	        state.ttsAudio = null;
+	        state.ttsMessage = null;
+	        setTtsActionState(button, "idle");
+	        setStatus("chatStatus", "语音生成失败，请稍后重试。", "err");
+	      });
+	      audio.play().catch(() => {
+	        if (state.ttsAudio === audio) setTtsActionState(button, "paused", audio);
+	      });
+	    }
+
 	    function createMessageElement(message) {
 	      const wrap = document.createElement("article");
 	      wrap.className = "bubble " + message.role;
@@ -5452,11 +5605,17 @@
 	      continueWrite.innerHTML = iconLabel("pen-line", "继续写", "✎");
 	      continueWrite.title = "基于这条回答继续写";
 	      continueWrite.addEventListener("click", () => continueFromMessage(message));
+	      const tts = document.createElement("button");
+	      tts.className = "message-action tts-action";
+	      tts.type = "button";
+	      tts.dataset.messageId = String(message.id || "");
+	      setTtsActionState(tts, "idle");
+	      tts.addEventListener("click", () => playMessageTts(message, tts));
 	      const reason = document.createElement("button");
 	      reason.className = "message-action reason-action";
 	      reason.type = "button";
 	      reason.addEventListener("click", () => toggleReasoning(message));
-	      actions.append(favorite, regenerate, continueWrite, copyAction);
+	      actions.append(favorite, regenerate, continueWrite, tts, copyAction);
 
 	      shell.append(reasoningPanel, imagePanel, quotePanel, text, copy);
 	      wrap.append(role, shell, sourcesPanel, time, actions);
@@ -5477,6 +5636,7 @@
 	      const favorite = wrap.querySelector(".favorite-action");
 	      const regenerate = wrap.querySelector(".regenerate-action");
 	      const continueWrite = wrap.querySelector(".continue-action");
+	      const tts = wrap.querySelector(".tts-action");
 	      const reason = wrap.querySelector(".reason-action");
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
 	      const imagePanel = wrap.querySelector(".message-images");
@@ -5544,6 +5704,15 @@
 	      }
 	      if (continueWrite) {
 	        continueWrite.hidden = !(message.role === "assistant" && displayContent);
+	      }
+	      if (tts) {
+	        tts.dataset.messageId = String(message.id || "");
+	        tts.hidden = !(message.role === "assistant" && message.id && displayContent && !message.thinking && state.ttsConfig?.enabled && state.ttsConfig?.configured);
+	        if (state.ttsMessage === message && state.ttsAudio) {
+	          setTtsActionState(tts, state.ttsAudio.paused ? "paused" : "playing", state.ttsAudio);
+	        } else {
+	          setTtsActionState(tts, "idle");
+	        }
 	      }
 	    }
 
@@ -5739,6 +5908,7 @@
 	      const favorite = wrap.querySelector(".favorite-action");
 	      const regenerate = wrap.querySelector(".regenerate-action");
 	      const continueWrite = wrap.querySelector(".continue-action");
+	      const tts = wrap.querySelector(".tts-action");
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
 	      const displayContent = visibleMessageContent(message);
 	      const reasoningContent = messageReasoningContent(message);
@@ -5793,6 +5963,12 @@
 	      }
 	      if (regenerate) regenerate.hidden = !hasContent;
 	      if (continueWrite) continueWrite.hidden = !hasContent;
+	      if (tts) {
+	        const canRead = Boolean(options.final && message.id && hasContent && !message.thinking && state.ttsConfig?.enabled && state.ttsConfig?.configured);
+	        tts.dataset.messageId = String(message.id || "");
+	        tts.hidden = !canRead;
+	        if (canRead) setTtsActionState(tts, "idle");
+	      }
 	      return iconsChanged;
 	    }
 
@@ -6619,6 +6795,7 @@
 	      models: { title: "模型管理", desc: "维护模型名称、供应商、Endpoint、System Prompt 和能力标签。" },
 	      keys: { title: "密钥管理", desc: "集中维护管理密钥、模型 API Key 和搜索 API Key。" },
 	      search: { title: "联网搜索", desc: "配置 Tavily/Brave、搜索策略、搜索深度和结果数量。" },
+	      tts: { title: "语音服务", desc: "配置豆包 TTS、可用音色、默认语速和 OSS 音频缓存。" },
 	      plugins: { title: "插件管理", desc: "查看图片、听悟、搜索、提示词等功能状态，后续可扩展独立开关。" },
 	      tokens: { title: "Token统计", desc: "按账号查看累计 Token 用量和最近请求记录。" },
 	      costs: { title: "成本统计", desc: "根据模型价格快照查看平台成本、模型排行和用户排行。" },
@@ -6642,6 +6819,7 @@
 	      if (key === "models") loadAdminModels();
 	      if (key === "keys") loadAdminModels();
 	      if (key === "search") loadAdminSearch();
+	      if (key === "tts") loadAdminTts();
 	      if (key === "plugins") {
 	        if (!state.adminOverview) loadAdminOverview();
 	        renderPluginStatus();
@@ -6663,6 +6841,7 @@
 	      loadAdminOverview();
 	      loadAdminModels();
 	      loadAdminSearch();
+	      loadAdminTts();
 	      loadAdminUsers();
 	      loadTokenStats();
 	      loadCostStats();
@@ -6708,6 +6887,7 @@
 	      const search = overview.search || {};
 	      const oss = overview.oss || {};
 	      const tingwu = overview.tingwu || {};
+	      const tts = overview.tts || {};
 	      const metricCards = [
 	        ["users", "用户数", users.total || summary.total_users || 0, "启用 " + tokenNumber(users.active || 0) + " 个账号"],
 	        ["message-square", "总请求数", summary.total_requests || 0, "来自聊天请求日志"],
@@ -6716,7 +6896,8 @@
 	        ["messages-square", "会话数", conversations.total || 0, "未归档会话"],
 	        ["search", "联网搜索", search.enabled ? "已开启" : "未开启", search.configured ? ((search.provider || "search") + " · " + (search.mode || "auto")) : "尚未配置 Key"],
 	        ["hard-drive-upload", "OSS", oss.configured ? "已配置" : "未配置", ["猫相册", "聊天图片", "音视频"].filter((_, i) => [oss.cat, oss.chat_image, oss.media][i]).join(" · ") || "上传能力待配置"],
-	        ["file-video", "听悟", tingwu.configured ? "已配置" : "未配置", "音视频分析状态"]
+	        ["file-video", "听悟", tingwu.configured ? "已配置" : "未配置", "音视频分析状态"],
+	        ["volume-2", "语音朗读", tts.configured ? "已配置" : "未配置", (tts.voice_count || 0) + " 个可用音色"]
 	      ];
 	      const grid = $("adminOverviewGrid");
 	      if (grid) {
@@ -6734,6 +6915,7 @@
 	          ["search", "联网搜索", search.enabled && search.configured, search.enabled ? "自动/手动搜索策略可用" : "当前未启用"],
 	          ["image", "图片理解上传", Boolean(oss.chat_image), oss.chat_image ? "OSS 已配置，可上传图片" : "聊天图片 OSS 待配置"],
 	          ["file-video", "音视频分析", Boolean(oss.media && tingwu.configured), oss.media && tingwu.configured ? "听悟与媒体 OSS 已就绪" : "需要听悟 AppKey 与媒体 OSS"],
+	          ["volume-2", "语音朗读", Boolean(tts.enabled && tts.configured), tts.configured ? "豆包 TTS 与音色配置可用" : "需要配置 TTS API Key"],
 	          ["book-open", "提示词库", true, "默认模板与自定义模板可用"],
 	          ["user-round-cog", "AI档案", true, "按账号隔离的长期档案可用"],
 	          ["shield-check", "后台权限", hasAdminAccess(), hasAdminAccess() ? "当前账号可管理后台" : "需要管理员身份"]
@@ -6754,12 +6936,14 @@
 	      const search = overview.search || state.adminSearch || {};
 	      const oss = overview.oss || {};
 	      const tingwu = overview.tingwu || {};
+	      const tts = overview.tts || {};
 	      const visionCount = state.adminModels.filter((item) => item.enabled && item.supports_vision).length;
 	      const plugins = [
 	        ["search", "联网搜索", Boolean(search.enabled && (search.configured || search.has_api_key)), search.enabled ? "已启用搜索策略" : "未启用"],
 	        ["image", "图片理解", visionCount > 0, visionCount ? tokenNumber(visionCount) + " 个模型支持图片理解" : "没有开启图片理解的模型"],
 	        ["upload-cloud", "图片上传", Boolean(oss.chat_image), oss.chat_image ? "聊天图片 OSS 已配置" : "待配置聊天图片 OSS"],
 	        ["file-video", "音视频分析", Boolean(oss.media && tingwu.configured), oss.media && tingwu.configured ? "通义听悟可用" : "待配置听悟或媒体 OSS"],
+	        ["volume-2", "语音朗读", Boolean(tts.enabled && tts.configured), tts.configured ? (tts.voice_count || 0) + " 个音色可用" : "待配置豆包 TTS"],
 	        ["book-open", "提示词库", true, "常用提示词模板已启用"],
 	        ["star", "收藏回答", true, "按账号隔离保存收藏"],
 	        ["user-round-cog", "AI档案", true, "长期档案已启用"],
@@ -6856,6 +7040,101 @@
 
 	    async function saveSearchKey() {
 	      await saveSearchConfig(false);
+	    }
+
+	    function ttsVoiceRows() {
+	      return Array.from($("ttsVoiceList")?.querySelectorAll(".tts-voice-row") || []).map((row) => ({
+	        name: row.querySelector('[data-tts-field="name"]')?.value.trim() || "",
+	        id: row.querySelector('[data-tts-field="id"]')?.value.trim() || "",
+	        resource_id: row.querySelector('[data-tts-field="resource_id"]')?.value.trim() || "",
+	      })).filter((item) => item.id && item.resource_id);
+	    }
+
+	    function syncTtsDefaultVoiceOptions(selected = "") {
+	      const select = $("ttsDefaultVoice");
+	      const voices = ttsVoiceRows();
+	      if (!select) return;
+	      const value = selected || select.value;
+	      select.innerHTML = voices.map((item) => `<option value="${escapeHTML(item.id)}">${escapeHTML(item.name || item.id)}</option>`).join("");
+	      if (voices.some((item) => item.id === value)) select.value = value;
+	    }
+
+	    function addTtsVoiceRow(voice = {}) {
+	      const row = document.createElement("div");
+	      row.className = "tts-voice-row";
+	      row.innerHTML = `
+	        <label>显示名<input data-tts-field="name" value="${escapeHTML(voice.name || "")}" placeholder="例如 Vivi 2.0"></label>
+	        <label>音色 ID<input data-tts-field="id" value="${escapeHTML(voice.id || "")}" placeholder="zh_female_vv_uranus_bigtts"></label>
+	        <label>Resource ID<input data-tts-field="resource_id" value="${escapeHTML(voice.resource_id || "seed-tts-2.0")}" placeholder="seed-tts-2.0"></label>
+	        <button class="ui-icon-btn tts-remove-voice" type="button" title="移除音色" aria-label="移除音色"><i data-lucide="trash-2" aria-hidden="true"></i></button>`;
+	      row.querySelector(".tts-remove-voice").addEventListener("click", () => {
+	        row.remove();
+	        syncTtsDefaultVoiceOptions();
+	      });
+	      row.querySelectorAll("input").forEach((input) => input.addEventListener("input", () => syncTtsDefaultVoiceOptions()));
+	      $("ttsVoiceList").appendChild(row);
+	      syncTtsDefaultVoiceOptions();
+	      queueLucideRefresh();
+	    }
+
+	    function renderAdminTts(config = {}) {
+	      state.adminTts = config;
+	      $("ttsEnabled").value = config.enabled ? "1" : "0";
+	      $("ttsProvider").value = config.provider || "volcengine";
+	      $("ttsEndpoint").value = config.endpoint || "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
+	      $("ttsApiKey").value = "";
+	      $("ttsApiKey").placeholder = config.has_api_key ? "已保存，留空保持现有密钥" : "请输入 API Key";
+	      $("ttsCacheEnabled").value = config.cache_enabled === false ? "0" : "1";
+	      $("ttsDefaultSpeed").value = config.default_speed || 1;
+	      $("ttsLongTextThreshold").value = config.long_text_threshold || 5000;
+	      $("ttsVoiceList").replaceChildren();
+	      (config.voices || []).forEach(addTtsVoiceRow);
+	      if (!(config.voices || []).length) addTtsVoiceRow();
+	      syncTtsDefaultVoiceOptions(config.default_voice || "");
+	    }
+
+	    async function loadAdminTts() {
+	      if (!hasAdminAccess()) return;
+	      setStatus("ttsAdminStatus", "正在加载语音配置…", "");
+	      const res = await adminApi("/api/admin/tts");
+	      if (!res.ok) {
+	        setStatus("ttsAdminStatus", await readError(res, "语音配置加载失败。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      renderAdminTts(data.tts || {});
+	      setStatus("ttsAdminStatus", data.tts?.configured ? "语音服务已配置" : "语音服务尚未配置", data.tts?.configured ? "ok" : "");
+	    }
+
+	    async function saveAdminTts() {
+	      const voices = ttsVoiceRows();
+	      if (!voices.length) {
+	        setStatus("ttsAdminStatus", "至少添加一个音色。", "err");
+	        return;
+	      }
+	      const body = {
+	        enabled: $("ttsEnabled").value === "1",
+	        provider: $("ttsProvider").value,
+	        endpoint: $("ttsEndpoint").value.trim(),
+	        api_key: $("ttsApiKey").value.trim(),
+	        voices,
+	        default_voice: $("ttsDefaultVoice").value,
+	        cache_enabled: $("ttsCacheEnabled").value === "1",
+	        default_speed: Number($("ttsDefaultSpeed").value || 1),
+	        default_volume: 1,
+	        sample_rate: 24000,
+	        long_text_threshold: Number($("ttsLongTextThreshold").value || 5000),
+	      };
+	      setStatus("ttsAdminStatus", "正在保存语音配置…", "");
+	      const res = await adminApi("/api/admin/tts", { method: "POST", body: JSON.stringify(body) });
+	      if (!res.ok) {
+	        setStatus("ttsAdminStatus", await readError(res, "语音配置保存失败。"), "err");
+	        return;
+	      }
+	      const data = await res.json();
+	      renderAdminTts(data.tts || {});
+	      await loadTtsConfig();
+	      setStatus("ttsAdminStatus", "语音配置已保存", "ok");
 	    }
 
 	    function tokenNumber(value) {
@@ -7900,6 +8179,8 @@
 	      });
 	    });
 	    $("resetInterfaceSettings").addEventListener("click", resetInterfaceSettings);
+	    $("ttsUserVoice").addEventListener("change", saveTtsUserSettings);
+	    $("ttsUserSpeed").addEventListener("input", saveTtsUserSettings);
 	    $("desktopPetHandle").addEventListener("pointerdown", startDesktopPetDrag);
 	    $("desktopPetHandle").addEventListener("pointermove", moveDesktopPet);
 	    $("desktopPetHandle").addEventListener("pointerup", finishDesktopPetDrag);
@@ -7983,6 +8264,8 @@
 	      button.addEventListener("click", () => switchAdminSection(button.dataset.adminSection));
 	    });
 	    $("saveModel").addEventListener("click", saveModel);
+	    $("addTtsVoice").addEventListener("click", () => addTtsVoiceRow());
+	    $("saveTtsConfig").addEventListener("click", saveAdminTts);
 	    $("resetModelForm").addEventListener("click", resetModelForm);
 	    $("inputPricePerMillion").addEventListener("input", syncCostEnabledFromPrices);
 	    $("outputPricePerMillion").addEventListener("input", syncCostEnabledFromPrices);
@@ -7993,6 +8276,7 @@
 		      loadAdminOverview();
 		      loadAdminModels();
 		      loadAdminSearch();
+		      loadAdminTts();
 		      loadAdminUsers();
 		      loadTokenStats();
 		      loadCostStats();

@@ -191,6 +191,27 @@ def init_db(secrets_data=None):
               FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS message_tts (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              message_id INTEGER NOT NULL,
+              provider TEXT NOT NULL DEFAULT '',
+              model TEXT NOT NULL DEFAULT '',
+              voice TEXT NOT NULL,
+              resource_id TEXT NOT NULL DEFAULT '',
+              speed REAL NOT NULL DEFAULT 1,
+              text_hash TEXT NOT NULL,
+              oss_key TEXT NOT NULL DEFAULT '',
+              duration REAL NOT NULL DEFAULT 0,
+              file_size INTEGER NOT NULL DEFAULT 0,
+              status TEXT NOT NULL DEFAULT 'generating',
+              error_message TEXT NOT NULL DEFAULT '',
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL,
+              UNIQUE(user_id, message_id, text_hash, voice, speed),
+              FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS chat_message_images (
               id TEXT PRIMARY KEY,
               user_id TEXT NOT NULL,
@@ -482,6 +503,7 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_favorites_user_created ON favorite_messages(user_id, created_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_usage_user_date ON daily_usage(user_id, date)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_cost_created ON messages(role, created_at, estimated_cost)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_message_tts_user_message ON message_tts(user_id, message_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_profiles_user_sort ON user_profiles(user_id, sort_order ASC, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_user_updated ON media_analysis_tasks(user_id, updated_at DESC)")

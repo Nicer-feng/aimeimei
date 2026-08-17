@@ -16,6 +16,7 @@ from ai_platform.handlers import (
     ChatHandlersMixin,
     LibraryHandlersMixin,
     MediaHandlersMixin,
+    TTSHandlersMixin,
 )
 from ai_platform.runtime import (
     current_app_version,
@@ -45,6 +46,7 @@ class AppHandler(
     AdminHandlersMixin,
     LibraryHandlersMixin,
     MediaHandlersMixin,
+    TTSHandlersMixin,
     ChatHandlersMixin,
     BaseHTTPRequestHandler,
 ):
@@ -97,6 +99,10 @@ class AppHandler(
             return self.handle_me()
         if path == "/api/models":
             return self.require_user(self.handle_models)
+        if path == "/api/tts/config":
+            return self.require_user(self.handle_tts_config)
+        if path.startswith("/api/messages/") and path.endswith("/tts/audio"):
+            return self.require_user(self.handle_message_tts_audio)
         if path == "/api/search":
             return self.require_user(self.handle_global_search)
         if path == "/api/search-config":
@@ -115,6 +121,8 @@ class AppHandler(
             return self.require_user(self.handle_media_task_item)
         if path == "/api/admin/models":
             return self.require_admin(self.handle_admin_models)
+        if path == "/api/admin/tts":
+            return self.require_admin(self.handle_admin_tts)
         if path == "/api/admin/search":
             return self.require_admin(self.handle_admin_search)
         if path == "/api/admin/token-stats":
@@ -170,6 +178,8 @@ class AppHandler(
             return self.handle_logout()
         if path == "/api/admin/models":
             return self.require_admin(self.handle_admin_models)
+        if path == "/api/admin/tts":
+            return self.require_admin(self.handle_admin_tts)
         if path == "/api/admin/search":
             return self.require_admin(self.handle_admin_search)
         if path == "/api/admin/cost-recalculate":
@@ -186,6 +196,8 @@ class AppHandler(
             return self.require_user(self.handle_prompts)
         if path == "/api/favorites":
             return self.require_user(self.handle_favorites)
+        if path.startswith("/api/messages/") and path.endswith("/tts"):
+            return self.require_user(self.handle_message_tts_prepare)
         if path == "/api/chat-images/upload-policy":
             return self.require_user(self.handle_chat_image_upload_policy)
         if path == "/api/chat-images":

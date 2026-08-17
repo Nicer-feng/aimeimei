@@ -58,7 +58,7 @@
   <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.18.2">
+  <link rel="stylesheet" href="/res/ai.css?v=2.19.0">
 
   <link rel="stylesheet" href="/res/markdown.css">
 </head>
@@ -69,14 +69,14 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.18.2</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.19.0</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.18.2</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.19.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -89,7 +89,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.18.2</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.19.0</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -124,7 +124,7 @@
 		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.18.2</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.19.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -249,6 +249,17 @@
 		                  </label>
 		                  <button class="ui-btn ui-btn-secondary inline-flex items-center justify-center gap-2" id="resetPetPosition" type="button"><i data-lucide="locate-fixed" aria-hidden="true"></i><span>恢复默认位置</span></button>
 		                </div>
+		              </section>
+		              <section class="interface-section" id="ttsUserSettings" hidden>
+		                <h2>语音朗读</h2>
+		                <div class="grid2 tts-user-settings">
+		                  <label>默认音色<select id="ttsUserVoice"></select></label>
+		                  <label class="range-field">
+		                    <span class="range-field-head"><strong>语速</strong><span id="ttsUserSpeedValue">1.0x</span></span>
+		                    <input id="ttsUserSpeed" type="range" min="0.5" max="2" step="0.1" value="1">
+		                  </label>
+		                </div>
+		                <small class="interface-hint">只在主动点击回答下方的朗读按钮时生成语音。</small>
 		              </section>
 		              <div class="interface-actions">
 			                <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetInterfaceSettings" type="button"><i data-lucide="rotate-ccw" aria-hidden="true"></i><span>恢复默认设置</span></button>
@@ -557,6 +568,7 @@
 	        <button class="admin-nav-item" type="button" data-admin-section="models"><i data-lucide="bot" aria-hidden="true"></i><span>模型管理</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="keys"><i data-lucide="key-round" aria-hidden="true"></i><span>密钥管理</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="search"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></button>
+	        <button class="admin-nav-item" type="button" data-admin-section="tts"><i data-lucide="volume-2" aria-hidden="true"></i><span>语音服务</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="plugins"><i data-lucide="puzzle" aria-hidden="true"></i><span>插件管理</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="tokens"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="costs"><i data-lucide="coins" aria-hidden="true"></i><span>成本统计</span></button>
@@ -707,6 +719,35 @@
 	          </section>
 	        </section>
 
+	        <section class="admin-page" data-admin-page="tts">
+	          <section class="panel">
+	            <h2 class="panel-title"><i data-lucide="volume-2" aria-hidden="true"></i><span>TTS 语音朗读</span></h2>
+	            <div class="grid2">
+	              <label>启用语音朗读<select id="ttsEnabled"><option value="1">开启</option><option value="0">关闭</option></select></label>
+	              <label>Provider<select id="ttsProvider"><option value="volcengine">Volcengine / Doubao</option></select></label>
+	            </div>
+	            <label>Endpoint<input id="ttsEndpoint" placeholder="https://openspeech.bytedance.com/api/v3/tts/unidirectional"></label>
+	            <label>API Key<input id="ttsApiKey" type="password" autocomplete="off" placeholder="留空保持现有密钥"></label>
+	            <div class="grid2">
+	              <label>默认音色<select id="ttsDefaultVoice"></select></label>
+	              <label>音频缓存<select id="ttsCacheEnabled"><option value="1">缓存到 OSS</option><option value="0">不缓存</option></select></label>
+	            </div>
+	            <div class="grid2">
+	              <label>默认语速<input id="ttsDefaultSpeed" type="number" min="0.5" max="2" step="0.1" value="1"></label>
+	              <label>长文本阈值<input id="ttsLongTextThreshold" type="number" min="500" max="50000" step="100" value="5000"></label>
+	            </div>
+	            <div class="tts-voice-editor-head">
+	              <strong>可用音色</strong>
+	              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="addTtsVoice" type="button"><i data-lucide="plus" aria-hidden="true"></i><span>添加音色</span></button>
+	            </div>
+	            <div class="tts-voice-list" id="ttsVoiceList"></div>
+	            <div class="library-actions">
+	              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveTtsConfig" type="button"><i data-lucide="save" aria-hidden="true"></i><span>保存语音配置</span></button>
+	            </div>
+	            <div class="status" id="ttsAdminStatus"></div>
+	          </section>
+	        </section>
+
 	        <section class="admin-page" data-admin-page="plugins">
 	          <section class="panel">
 	            <h2 class="panel-title"><i data-lucide="puzzle" aria-hidden="true"></i><span>插件管理</span></h2>
@@ -801,7 +842,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.18.2</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.19.0</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -813,7 +854,7 @@
 	    </div>
 	  </section>
 
-	  <script src="/res/ai.js?v=2.18.2"></script>
+	  <script src="/res/ai.js?v=2.19.0"></script>
 
 </body>
 </html>
