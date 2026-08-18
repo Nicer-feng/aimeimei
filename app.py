@@ -16,6 +16,7 @@ from ai_platform.handlers import (
     ChatHandlersMixin,
     LibraryHandlersMixin,
     MediaHandlersMixin,
+    ShareHandlersMixin,
     TTSHandlersMixin,
 )
 from ai_platform.runtime import (
@@ -37,6 +38,7 @@ from ai_platform.settings import (
     MARKDOWN_TEST_PATH,
     RES_DIR,
     SESSION_COOKIE,
+    SHARE_PAGE_PATH,
 )
 
 
@@ -46,6 +48,7 @@ class AppHandler(
     AdminHandlersMixin,
     LibraryHandlersMixin,
     MediaHandlersMixin,
+    ShareHandlersMixin,
     TTSHandlersMixin,
     ChatHandlersMixin,
     BaseHTTPRequestHandler,
@@ -67,6 +70,8 @@ class AppHandler(
             return self.home_page()
         if path in ("/cat", "/cat/"):
             return self.cat_page()
+        if path.startswith("/share/") or path.startswith("/ai/share/"):
+            return self.share_page()
         if path == "/favicon.ico":
             return self.static_file(RES_DIR / "favicon.ico")
         if path.startswith("/res/"):
@@ -95,6 +100,10 @@ class AppHandler(
             return self.handle_version()
         if path == "/api/changelog":
             return self.handle_changelog()
+        if path.startswith("/api/public/shares/") and "/images/" in path:
+            return self.handle_public_share_image()
+        if path.startswith("/api/public/shares/"):
+            return self.handle_public_share()
         if path == "/api/me":
             return self.handle_me()
         if path == "/api/models":
@@ -143,6 +152,8 @@ class AppHandler(
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
             return self.require_user(self.handle_messages)
+        if path.startswith("/api/conversations/") and path.endswith("/shares"):
+            return self.require_user(self.handle_conversation_shares)
         if path.startswith("/api/conversations/") and path.endswith("/stats"):
             return self.require_user(self.handle_conversation_stats)
         if path.startswith("/api/sessions/") and path.endswith("/stats"):
@@ -226,6 +237,8 @@ class AppHandler(
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
             return self.require_user(self.handle_send_message)
+        if path.startswith("/api/conversations/") and path.endswith("/shares"):
+            return self.require_user(self.handle_conversation_shares)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_PUT(self):
@@ -270,6 +283,8 @@ class AppHandler(
             return self.require_user(self.handle_favorite_item)
         if path.startswith("/api/media/tasks/"):
             return self.require_user(self.handle_media_task_item)
+        if path.startswith("/api/conversation-shares/"):
+            return self.require_user(self.handle_conversation_share_item)
         if path.startswith("/api/conversations/"):
             return self.require_user(self.handle_conversation_item)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
@@ -313,6 +328,12 @@ class AppHandler(
             return self.html(CAT_PAGE_PATH.read_text())
         except FileNotFoundError:
             return self.error(HTTPStatus.NOT_FOUND, "cat page not found")
+
+    def share_page(self):
+        try:
+            return self.html(SHARE_PAGE_PATH.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return self.error(HTTPStatus.NOT_FOUND, "share page not found")
 
     def handle_changelog(self):
         params = parse_qs(urlparse(self.path).query)

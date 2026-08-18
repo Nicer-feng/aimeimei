@@ -225,6 +225,22 @@ def init_db(secrets_data=None):
               created_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS conversation_shares (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              conversation_id TEXT NOT NULL,
+              token_hash TEXT NOT NULL UNIQUE,
+              scope TEXT NOT NULL,
+              source_message_id INTEGER NOT NULL DEFAULT 0,
+              title TEXT NOT NULL,
+              snapshot_json TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              expires_at INTEGER NOT NULL,
+              revoked_at INTEGER NOT NULL DEFAULT 0,
+              access_count INTEGER NOT NULL DEFAULT 0,
+              last_access_at INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS prompt_templates (
               id TEXT PRIMARY KEY,
               user_id TEXT NOT NULL DEFAULT '',
@@ -500,6 +516,8 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_side_discussions_user_session ON side_discussions(user_id, session_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_side_discussion_messages_discussion ON side_discussion_messages(discussion_id, id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_images_user_session ON chat_message_images(user_id, session_id, message_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversation_shares_user_created ON conversation_shares(user_id, conversation_id, created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversation_shares_expiry ON conversation_shares(expires_at, revoked_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_favorites_user_created ON favorite_messages(user_id, created_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_usage_user_date ON daily_usage(user_id, date)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_cost_created ON messages(role, created_at, estimated_cost)")

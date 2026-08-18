@@ -126,7 +126,9 @@
 	      petStartX: 0,
 	      petStartY: 0,
 	      petSuppressClickUntil: 0,
-	      petCorrectionFrame: 0
+	      petCorrectionFrame: 0,
+	      shareTargetMessage: null,
+	      activeShare: null
 	    };
 	    let lucideRefreshQueued = false;
 	    $("adminKey").value = state.adminKey;
@@ -1349,7 +1351,7 @@
     }
 
     function setDialogOpenState() {
-	      const open = ["promptDialog", "profileDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "globalSearchDialog", "modelPickerDialog", "changelogDialog", "confirmDialog"].some((id) => {
+	      const open = ["promptDialog", "profileDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "globalSearchDialog", "modelPickerDialog", "changelogDialog", "confirmDialog", "shareDialog"].some((id) => {
         const el = $(id);
         return el && el.classList.contains("show");
       });
@@ -5623,11 +5625,17 @@
 	      tts.dataset.messageId = String(message.id || "");
 	      setTtsActionState(tts, "idle");
 	      tts.addEventListener("click", () => playMessageTts(message, tts));
+	      const share = document.createElement("button");
+	      share.className = "message-action share-action";
+	      share.type = "button";
+	      share.innerHTML = iconLabel("share-2", "分享", "↗");
+	      share.title = "分享这条回答或本轮问答";
+	      share.addEventListener("click", () => openShareDialog(message));
 	      const reason = document.createElement("button");
 	      reason.className = "message-action reason-action";
 	      reason.type = "button";
 	      reason.addEventListener("click", () => toggleReasoning(message));
-	      actions.append(favorite, regenerate, continueWrite, tts, copyAction);
+	      actions.append(favorite, regenerate, continueWrite, tts, share, copyAction);
 
 	      shell.append(reasoningPanel, imagePanel, quotePanel, text, copy);
 	      wrap.append(role, shell, sourcesPanel, time, actions);
@@ -5649,6 +5657,7 @@
 	      const regenerate = wrap.querySelector(".regenerate-action");
 	      const continueWrite = wrap.querySelector(".continue-action");
 	      const tts = wrap.querySelector(".tts-action");
+	      const share = wrap.querySelector(".share-action");
 	      const reason = wrap.querySelector(".reason-action");
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
 	      const imagePanel = wrap.querySelector(".message-images");
@@ -5726,6 +5735,7 @@
 	          setTtsActionState(tts, "idle");
 	        }
 	      }
+	      if (share) share.hidden = !(message.role === "assistant" && message.id && displayContent && !message.thinking);
 	    }
 
 	    function updateLiveReasoningPanel(panel, message, reasoningContent, options = {}) {
@@ -5921,6 +5931,7 @@
 	      const regenerate = wrap.querySelector(".regenerate-action");
 	      const continueWrite = wrap.querySelector(".continue-action");
 	      const tts = wrap.querySelector(".tts-action");
+	      const share = wrap.querySelector(".share-action");
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
 	      const displayContent = visibleMessageContent(message);
 	      const reasoningContent = messageReasoningContent(message);
@@ -5981,6 +5992,7 @@
 	        tts.hidden = !canRead;
 	        if (canRead) setTtsActionState(tts, "idle");
 	      }
+	      if (share) share.hidden = !(options.final && message.id && hasContent && !message.thinking);
 	      return iconsChanged;
 	    }
 
@@ -6099,6 +6111,96 @@
 	      }
 	      openManualCopy(value);
 	      setStatus("chatStatus", "浏览器限制了自动复制", "err");
+	    }
+
+	    function shareScopeLabel(scope) {
+	      return { assistant: "仅此 AI 回答", turn: "本轮问答", conversation: "整个对话" }[scope] || "对话";
+	    }
+
+	    function absoluteShareUrl(path) {
+	      return new URL(String(path || ""), window.location.origin).href;
+	    }
+
+	    function formatShareExpiry(value) {
+	      const date = new Date(Number(value || 0) * 1000);
+	      if (Number.isNaN(date.getTime())) return "到期时间未知";
+	      return new Intl.DateTimeFormat("zh-CN", {
+	        month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
+	      }).format(date);
+	    }
+
+	    function openShareDialog(message = null) {
+	      if (!state.currentConversation) {
+	        setStatus("chatStatus", "当前还没有可以分享的对话。", "err");
+	        return;
+	      }
+	      if (message && (!message.id || message.role !== "assistant" || message.thinking)) {
+	        setStatus("chatStatus", "这条回答完成后才能分享。", "err");
+	        return;
+	      }
+	      state.shareTargetMessage = message;
+	      state.activeShare = null;
+	      const hasMessage = Boolean(message?.id);
+	      document.querySelectorAll("[data-share-scope-option]").forEach((label) => {
+	        const input = label.querySelector("input");
+	        const disabled = !hasMessage && input.value !== "conversation";
+	        input.disabled = disabled;
+	        label.classList.toggle("is-disabled", disabled);
+	        if ((!hasMessage && input.value === "conversation") || (hasMessage && input.value === "turn")) input.checked = true;
+	      });
+	      $("shareResult").hidden = true;
+	      $("shareUrl").value = "";
+	      setStatus("shareStatus", "");
+	      $("shareDialog").classList.add("show");
+	      setDialogOpenState();
+	      queueLucideRefresh();
+	    }
+
+	    function closeShareDialog() {
+	      $("shareDialog")?.classList.remove("show");
+	      state.shareTargetMessage = null;
+	      setDialogOpenState();
+	    }
+
+	    async function createShareLink() {
+	      if (!state.currentConversation) return;
+	      const scope = document.querySelector('input[name="shareScope"]:checked')?.value || "conversation";
+	      const button = $("createShareLink");
+	      button.disabled = true;
+	      button.classList.add("loading");
+	      setStatus("shareStatus", "槑槑正在生成临时链接...");
+	      try {
+	        const res = await api(`/api/conversations/${encodeURIComponent(state.currentConversation.id)}/shares`, {
+	          method: "POST",
+	          body: JSON.stringify({
+	            scope,
+	            message_id: state.shareTargetMessage?.id || 0,
+	            expires_in: Number($("shareExpirySelect").value || 86400)
+	          })
+	        });
+	        if (!res.ok) throw new Error(await readError(res, "分享链接创建失败，请稍后重试。"));
+	        const data = await res.json();
+	        state.activeShare = data.share || null;
+	        const url = absoluteShareUrl(data.share?.url || "");
+	        $("shareUrl").value = url;
+	        $("shareResult").hidden = false;
+	        $("shareResultMeta").textContent = `${shareScopeLabel(scope)} · ${formatShareExpiry(data.share?.expires_at)} 自动失效`;
+	        if (await writeClipboard(url)) {
+	          setStatus("shareStatus", "链接已创建并复制，可以直接发给朋友。", "ok");
+	        } else {
+	          setStatus("shareStatus", "链接已创建，请点复制按钮。", "ok");
+	        }
+	      } catch (error) {
+	        setStatus("shareStatus", friendlyError(error, "分享链接创建失败，请稍后重试。"), "err");
+	      } finally {
+	        button.disabled = false;
+	        button.classList.remove("loading");
+	      }
+	    }
+
+	    function copyCreatedShareLink() {
+	      const url = $("shareUrl").value;
+	      if (url) copyText(url, $("copyShareUrl"));
 	    }
 
 	    async function writeClipboard(text) {
@@ -8126,6 +8228,14 @@
 	      handleImageFiles(event.target.files).catch((err) => setStatus("chatStatus", friendlyError(err, "图片上传失败。"), "err"));
 	    });
 	    $("insertNewline").addEventListener("click", insertNewlineAtCursor);
+	    $("shareConversation").addEventListener("click", () => openShareDialog());
+	    $("closeShareDialog").addEventListener("click", closeShareDialog);
+	    $("cancelShareDialog").addEventListener("click", closeShareDialog);
+	    $("createShareLink").addEventListener("click", createShareLink);
+	    $("copyShareUrl").addEventListener("click", copyCreatedShareLink);
+	    $("shareDialog").addEventListener("click", (event) => {
+	      if (event.target === $("shareDialog")) closeShareDialog();
+	    });
 	    $("deleteConversation").addEventListener("click", deleteCurrentConversation);
 	    $("messages").addEventListener("pointerdown", beginChatTextSelection);
 	    $("messages").addEventListener("scroll", handleMessagesScroll, { passive: true });
@@ -8223,6 +8333,7 @@
 	        closeModelPicker();
 	        closeGlobalSearch();
 	        closeChangelog();
+	        closeShareDialog();
 	        closeProfilePopover();
 	        closeProfiles();
 	        closeTokenActivity();

@@ -8,6 +8,7 @@ APP_DIR = Path(__file__).resolve().parent.parent
 APP_ENTRY_PATH = APP_DIR / "app.py"
 RES_DIR = APP_DIR / "res"
 AI_PAGE_PATH = APP_DIR / "ai.html"
+SHARE_PAGE_PATH = APP_DIR / "share.html"
 HOME_PAGE_PATH = APP_DIR / "index.html"
 CAT_PAGE_PATH = APP_DIR / "cat.html"
 CHANGELOG_PATH = APP_DIR / "CHANGELOG.md"

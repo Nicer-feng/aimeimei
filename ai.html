@@ -58,7 +58,7 @@
   <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.19.1">
+  <link rel="stylesheet" href="/res/ai.css?v=2.20.0">
 
   <link rel="stylesheet" href="/res/markdown.css">
 </head>
@@ -69,14 +69,14 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.19.1</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.20.0</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.19.1</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.20.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -89,7 +89,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.19.1</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.20.0</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -124,7 +124,7 @@
 		          <button class="sidebar-action inline-flex items-center gap-2" id="openSettings" role="menuitem"><i data-lucide="settings" aria-hidden="true"></i><span>后台管理</span></button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.19.1</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.20.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -142,6 +142,7 @@
           <button class="profile-status-chip" id="profileStatus" type="button"><i data-lucide="brain" aria-hidden="true"></i><span>AI档案未加载</span></button>
         </div>
         <div class="top-actions">
+          <button class="icon ui-icon-btn" id="shareConversation" type="button" title="分享当前对话" aria-label="分享当前对话"><i data-lucide="share-2" aria-hidden="true"></i><span class="icon-fallback">↗</span></button>
           <button class="icon side-discussion-trigger ui-btn ui-btn-ghost" id="reopenSideDiscussion" type="button" hidden title="打开侧边讨论"><i data-lucide="panel-right-open" aria-hidden="true"></i><span id="sideDiscussionCount">侧边讨论</span></button>
           <button class="icon accent-toggle ui-icon-btn" id="accentToggle" title="主色调" aria-label="主色调"><i data-lucide="palette" aria-hidden="true"></i><span class="icon-fallback">●</span></button>
           <button class="icon font-toggle" id="fontSizeToggle" title="字体大小：中">中</button>
@@ -381,7 +382,7 @@
 	      </div>
 	    </div>
 	  </section>
-	  <section class="confirm-dialog" id="confirmDialog">
+  <section class="confirm-dialog" id="confirmDialog">
 	    <div class="confirm-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
 	      <div>
 	        <h2 id="confirmTitle">确认操作</h2>
@@ -393,7 +394,41 @@
         <button class="primary" id="confirmOk">确定</button>
       </div>
 	    </div>
-	  </section>
+  </section>
+  <section class="share-dialog" id="shareDialog">
+    <div class="share-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="shareDialogTitle">
+      <div class="dialog-head">
+        <strong class="dialog-title" id="shareDialogTitle"><i data-lucide="share-2" aria-hidden="true"></i><span>分享这段对话</span></strong>
+        <button class="icon ui-icon-btn" id="closeShareDialog" type="button" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
+      </div>
+      <div class="share-dialog-body">
+        <p class="share-help">创建一个无需登录即可查看的临时快照。思考过程和账号信息不会被分享。</p>
+        <fieldset class="share-scope-options" id="shareScopeOptions">
+          <legend>分享范围</legend>
+          <label data-share-scope-option="assistant"><input type="radio" name="shareScope" value="assistant"><span><strong>仅此 AI 回答</strong><small>只分享选中的一条槑槑回复</small></span><i data-lucide="bot" aria-hidden="true"></i></label>
+          <label data-share-scope-option="turn"><input type="radio" name="shareScope" value="turn" checked><span><strong>本轮问答</strong><small>包含你的提问和这条回答</small></span><i data-lucide="messages-square" aria-hidden="true"></i></label>
+          <label data-share-scope-option="conversation"><input type="radio" name="shareScope" value="conversation"><span><strong>整个对话</strong><small>包含当前全部多轮提问和回答</small></span><i data-lucide="message-square-more" aria-hidden="true"></i></label>
+        </fieldset>
+        <label class="share-expiry-field">有效期
+          <select id="shareExpirySelect">
+            <option value="3600">1 小时</option>
+            <option value="21600">6 小时</option>
+            <option value="86400" selected>1 天</option>
+            <option value="604800">7 天</option>
+          </select>
+        </label>
+        <div class="share-result" id="shareResult" hidden>
+          <div class="share-url-row"><input id="shareUrl" readonly aria-label="分享链接"><button class="ui-btn ui-btn-secondary" id="copyShareUrl" type="button"><i data-lucide="copy" aria-hidden="true"></i><span>复制</span></button></div>
+          <p id="shareResultMeta"></p>
+        </div>
+        <div class="status" id="shareStatus"></div>
+      </div>
+      <div class="share-dialog-actions">
+        <button class="ui-btn ui-btn-secondary" id="cancelShareDialog" type="button">取消</button>
+        <button class="primary ui-btn ui-btn-primary" id="createShareLink" type="button"><i data-lucide="link" aria-hidden="true"></i><span>创建并复制链接</span></button>
+      </div>
+    </div>
+  </section>
 	  <section class="theme-dialog" id="accentDialog">
 	    <div class="accent-panel ui-modal" role="dialog" aria-modal="true" aria-labelledby="accentDialogTitle">
 	      <div class="dialog-head">
@@ -842,7 +877,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.19.1</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.20.0</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -854,7 +889,7 @@
 	    </div>
 	  </section>
 
-	  <script src="/res/ai.js?v=2.19.1"></script>
+	  <script src="/res/ai.js?v=2.20.0"></script>
 
 </body>
 </html>
