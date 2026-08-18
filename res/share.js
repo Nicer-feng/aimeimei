@@ -18,12 +18,20 @@
 
   function renderMarkdown(root, content) {
     const text = String(content || "");
-    if (window.AIMarkdown?.isReady?.()) {
-      root.innerHTML = window.AIMarkdown.render(text);
-      window.AIMarkdown.enhance(root, { imagePreview: true });
-    } else {
-      root.textContent = text;
+    try {
+      if (window.AIMarkdown?.isReady?.()) {
+        const html = window.AIMarkdown.render(text);
+        if (html || !text.trim()) {
+          root.innerHTML = html;
+          window.AIMarkdown.enhance(root, { imagePreview: true });
+          return;
+        }
+      }
+    } catch {
+      // Keep a malformed message readable instead of blanking the shared page.
     }
+    root.classList.add("is-markdown-fallback");
+    root.textContent = text;
   }
 
   function renderMessage(message) {
@@ -55,6 +63,7 @@
       body.appendChild(images);
     }
     const content = document.createElement("div");
+    content.className = "share-message-content";
     renderMarkdown(content, message.content);
     body.appendChild(content);
     if (Array.isArray(message.sources) && message.sources.length) {

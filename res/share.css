@@ -34,12 +34,36 @@ button, input { font: inherit; }
 .share-title h1 { margin: 13px 0 10px; font-size: clamp(28px, 5vw, 46px); line-height: 1.16; letter-spacing: 0; overflow-wrap: anywhere; }
 .share-title p { margin: 0; color: var(--muted); }
 .share-messages { display: grid; gap: 38px; padding: 42px 0; }
-.share-message { min-width: 0; }
+.share-message { min-width: 0; max-width: 100%; }
 .share-message-role { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--muted); font-size: 13px; font-weight: 730; }
 .share-message-role img { width: 28px; height: 28px; border-radius: 10px; }
 .share-message.user { display: grid; justify-items: end; }
 .share-message.user .share-message-role { justify-content: flex-end; }
 .share-message.user .share-message-body { width: min(78%, 680px); padding: 15px 18px; border: 1px solid rgba(217,143,168,.28); border-radius: 20px 20px 6px 20px; background: rgba(249,231,237,.72); }
+.share-message-body,
+.share-message-body > *,
+.share-message-body .markdown {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.share-message-body pre,
+.share-message-body .code-block,
+.share-message-body .table-wrapper,
+.share-message-body .media-wrapper {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+.share-message-body pre,
+.share-message-body .table-wrapper,
+.share-message-body .media-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.share-message-content.is-markdown-fallback { white-space: pre-wrap; }
 .share-message.assistant .share-message-body { font-size: 16px; line-height: 1.82; }
 .share-message-time { margin-top: 9px; color: var(--muted); font-size: 12px; }
 .share-message.user .share-message-time { text-align: right; }
