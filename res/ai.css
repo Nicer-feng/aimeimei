@@ -7656,3 +7656,122 @@
         transition-duration: .01ms !important;
       }
     }
+
+    /* Compact conversation header: use one line when space permits. */
+    .topbar {
+      min-height: 52px;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 10px;
+      padding: 5px var(--space-4);
+    }
+    .top-title {
+      grid-column: 2;
+      justify-self: stretch;
+      max-width: none;
+      min-width: 0;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      column-gap: 8px;
+      row-gap: 1px;
+      line-height: 1.35;
+    }
+    .top-title strong {
+      display: block;
+      flex: 0 1 auto;
+      min-width: 0;
+      max-width: min(48vw, 680px);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+    .top-title .top-meta {
+      min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: var(--color-text-tertiary);
+      font-size: 11px;
+      line-height: 1.35;
+      white-space: nowrap;
+    }
+    .top-title .top-meta > span {
+      display: inline;
+      min-width: 0;
+      max-width: min(32vw, 430px);
+    }
+    .top-title .top-meta > span + span:not(:empty)::before {
+      content: "\00b7";
+      margin-right: 6px;
+      color: var(--color-text-tertiary);
+    }
+    .top-actions .profile-status-chip {
+      width: 36px;
+      min-width: 36px;
+      height: 36px;
+      min-height: 36px;
+      margin: 0;
+      padding: 0;
+      justify-content: center;
+      border-radius: 50%;
+    }
+    .profile-status-label {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      padding: 0 !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important;
+    }
+    .profile-popover {
+      top: 58px;
+      right: 14px;
+      left: auto;
+      transform: none;
+    }
+    @media (max-width: 1180px) {
+      .top-title strong {
+        flex-basis: 100%;
+        max-width: 100%;
+      }
+    }
+    @media (max-width: 900px) {
+      .topbar {
+        min-height: 56px;
+        grid-template-columns: 42px minmax(0, 1fr) auto;
+        padding: 4px 10px;
+      }
+      .top-title strong {
+        flex-basis: 100%;
+      }
+      .top-title .top-meta {
+        width: 100%;
+        overflow: hidden;
+      }
+      .top-title .top-meta > span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .profile-popover {
+        top: 62px;
+        right: 10px;
+      }
+    }
+    @media (max-width: 620px) {
+      .topbar {
+        min-height: 54px;
+      }
+      .top-title strong {
+        font-size: 13px;
+      }
+      .top-title .top-meta {
+        font-size: 10px;
+      }
+      .top-title .top-meta .chat-usage {
+        display: none;
+      }
+    }

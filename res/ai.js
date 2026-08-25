@@ -2137,6 +2137,7 @@
 	        label.textContent = "AI档案未设置";
 	        button.title = "点击管理长期档案";
 	      }
+	      button.setAttribute("aria-label", label.textContent);
 	      queueLucideRefresh();
 	    }
 
