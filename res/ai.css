@@ -6338,24 +6338,56 @@
     }
     .admin-nav {
       border-color: color-mix(in srgb, var(--color-border) 74%, transparent);
-      background: color-mix(in srgb, var(--sidebar) 90%, var(--color-page));
+      background:
+        radial-gradient(circle at 12% 6%, color-mix(in srgb, var(--accent-soft) 62%, transparent), transparent 34%),
+        color-mix(in srgb, var(--sidebar) 90%, var(--color-page));
+    }
+    .admin-brand {
+      border: 1px solid color-mix(in srgb, var(--color-border) 58%, transparent);
+      border-radius: var(--radius-md);
+      background: color-mix(in srgb, var(--color-surface) 58%, transparent);
+      box-shadow: var(--shadow-xs);
     }
     .admin-nav-item {
       min-height: 40px;
-      border-radius: var(--radius-sm);
+      position: relative;
+      overflow: hidden;
+      border-radius: var(--radius-md);
       color: var(--color-text-secondary);
       font-weight: 620;
+      transition:
+        color 160ms ease,
+        background-color 160ms ease,
+        border-color 160ms ease,
+        box-shadow 170ms ease,
+        transform 170ms var(--ease-standard);
+    }
+    .admin-nav-item::after {
+      content: "";
+      position: absolute;
+      inset: 8px auto 8px 0;
+      width: 3px;
+      border-radius: 999px;
+      background: var(--accent);
+      opacity: 0;
+      transform: scaleY(.45);
+      transition: opacity 160ms ease, transform 170ms var(--ease-standard);
     }
     .admin-nav-item:hover,
     .admin-nav-item:focus-visible {
-      transform: none;
+      transform: translateX(2px);
       background: color-mix(in srgb, var(--sidebar-strong) 60%, transparent);
+      box-shadow: var(--shadow-xs);
     }
     .admin-nav-item.active {
       border-color: color-mix(in srgb, var(--accent) 22%, var(--color-border));
       background: color-mix(in srgb, var(--accent-soft) 32%, var(--color-surface));
       color: var(--color-text-primary);
       box-shadow: var(--shadow-xs);
+    }
+    .admin-nav-item.active::after {
+      opacity: 1;
+      transform: scaleY(1);
     }
     .admin-main,
     .admin-content {
@@ -6388,16 +6420,43 @@
     .admin-key-card,
     .admin-plugin-card,
     .token-summary-card {
+      position: relative;
+      overflow: hidden;
       border-color: color-mix(in srgb, var(--color-border) 78%, transparent);
       border-radius: var(--radius-md);
-      background: var(--color-surface);
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 95%, transparent), color-mix(in srgb, var(--surface-soft) 14%, var(--color-surface)));
       box-shadow: var(--shadow-xs);
+      transition:
+        transform 170ms var(--ease-standard),
+        border-color 160ms ease,
+        box-shadow 170ms ease,
+        background-color 160ms ease;
+    }
+    .admin-metric-card::before,
+    .admin-status-card::before,
+    .admin-plugin-card::before,
+    .token-summary-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0;
+      background: linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 42%, transparent), transparent 46%);
+      transition: opacity 170ms ease;
     }
     .admin-metric-card:hover,
     .admin-status-card:hover,
     .admin-plugin-card:hover {
       border-color: color-mix(in srgb, var(--accent) 24%, var(--color-border));
       box-shadow: var(--shadow-sm);
+      transform: translateY(-2px);
+    }
+    .admin-metric-card:hover::before,
+    .admin-status-card:hover::before,
+    .admin-plugin-card:hover::before,
+    .token-summary-card:hover::before {
+      opacity: 1;
     }
     .admin-metric-card strong,
     .token-summary-card strong {
@@ -6995,11 +7054,14 @@
       left: 10px;
       z-index: 24;
       display: grid;
-      gap: 3px;
-      padding: 7px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px;
       border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
-      border-radius: 15px;
-      background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+      border-radius: 18px;
+      background:
+        radial-gradient(circle at 18% 8%, color-mix(in srgb, var(--accent-soft) 72%, transparent), transparent 44%),
+        color-mix(in srgb, var(--color-surface) 91%, transparent);
       box-shadow: var(--shadow-lg);
       -webkit-backdrop-filter: blur(18px) saturate(145%);
       backdrop-filter: blur(18px) saturate(145%);
@@ -7020,23 +7082,113 @@
       transform: translateY(0) scale(1);
       transition-delay: 0s;
     }
-    .sidebar-tools-popover .sidebar-action,
-    .sidebar-tools-popover #openFavorites {
+    .sidebar-tool-card {
       width: 100%;
-      min-height: 39px;
-      justify-content: flex-start;
-      padding: 0 11px;
-      border: 0;
-      border-radius: 10px;
-      background: transparent;
+      min-width: 0;
+      min-height: 74px;
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      padding: 10px;
+      border: 1px solid color-mix(in srgb, var(--color-border) 62%, transparent);
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 82%, transparent), color-mix(in srgb, var(--surface-soft) 24%, transparent));
       color: var(--color-text-secondary);
-      font-size: 12px;
-      font-weight: 640;
+      text-align: left;
+      box-shadow: 0 8px 18px rgba(46, 41, 32, .045);
+      transform: translateY(4px) scale(.985);
+      opacity: 0;
+      transition:
+        opacity 180ms ease,
+        transform 190ms var(--ease-standard),
+        border-color 160ms ease,
+        box-shadow 160ms ease,
+        background-color 160ms ease;
     }
-    .sidebar-tools-popover .sidebar-action:hover,
-    .sidebar-tools-popover #openFavorites:hover {
-      background: color-mix(in srgb, var(--sidebar-strong) 66%, transparent);
+    .sidebar-tools-popover.show .sidebar-tool-card {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    .sidebar-tools-popover.show .sidebar-tool-card:nth-child(2) { transition-delay: 18ms; }
+    .sidebar-tools-popover.show .sidebar-tool-card:nth-child(3) { transition-delay: 36ms; }
+    .sidebar-tools-popover.show .sidebar-tool-card:nth-child(4) { transition-delay: 54ms; }
+    .sidebar-tools-popover.show .sidebar-tool-card:nth-child(5) { transition-delay: 72ms; }
+    .sidebar-tool-card:hover,
+    .sidebar-tool-card:focus-visible {
       color: var(--color-text-primary);
+      border-color: color-mix(in srgb, var(--tool-accent, var(--accent)) 44%, var(--color-border));
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--tool-bg, var(--accent-soft)) 44%, var(--color-surface)), color-mix(in srgb, var(--color-surface) 78%, transparent));
+      box-shadow: 0 14px 28px rgba(46, 41, 32, .08);
+      transform: translateY(-2px) scale(1.01);
+    }
+    .sidebar-tool-card:active {
+      transform: translateY(0) scale(.985);
+    }
+    .sidebar-tool-card:nth-child(5) {
+      grid-column: 1 / -1;
+      min-height: 62px;
+    }
+    .tool-card-icon {
+      width: 34px;
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      color: var(--tool-accent, var(--accent-strong));
+      background: color-mix(in srgb, var(--tool-bg, var(--accent-soft)) 70%, var(--color-surface));
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tool-accent, var(--accent)) 18%, transparent);
+    }
+    .tool-card-icon .lucide {
+      width: 17px;
+      height: 17px;
+      stroke-width: 2.2;
+    }
+    .tool-card-copy {
+      min-width: 0;
+      display: grid;
+      gap: 1px;
+    }
+    .tool-card-copy strong,
+    .tool-card-copy small {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tool-card-copy strong {
+      color: var(--color-text-primary);
+      font-size: 13px;
+      font-weight: 760;
+      line-height: 1.25;
+    }
+    .tool-card-copy small {
+      color: var(--color-text-tertiary, var(--muted-2));
+      font-size: 11px;
+      font-weight: 650;
+      line-height: 1.3;
+    }
+    .sidebar-tool-card[data-tool-tone="rose"] {
+      --tool-accent: #D98FA8;
+      --tool-bg: #FCE8EF;
+    }
+    .sidebar-tool-card[data-tool-tone="amber"] {
+      --tool-accent: #B98542;
+      --tool-bg: #F7E8C7;
+    }
+    .sidebar-tool-card[data-tool-tone="mint"] {
+      --tool-accent: #5D967D;
+      --tool-bg: #DDF1E8;
+    }
+    .sidebar-tool-card[data-tool-tone="violet"] {
+      --tool-accent: #8F7BC7;
+      --tool-bg: #EEE7FF;
+    }
+    .sidebar-tool-card[data-tool-tone="slate"] {
+      --tool-accent: #8A6D5A;
+      --tool-bg: #F2E8DF;
     }
     .side-icp {
       grid-column: 1 / -1;
@@ -7050,9 +7202,25 @@
       .sidebar-tools-popover {
         right: 12px;
         left: 12px;
+        grid-template-columns: 1fr;
+      }
+      .sidebar-tool-card,
+      .sidebar-tool-card:nth-child(5) {
+        min-height: 58px;
       }
       .side-foot #logout {
         min-height: 44px;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .sidebar-tool-card,
+      .admin-nav-item,
+      .admin-metric-card,
+      .admin-status-card,
+      .admin-plugin-card,
+      .token-summary-card {
+        transition: none !important;
+        transform: none !important;
       }
     }
     .pet-settings-grid {
