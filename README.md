@@ -2,7 +2,7 @@
 
 AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实现。项目保持轻量模块化形态，无 Docker、无前端框架、无外部 Python 依赖。
 
-当前版本：`2.18.0`
+当前版本：`2.21.0`
 
 ## 目录说明
 
@@ -18,6 +18,8 @@ AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实
 - `ai-platform.service`：systemd 服务配置示例。
 - `deploy/nginx/aimeimei.conf`：域名访问用的 Nginx 配置示例，`feng.asia` 和 `www.feng.asia` 首页指向槑槑小记，AI 平台挂载在 `/ai`，小猫书挂载在 `/cat`。
 - `deploy/caddy/Caddyfile`：Caddy HTTPS 配置示例，自动申请证书并将 `/cat/` 反向代理到本机应用。
+- `scripts/backup_chat_to_oss.py`：生成脱敏 SQLite 快照并备份到 OSS。
+- `deploy/systemd/ai-platform-backup.*`：每日 OSS 备份的 systemd service 与 timer。
 - `verify.sh`：线上健康检查和基础接口验证脚本。
 - `res/`：项目资源文件，包括无文字槑槑头像、登录插画、空状态插画、favicon 和原始猫咪照片。
 - `res/markdown-renderer.js`、`res/markdown.css`：聊天、收藏和音视频分析共用的 Markdown 渲染与视觉层。
@@ -104,6 +106,19 @@ MEDIA_MAX_UPLOAD_MB
 ```
 
 如果不单独设置 `MEDIA_OSS_*`，会优先复用 `CAT_OSS_*`，仅目录默认改为 `tingwu`。
+
+### 每日聊天备份
+
+备份任务复用现有 `CAT_OSS_*` 配置，不需要在 OSS 控制台预先创建目录。OSS 会在首次上传时自动形成 `backups/ai-platform/YYYY/MM/` 前缀。
+
+备份内容是全部账号共用数据库的脱敏在线快照，保留会话、消息、收藏、AI 档案、Token 统计和音视频分析结果；密码哈希、模型密钥、登录会话、分享令牌、临时文件 URL 不进入备份。备份对象强制设为私有并启用 OSS 服务端 AES256 加密，默认保留 90 天。
+
+```bash
+sudo systemctl enable --now ai-platform-backup.timer
+sudo systemctl start ai-platform-backup.service
+sudo systemctl status ai-platform-backup.service
+sudo systemctl list-timers ai-platform-backup.timer
+```
 
 百炼 Qwen 原生联网不需要单独的搜索 Key。模型管理中将“联网能力”设为“百炼原生联网”，并确保该模型的 Base URL、Model 和百炼 API Key 可正常调用；后台联网搜索仍需保持启用，用于控制自动、手动或强制联网策略。非原生联网模型继续使用 Tavily 或 Brave 的搜索 Key。
 

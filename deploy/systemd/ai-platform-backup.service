@@ -1,0 +1,23 @@
+[Unit]
+Description=AI Platform sanitized chat backup to OSS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ai-platform
+Group=ai-platform
+WorkingDirectory=/opt/ai-platform
+Environment=AI_PLATFORM_DATA=/opt/ai-platform
+Environment=AI_PLATFORM_BACKUP_PREFIX=backups/ai-platform
+Environment=AI_PLATFORM_BACKUP_RETENTION_DAYS=90
+EnvironmentFile=/etc/ai-platform/backup-oss.env
+ExecStart=/usr/bin/python3 /opt/ai-platform/scripts/backup_chat_to_oss.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/ai-platform
+
+[Install]
+WantedBy=multi-user.target

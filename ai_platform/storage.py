@@ -271,10 +271,27 @@ def tts_oss_config(secrets_data):
     return {**base, "directory": directory}
 
 
-def oss_put_bytes(config, oss_key, data, content_type="application/octet-stream"):
+def oss_put_bytes(
+    config,
+    oss_key,
+    data,
+    content_type="application/octet-stream",
+    oss_headers=None,
+):
     date_value = formatdate(timeval=None, localtime=False, usegmt=True)
     canonical_resource = f"/{config['bucket']}/{oss_key}"
-    string_to_sign = f"PUT\n\n{content_type}\n{date_value}\n{canonical_resource}"
+    extra_headers = {
+        str(name).strip().lower(): " ".join(str(value).strip().split())
+        for name, value in (oss_headers or {}).items()
+        if str(name).strip().lower().startswith("x-oss-") and str(value).strip()
+    }
+    canonical_oss_headers = "".join(
+        f"{name}:{extra_headers[name]}\n" for name in sorted(extra_headers)
+    )
+    string_to_sign = (
+        f"PUT\n\n{content_type}\n{date_value}\n"
+        f"{canonical_oss_headers}{canonical_resource}"
+    )
     signature = base64.b64encode(
         hmac.new(config["access_key_secret"].encode(), string_to_sign.encode(), hashlib.sha1).digest()
     ).decode()
@@ -286,6 +303,7 @@ def oss_put_bytes(config, oss_key, data, content_type="application/octet-stream"
             "Content-Type": content_type,
             "Date": date_value,
             "Authorization": f"OSS {config['access_key_id']}:{signature}",
+            **extra_headers,
         },
         method="PUT",
     )
