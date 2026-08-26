@@ -178,10 +178,14 @@ class ChatHandlersMixin:
             history = conn.execute(
                 """
                 SELECT role, content
-                FROM side_discussion_messages
-                WHERE discussion_id=?
+                FROM (
+                  SELECT id, role, content
+                  FROM side_discussion_messages
+                  WHERE discussion_id=?
+                  ORDER BY id DESC
+                  LIMIT 60
+                ) AS recent_messages
                 ORDER BY id ASC
-                LIMIT 60
                 """,
                 (discussion_id,),
             ).fetchall()
@@ -860,10 +864,14 @@ class ChatHandlersMixin:
             history = conn.execute(
                 """
                 SELECT id, role, content
-                FROM messages
-                WHERE conversation_id=? AND user_id=?
+                FROM (
+                  SELECT id, role, content
+                  FROM messages
+                  WHERE conversation_id=? AND user_id=?
+                  ORDER BY id DESC
+                  LIMIT 80
+                ) AS recent_messages
                 ORDER BY id ASC
-                LIMIT 80
                 """,
                 (conversation_id, user_id),
             ).fetchall()
