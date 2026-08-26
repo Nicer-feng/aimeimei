@@ -1637,19 +1637,36 @@
       if (/qwen|通义|aliyun|阿里/i.test(raw)) return "Qwen";
       if (/deepseek|深度求索/i.test(raw)) return "DeepSeek";
       if (/kimi|moonshot|月之暗面/i.test(raw)) return "Kimi";
+      if (/glm|智谱|zhipu/i.test(raw)) return "GLM";
       if (/openai|gpt/i.test(raw)) return "OpenAI";
       if (/claude|anthropic/i.test(raw)) return "Claude";
       return raw || "模型";
     }
 
+    function modelProviderGroup(model) {
+      const label = modelProviderLabel(model);
+      if (label === "Qwen") return "Qwen";
+      if (label === "小米") return "小米";
+      if (label === "DeepSeek") return "DeepSeek";
+      if (label === "Kimi") return "Kimi";
+      if (label === "GLM") return "GLM";
+      return "其它";
+    }
+
+    function modelProviderGroupRank(group) {
+      const order = ["Qwen", "小米", "DeepSeek", "Kimi", "GLM", "其它"];
+      const index = order.indexOf(group);
+      return index >= 0 ? index : order.length;
+    }
+
     function modelCapabilityTags(model) {
       const text = [model?.name, model?.provider, model?.model].join(" ").toLowerCase();
       const tags = [];
-      if (model?.supports_vision) tags.push({ icon: "image", label: "可看图" });
-      if (model?.supports_native_web_search) tags.push({ icon: "globe-2", label: "原生联网" });
-      if (/reason|thinking|r1|推理|思考|qwq/.test(text)) tags.push({ icon: "brain", label: "推理" });
-      if (/flash|turbo|lite|mini|fast|快速|speed/.test(text)) tags.push({ icon: "zap", label: "快速" });
-      if (/max|pro|主力|旗舰|plus/.test(text)) tags.push({ icon: "sparkles", label: "主力" });
+      if (/max|pro|主力|旗舰|plus/.test(text)) tags.push({ icon: "sparkles", label: "主力模型" });
+      if (model?.supports_native_web_search) tags.push({ icon: "globe-2", label: "支持原生联网" });
+      if (model?.supports_vision) tags.push({ icon: "image", label: "支持图片理解" });
+      if (/reason|thinking|r1|推理|思考|qwq/.test(text)) tags.push({ icon: "brain", label: "支持推理" });
+      if (/flash|turbo|lite|mini|fast|快速|speed/.test(text)) tags.push({ icon: "zap", label: "快速响应" });
       return tags.slice(0, 4);
     }
 
@@ -1661,8 +1678,12 @@
 
     function filteredModels() {
       const query = String(state.modelPickerFilter || "").trim().toLowerCase();
-      if (!query) return state.models.slice();
-      return state.models.filter((model) => modelSearchText(model).includes(query));
+      const list = query ? state.models.filter((model) => modelSearchText(model).includes(query)) : state.models.slice();
+      return list.sort((a, b) => {
+        const groupDiff = modelProviderGroupRank(modelProviderGroup(a)) - modelProviderGroupRank(modelProviderGroup(b));
+        if (groupDiff) return groupDiff;
+        return String(a?.name || a?.model || "").localeCompare(String(b?.name || b?.model || ""), "zh-Hans-CN");
+      });
     }
 
     function syncModelPickerButton() {
@@ -1682,10 +1703,11 @@
       const button = $("modelPickerButton");
       if (!popover || !button || isSmallScreen()) return;
       const rect = button.getBoundingClientRect();
-      const width = Math.min(430, window.innerWidth - 24);
+      const width = Math.min(388, window.innerWidth - 24);
       const left = clampNumber(rect.left, 12, Math.max(12, window.innerWidth - width - 12), 12);
-      const maxTop = Math.max(12, window.innerHeight - Math.min(560, window.innerHeight * .7) - 12);
-      const preferredTop = rect.top - 10 - Math.min(560, window.innerHeight * .7);
+      const pickerHeight = Math.min(480, window.innerHeight * .7);
+      const maxTop = Math.max(12, window.innerHeight - pickerHeight - 12);
+      const preferredTop = rect.top - 10 - pickerHeight;
       const belowTop = rect.bottom + 10;
       popover.style.width = width + "px";
       popover.style.left = left + "px";
@@ -1735,7 +1757,17 @@
       }
       state.modelPickerSelectedIndex = clampNumber(state.modelPickerSelectedIndex, 0, models.length - 1, 0);
       const currentId = $("modelSelect")?.value || "";
+      let lastGroup = "";
       for (const [index, model] of models.entries()) {
+        const group = modelProviderGroup(model);
+        if (group !== lastGroup) {
+          const heading = document.createElement("div");
+          heading.className = "model-group-heading";
+          heading.textContent = group;
+          heading.setAttribute("role", "presentation");
+          box.appendChild(heading);
+          lastGroup = group;
+        }
         const selected = model.id === currentId;
         const button = document.createElement("button");
         button.type = "button";
@@ -1745,9 +1777,8 @@
         const tags = modelCapabilityTags(model);
         button.innerHTML =
           '<span class="model-option-main">' +
-            '<span class="model-option-title"><strong>' + escapeHTML(model.name) + '</strong><span class="model-provider">' + escapeHTML(modelProviderLabel(model)) + '</span></span>' +
-            '<span class="model-code-line">' + escapeHTML(model.model) + '</span>' +
-            '<span class="model-tags">' + tags.map((tag) => '<span class="model-tag">' + iconMarkup(tag.icon) + '<span>' + escapeHTML(tag.label) + '</span></span>').join("") + '</span>' +
+            '<span class="model-option-row model-option-top"><strong>' + escapeHTML(model.name) + '</strong><span class="model-tags">' + tags.map((tag) => '<span class="model-tag" title="' + escapeHTML(tag.label) + '" aria-label="' + escapeHTML(tag.label) + '">' + iconMarkup(tag.icon) + '</span>').join("") + '</span></span>' +
+            '<span class="model-code-line">' + escapeHTML(model.model || "") + ' · ' + escapeHTML(modelProviderLabel(model)) + '</span>' +
           '</span>' +
           '<span class="model-check">' + iconMarkup("check", "✓") + '</span>';
         button.addEventListener("mouseenter", () => setModelPickerSelectedIndex(index));
@@ -3547,7 +3578,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.2" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.3" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
