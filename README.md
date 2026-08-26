@@ -111,7 +111,19 @@ MEDIA_MAX_UPLOAD_MB
 
 备份任务复用现有 `CAT_OSS_*` 配置，不需要在 OSS 控制台预先创建目录。OSS 会在首次上传时自动形成 `backups/ai-platform/YYYY/MM/` 前缀。
 
-备份内容是全部账号共用数据库的脱敏在线快照，保留会话、消息、收藏、AI 档案、Token 统计和音视频分析结果；密码哈希、模型密钥、登录会话、分享令牌、临时文件 URL 不进入备份。备份对象强制设为私有并启用 OSS 服务端 AES256 加密，默认保留 90 天。
+备份内容是全部账号共用数据库的脱敏在线快照，保留会话、消息、收藏、AI 档案、Token 统计和音视频分析结果；密码哈希、模型密钥、登录会话、分享令牌、临时文件 URL 不进入备份。备份文件上传前使用独立密钥执行 AES-256-CBC + PBKDF2 加密，同时请求 OSS 私有 ACL 与服务端 AES256 加密，默认保留 90 天。
+
+加密密钥保存在服务器 `/etc/ai-platform/backup.key`，不进入 Git 和 OSS。应将该文件单独保存到安全位置；服务器完全丢失且没有密钥时，OSS 中的备份无法解密。
+
+恢复时先下载 `.sqlite.gz.enc` 文件，再执行：
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
+  -pass file:/etc/ai-platform/backup.key \
+  -in chat-backup.sqlite.gz.enc -out chat-backup.sqlite.gz
+gunzip chat-backup.sqlite.gz
+sqlite3 chat-backup.sqlite "PRAGMA integrity_check;"
+```
 
 ```bash
 sudo systemctl enable --now ai-platform-backup.timer

@@ -1,9 +1,9 @@
 import gzip
 import hashlib
-import json
 import os
 import re
 import sqlite3
+import subprocess
 import tempfile
 import urllib.error
 import urllib.request
@@ -23,7 +23,7 @@ from .storage import cat_oss_config, oss_put_bytes, oss_signed_get_url
 
 BACKUP_PREFIX = "backups/ai-platform"
 BACKUP_RETENTION_DAYS = 90
-BACKUP_NAME_RE = re.compile(r"chat-backup-(\d{8})-(\d{6})\.sqlite\.gz(?:\.json)?$")
+BACKUP_NAME_RE = re.compile(r"chat-backup-(\d{8})-(\d{6})\.sqlite\.gz\.enc$")
 
 
 def _table_exists(conn, table_name):
@@ -137,6 +137,37 @@ def gzip_snapshot(snapshot_path, archive_path):
     os.chmod(archive_path, 0o600)
 
 
+def encrypt_archive(source_path, encrypted_path, key_path):
+    if not key_path.is_file() or key_path.stat().st_size < 32:
+        raise RuntimeError("backup encryption key is missing or invalid")
+    command = [
+        "openssl",
+        "enc",
+        "-aes-256-cbc",
+        "-salt",
+        "-pbkdf2",
+        "-iter",
+        "200000",
+        "-md",
+        "sha256",
+        "-pass",
+        "file:{}".format(key_path),
+        "-in",
+        str(source_path),
+        "-out",
+        str(encrypted_path),
+    ]
+    result = subprocess.run(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("backup archive encryption failed")
+    os.chmod(encrypted_path, 0o600)
+
+
 def file_sha256(path):
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -229,13 +260,15 @@ def purge_old_backups(config, prefix, retention_days):
     return removed
 
 
-def verify_private_backup(config, oss_key, expected_sha256):
+def verify_uploaded_backup(config, oss_key, expected_sha256):
     public_url = config["public_base"].rstrip("/") + "/" + quote(
         oss_key, safe="/-_.~"
     )
+    publicly_readable = False
     try:
-        with urllib.request.urlopen(public_url, timeout=15):
-            raise RuntimeError("backup object is publicly readable")
+        with urllib.request.urlopen(public_url, timeout=15) as response:
+            response.read(1)
+            publicly_readable = True
     except urllib.error.HTTPError as exc:
         if exc.code != 403:
             raise RuntimeError("backup privacy check returned HTTP {}".format(exc.code))
@@ -250,6 +283,7 @@ def verify_private_backup(config, oss_key, expected_sha256):
             digest.update(chunk)
     if digest.hexdigest() != expected_sha256:
         raise RuntimeError("uploaded backup checksum mismatch")
+    return publicly_readable
 
 
 def run_daily_backup():
@@ -268,7 +302,9 @@ def run_daily_backup():
         int(os.environ.get("AI_PLATFORM_BACKUP_RETENTION_DAYS", BACKUP_RETENTION_DAYS)),
     )
     timestamp = datetime.now().astimezone()
-    basename = "chat-backup-{}.sqlite.gz".format(timestamp.strftime("%Y%m%d-%H%M%S"))
+    basename = "chat-backup-{}.sqlite.gz.enc".format(
+        timestamp.strftime("%Y%m%d-%H%M%S")
+    )
     oss_key = "{}/{}/{}/{}".format(
         prefix,
         timestamp.strftime("%Y"),
@@ -279,12 +315,21 @@ def run_daily_backup():
     with tempfile.TemporaryDirectory(prefix="ai-platform-backup-") as temp_dir:
         temp_path = Path(temp_dir)
         snapshot_path = temp_path / "ai-platform.sanitized.db"
-        archive_path = temp_path / basename
+        archive_path = temp_path / basename[:-4]
+        encrypted_path = temp_path / basename
+        key_path = Path(
+            os.environ.get(
+                "AI_PLATFORM_BACKUP_KEY_FILE",
+                "/etc/ai-platform/backup.key",
+            )
+        )
         counts = create_sanitized_snapshot(DB_PATH, snapshot_path)
         os.chmod(snapshot_path, 0o600)
         gzip_snapshot(snapshot_path, archive_path)
-        archive_sha256 = file_sha256(archive_path)
-        archive_data = archive_path.read_bytes()
+        plaintext_sha256 = file_sha256(archive_path)
+        encrypt_archive(archive_path, encrypted_path, key_path)
+        archive_sha256 = file_sha256(encrypted_path)
+        archive_data = encrypted_path.read_bytes()
 
         private_headers = {
             "x-oss-object-acl": "private",
@@ -293,37 +338,30 @@ def run_daily_backup():
             "x-oss-meta-backup-version": VERSION_PATH.read_text(
                 encoding="utf-8"
             ).strip(),
+            "x-oss-meta-backup-format": "aes-256-cbc-pbkdf2",
         }
         oss_put_bytes(
             config,
             oss_key,
             archive_data,
-            content_type="application/gzip",
+            content_type="application/octet-stream",
             oss_headers=private_headers,
         )
 
         manifest = {
-            "format": "ai-platform-sanitized-sqlite-gzip-v1",
+            "format": "ai-platform-sanitized-sqlite-gzip-aes256-v1",
             "created_at": timestamp.isoformat(),
             "version": VERSION_PATH.read_text(encoding="utf-8").strip(),
             "build_id": BUILD_ID_PATH.read_text(encoding="utf-8").strip(),
             "object_key": oss_key,
             "compressed_size": len(archive_data),
             "sha256": archive_sha256,
+            "plaintext_sha256": plaintext_sha256,
             "sanitized": True,
+            "encrypted": True,
             "counts": counts,
         }
-        oss_put_bytes(
-            config,
-            oss_key + ".json",
-            json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
-            content_type="application/json; charset=utf-8",
-            oss_headers={
-                "x-oss-object-acl": "private",
-                "x-oss-server-side-encryption": "AES256",
-            },
-        )
-        verify_private_backup(config, oss_key, archive_sha256)
+        publicly_readable = verify_uploaded_backup(config, oss_key, archive_sha256)
 
     try:
         removed = purge_old_backups(config, prefix, retention_days)
@@ -332,10 +370,11 @@ def run_daily_backup():
         removed = 0
 
     print(
-        "backup uploaded: key={} size={} sha256={} users={} conversations={} messages={} removed={}".format(
+        "backup uploaded: key={} size={} sha256={} encrypted=yes public_endpoint={} users={} conversations={} messages={} removed={}".format(
             oss_key,
             manifest["compressed_size"],
             archive_sha256[:12],
+            "yes" if publicly_readable else "no",
             counts["users"],
             counts["conversations"],
             counts["messages"],
