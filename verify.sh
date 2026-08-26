@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$PROJECT_ROOT/scripts/check_release_version.py"
+
 PASS="$(tr -d '\r\n' < /opt/ai-platform/family_password.txt)"
 ADMIN="$(tr -d '\r\n' < /opt/ai-platform/admin.key)"
 COOKIE="/tmp/ai-platform-cookie.txt"

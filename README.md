@@ -19,6 +19,7 @@ AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实
 - `deploy/nginx/aimeimei.conf`：域名访问用的 Nginx 配置示例，`feng.asia` 和 `www.feng.asia` 首页指向槑槑小记，AI 平台挂载在 `/ai`，小猫书挂载在 `/cat`。
 - `deploy/caddy/Caddyfile`：Caddy HTTPS 配置示例，自动申请证书并将 `/cat/` 反向代理到本机应用。
 - `scripts/backup_chat_to_oss.py`：生成脱敏 SQLite 快照并备份到 OSS。
+- `scripts/check_release_version.py`：发布前校验页面版本号和静态资源缓存参数是否与 `VERSION` 一致。
 - `deploy/systemd/ai-platform-backup.*`：每日 OSS 备份的 systemd service 与 timer。
 - `verify.sh`：线上健康检查和基础接口验证脚本。
 - `res/`：项目资源文件，包括无文字槑槑头像、登录插画、空状态插画、favicon 和原始猫咪照片。
@@ -137,6 +138,7 @@ sudo systemctl list-timers ai-platform-backup.timer
 常用部署流程：
 
 ```bash
+python3 scripts/check_release_version.py
 python3 -m py_compile app.py
 node --check res/ai.js
 scp app.py ai.html VERSION BUILD_ID CHANGELOG.md aliyun_3129:/tmp/ai-platform-build/
