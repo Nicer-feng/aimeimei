@@ -100,6 +100,8 @@ class AppHandler(
             return self.handle_version()
         if path == "/api/changelog":
             return self.handle_changelog()
+        if path == "/api/captcha":
+            return self.handle_captcha()
         if path.startswith("/api/public/shares/") and "/images/" in path:
             return self.handle_public_share_image()
         if path.startswith("/api/public/shares/"):

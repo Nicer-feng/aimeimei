@@ -1103,6 +1103,7 @@
 	      if (/unauthorized|未登录|登录已过期/i.test(text)) return "登录状态过期了，请重新登录。";
 	      if (/password incorrect|密码不对/i.test(text)) return "密码不对，再检查一下。";
 	      if (/username and password/i.test(text)) return "请输入账号和密码。";
+      if (/captcha incorrect|验证码/i.test(text)) return "验证码不对，换一张再试试。";
 	      if (/username already exists/i.test(text)) return "这个账号已经存在了。";
 	      if (/username invalid/i.test(text)) return "账号只能使用 2-32 位字母、数字、下划线或短横线。";
 	      if (/at least one active admin/i.test(text)) return "至少要保留一个可用的管理员账号。";
@@ -1294,6 +1295,7 @@
 	      $("loginView").style.display = "grid";
 	      $("appView").style.display = "none";
 	      updateDesktopPetVisibility();
+      refreshLoginCaptcha({ quiet: true });
 	      $("loginUsername").focus();
 	    }
 
@@ -1460,24 +1462,67 @@
       }
     }
 
+    async function refreshLoginCaptcha(options = {}) {
+      const image = $("captchaImage");
+      const id = $("captchaId");
+      if (!image || !id) return;
+      try {
+        const res = await request("/api/captcha");
+        if (!res.ok) throw new Error(await readError(res, "验证码加载失败。"));
+        const data = await res.json();
+        id.value = data.captcha_id || "";
+        image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(data.image_svg || "");
+        image.dataset.loaded = "1";
+        const input = $("loginCaptcha");
+        if (input) input.value = "";
+      } catch (err) {
+        id.value = "";
+        image.removeAttribute("src");
+        image.dataset.loaded = "";
+        if (!options.quiet) setStatus("loginStatus", friendlyError(err, "验证码加载失败，点图片再试一次。"), "err");
+      }
+    }
+
+    function normalizeCaptchaInput() {
+      const input = $("loginCaptcha");
+      if (!input) return;
+      input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+    }
+
     async function login(event) {
 	      event.preventDefault();
 	      setStatus("loginStatus", "");
 	      const username = $("loginUsername").value.trim();
 	      const password = $("loginPassword").value;
+      normalizeCaptchaInput();
+      const captcha = $("loginCaptcha")?.value.trim() || "";
+      const captcha_id = $("captchaId")?.value.trim() || "";
+      if (!captcha_id) {
+        await refreshLoginCaptcha();
+        setStatus("loginStatus", "验证码刚刚没加载出来，重新输入一下。", "err");
+        return;
+      }
+      if (captcha.length !== 4) {
+        setStatus("loginStatus", "请输入右侧图片里的 4 位验证码。", "err");
+        $("loginCaptcha")?.focus();
+        return;
+      }
 	      let res;
 	      try {
-	        res = await request("/api/login", { method: "POST", body: JSON.stringify({ username, password }) });
+	        res = await request("/api/login", { method: "POST", body: JSON.stringify({ username, password, captcha_id, captcha }) });
       } catch (err) {
         setStatus("loginStatus", friendlyError(err, "现在连不上服务，稍后再试一下。"), "err");
         return;
       }
 	      if (!res.ok) {
-		setStatus("loginStatus", await readError(res, "密码不对，再检查一下。"), "err");
+		setStatus("loginStatus", await readError(res, "密码或验证码不对，再检查一下。"), "err");
+        await refreshLoginCaptcha({ quiet: true });
+        $("loginCaptcha")?.focus();
 		return;
 	      }
 	      const data = await res.json();
 		      $("loginPassword").value = "";
+      if ($("loginCaptcha")) $("loginCaptcha").value = "";
 		      applyCurrentUser(data.user || null);
 		      loadUserPreferences();
 		      state.authed = true;
@@ -3578,7 +3623,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.3" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.4" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8175,6 +8220,8 @@
 
     $("globalSearchShortcut").textContent = globalSearchShortcutText();
     $("loginForm").addEventListener("submit", login);
+    $("refreshCaptcha")?.addEventListener("click", () => refreshLoginCaptcha());
+    $("loginCaptcha")?.addEventListener("input", normalizeCaptchaInput);
     $("logout").addEventListener("click", logout);
     $("newChat").addEventListener("click", () => {
       newConversation().catch((err) => setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err"));

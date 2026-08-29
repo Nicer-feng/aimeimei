@@ -414,6 +414,37 @@
       font-weight: 680;
       color: var(--muted);
     }
+    .captcha-field {
+      min-width: 0;
+    }
+    .captcha-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 128px;
+      gap: 10px;
+      align-items: center;
+    }
+    .captcha-image-button {
+      width: 128px;
+      height: 48px;
+      min-height: 48px;
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--surface) 88%, var(--surface-soft));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.42);
+    }
+    .captcha-image-button:hover,
+    .captcha-image-button:focus-visible {
+      border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 34%, var(--surface));
+    }
+    .captcha-image-button img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
     .site-icp {
       color: var(--muted-2);
       font-size: 12px;

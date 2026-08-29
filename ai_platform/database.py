@@ -310,6 +310,14 @@ def init_db(secrets_data=None):
               expires_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS login_captchas (
+              id TEXT PRIMARY KEY,
+              answer_hash TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              expires_at INTEGER NOT NULL,
+              attempts INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS cat_users (
               id TEXT PRIMARY KEY,
               username TEXT NOT NULL UNIQUE,
@@ -527,6 +535,7 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_user_updated ON media_analysis_tasks(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_task_id ON media_analysis_tasks(task_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_conversation ON media_analysis_tasks(conversation_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_login_captchas_expiry ON login_captchas(expires_at)")
 
         daily_count = conn.execute("SELECT COUNT(*) AS n FROM daily_usage").fetchone()["n"]
         if daily_count == 0:

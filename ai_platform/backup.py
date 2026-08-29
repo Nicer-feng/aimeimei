@@ -77,7 +77,7 @@ def create_sanitized_snapshot(source_path, snapshot_path):
         _execute_if_column(destination, "chat_message_images", "oss_url", "UPDATE chat_message_images SET oss_url='' ")
         _execute_if_column(destination, "message_tts", "error_message", "UPDATE message_tts SET error_message='' ")
 
-        for table_name in ("sessions", "cat_sessions", "conversation_shares"):
+        for table_name in ("sessions", "cat_sessions", "conversation_shares", "login_captchas"):
             if _table_exists(destination, table_name):
                 destination.execute('DELETE FROM "{}"'.format(table_name))
 
