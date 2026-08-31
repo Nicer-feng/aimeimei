@@ -30,6 +30,7 @@ from ..content import (
     search_snippet,
 )
 from ..database import db
+from ..features import feature_enabled, feature_flags
 from ..presenters import (
     ai_user_public,
     build_user_profile_context,

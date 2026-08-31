@@ -105,6 +105,8 @@
 	      lastCompositionEndAt: 0,
 	      messageSeq: 0,
 	      searchConfig: null,
+	      featureFlags: { selection_quote: true, side_discussion: true },
+	      adminFeatures: null,
 		      adminKey: localStorage.getItem("aiPlatformAdminKey") || "",
 		      theme: localStorage.getItem("aiPlatformTheme") || "",
 		      accent: localStorage.getItem("aiPlatformAccent") || "pink",
@@ -1291,6 +1293,45 @@
 	      return state.user?.role === "admin" || Boolean($("adminKey").value.trim());
 	    }
 
+    function featureEnabled(name) {
+      return state.featureFlags?.[name] !== false;
+    }
+
+    function selectionQuoteEnabled() {
+      return featureEnabled("selection_quote");
+    }
+
+    function sideDiscussionEnabled() {
+      return featureEnabled("side_discussion");
+    }
+
+    function applyFeatureFlagsToUI() {
+      document.body.classList.toggle("feature-selection-quote-off", !selectionQuoteEnabled());
+      document.body.classList.toggle("feature-side-discussion-off", !sideDiscussionEnabled());
+      if ($("quoteSelection")) $("quoteSelection").hidden = !selectionQuoteEnabled();
+      if ($("discussSelection")) $("discussSelection").hidden = !sideDiscussionAvailable();
+      if (!sideDiscussionEnabled()) {
+        hideSelectionToolbar();
+        if ($("sideDiscussionPanel") && !$("sideDiscussionPanel").hidden) closeSideDiscussion();
+        state.sideDiscussions = [];
+      }
+      updateSideDiscussionEntry();
+    }
+
+    async function loadFeatureFlags() {
+      try {
+        const res = await api("/api/features");
+        if (!res.ok) throw new Error(await readError(res, "功能开关加载失败。"));
+        const data = await res.json();
+        state.featureFlags = { selection_quote: true, side_discussion: true, ...(data.features || {}) };
+      } catch (err) {
+        state.featureFlags = { selection_quote: true, side_discussion: true };
+        console.warn("feature flags load failed", err);
+      }
+      applyFeatureFlagsToUI();
+      return state.featureFlags;
+    }
+
 	    function showLogin() {
 	      $("loginView").style.display = "grid";
 	      $("appView").style.display = "none";
@@ -1445,7 +1486,7 @@
 	        loadUserPreferences();
 		        state.authed = true;
 		        showApp();
-		        await Promise.all([loadModels(), loadSearchConfig(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
+		        await Promise.all([loadModels(), loadSearchConfig(), loadFeatureFlags(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
 	      } catch {
 	        showLogin();
 	      }
@@ -1527,7 +1568,7 @@
 		      loadUserPreferences();
 		      state.authed = true;
 	      showApp();
-	      await Promise.all([loadModels(), loadSearchConfig(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
+	      await Promise.all([loadModels(), loadSearchConfig(), loadFeatureFlags(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
 	    }
 
     async function logout() {
@@ -3623,7 +3664,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.4" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.5" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -4943,7 +4984,7 @@
 	    }
 
 	    function selectedMessageContext() {
-	      if (!desktopSelectionToolsEnabled() || document.body.classList.contains("dialog-open")) return null;
+	      if ((!selectionQuoteEnabled() && !sideDiscussionEnabled()) || !desktopSelectionToolsEnabled() || document.body.classList.contains("dialog-open")) return null;
 	      const selection = window.getSelection?.();
 	      if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
 	      const text = selection.toString().replace(/\u00a0/g, " ").trim();
@@ -4997,8 +5038,12 @@
 	    function showSelectionToolbar() {
 	      const context = selectedMessageContext();
 	      if (!context) return hideSelectionToolbar();
+	      const canQuote = selectionQuoteEnabled();
+	      const canDiscuss = sideDiscussionAvailable();
+	      if (!canQuote && !canDiscuss) return hideSelectionToolbar();
 	      state.activeTextSelection = context;
-	      if ($("discussSelection")) $("discussSelection").hidden = !sideDiscussionAvailable();
+	      if ($("quoteSelection")) $("quoteSelection").hidden = !canQuote;
+	      if ($("discussSelection")) $("discussSelection").hidden = !canDiscuss;
 	      positionSelectionToolbar(context);
 	      queueLucideRefresh();
 	    }
@@ -5012,6 +5057,11 @@
 	    }
 
 	    function addActiveSelectionQuote() {
+	      if (!selectionQuoteEnabled()) {
+	        hideSelectionToolbar({ clearSelection: true });
+	        setStatus("chatStatus", "引用提问已由管理员关闭。", "err");
+	        return;
+	      }
 	      const context = state.activeTextSelection;
 	      if (!context) return;
 	      if (state.pendingQuotes.length >= 3) {
@@ -5040,7 +5090,7 @@
 	    }
 
 	    function sideDiscussionAvailable() {
-	      if (!desktopSelectionToolsEnabled()) return false;
+	      if (!sideDiscussionEnabled() || !desktopSelectionToolsEnabled()) return false;
 	      const sidebarWidth = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-width")) || Number(state.sidebarWidth) || 322;
 	      const available = window.innerWidth - sidebarWidth;
 	      return window.innerWidth >= 1220 && available >= 920;
@@ -5074,7 +5124,7 @@
 	    }
 
 	    async function loadSideDiscussions(sessionId = state.currentConversation?.id || "") {
-	      if (!sessionId) {
+	      if (!sessionId || !sideDiscussionEnabled()) {
 	        state.sideDiscussions = [];
 	        updateSideDiscussionEntry();
 	        return [];
@@ -5184,6 +5234,10 @@
 	    }
 
 	    async function openSideDiscussion(discussionId) {
+	      if (!sideDiscussionEnabled()) {
+	        setStatus("chatStatus", "侧边讨论已由管理员关闭。", "err");
+	        return;
+	      }
 	      if (!sideDiscussionAvailable()) {
 	        setStatus("chatStatus", "请扩大浏览器窗口后使用侧边讨论。", "err");
 	        return;
@@ -7013,6 +7067,7 @@
 	      if (key === "tts") loadAdminTts();
 	      if (key === "plugins") {
 	        if (!state.adminOverview) loadAdminOverview();
+	        loadAdminFeatures();
 	        renderPluginStatus();
 	      }
 	      if (key === "tokens") loadTokenStats();
@@ -7033,6 +7088,7 @@
 	      loadAdminModels();
 	      loadAdminSearch();
 	      loadAdminTts();
+	      loadAdminFeatures();
 	      loadAdminUsers();
 	      loadTokenStats();
 	      loadCostStats();
@@ -7122,13 +7178,86 @@
 	      queueLucideRefresh();
 	    }
 
-	    function renderPluginStatus() {
+	    function renderFeatureToggles() {
+      const box = $("featureToggleList");
+      if (!box) return;
+      const features = state.adminFeatures || state.featureFlags || { selection_quote: true, side_discussion: true };
+      const rows = [
+        { key: "selection_quote", icon: "quote", title: "引用提问", desc: "选中聊天正文后，可把内容引用到当前输入框。" },
+        { key: "side_discussion", icon: "panel-right-open", title: "侧边讨论", desc: "选中文字后打开右侧并行讨论栏。关闭后右上角入口也会隐藏。" }
+      ];
+      box.innerHTML = rows.map((item) => (
+        '<label class="feature-toggle-card">' +
+          '<span>' +
+            '<span class="feature-title">' + iconMarkup(item.icon) + '<span>' + escapeHTML(item.title) + '</span></span>' +
+            '<small>' + escapeHTML(item.desc) + '</small>' +
+          '</span>' +
+          '<span class="feature-switch" aria-label="' + escapeHTML(item.title) + '">' +
+            '<input type="checkbox" data-feature-toggle="' + escapeHTML(item.key) + '" ' + (features[item.key] !== false ? 'checked' : '') + '>' +
+            '<span></span>' +
+          '</span>' +
+        '</label>'
+      )).join("");
+      queueLucideRefresh();
+    }
+
+    async function loadAdminFeatures() {
+      if (!hasAdminAccess()) {
+        state.adminFeatures = null;
+        renderFeatureToggles();
+        return;
+      }
+      try {
+        const res = await adminApi("/api/admin/features");
+        if (!res.ok) throw new Error(await readError(res, "功能开关加载失败。"));
+        const data = await res.json();
+        state.adminFeatures = { selection_quote: true, side_discussion: true, ...(data.features || {}) };
+        state.featureFlags = { ...state.featureFlags, ...state.adminFeatures };
+        applyFeatureFlagsToUI();
+        renderFeatureToggles();
+        renderPluginStatus();
+        setStatus("featureStatus", "", "");
+      } catch (err) {
+        setStatus("featureStatus", friendlyError(err, "功能开关加载失败。"), "err");
+      }
+    }
+
+    async function saveAdminFeatures() {
+      if (!hasAdminAccess()) {
+        setStatus("featureStatus", "管理员账号或管理密钥可保存功能开关。", "err");
+        return;
+      }
+      const features = { selection_quote: true, side_discussion: true, ...(state.adminFeatures || state.featureFlags || {}) };
+      document.querySelectorAll("[data-feature-toggle]").forEach((input) => {
+        features[input.dataset.featureToggle] = input.checked;
+      });
+      state.adminFeatures = features;
+      renderFeatureToggles();
+      setStatus("featureStatus", "正在保存功能开关...", "");
+      try {
+        const res = await adminApi("/api/admin/features", { method: "POST", body: JSON.stringify({ features }) });
+        if (!res.ok) throw new Error(await readError(res, "功能开关保存失败。"));
+        const data = await res.json();
+        state.adminFeatures = { selection_quote: true, side_discussion: true, ...(data.features || {}) };
+        state.featureFlags = { ...state.featureFlags, ...state.adminFeatures };
+        applyFeatureFlagsToUI();
+        renderFeatureToggles();
+        renderPluginStatus();
+        setStatus("featureStatus", "功能开关已保存。", "ok");
+      } catch (err) {
+        setStatus("featureStatus", friendlyError(err, "功能开关保存失败。"), "err");
+        await loadAdminFeatures();
+      }
+    }
+
+    function renderPluginStatus() {
 	      const overview = state.adminOverview || {};
 	      const search = overview.search || state.adminSearch || {};
 	      const oss = overview.oss || {};
 	      const tingwu = overview.tingwu || {};
 	      const tts = overview.tts || {};
 	      const visionCount = state.adminModels.filter((item) => item.enabled && item.supports_vision).length;
+	      const features = state.adminFeatures || state.featureFlags || {};
 	      const plugins = [
 	        ["search", "联网搜索", Boolean(search.enabled && (search.configured || search.has_api_key)), search.enabled ? "已启用搜索策略" : "未启用"],
 	        ["image", "图片理解", visionCount > 0, visionCount ? tokenNumber(visionCount) + " 个模型支持图片理解" : "没有开启图片理解的模型"],
@@ -7138,6 +7267,8 @@
 	        ["book-open", "提示词库", true, "常用提示词模板已启用"],
 	        ["star", "收藏回答", true, "按账号隔离保存收藏"],
 	        ["user-round-cog", "AI档案", true, "长期档案已启用"],
+	        ["quote", "引用提问", features.selection_quote !== false, features.selection_quote !== false ? "选中文本后可引用到输入框" : "管理员已关闭"],
+	        ["panel-right-open", "侧边讨论", features.side_discussion !== false, features.side_discussion !== false ? "桌面端并行讨论可用" : "管理员已关闭"],
 	        ["map", "Conversation Minimap", true, "桌面端对话缩略导航"]
 	      ];
 	      const box = $("pluginStatusList");
@@ -8281,6 +8412,9 @@
 	    $("toggleSidebarTools").addEventListener("click", toggleSidebarTools);
 	    $("sidebarToolsPopover").addEventListener("click", (event) => {
 	      if (event.target.closest("button")) closeSidebarTools();
+	    });
+	    $("featureToggleList")?.addEventListener("change", (event) => {
+	      if (event.target?.matches?.("[data-feature-toggle]")) saveAdminFeatures();
 	    });
 	    document.addEventListener("pointerdown", handleSidebarToolsOutsidePointer);
 	    $("closeTokenActivity").addEventListener("click", closeTokenActivity);

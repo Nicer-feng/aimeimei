@@ -260,6 +260,20 @@ def ensure_secrets():
             web_search["depth"] = "advanced"
             changed = True
 
+
+    feature_flags = data.get("feature_flags")
+    if not isinstance(feature_flags, dict):
+        data["feature_flags"] = {
+            "selection_quote": True,
+            "side_discussion": True,
+        }
+        changed = True
+    else:
+        for key in ("selection_quote", "side_discussion"):
+            if key not in feature_flags:
+                feature_flags[key] = True
+                changed = True
+
     if changed:
         write_private(SECRETS_PATH, json.dumps(data, indent=2) + "\n")
 

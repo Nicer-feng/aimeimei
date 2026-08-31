@@ -118,6 +118,8 @@ class AppHandler(
             return self.require_user(self.handle_global_search)
         if path == "/api/search-config":
             return self.require_user(self.handle_search_config)
+        if path == "/api/features":
+            return self.require_user(self.handle_feature_flags)
         if path == "/api/profiles":
             return self.require_user(self.handle_profiles)
         if path == "/api/prompts":
@@ -136,6 +138,8 @@ class AppHandler(
             return self.require_admin(self.handle_admin_tts)
         if path == "/api/admin/search":
             return self.require_admin(self.handle_admin_search)
+        if path == "/api/admin/features":
+            return self.require_admin(self.handle_admin_features)
         if path == "/api/admin/token-stats":
             return self.require_admin(self.handle_admin_token_stats)
         if path == "/api/admin/cost-stats":
@@ -195,6 +199,8 @@ class AppHandler(
             return self.require_admin(self.handle_admin_tts)
         if path == "/api/admin/search":
             return self.require_admin(self.handle_admin_search)
+        if path == "/api/admin/features":
+            return self.require_admin(self.handle_admin_features)
         if path == "/api/admin/cost-recalculate":
             return self.require_admin(self.handle_admin_cost_recalculate)
         if path == "/api/admin/password":

@@ -12,6 +12,26 @@ class AdminHandlersMixin:
     def handle_search_config(self):
         return self.json({"search": public_web_search_config(self.server.secrets)})
 
+    def handle_feature_flags(self):
+        return self.json({"features": feature_flags(self.server.secrets)})
+
+    def handle_admin_features(self):
+        if self.command == "GET":
+            return self.json({"features": feature_flags(self.server.secrets)})
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+        current = feature_flags(self.server.secrets)
+        incoming = data.get("features") if isinstance(data.get("features"), dict) else data
+        updated = {
+            "selection_quote": bool(incoming.get("selection_quote", current["selection_quote"])),
+            "side_discussion": bool(incoming.get("side_discussion", current["side_discussion"])),
+        }
+        self.server.secrets["feature_flags"] = updated
+        write_private(SECRETS_PATH, json.dumps(self.server.secrets, indent=2) + "\n")
+        return self.json({"ok": True, "features": updated})
+
     def handle_global_search(self):
         user_id = self.current_user()["id"]
         params = parse_qs(urlparse(self.path).query)
@@ -937,6 +957,7 @@ class AdminHandlersMixin:
         cat_oss = cat_oss_config(self.server.secrets)
         tingwu = tingwu_config(self.server.secrets)
         tts = tts_config(self.server.secrets)
+        features = feature_flags(self.server.secrets)
         with db() as conn:
             user_count = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
             active_user_count = conn.execute("SELECT COUNT(*) AS n FROM users WHERE is_active=1").fetchone()["n"]
@@ -977,6 +998,7 @@ class AdminHandlersMixin:
                         "configured": bool(tts["configured"]),
                         "voice_count": len(tts["voices"]),
                     },
+                    "features": features,
                 }
             }
         )

@@ -2,6 +2,9 @@ from .shared import *
 
 
 class ChatHandlersMixin:
+    def side_discussion_disabled_error(self):
+        return self.error(HTTPStatus.FORBIDDEN, "侧边讨论已由管理员关闭")
+
     def side_discussion_id_from_path(self):
         parts = urllib.parse.urlparse(self.path).path.strip("/").split("/")
         return urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
@@ -21,6 +24,8 @@ class ChatHandlersMixin:
         ).fetchone()
 
     def handle_side_discussions(self):
+        if not feature_enabled(self.server.secrets, "side_discussion"):
+            return self.side_discussion_disabled_error()
         user_id = self.current_user()["id"]
         if self.command == "GET":
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -109,6 +114,8 @@ class ChatHandlersMixin:
         return self.json({"discussion": side_discussion_public(row)}, status=HTTPStatus.CREATED)
 
     def handle_side_discussion_item(self):
+        if not feature_enabled(self.server.secrets, "side_discussion"):
+            return self.side_discussion_disabled_error()
         user_id = self.current_user()["id"]
         discussion_id = self.side_discussion_id_from_path()
         with db() as conn:
@@ -133,6 +140,8 @@ class ChatHandlersMixin:
         )
 
     def handle_side_discussion_send(self):
+        if not feature_enabled(self.server.secrets, "side_discussion"):
+            return self.side_discussion_disabled_error()
         user_id = self.current_user()["id"]
         discussion_id = self.side_discussion_id_from_path()
         try:
@@ -388,6 +397,8 @@ class ChatHandlersMixin:
             pass
 
     def handle_side_discussion_conversation(self):
+        if not feature_enabled(self.server.secrets, "side_discussion"):
+            return self.side_discussion_disabled_error()
         user_id = self.current_user()["id"]
         discussion_id = self.side_discussion_id_from_path()
         with db() as conn:
