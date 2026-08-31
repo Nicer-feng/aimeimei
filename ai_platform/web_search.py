@@ -255,7 +255,8 @@ def enrich_search_result_snippets(results, query, conn=None):
             continue
         needs_fetch.append(item)
     if needs_fetch:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(needs_fetch))) as executor:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(needs_fetch)))
+        try:
             future_map = {
                 executor.submit(fetch_relevant_source_snippet, item, query): item
                 for item in needs_fetch
@@ -278,6 +279,8 @@ def enrich_search_result_snippets(results, query, conn=None):
                 if snippet:
                     item["snippet"] = snippet[:900]
                 save_source_snippet_cache(conn, url or item.get("url") or "", snippet, status)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
     for item in results:
         item["snippet"] = normalize_space(item.get("snippet") or "")[:900]
     return results

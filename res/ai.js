@@ -3669,7 +3669,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.7" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.8" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -5542,12 +5542,10 @@
 	        title.textContent = item.title || item.hostname || item.url;
 	        link.append(meta, title);
 	        const snippetText = String(item.snippet || "").trim();
-	        if (snippetText) {
-	          const snippet = document.createElement("p");
-	          snippet.className = "reference-source-snippet";
-	          snippet.textContent = snippetText;
-	          link.appendChild(snippet);
-	        }
+	        const snippet = document.createElement("p");
+	        snippet.className = "reference-source-snippet" + (snippetText ? "" : " is-empty");
+	        snippet.textContent = snippetText || "暂无可展示的相关摘要，点击打开原网页查看。";
+	        link.appendChild(snippet);
 	        const url = document.createElement("span");
 	        url.className = "reference-source-url";
 	        url.textContent = item.url;
@@ -7109,7 +7107,8 @@
 	                assistant.id = event.message_id;
 	                assistant.favorite_id = null;
 	                assistant.usage = event.usage || assistant.usage || null;
-	                updateStreamingMessage(assistant, { saved: true, usage: true });
+	                if (Array.isArray(event.sources)) assistant.sources = event.sources;
+	                updateStreamingMessage(assistant, { saved: true, usage: true, sources: true });
 	                continue;
 	              }
 	              const choice = event.choices?.[0] || {};

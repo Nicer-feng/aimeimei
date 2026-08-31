@@ -326,6 +326,14 @@ class ChatHandlersMixin:
         finally:
             response.close()
 
+        if search_results:
+            with db() as source_conn:
+                search_results = enrich_search_result_snippets(
+                    search_results,
+                    build_search_query(content),
+                    source_conn,
+                )
+
         assistant_text = "".join(assistant_parts).strip()
         reasoning_text = "".join(reasoning_parts).strip()
         assistant_text, think_reasoning = split_think_blocks(assistant_text)
@@ -1300,6 +1308,7 @@ class ChatHandlersMixin:
                     "total_tokens": total_tokens,
                     "estimated_cost": estimated_cost,
                 },
+                "sources": public_sources(search_results),
             }
             try:
                 self.wfile.write(

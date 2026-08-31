@@ -8052,6 +8052,9 @@
       -webkit-line-clamp: 3;
       overflow-wrap: anywhere;
     }
+    .reference-source-snippet.is-empty {
+      color: var(--color-text-tertiary);
+    }
     .reference-source-item:hover .reference-source-snippet {
       -webkit-line-clamp: 5;
     }
