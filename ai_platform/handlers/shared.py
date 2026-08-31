@@ -104,7 +104,6 @@ from ..web_search import (
     build_search_context,
     build_search_query,
     clamp_int,
-    format_sources_markdown,
     native_search_results_from_item,
     perform_web_search,
     public_sources,

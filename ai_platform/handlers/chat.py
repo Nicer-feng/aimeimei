@@ -1216,26 +1216,6 @@ class ChatHandlersMixin:
         finally:
             response.close()
 
-        sources_markdown = format_sources_markdown(search_results)
-        if sources_markdown:
-            source_event = {
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {"content": sources_markdown},
-                        "finish_reason": None,
-                    }
-                ]
-            }
-            try:
-                self.wfile.write(
-                    ("data: " + json.dumps(source_event, ensure_ascii=False) + "\n\n").encode()
-                )
-                self.wfile.flush()
-            except Exception:
-                pass
-            assistant_parts.append(sources_markdown)
-
         assistant_text = "".join(assistant_parts).strip()
         reasoning_text = "".join(reasoning_parts).strip()
         assistant_text, think_reasoning = split_think_blocks(assistant_text)

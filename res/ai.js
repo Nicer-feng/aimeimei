@@ -130,7 +130,10 @@
 	      petSuppressClickUntil: 0,
 	      petCorrectionFrame: 0,
 	      shareTargetMessage: null,
-	      activeShare: null
+	      activeShare: null,
+	      referenceSources: [],
+	      referenceMessage: null,
+	      referenceHighlightIndex: 0
 	    };
 	    let lucideRefreshQueued = false;
 	    $("adminKey").value = state.adminKey;
@@ -3549,6 +3552,7 @@
 	      state.newConversationPromise = (async () => {
 	        stopCurrentTts();
 	        closeSideDiscussion();
+	        closeReferenceSources();
 	        state.sideDiscussions = [];
 	        state.activeSideDiscussion = null;
 	        state.sideDiscussionMessages = [];
@@ -3578,6 +3582,7 @@
     }
 
 	    async function selectConversation(id, options = {}) {
+	      closeReferenceSources();
 	      if (state.currentConversation?.id !== id) {
 	        stopCurrentTts();
 	        saveCurrentDraft();
@@ -3664,7 +3669,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.5" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.6" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -4301,8 +4306,24 @@
 	      return { content: content.trim(), reasoning: reasoning.join("\n\n"), reasoningOpen };
 	    }
 
+	    function stripLegacySourcesMarkdown(value) {
+	      let text = String(value || "");
+	      const markers = ["\n### 参考来源", "\n## 参考来源", "\n参考来源\n"];
+	      let cut = -1;
+	      for (const marker of markers) {
+	        const index = text.lastIndexOf(marker);
+	        if (index >= 0 && index > cut) cut = index;
+	      }
+	      if (cut >= 0) {
+	        const before = text.slice(0, cut).replace(/\n-{3,}\s*$/m, "").trimEnd();
+	        return before;
+	      }
+	      return text;
+	    }
+
 	    function visibleMessageContent(message) {
-	      return splitThinkContent(message.content || "").content;
+	      const content = splitThinkContent(message.content || "").content;
+	      return message?.role === "assistant" ? stripLegacySourcesMarkdown(content) : content;
 	    }
 
 	    function parseQuotedUserContent(source) {
@@ -4538,40 +4559,106 @@
 	      updateReasoningHeader(panel, message, reasoningContent);
 	    }
 
-	    function sourceDomain(value) {
+	    function sourceHostname(value) {
 	      try {
-	        return new URL(value).hostname.replace(/^www\./, "");
+	        return new URL(value).hostname;
 	      } catch {
-	        return "来源";
+	        return "";
 	      }
 	    }
 
-	    function renderSourcesPanel(panel, sources) {
-	      if (!panel) return;
-	      const items = Array.isArray(sources) ? sources.filter((item) => item && item.url) : [];
-	      panel.hidden = !items.length;
-	      panel.innerHTML = "";
-	      if (!items.length) return;
-	      const title = document.createElement("div");
-	      title.className = "sources-title";
-	      title.textContent = "参考来源";
-	      const list = document.createElement("div");
-	      list.className = "sources-list";
-	      for (const item of items.slice(0, 6)) {
-	        const link = document.createElement("a");
-	        link.className = "source-card";
-	        link.href = safeHref(item.url);
-	        link.target = "_blank";
-	        link.rel = "noreferrer";
-	        link.title = item.title || item.url;
-	        const strong = document.createElement("strong");
-	        strong.textContent = (item.position ? item.position + ". " : "") + (item.title || sourceDomain(item.url));
-	        const domain = document.createElement("span");
-	        domain.textContent = sourceDomain(item.url);
-	        link.append(strong, domain);
-	        list.appendChild(link);
+	    function sourceDomain(value) {
+	      const host = sourceHostname(value);
+	      return host ? host.replace(/^www\./, "") : "来源";
+	    }
+
+	    function normalizeSearchSource(rawSource, index = 0) {
+	      const raw = rawSource || {};
+	      const url = String(raw.url || raw.link || raw.href || "").trim();
+	      const hostname = sourceDomain(url);
+	      const favicon = String(raw.favicon || raw.icon || raw.favicon_url || raw.site_icon || raw.logo || "").trim();
+	      return {
+	        id: raw.id || raw.source_id || url || String(index + 1),
+	        url,
+	        hostname,
+	        favicon,
+	        title: String(raw.title || raw.name || hostname || url || "参考来源").trim(),
+	        snippet: String(raw.snippet || raw.summary || raw.content || raw.description || "").trim(),
+	        publishedAt: raw.published_at || raw.publishedAt || raw.date || raw.created_at || "",
+	        sourceName: String(raw.source_name || raw.sourceName || raw.site_name || hostname || "").trim(),
+	        citationIndex: Number(raw.citation_index || raw.position || index + 1) || index + 1
+	      };
+	    }
+
+	    function normalizedSearchSources(sources) {
+	      return (Array.isArray(sources) ? sources : [])
+	        .map((item, index) => normalizeSearchSource(item, index))
+	        .filter((item) => item.url);
+	    }
+
+	    function sourceFaviconUrl(source) {
+	      if (source?.favicon && /^(https?:)?\/\//i.test(source.favicon)) return source.favicon;
+	      const host = sourceHostname(source?.url || "");
+	      return host ? "https://" + host + "/favicon.ico" : "";
+	    }
+
+	    function createSourceFavicon(source) {
+	      const box = document.createElement("span");
+	      box.className = "source-favicon";
+	      const url = sourceFaviconUrl(source);
+	      if (url) {
+	        const img = document.createElement("img");
+	        img.alt = "";
+	        img.loading = "lazy";
+	        img.referrerPolicy = "no-referrer";
+	        img.src = url;
+	        img.addEventListener("error", () => {
+	          box.classList.add("is-fallback");
+	          box.innerHTML = iconMarkup("globe", "🌐");
+	          queueLucideRefresh();
+	        }, { once: true });
+	        box.appendChild(img);
+	      } else {
+	        box.classList.add("is-fallback");
+	        box.innerHTML = iconMarkup("globe", "🌐");
 	      }
-	      panel.append(title, list);
+	      return box;
+	    }
+
+	    function sourcePreviewItems(items, limit = 5) {
+	      const seen = new Set();
+	      const unique = [];
+	      for (const item of items) {
+	        const key = item.hostname || item.url;
+	        if (seen.has(key)) continue;
+	        seen.add(key);
+	        unique.push(item);
+	        if (unique.length >= limit) break;
+	      }
+	      return unique.length ? unique : items.slice(0, limit);
+	    }
+
+	    function renderSourcesPanel(panel, sources, message = null) {
+	      if (!panel) return;
+	      const items = normalizedSearchSources(sources);
+	      panel.hidden = !items.length || Boolean(message?.thinking);
+	      panel.replaceChildren();
+	      if (!items.length || message?.thinking) return;
+	      const button = document.createElement("button");
+	      button.type = "button";
+	      button.className = "sources-entry";
+	      button.title = "查看 " + items.length + " 个参考来源";
+	      button.setAttribute("aria-label", button.title);
+	      const stack = document.createElement("span");
+	      stack.className = "source-favicon-stack";
+	      sourcePreviewItems(items).forEach((item) => stack.appendChild(createSourceFavicon(item)));
+	      const count = document.createElement("span");
+	      count.className = "sources-entry-count";
+	      count.textContent = items.length + " 个网页";
+	      button.append(stack, count);
+	      button.addEventListener("click", () => openReferenceSources(message, { sources: items }));
+	      panel.appendChild(button);
+	      queueLucideRefresh();
 	    }
 
 	    function formatMessageTime(value) {
@@ -5242,6 +5329,7 @@
 	        setStatus("chatStatus", "请扩大浏览器窗口后使用侧边讨论。", "err");
 	        return;
 	      }
+	      if ($("referenceSourcesPanel") && !$("referenceSourcesPanel").hidden) closeReferenceSources();
 	      const res = await api(`/api/side-discussions/${encodeURIComponent(discussionId)}`);
 	      if (!res.ok) {
 	        setStatus("chatStatus", await readError(res, "侧边讨论打开失败。"), "err");
@@ -5397,6 +5485,89 @@
 	        $("sideDiscussionSend").title = "发送";
 	        queueLucideRefresh();
 	      }
+	    }
+
+	    function closeReferenceSources() {
+	      if ($("referenceSourcesPanel")) $("referenceSourcesPanel").hidden = true;
+	      if ($("appView")) $("appView").classList.remove("references-open");
+	      document.body.classList.remove("references-active");
+	      state.referenceSources = [];
+	      state.referenceMessage = null;
+	      state.referenceHighlightIndex = 0;
+	      syncComposerLayout();
+	      queueConversationMinimap();
+	    }
+
+	    function formatSourceDate(value) {
+	      if (!value) return "";
+	      if (typeof value === "number") return formatDate(value);
+	      const date = new Date(value);
+	      if (Number.isNaN(date.getTime())) return String(value).slice(0, 16);
+	      const pad = (num) => String(num).padStart(2, "0");
+	      return date.getFullYear() + "/" + pad(date.getMonth() + 1) + "/" + pad(date.getDate());
+	    }
+
+	    function renderReferenceSourcesPanel(highlightIndex = 0) {
+	      const list = $("referenceSourcesList");
+	      if (!list) return;
+	      const items = normalizedSearchSources(state.referenceSources);
+	      $("referenceSourcesCount").textContent = items.length + " 个网页";
+	      list.replaceChildren();
+	      if (!items.length) {
+	        const empty = document.createElement("div");
+	        empty.className = "reference-sources-empty";
+	        empty.innerHTML = iconLabel("globe", "这条回答没有可查看的参考来源", "🌐");
+	        list.appendChild(empty);
+	        queueLucideRefresh();
+	        return;
+	      }
+	      items.forEach((item, index) => {
+	        const link = document.createElement("a");
+	        link.className = "reference-source-item" + (highlightIndex === item.citationIndex ? " is-highlighted" : "");
+	        link.id = "reference-source-" + item.citationIndex;
+	        link.href = safeHref(item.url);
+	        link.target = "_blank";
+	        link.rel = "noopener noreferrer";
+	        const meta = document.createElement("div");
+	        meta.className = "reference-source-meta";
+	        const site = document.createElement("span");
+	        site.className = "reference-source-site";
+	        site.append(createSourceFavicon(item), document.createTextNode(item.sourceName || item.hostname || "参考来源"));
+	        const side = document.createElement("span");
+	        side.className = "reference-source-side";
+	        const date = formatSourceDate(item.publishedAt);
+	        side.textContent = (date ? date + "  " : "") + item.citationIndex;
+	        meta.append(site, side);
+	        const title = document.createElement("strong");
+	        title.textContent = item.title || item.hostname || item.url;
+	        const snippet = document.createElement("p");
+	        snippet.textContent = item.snippet || item.url;
+	        link.append(meta, title, snippet);
+	        list.appendChild(link);
+	      });
+	      queueLucideRefresh();
+	      if (highlightIndex) {
+	        requestAnimationFrame(() => {
+	          const target = $("reference-source-" + highlightIndex);
+	          target?.scrollIntoView({ block: "center", behavior: "smooth" });
+	          setTimeout(() => target?.classList.remove("is-highlighted"), 1600);
+	        });
+	      }
+	    }
+
+	    function openReferenceSources(message, options = {}) {
+	      const sources = normalizedSearchSources(options.sources || message?.sources || []);
+	      if (!sources.length) return;
+	      if ($("sideDiscussionPanel") && !$("sideDiscussionPanel").hidden) closeSideDiscussion();
+	      state.referenceSources = sources;
+	      state.referenceMessage = message || null;
+	      state.referenceHighlightIndex = Number(options.highlightIndex || 0);
+	      if ($("referenceSourcesPanel")) $("referenceSourcesPanel").hidden = false;
+	      if ($("appView")) $("appView").classList.add("references-open");
+	      document.body.classList.add("references-active");
+	      renderReferenceSourcesPanel(state.referenceHighlightIndex);
+	      syncComposerLayout();
+	      queueConversationMinimap();
 	    }
 
 	    function quoteLastSideAnswer() {
@@ -5803,7 +5974,7 @@
 	        avatar.alt = "";
 	        role.append(avatar, document.createTextNode(message.thinking ? "槑槑 · 思考中" : "槑槑"));
 	      }
-	      renderSourcesPanel(sourcesPanel, message.role === "assistant" ? message.sources : []);
+	      renderSourcesPanel(sourcesPanel, message.role === "assistant" ? message.sources : [], message);
 	      if (time) {
 	        const tokens = message.role === "assistant" ? messageTotalTokens(message) : 0;
 	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
@@ -6073,7 +6244,7 @@
 	        ? updateLiveReasoningPanel(reasoningPanel, message, reasoningContent, options)
 	        : false;
 
-	      if (options.sources) renderSourcesPanel(sourcesPanel, message.sources || []);
+	      if (options.sources) renderSourcesPanel(sourcesPanel, message.sources || [], message);
 	      if (options.usage || options.final) {
 	        const tokens = messageTotalTokens(message);
 	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
@@ -8497,6 +8668,7 @@
 	    $("prompt").addEventListener("focus", handlePromptFocus);
 	    $("refreshForUpdate").addEventListener("click", refreshForVersionUpdate);
 	    $("snoozeVersionUpdate").addEventListener("click", snoozeVersionUpdate);
+	    if ($("closeReferenceSources")) $("closeReferenceSources").addEventListener("click", closeReferenceSources);
 	    $("closeVersionUpdate").addEventListener("click", snoozeVersionUpdate);
 	    $("openInterfaceSettings").addEventListener("click", toggleInterfaceSettings);
 	    $("closeInterfaceSettings").addEventListener("click", closeInterfaceSettings);
@@ -8541,6 +8713,7 @@
 	      if (event.key === "Escape") {
 	        hideSelectionToolbar({ clearSelection: true });
 	        if (!$("sideDiscussionPanel").hidden) closeSideDiscussion();
+	        if ($("referenceSourcesPanel") && !$("referenceSourcesPanel").hidden) closeReferenceSources();
 	        closeMessageQuotePreviews();
 	        if ($("versionUpdateToast")?.classList.contains("show")) snoozeVersionUpdate();
 	        closeModelPicker();
