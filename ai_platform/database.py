@@ -191,6 +191,14 @@ def init_db(secrets_data=None):
               FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS source_snippet_cache (
+              url_hash TEXT PRIMARY KEY,
+              url TEXT NOT NULL,
+              snippet TEXT NOT NULL DEFAULT '',
+              fetch_status TEXT NOT NULL DEFAULT '',
+              fetched_at INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS message_tts (
               id TEXT PRIMARY KEY,
               user_id TEXT NOT NULL,

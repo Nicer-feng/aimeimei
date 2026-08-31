@@ -835,6 +835,7 @@ class ChatHandlersMixin:
                     return self.error(HTTPStatus.BAD_REQUEST, "web search is not configured")
                 try:
                     search_results = perform_web_search(content, search_config)
+                    search_results = enrich_search_result_snippets(search_results, build_search_query(content), conn)
                 except urllib.error.HTTPError as exc:
                     detail = exc.read(65536).decode(errors="replace")
                     return self.error(

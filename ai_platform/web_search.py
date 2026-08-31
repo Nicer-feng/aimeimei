@@ -1,9 +1,13 @@
+import concurrent.futures
+import hashlib
+import html
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from .runtime import current_year, today_text
 
@@ -67,6 +71,217 @@ def search_result(title, url, snippet):
         "url": str(url or "").strip(),
         "snippet": str(snippet or "").strip()[:900],
     }
+
+SNIPPET_MIN_LENGTH = 80
+SNIPPET_MAX_LENGTH = 360
+SOURCE_FETCH_LIMIT = 6
+SOURCE_FETCH_TIMEOUT = 3
+SOURCE_CACHE_TTL = 7 * 24 * 3600
+STOPWORDS = {
+    "的", "了", "和", "是", "在", "有", "与", "及", "或", "吗", "呢", "啊", "把", "给", "为", "对", "中", "上", "下", "最新", "官方",
+    "the", "and", "for", "with", "from", "this", "that", "what", "when", "where", "how", "latest", "official",
+}
+
+
+def normalize_space(value):
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def source_url_hash(url):
+    return hashlib.sha256(str(url or "").strip().encode()).hexdigest()
+
+
+def extract_keywords(*values):
+    text = " ".join(str(value or "") for value in values).lower()
+    words = set()
+    for word in re.findall(r"[a-z0-9][a-z0-9._+-]{1,}|[\u4e00-\u9fff]{2,}", text):
+        if word in STOPWORDS:
+            continue
+        if re.fullmatch(r"[\u4e00-\u9fff]{2,}", word) and len(word) > 4:
+            for size in (2, 3, 4):
+                for index in range(0, max(0, len(word) - size + 1)):
+                    piece = word[index:index + size]
+                    if piece not in STOPWORDS:
+                        words.add(piece)
+        else:
+            words.add(word)
+    return words
+
+
+def clean_html_text(raw_html):
+    value = str(raw_html or "")
+    value = re.sub(r"(?is)<(script|style|noscript|svg|canvas|iframe|form|header|footer|nav|aside)[^>]*>.*?</\1>", " ", value)
+    value = re.sub(r"(?is)<!--.*?-->", " ", value)
+    value = re.sub(r"(?is)</(p|div|section|article|main|h[1-6]|li|tr|br)>", "\n", value)
+    value = re.sub(r"(?is)<[^>]+>", " ", value)
+    value = html.unescape(value)
+    value = value.replace("\u00a0", " ")
+    lines = []
+    for line in re.split(r"[\r\n]+", value):
+        line = normalize_space(line)
+        if len(line) < 24:
+            continue
+        if line.count("|") > 8 or line.count("/") > 16:
+            continue
+        if re.search(r"(登录|注册|菜单|导航|广告|cookie|隐私政策|版权所有|ICP备案)", line) and len(line) < 80:
+            continue
+        lines.append(line)
+    return "\n".join(lines[:240])
+
+
+def fetch_page_text(url):
+    parsed = urlparse(str(url or ""))
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; AI-Meimei/2.0; +https://feng.asia)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=SOURCE_FETCH_TIMEOUT) as response:
+        content_type = response.headers.get("Content-Type", "")
+        if not any(kind in content_type.lower() for kind in ("text/html", "text/plain", "application/xhtml")):
+            return ""
+        data = response.read(524288)
+        charset_match = re.search(r"charset=([\w.-]+)", content_type, re.I)
+        charset = charset_match.group(1) if charset_match else "utf-8"
+        try:
+            raw = data.decode(charset, errors="replace")
+        except LookupError:
+            raw = data.decode("utf-8", errors="replace")
+    return clean_html_text(raw)
+
+
+def paragraph_score(paragraph, keywords):
+    lower = paragraph.lower()
+    score = 0
+    for keyword in keywords:
+        if not keyword:
+            continue
+        hits = lower.count(keyword.lower())
+        if hits:
+            score += hits * (3 if len(keyword) >= 4 else 2)
+    if re.search(r"\b20\d{2}\b", paragraph):
+        score += 1
+    return score
+
+
+def relevant_snippet_from_text(text, query, title=""):
+    paragraphs = [normalize_space(item) for item in re.split(r"(?:\n+|(?<=[。！？；.!?;])\s+)", text or "")]
+    paragraphs = [item for item in paragraphs if len(item) >= 24]
+    if not paragraphs:
+        return ""
+    keywords = extract_keywords(query, title)
+    ranked = []
+    for index, paragraph in enumerate(paragraphs[:180]):
+        score = paragraph_score(paragraph, keywords)
+        if score > 0:
+            ranked.append((score, index, paragraph))
+    if ranked:
+        selected = sorted(sorted(ranked, reverse=True)[:2], key=lambda item: item[1])
+        snippet = " ".join(item[2] for item in selected)
+    else:
+        snippet = paragraphs[0]
+    snippet = normalize_space(snippet)
+    if len(snippet) > SNIPPET_MAX_LENGTH:
+        snippet = snippet[:SNIPPET_MAX_LENGTH].rstrip() + "..."
+    return snippet
+
+
+def cached_source_snippet(conn, url):
+    if not conn or not url:
+        return ""
+    try:
+        row = conn.execute(
+            "SELECT snippet, fetched_at FROM source_snippet_cache WHERE url_hash=?",
+            (source_url_hash(url),),
+        ).fetchone()
+    except Exception:
+        return ""
+    if not row:
+        return ""
+    try:
+        if int(row["fetched_at"] or 0) < int(time.time()) - SOURCE_CACHE_TTL:
+            return ""
+    except Exception:
+        return ""
+    return str(row["snippet"] or "").strip()
+
+
+def save_source_snippet_cache(conn, url, snippet, status="ok"):
+    if not conn or not url:
+        return
+    try:
+        conn.execute(
+            """
+            INSERT INTO source_snippet_cache(url_hash, url, snippet, fetch_status, fetched_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(url_hash) DO UPDATE SET
+              url=excluded.url,
+              snippet=excluded.snippet,
+              fetch_status=excluded.fetch_status,
+              fetched_at=excluded.fetched_at
+            """,
+            (source_url_hash(url), url, str(snippet or "")[:900], status, int(time.time())),
+        )
+    except Exception:
+        pass
+
+
+def fetch_relevant_source_snippet(item, query):
+    try:
+        page_text = fetch_page_text(item.get("url") or "")
+        snippet = relevant_snippet_from_text(page_text, query, item.get("title") or "")
+        return item.get("url") or "", snippet, "ok" if snippet else "empty"
+    except Exception:
+        return item.get("url") or "", "", "failed"
+
+
+def enrich_search_result_snippets(results, query, conn=None):
+    if not results:
+        return results
+    needs_fetch = []
+    for item in results[:SOURCE_FETCH_LIMIT]:
+        snippet = normalize_space(item.get("snippet") or "")
+        if len(snippet) >= SNIPPET_MIN_LENGTH:
+            item["snippet"] = snippet[:900]
+            continue
+        cached = cached_source_snippet(conn, item.get("url") or "")
+        if cached:
+            item["snippet"] = cached[:900]
+            continue
+        needs_fetch.append(item)
+    if needs_fetch:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(needs_fetch))) as executor:
+            future_map = {
+                executor.submit(fetch_relevant_source_snippet, item, query): item
+                for item in needs_fetch
+            }
+            done, pending = concurrent.futures.wait(
+                future_map,
+                timeout=SOURCE_FETCH_TIMEOUT * 2,
+                return_when=concurrent.futures.ALL_COMPLETED,
+            )
+            for future in pending:
+                future.cancel()
+            for future in done:
+                try:
+                    url, snippet, status = future.result()
+                except Exception:
+                    continue
+                item = future_map.get(future)
+                if not item:
+                    continue
+                if snippet:
+                    item["snippet"] = snippet[:900]
+                save_source_snippet_cache(conn, url or item.get("url") or "", snippet, status)
+    for item in results:
+        item["snippet"] = normalize_space(item.get("snippet") or "")[:900]
+    return results
+
 
 
 FRESHNESS_PATTERNS = [
