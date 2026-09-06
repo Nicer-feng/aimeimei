@@ -397,6 +397,7 @@ class AdminHandlersMixin:
                 args,
             ).fetchall() if view in ("all", "users") else []
 
+            # Join by conversation; the recent-user index scans too many messages here.
             model_rows = conn.execute(
                 f"""
                 SELECT
@@ -417,7 +418,8 @@ class AdminHandlersMixin:
                   MAX(CASE WHEN m.role='assistant' THEN m.created_at ELSE NULL END) AS last_used_at
                 FROM models mo
                 LEFT JOIN conversations c ON c.model_id=mo.id
-                LEFT JOIN messages m ON m.conversation_id=c.id AND m.user_id=c.user_id AND m.role='assistant'
+                LEFT JOIN messages m INDEXED BY idx_messages_user_conversation
+                  ON m.conversation_id=c.id AND m.user_id=c.user_id AND m.role='assistant'
                 {model_where_sql}
                 GROUP BY mo.id
                 ORDER BY {model_order_sql}
