@@ -27,7 +27,8 @@
 	      streamMessage: null,
 	      streamQueue: "",
 	      streamTimer: null,
-      streamResolve: null,
+	      streamResolve: null,
+	      streamPace: null,
 	      reasoningClockTimer: 0,
 	      activeReasoningMessage: null,
 	      newConversationPromise: null,
@@ -3690,7 +3691,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.9" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.10" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -6888,6 +6889,7 @@
 	      state.streamQueue = "";
 	      state.streamTimer = null;
 	      state.streamResolve = null;
+	      state.streamPace = null;
 	      state.firstTokenAt = null;
 	      state.lastStreamMinimapAt = 0;
 	    }
@@ -6933,11 +6935,22 @@
 	        state.streamQueue = "";
 	      }
 	      state.streamQueue += text;
+	      const now = performance.now();
+	      if (!state.streamPace) {
+	        state.streamPace = { lastTick: now, lastArrivalAt: 0, incomingRate: 0, rate: 100, credit: 0, deadline: 0 };
+	      }
+	      const pace = state.streamPace;
+	      if (pace.lastArrivalAt) {
+	        const arrivalMs = Math.min(3000, Math.max(40, now - pace.lastArrivalAt));
+	        const incomingRate = text.length * 1000 / arrivalMs;
+	        pace.incomingRate = pace.incomingRate ? pace.incomingRate * 0.68 + incomingRate * 0.32 : incomingRate;
+	      }
+	      pace.lastArrivalAt = now;
 	      if (!state.streamTimer) scheduleStreamTick();
 	    }
 
 	    function scheduleStreamTick() {
-	      state.streamTimer = setTimeout(streamTick, 32);
+	      state.streamTimer = setTimeout(streamTick, 24);
 	    }
 
 	    function streamTick() {
@@ -6952,7 +6965,13 @@
 	        resolveStreamDrain();
 	        return;
 	      }
-	      const count = streamChunkSize(state.streamQueue.length);
+	      let count = streamChunkSize(state.streamQueue.length);
+	      if (count <= 0) {
+	        scheduleStreamTick();
+	        return;
+	      }
+	      // Never paint half a UTF-16 surrogate pair while revealing received text.
+	      if (count < state.streamQueue.length && /[\uD800-\uDBFF]/.test(state.streamQueue[count - 1] || "")) count++;
 	      message.content += state.streamQueue.slice(0, count);
 	      state.streamQueue = state.streamQueue.slice(count);
 	      const parsed = splitThinkContent(message.content);
@@ -6969,14 +6988,30 @@
 	    }
 
 	    function streamChunkSize(length) {
-	      if (length > 4000) return 160;
-	      if (length > 1800) return 112;
-	      if (length > 800) return 72;
-	      if (length > 320) return 44;
-	      if (length > 120) return 28;
-	      if (length > 40) return 16;
-	      if (length > 16) return 10;
-	      return length;
+	      const pace = state.streamPace;
+	      if (!pace || state.userStopped || document.hidden) return length;
+	      const now = performance.now();
+	      const elapsed = Math.min(50, Math.max(0, now - pace.lastTick));
+	      pace.lastTick = now;
+	      // Smooth rate changes rather than jumping at queue-length thresholds.
+	      let target = Math.max(72, pace.incomingRate * 0.88);
+	      if (!pace.incomingRate) target = 100;
+	      if (length > 2400) target = Math.max(target, 560);
+	      else if (length > 1200) target = Math.max(target, 360);
+	      else if (length > 480) target = Math.max(target, 190);
+	      target = Math.min(720, target);
+	      pace.rate += (target - pace.rate) * (1 - Math.exp(-elapsed / 360));
+	      let rate = pace.rate;
+	      if (pace.deadline) {
+	        const remaining = pace.deadline - now;
+	        if (remaining <= 0) return length;
+	        rate = Math.max(rate, length * 1000 / Math.max(32, remaining));
+	      }
+	      pace.credit += rate * elapsed / 1000;
+	      const count = Math.min(length, Math.floor(pace.credit));
+	      pace.credit -= count;
+	      if (count === length) pace.credit = 0;
+	      return count;
 	    }
 
 	    function resolveStreamDrain() {
@@ -6989,6 +7024,8 @@
 
 	    function drainAssistantQueue() {
 	      if (!state.streamQueue && !state.streamTimer) return Promise.resolve();
+	      // Bound the visual tail after EOF; no prolonged replay after generation ends.
+	      if (state.streamPace && !state.streamPace.deadline) state.streamPace.deadline = performance.now() + 800;
 	      return new Promise((resolve) => {
 	        state.streamResolve = resolve;
 	      });
