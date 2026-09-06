@@ -83,6 +83,13 @@
 	      tokenStatsExpandedUserId: "",
 	      tokenStatsExpandedModelId: "",
 	      tokenStatsTimer: 0,
+          tokenStatsCache: {},
+          tokenStatsRequest: null,
+          tokenStatsSeq: 0,
+          tokenStatsEpoch: 0,
+          tokenStatsDetails: new Map(),
+          tokenStatsDetailsPending: new Map(),
+          adminGetRequests: new Map(),
 	      costStats: null,
 	      tokenActivity: null,
 	      changelogEntries: [],
@@ -370,6 +377,7 @@
 	    }
 
 	    function applyCurrentUser(user) {
+          if (state.user?.id !== user?.id) resetTokenStats();
 	      state.user = user || null;
 	      const label = $("currentUserLabel");
 	      if (label) {
@@ -1289,7 +1297,20 @@
 	      localStorage.setItem("aiPlatformAdminKey", state.adminKey);
 	      const headers = new Headers(options.headers || {});
 	      headers.set("X-Admin-Key", state.adminKey);
-	      return request(path, { ...options, headers });
+          if ((options.method || "GET").toUpperCase() !== "GET" || options.signal) {
+            return request(path, { ...options, headers });
+          }
+          const key = JSON.stringify([state.user?.id, state.adminKey, path]);
+          let pending = state.adminGetRequests.get(key);
+          if (!pending) {
+            pending = request(path, { ...options, headers });
+            state.adminGetRequests.set(key, pending);
+          }
+          try {
+            return (await pending).clone();
+          } finally {
+            if (state.adminGetRequests.get(key) === pending) state.adminGetRequests.delete(key);
+          }
 	    }
 
 	    function hasAdminAccess() {
@@ -3669,7 +3690,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.8" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.9" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -7241,11 +7262,14 @@
 	      if (key === "overview") loadAdminOverview();
 	      if (key === "accounts") loadAdminUsers();
 	      if (key === "models") loadAdminModels();
-	      if (key === "keys") loadAdminModels();
+          if (key === "keys") {
+            loadAdminModels();
+            loadAdminSearch();
+          }
 	      if (key === "search") loadAdminSearch();
 	      if (key === "tts") loadAdminTts();
 	      if (key === "plugins") {
-	        if (!state.adminOverview) loadAdminOverview();
+	        loadAdminOverview();
 	        loadAdminFeatures();
 	        renderPluginStatus();
 	      }
@@ -7263,14 +7287,6 @@
 	      document.body.classList.add("admin-open");
 	      closeDesktopPetMenu();
 	      switchAdminSection(state.adminSection || "overview");
-	      loadAdminOverview();
-	      loadAdminModels();
-	      loadAdminSearch();
-	      loadAdminTts();
-	      loadAdminFeatures();
-	      loadAdminUsers();
-	      loadTokenStats();
-	      loadCostStats();
 	    }
 
 	    function closeSettings() {
@@ -7306,7 +7322,7 @@
 
 	    function renderAdminOverview() {
 	      const overview = state.adminOverview || {};
-	      const summary = state.tokenStats?.summary || {};
+	      const summary = overview.usage || state.tokenStats?.summary || {};
 	      const models = overview.models || {};
 	      const users = overview.users || {};
 	      const conversations = overview.conversations || {};
@@ -7435,7 +7451,7 @@
 	      const oss = overview.oss || {};
 	      const tingwu = overview.tingwu || {};
 	      const tts = overview.tts || {};
-	      const visionCount = state.adminModels.filter((item) => item.enabled && item.supports_vision).length;
+	      const visionCount = overview.models?.vision ?? state.adminModels.filter((item) => item.enabled && item.supports_vision).length;
 	      const features = state.adminFeatures || state.featureFlags || {};
 	      const plugins = [
 	        ["search", "联网搜索", Boolean(search.enabled && (search.configured || search.has_api_key)), search.enabled ? "已启用搜索策略" : "未启用"],
@@ -7681,76 +7697,168 @@
 	      )).join("");
 	    }
 
-	    function switchTokenStatsTab(tab) {
-	      const key = tab === "models" ? "models" : "users";
-	      state.tokenStatsTab = key;
-	      document.querySelectorAll(".token-tab[data-token-tab]").forEach((button) => {
-	        const active = button.dataset.tokenTab === key;
-	        button.classList.toggle("active", active);
-	        button.setAttribute("aria-selected", active ? "true" : "false");
-	      });
-	      document.querySelectorAll(".token-panel[data-token-panel]").forEach((panel) => {
-	        panel.classList.toggle("active", panel.dataset.tokenPanel === key);
-	      });
-	      renderTokenStatsStatus();
-	      queueLucideRefresh();
-	    }
+    const tokenStatsCacheMs = 30000;
 
-	    function renderTokenStatsStatus() {
-	      const data = state.tokenStats;
-	      if (!data) {
-	        setStatus("tokenStatsStatus", "");
-	        return;
-	      }
-	      if (state.tokenStatsTab === "models") {
-	        setStatus("tokenStatsStatus", data.models?.length ? "" : "没有匹配的模型。", data.models?.length ? "" : "err");
-	      } else {
-	        setStatus("tokenStatsStatus", data.users?.length ? "" : "没有匹配的账号。", data.users?.length ? "" : "err");
-	      }
-	    }
+    function resetTokenStats() {
+      clearTimeout(state.tokenStatsTimer);
+      state.tokenStatsRequest?.controller.abort();
+      state.tokenStatsRequest = null;
+      state.tokenStatsSeq++;
+      state.tokenStatsEpoch++;
+      state.tokenStats = null;
+      state.tokenStatsCache = {};
+      state.tokenStatsDetails.clear();
+      state.tokenStatsDetailsPending.clear();
+      state.tokenStatsExpandedUserId = "";
+      state.tokenStatsExpandedModelId = "";
+      for (const id of ["tokenStatsList", "modelTokenStatsList", "tokenSummaryGrid", "modelTokenSummaryGrid"]) {
+        const element = $(id);
+        if (element) element.replaceChildren();
+      }
+    }
 
-	    function scheduleTokenStatsLoad() {
-	      clearTimeout(state.tokenStatsTimer);
-	      state.tokenStatsTimer = setTimeout(loadTokenStats, 180);
-	    }
+    function switchTokenStatsTab(tab) {
+      const key = tab === "models" ? "models" : "users";
+      state.tokenStatsTab = key;
+      clearTimeout(state.tokenStatsTimer);
+      document.querySelectorAll(".token-tab[data-token-tab]").forEach((button) => {
+        const active = button.dataset.tokenTab === key;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      document.querySelectorAll(".token-panel[data-token-panel]").forEach((panel) => {
+        panel.classList.toggle("active", panel.dataset.tokenPanel === key);
+      });
+      loadTokenStats();
+      queueLucideRefresh();
+    }
 
-	    async function loadTokenStats() {
-	      const list = $("tokenStatsList");
-	      if (!hasAdminAccess()) {
-	        state.tokenStats = null;
-	        if (list) list.innerHTML = '<div class="status">管理员账号或管理密钥可查看 Token 统计。</div>';
-	        renderTokenSummary({});
-	        renderModelTokenSummary({});
-	        if ($("modelTokenStatsList")) $("modelTokenStatsList").innerHTML = '<div class="status">管理员账号或管理密钥可查看模型 Token 统计。</div>';
-	        renderAdminOverview();
-	        setStatus("tokenStatsStatus", "");
-	        return;
-	      }
-	      const query = encodeURIComponent(($("tokenStatsQuery")?.value || "").trim());
-	      const sort = encodeURIComponent($("tokenStatsSort")?.value || "tokens");
-	      const modelQuery = encodeURIComponent(($("modelTokenStatsQuery")?.value || "").trim());
-	      const modelSort = encodeURIComponent($("modelTokenStatsSort")?.value || "tokens");
-	      setStatus("tokenStatsStatus", "正在加载 Token 统计...", "");
-	      const res = await adminApi(`/api/admin/token-stats?q=${query}&sort=${sort}&model_q=${modelQuery}&model_sort=${modelSort}`);
-	      if (!res.ok) {
-	        if (list) list.innerHTML = "";
-	        state.tokenStats = null;
-	        renderTokenSummary({});
-	        renderModelTokenSummary({});
-	        if ($("modelTokenStatsList")) $("modelTokenStatsList").innerHTML = "";
-	        renderAdminOverview();
-	        setStatus("tokenStatsStatus", await readError(res, "Token 统计加载失败，稍后再试一下。"), "err");
-	        return;
-	      }
-	      const data = await res.json();
-	      state.tokenStats = data;
-	      renderTokenSummary(data.summary || {});
-	      renderModelTokenSummary(data.model_summary || {});
-	      renderTokenStatsList(data.users || []);
-	      renderModelTokenStatsList(data.models || []);
-	      renderAdminOverview();
-	      renderTokenStatsStatus();
-	    }
+    function renderTokenStatsStatus() {
+      const items = state.tokenStats?.[state.tokenStatsTab];
+      setStatus("tokenStatsStatus", !items || items.length ? "" :
+        (state.tokenStatsTab === "models" ? "没有匹配的模型。" : "没有匹配的账号。"));
+    }
+
+    function scheduleTokenStatsLoad() {
+      clearTimeout(state.tokenStatsTimer);
+      // A stale response must not overwrite results for the new search text.
+      state.tokenStatsRequest?.controller.abort();
+      state.tokenStatsRequest = null;
+      state.tokenStatsSeq++;
+      state.tokenStatsTimer = setTimeout(loadTokenStats, 200);
+    }
+
+    function applyTokenStats(data, tab) {
+      state.tokenStats = { ...state.tokenStats, ...data };
+      if (tab === "models") {
+        renderModelTokenSummary(data.model_summary || {});
+        renderModelTokenStatsList(data.models || []);
+      } else {
+        renderTokenSummary(data.summary || {});
+        renderTokenStatsList(data.users || []);
+      }
+      renderTokenStatsStatus();
+    }
+
+    async function loadTokenStats(options = {}) {
+      clearTimeout(state.tokenStatsTimer);
+      const tab = state.tokenStatsTab;
+      const list = $(tab === "models" ? "modelTokenStatsList" : "tokenStatsList");
+      if (!hasAdminAccess()) {
+        resetTokenStats();
+        if (list) list.innerHTML = "";
+        renderTokenSummary({});
+        renderModelTokenSummary({});
+        setStatus("tokenStatsStatus", "管理员账号或管理密钥可查看 Token 统计。");
+        return;
+      }
+      const isModels = tab === "models";
+      const query = ($(isModels ? "modelTokenStatsQuery" : "tokenStatsQuery")?.value || "").trim();
+      const sort = $(isModels ? "modelTokenStatsSort" : "tokenStatsSort")?.value || "tokens";
+      const params = new URLSearchParams({ view: tab });
+      params.set(isModels ? "model_q" : "q", query);
+      params.set(isModels ? "model_sort" : "sort", sort);
+      const key = params.toString();
+      if (state.tokenStatsRequest?.key === key) return state.tokenStatsRequest.promise;
+      state.tokenStatsRequest?.controller.abort();
+      state.tokenStatsRequest = null;
+      const seq = ++state.tokenStatsSeq;
+      const cached = state.tokenStatsCache[tab];
+      if (!options.force && cached?.key === key && Date.now() - cached.at < tokenStatsCacheMs) {
+        applyTokenStats(cached.data, tab);
+        return;
+      }
+      if (options.force) {
+        state.tokenStatsDetails.clear();
+        state.tokenStatsDetailsPending.clear();
+        state.tokenStatsEpoch++;
+      }
+      setStatus("tokenStatsStatus", "正在加载 Token 统计...");
+      const controller = new AbortController();
+      const pending = { key, controller, promise: null };
+      state.tokenStatsRequest = pending;
+      pending.promise = (async () => {
+        try {
+          const res = await adminApi("/api/admin/token-stats?" + key, { signal: controller.signal });
+          if (!res.ok) throw new Error(await readError(res, "Token 统计加载失败，稍后再试一下。"));
+          const data = await res.json();
+          if (seq !== state.tokenStatsSeq) return;
+          // Keep each tab's cache independent; the API may include empty arrays for the other tab.
+          const activeData = isModels
+            ? { summary: data.summary, model_summary: data.model_summary, models: data.models }
+            : { summary: data.summary, users: data.users };
+          state.tokenStatsCache[tab] = { key, at: Date.now(), data: activeData };
+          if (state.tokenStatsTab === tab) applyTokenStats(activeData, tab);
+        } catch (err) {
+          if (err.name !== "AbortError" && seq === state.tokenStatsSeq) {
+            setStatus("tokenStatsStatus", friendlyError(err, "Token 统计加载失败，稍后再试一下。"), "err");
+          }
+        } finally {
+          if (state.tokenStatsRequest === pending) state.tokenStatsRequest = null;
+        }
+      })();
+      return pending.promise;
+    }
+
+    function renderLazyTokenDetail(kind, item) {
+      const key = kind + ":" + item.id;
+      const cached = state.tokenStatsDetails.get(key);
+      const render = (rows) => kind === "models"
+        ? renderModelTokenDetail({ ...item, recent_requests: rows })
+        : renderTokenUserDetail({ ...item, recent_requests: rows });
+      if (cached && Date.now() - cached.at < tokenStatsCacheMs) return render(cached.rows);
+      const detail = document.createElement("div");
+      detail.className = "token-detail";
+      detail.setAttribute("role", "status");
+      detail.setAttribute("aria-live", "polite");
+      detail.textContent = "正在加载最近 20 次请求...";
+      const epoch = state.tokenStatsEpoch;
+      let pending = state.tokenStatsDetailsPending.get(key);
+      if (!pending) {
+        const params = new URLSearchParams({ type: kind, id: item.id });
+        pending = (async () => {
+          const res = await adminApi("/api/admin/token-stats/details?" + params);
+          if (!res.ok) throw new Error(await readError(res, "详情加载失败，请重试。"));
+          const data = await res.json();
+          const rows = data.recent_requests || [];
+          if (epoch === state.tokenStatsEpoch) state.tokenStatsDetails.set(key, { rows, at: Date.now() });
+          return rows;
+        })();
+        state.tokenStatsDetailsPending.set(key, pending);
+      }
+      pending.then((rows) => {
+        if (epoch === state.tokenStatsEpoch && detail.isConnected) detail.replaceWith(render(rows));
+      }).catch((err) => {
+        if (epoch !== state.tokenStatsEpoch || !detail.isConnected) return;
+        detail.textContent = friendlyError(err, "详情加载失败，请重试。") + " ";
+        const retry = createIconButton("refresh-cw", "重试");
+        retry.addEventListener("click", () => detail.replaceWith(renderLazyTokenDetail(kind, item)));
+        detail.appendChild(retry);
+      }).finally(() => {
+        if (state.tokenStatsDetailsPending.get(key) === pending) state.tokenStatsDetailsPending.delete(key);
+      });
+      return detail;
+    }
 
 	    function renderTokenStatsList(users) {
 	      const box = $("tokenStatsList");
@@ -7789,7 +7897,7 @@
 	        });
 	        actions.append(detailBtn);
 	        row.append(main, actions);
-	        if (expanded) row.appendChild(renderTokenUserDetail(user));
+	        if (expanded) row.appendChild(renderLazyTokenDetail("users", user));
 	        box.appendChild(row);
 	      }
 	      queueLucideRefresh();
@@ -7861,7 +7969,7 @@
 	        });
 	        actions.append(detailBtn);
 	        row.append(main, actions);
-	        if (expanded) row.appendChild(renderModelTokenDetail(model));
+	        if (expanded) row.appendChild(renderLazyTokenDetail("models", model));
 	        box.appendChild(row);
 	      }
 	      queueLucideRefresh();
@@ -8000,7 +8108,7 @@
 	        "ok"
 	      );
 	      await loadCostStats();
-	      await loadTokenStats();
+          resetTokenStats();
 	      if ($("tokenActivityDialog").classList.contains("show")) await loadTokenActivity();
 	    }
 
@@ -8789,24 +8897,19 @@
 		    $("changePassword").addEventListener("click", changePassword);
 		    $("saveAccount").addEventListener("click", saveAccount);
 		    $("resetAccountForm").addEventListener("click", resetAccountForm);
-		    $("adminKey").addEventListener("change", () => {
-		      loadAdminOverview();
-		      loadAdminModels();
-		      loadAdminSearch();
-		      loadAdminTts();
-		      loadAdminUsers();
-		      loadTokenStats();
-		      loadCostStats();
-		    });
+        $("adminKey").addEventListener("change", () => {
+          resetTokenStats();
+          switchAdminSection(state.adminSection);
+        });
 	    $("tokenStatsQuery").addEventListener("input", scheduleTokenStatsLoad);
 	    $("tokenStatsSort").addEventListener("change", loadTokenStats);
-	    $("refreshTokenStats").addEventListener("click", loadTokenStats);
+	    $("refreshTokenStats").addEventListener("click", () => loadTokenStats({ force: true }));
 	    document.querySelectorAll(".token-tab[data-token-tab]").forEach((button) => {
 	      button.addEventListener("click", () => switchTokenStatsTab(button.dataset.tokenTab));
 	    });
 	    $("modelTokenStatsQuery").addEventListener("input", scheduleTokenStatsLoad);
 	    $("modelTokenStatsSort").addEventListener("change", loadTokenStats);
-	    $("refreshModelTokenStats").addEventListener("click", loadTokenStats);
+	    $("refreshModelTokenStats").addEventListener("click", () => loadTokenStats({ force: true }));
 	    $("costStatsRange").addEventListener("change", loadCostStats);
 	    $("refreshCostStats").addEventListener("click", loadCostStats);
 	    $("recalculateCostStats").addEventListener("click", recalculateCostStats);

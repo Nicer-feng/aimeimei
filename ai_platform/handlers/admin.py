@@ -236,8 +236,96 @@ class AdminHandlersMixin:
         write_private(SECRETS_PATH, json.dumps(self.server.secrets, indent=2) + "\n")
         return self.json({"ok": True, "search": public_web_search_config(self.server.secrets)})
 
+    def _token_usage_summary(self, conn):
+        row = conn.execute(
+            """
+            SELECT
+              COUNT(DISTINCT u.id) AS total_users,
+              COALESCE(SUM(CASE WHEN m.role='assistant' THEN 1 ELSE 0 END), 0) AS total_requests,
+              COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
+              COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
+              COALESCE(SUM(CASE WHEN m.role='assistant' THEN
+                CASE WHEN COALESCE(m.total_tokens, 0) > 0
+                  THEN COALESCE(m.total_tokens, 0)
+                  ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
+                END ELSE 0 END), 0) AS total_tokens
+            FROM users u
+            LEFT JOIN messages m ON m.user_id=u.id
+            """
+        ).fetchone()
+        return {key: int(row[key] or 0) for key in row.keys()}
+
+    def _token_recent_requests(self, conn, kind, item_id):
+        # Limit messages before looking up source metadata and other display fields.
+        join_sql = ""
+        where_sql = "m.user_id=?"
+        if kind == "models":
+            join_sql = "JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id"
+            where_sql = "c.model_id=?"
+        rows = conn.execute(
+            f"""
+            WITH recent AS (
+              SELECT m.id, m.user_id, m.conversation_id, m.created_at,
+                     m.prompt_tokens, m.completion_tokens,
+                     CASE WHEN COALESCE(m.total_tokens, 0) > 0
+                       THEN m.total_tokens
+                       ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
+                     END AS total_tokens
+              FROM messages m
+              {join_sql}
+              WHERE m.role='assistant' AND {where_sql}
+              ORDER BY m.created_at DESC, m.id DESC
+              LIMIT 20
+            )
+            SELECT m.*, c.title AS conversation_title,
+                   mo.name AS model_name, mo.model AS model_code,
+                   u.username, u.display_name,
+                   EXISTS(SELECT 1 FROM message_sources s WHERE s.message_id=m.id) AS web_search
+            FROM recent m
+            LEFT JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
+            LEFT JOIN models mo ON mo.id=c.model_id
+            LEFT JOIN users u ON u.id=m.user_id
+            ORDER BY m.created_at DESC, m.id DESC
+            """,
+            (item_id,),
+        ).fetchall()
+        return [
+            {
+                "message_id": row["id"],
+                "conversation_id": row["conversation_id"],
+                "conversation_title": row["conversation_title"] or "未命名对话",
+                "created_at": row["created_at"],
+                "model_name": row["model_name"] or "",
+                "model_code": row["model_code"] or "",
+                "username": row["username"] or "",
+                "display_name": row["display_name"] or row["username"] or "",
+                "prompt_tokens": int(row["prompt_tokens"] or 0),
+                "completion_tokens": int(row["completion_tokens"] or 0),
+                "total_tokens": int(row["total_tokens"] or 0),
+                "duration_ms": None,
+                "web_search": bool(row["web_search"]),
+            }
+            for row in rows
+        ]
+
+    def handle_admin_token_details(self):
+        params = parse_qs(urlparse(self.path).query)
+        kind = (params.get("type") or [""])[0]
+        item_id = (params.get("id") or [""])[0]
+        if kind not in ("users", "models") or not item_id or len(item_id) > 200:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid statistics target")
+        with db() as conn:
+            table = "users" if kind == "users" else "models"
+            if not conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (item_id,)).fetchone():
+                return self.error(HTTPStatus.NOT_FOUND, "statistics target not found")
+            rows = self._token_recent_requests(conn, kind, item_id)
+        return self.json({"type": kind, "id": item_id, "recent_requests": rows})
+
     def handle_admin_token_stats(self):
         params = parse_qs(urlparse(self.path).query)
+        view = (params.get("view") or ["all"])[0]
+        if view not in ("all", "users", "models", "summary"):
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid statistics view")
         query = str((params.get("q") or [""])[0] or "").strip().lower()[:80]
         sort = str((params.get("sort") or ["tokens"])[0] or "tokens").strip().lower()
         if sort not in ("tokens", "recent", "created"):
@@ -275,22 +363,9 @@ class AdminHandlersMixin:
             model_args.extend([model_like, model_like, model_like])
 
         with db() as conn:
-            summary = conn.execute(
-                """
-                SELECT
-                  COUNT(DISTINCT u.id) AS total_users,
-                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN 1 ELSE 0 END), 0) AS total_requests,
-                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
-                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
-                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN
-                    CASE WHEN COALESCE(m.total_tokens, 0) > 0
-                      THEN COALESCE(m.total_tokens, 0)
-                      ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
-                    END ELSE 0 END), 0) AS total_tokens
-                FROM users u
-                LEFT JOIN messages m ON m.user_id=u.id
-                """
-            ).fetchone()
+            summary = self._token_usage_summary(conn)
+            if view == "summary":
+                return self.json({"summary": summary})
 
             rows = conn.execute(
                 f"""
@@ -320,56 +395,7 @@ class AdminHandlersMixin:
                 LIMIT 200
                 """,
                 args,
-            ).fetchall()
-
-            details = {}
-            user_ids = [row["id"] for row in rows]
-            if user_ids:
-                placeholders = ",".join(["?"] * len(user_ids))
-                detail_rows = conn.execute(
-                    f"""
-                    SELECT
-                      m.id,
-                      m.user_id,
-                      m.conversation_id,
-                      m.created_at,
-                      m.prompt_tokens,
-                      m.completion_tokens,
-                      CASE WHEN COALESCE(m.total_tokens, 0) > 0
-                        THEN COALESCE(m.total_tokens, 0)
-                        ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
-                      END AS total_tokens,
-                      c.title AS conversation_title,
-                      mo.name AS model_name,
-                      mo.model AS model_code,
-                      EXISTS(SELECT 1 FROM message_sources s WHERE s.message_id=m.id) AS web_search
-                    FROM messages m
-                    LEFT JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
-                    LEFT JOIN models mo ON mo.id=c.model_id
-                    WHERE m.role='assistant' AND m.user_id IN ({placeholders})
-                    ORDER BY m.user_id ASC, m.created_at DESC, m.id DESC
-                    """,
-                    user_ids,
-                ).fetchall()
-                for detail in detail_rows:
-                    bucket = details.setdefault(detail["user_id"], [])
-                    if len(bucket) >= 20:
-                        continue
-                    bucket.append(
-                        {
-                            "message_id": detail["id"],
-                            "conversation_id": detail["conversation_id"],
-                            "conversation_title": detail["conversation_title"] or "未命名对话",
-                            "created_at": detail["created_at"],
-                            "model_name": detail["model_name"] or "",
-                            "model_code": detail["model_code"] or "",
-                            "prompt_tokens": int(detail["prompt_tokens"] or 0),
-                            "completion_tokens": int(detail["completion_tokens"] or 0),
-                            "total_tokens": int(detail["total_tokens"] or 0),
-                            "duration_ms": None,
-                            "web_search": bool(detail["web_search"]),
-                        }
-                    )
+            ).fetchall() if view in ("all", "users") else []
 
             model_rows = conn.execute(
                 f"""
@@ -398,57 +424,14 @@ class AdminHandlersMixin:
                 LIMIT 200
                 """,
                 model_args,
-            ).fetchall()
+            ).fetchall() if view in ("all", "models") else []
 
+            # Keep responses usable for tabs still running the previous frontend.
+            details = {}
             model_details = {}
-            model_ids = [row["id"] for row in model_rows]
-            if model_ids:
-                placeholders = ",".join(["?"] * len(model_ids))
-                model_detail_rows = conn.execute(
-                    f"""
-                    SELECT
-                      mo.id AS model_id,
-                      m.id AS message_id,
-                      m.conversation_id,
-                      m.created_at,
-                      m.prompt_tokens,
-                      m.completion_tokens,
-                      CASE WHEN COALESCE(m.total_tokens, 0) > 0
-                        THEN COALESCE(m.total_tokens, 0)
-                        ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
-                      END AS total_tokens,
-                      c.title AS conversation_title,
-                      u.username,
-                      u.display_name,
-                      EXISTS(SELECT 1 FROM message_sources s WHERE s.message_id=m.id) AS web_search
-                    FROM messages m
-                    JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
-                    JOIN models mo ON mo.id=c.model_id
-                    LEFT JOIN users u ON u.id=m.user_id
-                    WHERE m.role='assistant' AND mo.id IN ({placeholders})
-                    ORDER BY mo.id ASC, m.created_at DESC, m.id DESC
-                    """,
-                    model_ids,
-                ).fetchall()
-                for detail in model_detail_rows:
-                    bucket = model_details.setdefault(detail["model_id"], [])
-                    if len(bucket) >= 20:
-                        continue
-                    bucket.append(
-                        {
-                            "message_id": detail["message_id"],
-                            "conversation_id": detail["conversation_id"],
-                            "conversation_title": detail["conversation_title"] or "未命名对话",
-                            "created_at": detail["created_at"],
-                            "username": detail["username"] or "",
-                            "display_name": detail["display_name"] or detail["username"] or "",
-                            "prompt_tokens": int(detail["prompt_tokens"] or 0),
-                            "completion_tokens": int(detail["completion_tokens"] or 0),
-                            "total_tokens": int(detail["total_tokens"] or 0),
-                            "duration_ms": None,
-                            "web_search": bool(detail["web_search"]),
-                        }
-                    )
+            if view == "all":
+                details = {row["id"]: self._token_recent_requests(conn, "users", row["id"]) for row in rows}
+                model_details = {row["id"]: self._token_recent_requests(conn, "models", row["id"]) for row in model_rows}
 
         users = []
         for row in rows:
@@ -466,7 +449,7 @@ class AdminHandlersMixin:
                     "completion_tokens": int(row["completion_tokens"] or 0),
                     "total_tokens": int(row["total_tokens"] or 0),
                     "last_used_at": row["last_used_at"] or 0,
-                    "recent_requests": details.get(row["id"], []),
+                    **({"recent_requests": details.get(row["id"], [])} if view == "all" else {}),
                 }
             )
 
@@ -485,7 +468,7 @@ class AdminHandlersMixin:
                     "total_tokens": int(row["total_tokens"] or 0),
                     "user_count": int(row["user_count"] or 0),
                     "last_used_at": row["last_used_at"] or 0,
-                    "recent_requests": model_details.get(row["id"], []),
+                    **({"recent_requests": model_details.get(row["id"], [])} if view == "all" else {}),
                 }
             )
 
@@ -963,10 +946,13 @@ class AdminHandlersMixin:
             active_user_count = conn.execute("SELECT COUNT(*) AS n FROM users WHERE is_active=1").fetchone()["n"]
             model_count = conn.execute("SELECT COUNT(*) AS n FROM models").fetchone()["n"]
             enabled_model_count = conn.execute("SELECT COUNT(*) AS n FROM models WHERE enabled=1").fetchone()["n"]
+            vision_model_count = conn.execute("SELECT COUNT(*) AS n FROM models WHERE enabled=1 AND supports_vision=1").fetchone()["n"]
             conversation_count = conn.execute("SELECT COUNT(*) AS n FROM conversations WHERE archived=0").fetchone()["n"]
+            usage = self._token_usage_summary(conn)
         return self.json(
             {
                 "overview": {
+                    "usage": usage,
                     "users": {
                         "total": int(user_count or 0),
                         "active": int(active_user_count or 0),
@@ -974,6 +960,7 @@ class AdminHandlersMixin:
                     "models": {
                         "total": int(model_count or 0),
                         "enabled": int(enabled_model_count or 0),
+                        "vision": int(vision_model_count or 0),
                     },
                     "conversations": {
                         "total": int(conversation_count or 0),

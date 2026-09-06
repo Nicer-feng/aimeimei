@@ -142,6 +142,8 @@ class AppHandler(
             return self.require_admin(self.handle_admin_features)
         if path == "/api/admin/token-stats":
             return self.require_admin(self.handle_admin_token_stats)
+        if path == "/api/admin/token-stats/details":
+            return self.require_admin(self.handle_admin_token_details)
         if path == "/api/admin/cost-stats":
             return self.require_admin(self.handle_admin_cost_stats)
         if path == "/api/admin/overview":

@@ -529,6 +529,8 @@ def init_db(secrets_data=None):
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations(user_id, archived, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_conversation ON messages(user_id, conversation_id, id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_recent ON messages(user_id, role, created_at DESC, id DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_message_sources_message ON message_sources(message_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_side_discussions_user_session ON side_discussions(user_id, session_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_side_discussion_messages_discussion ON side_discussion_messages(discussion_id, id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_images_user_session ON chat_message_images(user_id, session_id, message_id)")
