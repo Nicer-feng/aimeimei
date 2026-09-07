@@ -791,6 +791,7 @@ class ChatHandlersMixin:
             return self.error(HTTPStatus.BAD_REQUEST, "content required")
 
         search_results = []
+        native_extractor_snippets = {}
         search_config = web_search_config(self.server.secrets)
         use_web_search = should_use_web_search(content, requested_web_search, search_config)
         use_profile = data.get("use_profile", True) is not False
@@ -945,8 +946,8 @@ class ChatHandlersMixin:
             runtime_context = build_runtime_context(bool(results))
             if use_native_search:
                 runtime_context += (
-                    "\n本次请求已启用百炼 web_search 工具。必须先调用该工具检索最新资料，"
-                    "再依据检索结果回答；不要跳过搜索，也不要假装已经搜索。"
+                    "\n本次请求已启用百炼 web_search 与 web_extractor 工具。必须先检索最新资料，"
+                    "并优先抽取最相关网页的正文后再回答；不要跳过搜索，也不要假装已经搜索。"
                 )
             upstream_messages = [
                 {"role": "system", "content": runtime_context}
@@ -977,11 +978,14 @@ class ChatHandlersMixin:
                 payload["stream_options"] = {"include_usage": True}
             return payload
 
-        def make_native_search_payload():
+        def make_native_search_payload(include_extractor=True):
+            tools = [{"type": "web_search"}]
+            if include_extractor:
+                tools.append({"type": "web_extractor"})
             return {
                 "model": convo["model"],
                 "input": responses_input_from_messages(make_upstream_messages([])),
-                "tools": [{"type": "web_search"}],
+                "tools": tools,
                 "stream": True,
             }
 
@@ -1013,7 +1017,12 @@ class ChatHandlersMixin:
                     exc.url, exc.code, exc.reason, exc.headers, io.BytesIO(detail.encode())
                 )
 
-        payload = make_native_search_payload() if use_native_search else make_payload(search_results)
+        native_extractor_enabled = bool(use_native_search)
+        payload = (
+            make_native_search_payload(native_extractor_enabled)
+            if use_native_search
+            else make_payload(search_results)
+        )
         search_fallback_notice = ""
 
         def upstream_error_message(code, detail):
@@ -1040,7 +1049,22 @@ class ChatHandlersMixin:
             )
         except urllib.error.HTTPError as exc:
             detail = exc.read(65536).decode(errors="replace")
-            if not use_native_search and search_results and exc.code == 400 and "data_inspection_failed" in detail:
+            if use_native_search and native_extractor_enabled and web_extractor_option_rejected(detail):
+                native_extractor_enabled = False
+                try:
+                    response = open_upstream(
+                        make_native_search_payload(False),
+                        native_search=True,
+                    )
+                except urllib.error.HTTPError as retry_exc:
+                    retry_detail = retry_exc.read(65536).decode(errors="replace")
+                    message = upstream_error_message(retry_exc.code, retry_detail)
+                    return self.error(HTTPStatus.BAD_GATEWAY, message, retry_detail)
+                except Exception as retry_exc:
+                    return self.error(
+                        HTTPStatus.BAD_GATEWAY, "upstream request failed", str(retry_exc)
+                    )
+            elif not use_native_search and search_results and exc.code == 400 and "data_inspection_failed" in detail:
                 search_results = []
                 payload = make_payload(search_results)
                 search_fallback_notice = "（联网资料被上游安全策略拦截，本次先按普通模式回答。）\n\n"
@@ -1177,25 +1201,33 @@ class ChatHandlersMixin:
                                     }
                                 )
                         elif event_type == "response.output_item.done":
-                            native_results = native_search_results_from_item(
-                                event.get("item"), search_config["result_count"]
-                            )
-                            known_urls = {item["url"] for item in search_results}
-                            for item in native_results:
-                                if item["url"] not in known_urls:
-                                    search_results.append(item)
-                                    known_urls.add(item["url"])
-                                if len(search_results) >= search_config["result_count"]:
-                                    break
-                            if search_results:
-                                emit_client_event(
-                                    {
-                                        "type": "search_status",
-                                        "status": "done",
-                                        "count": len(search_results),
-                                        "sources": public_sources(search_results),
-                                    }
+                            output_item = event.get("item") or {}
+                            if output_item.get("type") == "web_extractor_call":
+                                for url, snippet in native_extractor_snippets_from_item(
+                                    output_item,
+                                    build_search_query(content),
+                                ):
+                                    native_extractor_snippets[url.rstrip("/")] = snippet
+                            else:
+                                native_results = native_search_results_from_item(
+                                    output_item, search_config["result_count"]
                                 )
+                                known_urls = {item["url"] for item in search_results}
+                                for item in native_results:
+                                    if item["url"] not in known_urls:
+                                        search_results.append(item)
+                                        known_urls.add(item["url"])
+                                    if len(search_results) >= search_config["result_count"]:
+                                        break
+                                if search_results:
+                                    emit_client_event(
+                                        {
+                                            "type": "search_status",
+                                            "status": "done",
+                                            "count": len(search_results),
+                                            "sources": public_sources(search_results),
+                                        }
+                                    )
                         elif event_type == "response.completed":
                             completed = event.get("response") or {}
                             if isinstance(completed.get("usage"), dict):
@@ -1224,6 +1256,19 @@ class ChatHandlersMixin:
                         assistant_parts.append(piece)
         finally:
             response.close()
+
+        if use_native_search and search_results:
+            for item in search_results:
+                url_key = str(item.get("url") or "").rstrip("/")
+                extracted = native_extractor_snippets.get(url_key)
+                if extracted:
+                    item["snippet"] = extracted
+            with db() as source_conn:
+                search_results = enrich_search_result_snippets(
+                    search_results,
+                    build_search_query(content),
+                    source_conn,
+                )
 
         assistant_text = "".join(assistant_parts).strip()
         reasoning_text = "".join(reasoning_parts).strip()

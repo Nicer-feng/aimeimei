@@ -23,6 +23,20 @@ def usage_option_rejected(detail):
     )
 
 
+def web_extractor_option_rejected(detail):
+    text = str(detail or "").lower()
+    return "web_extractor" in text and any(
+        marker in text
+        for marker in (
+            "unsupported",
+            "not support",
+            "invalid",
+            "unknown",
+            "not available",
+        )
+    )
+
+
 def clamp_int(value, default, min_value, max_value):
     try:
         number = int(value)
@@ -87,6 +101,59 @@ def normalize_space(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def html_attribute_map(tag):
+    attrs = {}
+    for name, quoted, single, bare in re.findall(
+        r"([:\w-]+)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))",
+        str(tag or ""),
+        flags=re.I,
+    ):
+        attrs[name.lower()] = html.unescape(quoted or single or bare or "")
+    return attrs
+
+
+def structured_html_text(raw_html):
+    value = str(raw_html or "")
+    parts = []
+    for tag in re.findall(r"(?is)<meta\b[^>]*>", value):
+        attrs = html_attribute_map(tag)
+        name = (attrs.get("name") or attrs.get("property") or "").lower()
+        content = normalize_space(attrs.get("content") or "")
+        if name in ("description", "og:description", "twitter:description") and len(content) >= 24:
+            parts.append(content)
+
+    def collect_json_ld(node):
+        if isinstance(node, dict):
+            for key in ("headline", "description", "articleBody", "text"):
+                content = node.get(key)
+                if isinstance(content, str) and len(normalize_space(content)) >= 24:
+                    parts.append(normalize_space(content))
+            for content in node.values():
+                if isinstance(content, (dict, list)):
+                    collect_json_ld(content)
+        elif isinstance(node, list):
+            for content in node:
+                collect_json_ld(content)
+
+    for payload in re.findall(
+        r"(?is)<script\b[^>]*type\s*=\s*['\"]application/ld\+json['\"][^>]*>(.*?)</script>",
+        value,
+    ):
+        try:
+            collect_json_ld(json.loads(html.unescape(payload).strip()))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+
+    unique = []
+    seen = set()
+    for part in parts:
+        part = normalize_space(part)
+        if part and part not in seen:
+            seen.add(part)
+            unique.append(part)
+    return "\n".join(unique[:24])
+
+
 def source_url_hash(url):
     return hashlib.sha256(str(url or "").strip().encode()).hexdigest()
 
@@ -110,6 +177,7 @@ def extract_keywords(*values):
 
 def clean_html_text(raw_html):
     value = str(raw_html or "")
+    structured = structured_html_text(value)
     value = re.sub(r"(?is)<(script|style|noscript|svg|canvas|iframe|form|header|footer|nav|aside)[^>]*>.*?</\1>", " ", value)
     value = re.sub(r"(?is)<!--.*?-->", " ", value)
     value = re.sub(r"(?is)</(p|div|section|article|main|h[1-6]|li|tr|br)>", "\n", value)
@@ -126,7 +194,30 @@ def clean_html_text(raw_html):
         if re.search(r"(登录|注册|菜单|导航|广告|cookie|隐私政策|版权所有|ICP备案)", line) and len(line) < 80:
             continue
         lines.append(line)
-    return "\n".join(lines[:240])
+    body = "\n".join(lines[:240])
+    return "\n".join(part for part in (structured, body) if part)
+
+
+def decode_html_bytes(data, content_type=""):
+    candidates = []
+    meta = re.search(br"(?i)<meta[^>]+charset\s*=\s*['\"]?\s*([a-z0-9._-]+)", data[:16384])
+    if meta:
+        candidates.append(meta.group(1).decode("ascii", errors="ignore"))
+    header = re.search(r"charset=([\w.-]+)", str(content_type or ""), re.I)
+    if header:
+        candidates.append(header.group(1))
+    candidates.extend(("utf-8", "gb18030"))
+    seen = set()
+    for charset in candidates:
+        charset = str(charset or "").strip().lower()
+        if not charset or charset in seen:
+            continue
+        seen.add(charset)
+        try:
+            return data.decode(charset)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def fetch_page_text(url):
@@ -138,6 +229,7 @@ def fetch_page_text(url):
         headers={
             "User-Agent": "Mozilla/5.0 (compatible; AI-Meimei/2.0; +https://feng.asia)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.5",
         },
         method="GET",
     )
@@ -146,12 +238,7 @@ def fetch_page_text(url):
         if not any(kind in content_type.lower() for kind in ("text/html", "text/plain", "application/xhtml")):
             return ""
         data = response.read(524288)
-        charset_match = re.search(r"charset=([\w.-]+)", content_type, re.I)
-        charset = charset_match.group(1) if charset_match else "utf-8"
-        try:
-            raw = data.decode(charset, errors="replace")
-        except LookupError:
-            raw = data.decode("utf-8", errors="replace")
+        raw = decode_html_bytes(data, content_type)
     return clean_html_text(raw)
 
 
@@ -497,6 +584,24 @@ def native_search_results_from_item(item, limit=5):
         if len(results) >= limit:
             break
     return results
+
+
+def native_extractor_snippets_from_item(item, query=""):
+    if not isinstance(item, dict) or item.get("type") != "web_extractor_call":
+        return []
+    output = str(item.get("output") or "").strip()
+    urls = item.get("urls") or []
+    if not output or not isinstance(urls, list):
+        return []
+    snippets = []
+    for url in urls:
+        url = str(url or "").strip()
+        if not url:
+            continue
+        snippet = relevant_snippet_from_text(output, query, urlparse(url).netloc)
+        if snippet:
+            snippets.append((url, snippet[:900]))
+    return snippets
 
 
 def split_think_blocks(content):

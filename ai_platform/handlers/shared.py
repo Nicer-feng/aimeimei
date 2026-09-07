@@ -105,6 +105,7 @@ from ..web_search import (
     build_search_query,
     clamp_int,
     enrich_search_result_snippets,
+    native_extractor_snippets_from_item,
     native_search_results_from_item,
     perform_web_search,
     public_sources,
@@ -113,5 +114,6 @@ from ..web_search import (
     should_use_web_search,
     split_think_blocks,
     usage_option_rejected,
+    web_extractor_option_rejected,
     web_search_config,
 )
