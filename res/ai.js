@@ -3730,7 +3730,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.15" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.16" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -5958,7 +5958,10 @@
 	      const quotePanel = document.createElement("div");
 	      quotePanel.className = "message-quote-reference";
 	      quotePanel.hidden = true;
-	      const copy = document.createElement("button");
+	      const activity = document.createElement("div");
+      activity.className = "stream-activity";
+      activity.hidden = true;
+      const copy = document.createElement("button");
 	      copy.className = "copy-btn";
 	      copy.type = "button";
 	      copy.title = "复制";
@@ -6007,7 +6010,7 @@
 	      reason.addEventListener("click", () => toggleReasoning(message));
 	      actions.append(favorite, regenerate, continueWrite, tts, share, copyAction);
 
-	      shell.append(reasoningPanel, imagePanel, quotePanel, text, copy);
+	      shell.append(reasoningPanel, imagePanel, quotePanel, text, activity, copy);
 	      wrap.append(role, shell, sourcesPanel, time, actions);
 	      updateMessageElement(wrap, message);
 	      return wrap;
@@ -6062,7 +6065,7 @@
 	          <div class="thinking">
 	            <img class="thinking-avatar" src="/res/meimei-avatar.png" alt="">
 	            <span class="thinking-dots"><span></span><span></span><span></span></span>
-	            <span><strong>槑槑</strong>正在整理思路...</span>
+	            <span data-thinking-label><strong>槑槑</strong>${assistantActivityLabel(message)}</span>
 	          </div>`;
 	        if (imagePanel) imagePanel.hidden = true;
 	        copy.hidden = true;
@@ -6303,6 +6306,7 @@
 	      const tts = wrap.querySelector(".tts-action");
 	      const share = wrap.querySelector(".share-action");
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
+	      const activity = wrap.querySelector(".stream-activity");
 	      const displayContent = visibleMessageContent(message);
 	      const reasoningContent = messageReasoningContent(message);
 	      const shouldUpdateReasoning = Boolean(
@@ -6326,9 +6330,12 @@
 	            <div class="thinking">
 	              <img class="thinking-avatar" src="/res/meimei-avatar.png" alt="">
 	              <span class="thinking-dots"><span></span><span></span><span></span></span>
-	              <span><strong>槑槑</strong>正在整理思路...</span>
+	              <span data-thinking-label><strong>槑槑</strong>${assistantActivityLabel(message)}</span>
 	            </div>`;
 	        }
+	        const label = text.querySelector("[data-thinking-label]");
+	        if (label) label.innerHTML = "<strong>槑槑</strong>" + escapeHTML(assistantActivityLabel(message));
+	        if (activity) activity.hidden = true;
 	        copy.hidden = true;
 	        if (actions) actions.hidden = true;
 	        return iconsChanged;
@@ -6346,6 +6353,11 @@
 	      wrap.dataset.liveState = "streaming";
 	      text.className = "message-content markdown";
 	      renderStreamingMarkdown(text, message, displayContent, options);
+      const showActivity = Boolean(message._streamPaused && message._upstreamActive && displayContent);
+      if (activity) {
+        activity.hidden = !showActivity;
+        if (showActivity) activity.innerHTML = '<span class="stream-activity-pulse" aria-hidden="true"></span><span>' + escapeHTML(assistantActivityLabel(message)) + '</span>';
+      }
 	      copy.hidden = true;
 	      const hasContent = Boolean(displayContent);
 	      if (actions) actions.hidden = !hasContent;
@@ -6922,6 +6934,11 @@
 	      });
 	    }
 
+    function assistantActivityLabel(message) {
+      const value = String(message?._activityStatus || "").trim();
+      return value || "槑槑正在整理思路...";
+    }
+
 	    function resetStreamState() {
 	      if (state.streamTimer) clearTimeout(state.streamTimer);
 	      state.streamMessage = null;
@@ -6956,119 +6973,148 @@
 	    }
 
 	    function enqueueAssistantText(message, piece) {
-	      const text = String(piece || "");
-	      if (!text) return;
-	      const pendingContent = String(message.content || "") + (state.streamMessage === message ? state.streamQueue : "") + text;
-	      const parsedPending = splitThinkContent(pendingContent);
-	      if (message.thinking && parsedPending.reasoning && !message._reasoningStartedAt) {
-	        message._reasoningStartedAt = Date.now();
-	      }
-	      if (message.thinking && parsedPending.content) {
-	        completeReasoning(message);
-	        message.thinking = false;
-	        state.firstTokenAt = Date.now();
-	        setStatus("chatStatus", "正在生成...", "");
-	      }
-	      if (state.streamMessage !== message) {
-	        state.streamMessage = message;
-	        state.streamQueue = "";
-	      }
-	      state.streamQueue += text;
-	      const now = performance.now();
-	      if (!state.streamPace) {
-	        state.streamPace = { lastTick: now, lastArrivalAt: 0, incomingRate: 0, rate: 100, credit: 0, deadline: 0 };
-	      }
-	      const pace = state.streamPace;
-	      if (pace.lastArrivalAt) {
-	        const arrivalMs = Math.min(3000, Math.max(40, now - pace.lastArrivalAt));
-	        const incomingRate = text.length * 1000 / arrivalMs;
-	        pace.incomingRate = pace.incomingRate ? pace.incomingRate * 0.68 + incomingRate * 0.32 : incomingRate;
-	      }
-	      pace.lastArrivalAt = now;
-	      if (!state.streamTimer) scheduleStreamTick();
-	    }
+      const text = String(piece || "");
+      if (!text) return;
+      const pendingContent = String(message.content || "") + (state.streamMessage === message ? state.streamQueue : "") + text;
+      const parsedPending = splitThinkContent(pendingContent);
+      if (message.thinking && parsedPending.reasoning && !message._reasoningStartedAt) message._reasoningStartedAt = Date.now();
+      if (message.thinking && parsedPending.content && !message._streamBuffering) {
+        completeReasoning(message);
+        message._streamBuffering = true;
+        message._activityStatus = "槑槑正在组织回答...";
+        state.firstTokenAt = Date.now();
+        updateStreamingMessage(message, { activity: true });
+      }
+      if (state.streamMessage !== message) {
+        state.streamMessage = message;
+        state.streamQueue = "";
+      }
+      const now = performance.now();
+      if (!state.streamPace) {
+        state.streamPace = { lastTick: now, lastArrivalAt: 0, incomingRate: 0, rate: 88, credit: 0, deadline: 0, buffering: true, started: false, firstQueuedAt: now, upstreamDone: false };
+      }
+      const pace = state.streamPace;
+      const wasPaused = Boolean(message._streamPaused);
+      message._streamPaused = false;
+      if (wasPaused && message.content) {
+        message._activityStatus = "槑槑正在继续整理回答...";
+        updateStreamingMessage(message, { activity: true });
+      }
+      if (pace.lastArrivalAt) {
+        const arrivalMs = Math.min(3000, Math.max(40, now - pace.lastArrivalAt));
+        const incomingRate = text.length * 1000 / arrivalMs;
+        pace.incomingRate = pace.incomingRate ? pace.incomingRate * .7 + incomingRate * .3 : incomingRate;
+      }
+      pace.lastArrivalAt = now;
+      state.streamQueue += text;
+      if (!state.streamTimer) scheduleStreamTick();
+    }
 
-	    function scheduleStreamTick() {
-	      state.streamTimer = setTimeout(streamTick, 24);
-	    }
+    function scheduleStreamTick() {
+      state.streamTimer = setTimeout(streamTick, 40);
+    }
 
-	    function streamTick() {
-	      const message = state.streamMessage;
-	      if (!message) {
-	        state.streamTimer = null;
-	        resolveStreamDrain();
-	        return;
-	      }
-	      if (!state.streamQueue) {
-	        state.streamTimer = null;
-	        resolveStreamDrain();
-	        return;
-	      }
-	      let count = streamChunkSize(state.streamQueue.length);
-	      if (count <= 0) {
-	        scheduleStreamTick();
-	        return;
-	      }
-	      // Never paint half a UTF-16 surrogate pair while revealing received text.
-	      if (count < state.streamQueue.length && /[\uD800-\uDBFF]/.test(state.streamQueue[count - 1] || "")) count++;
-	      message.content += state.streamQueue.slice(0, count);
-	      state.streamQueue = state.streamQueue.slice(count);
-	      const parsed = splitThinkContent(message.content);
-	      if (parsed.reasoning && message.thinking) {
-	        scheduleReasoningPreview(message);
-	      }
-	      updateStreamingMessage(message, { stream: true });
-	      if (state.streamQueue) {
-	        scheduleStreamTick();
-	      } else {
-	        state.streamTimer = null;
-	        resolveStreamDrain();
-	      }
-	    }
+    function streamTick() {
+      const message = state.streamMessage;
+      if (!message) {
+        state.streamTimer = null;
+        resolveStreamDrain();
+        return;
+      }
+      const pace = state.streamPace;
+      if (!state.streamQueue) {
+        state.streamTimer = null;
+        if (message._upstreamActive && message.content && !message._streamPaused) {
+          message._streamPaused = true;
+          message._activityStatus = "槑槑正在整理后续内容...";
+          updateStreamingMessage(message, { activity: true });
+        }
+        resolveStreamDrain();
+        return;
+      }
+      const now = performance.now();
+      if (pace?.buffering && !pace.started) {
+        const bufferedEnough = state.streamQueue.length >= 360;
+        const waitedLongEnough = now - Number(pace.firstQueuedAt || now) >= 1600;
+        if (!bufferedEnough && !waitedLongEnough && !pace.upstreamDone && !state.userStopped && !document.hidden) {
+          scheduleStreamTick();
+          return;
+        }
+        pace.buffering = false;
+        pace.started = true;
+        pace.lastTick = now;
+        message._streamBuffering = false;
+        message.thinking = false;
+        message._activityStatus = "";
+        setStatus("chatStatus", "正在稳定输出...", "");
+      }
+      let count = streamChunkSize(state.streamQueue.length);
+      if (count <= 0) {
+        scheduleStreamTick();
+        return;
+      }
+      // Never paint half a UTF-16 surrogate pair while revealing received text.
+      if (count < state.streamQueue.length && /[\uD800-\uDBFF]/.test(state.streamQueue[count - 1] || "")) count++;
+      message.content += state.streamQueue.slice(0, count);
+      state.streamQueue = state.streamQueue.slice(count);
+      updateStreamingMessage(message, { stream: true });
+      if (state.streamQueue) scheduleStreamTick();
+      else {
+        state.streamTimer = null;
+        if (message._upstreamActive && !message._streamPaused) {
+          message._streamPaused = true;
+          message._activityStatus = "槑槑正在整理后续内容...";
+          updateStreamingMessage(message, { activity: true });
+        }
+        resolveStreamDrain();
+      }
+    }
 
-	    function streamChunkSize(length) {
-	      const pace = state.streamPace;
-	      if (!pace || state.userStopped || document.hidden) return length;
-	      const now = performance.now();
-	      const elapsed = Math.min(50, Math.max(0, now - pace.lastTick));
-	      pace.lastTick = now;
-	      // Smooth rate changes rather than jumping at queue-length thresholds.
-	      let target = Math.max(72, pace.incomingRate * 0.88);
-	      if (!pace.incomingRate) target = 100;
-	      if (length > 2400) target = Math.max(target, 560);
-	      else if (length > 1200) target = Math.max(target, 360);
-	      else if (length > 480) target = Math.max(target, 190);
-	      target = Math.min(720, target);
-	      pace.rate += (target - pace.rate) * (1 - Math.exp(-elapsed / 360));
-	      let rate = pace.rate;
-	      if (pace.deadline) {
-	        const remaining = pace.deadline - now;
-	        if (remaining <= 0) return length;
-	        rate = Math.max(rate, length * 1000 / Math.max(32, remaining));
-	      }
-	      pace.credit += rate * elapsed / 1000;
-	      const count = Math.min(length, Math.floor(pace.credit));
-	      pace.credit -= count;
-	      if (count === length) pace.credit = 0;
-	      return count;
-	    }
+    function streamChunkSize(length) {
+      const pace = state.streamPace;
+      if (!pace || state.userStopped || document.hidden) return length;
+      const now = performance.now();
+      const elapsed = Math.min(80, Math.max(0, now - pace.lastTick));
+      pace.lastTick = now;
+      let target = 82;
+      if (length > 2800) target = 310;
+      else if (length > 1400) target = 205;
+      else if (length > 720) target = 145;
+      else if (length > 360) target = 110;
+      else if (!pace.upstreamDone && length < 140) target = 58;
+      if (pace.incomingRate && length > 360) target = Math.max(target, Math.min(300, pace.incomingRate * .46));
+      pace.rate += (target - pace.rate) * (1 - Math.exp(-elapsed / 300));
+      let rate = pace.rate;
+      if (pace.deadline) {
+        const remaining = pace.deadline - now;
+        if (remaining <= 0) return length;
+        rate = Math.max(rate, length * 1000 / Math.max(32, remaining));
+      }
+      pace.credit += rate * elapsed / 1000;
+      const count = Math.min(length, Math.floor(pace.credit));
+      pace.credit -= count;
+      if (count === length) pace.credit = 0;
+      return count;
+    }
 
-	    function resolveStreamDrain() {
-	      if (state.streamResolve) {
-	        const resolve = state.streamResolve;
-	        state.streamResolve = null;
-	        resolve();
-	      }
-	    }
+    function resolveStreamDrain() {
+      if (state.streamResolve) {
+        const resolve = state.streamResolve;
+        state.streamResolve = null;
+        resolve();
+      }
+    }
 
-	    function drainAssistantQueue() {
-	      if (!state.streamQueue && !state.streamTimer) return Promise.resolve();
-	      // Bound the visual tail after EOF; no prolonged replay after generation ends.
-	      if (state.streamPace && !state.streamPace.deadline) state.streamPace.deadline = performance.now() + 800;
-	      return new Promise((resolve) => {
-	        state.streamResolve = resolve;
-	      });
-	    }
+    function drainAssistantQueue() {
+      if (!state.streamQueue && !state.streamTimer) return Promise.resolve();
+      if (state.streamPace) {
+        state.streamPace.upstreamDone = true;
+        state.streamPace.buffering = false;
+        if (!state.streamPace.deadline) state.streamPace.deadline = performance.now() + 1100;
+      }
+      if (!state.streamTimer && state.streamQueue) scheduleStreamTick();
+      return new Promise((resolve) => { state.streamResolve = resolve; });
+    }
 
 	    async function sendMessage(contentOverride = "", options = {}) {
 	      const hasOverride = typeof contentOverride === "string" && contentOverride.trim();
@@ -7155,7 +7201,11 @@
 	      if (!hasOverride) clearAttachments();
 	      const userContent = content || "请分析这些图片。";
 	      state.messages.push({ role: "user", content: userContent, images: sentImages, created_at: sentAt });
-	      const assistant = { role: "assistant", content: "", reasoning_content: "", sources: [], thinking: true, created_at: sentAt, _thinkingStartedAt: Date.now() };
+	      const assistant = {
+        role: "assistant", content: "", reasoning_content: "", sources: [], thinking: true,
+        created_at: sentAt, _thinkingStartedAt: Date.now(), _upstreamActive: true,
+        _activityStatus: useWebSearch ? "槑槑正在上网查资料中..." : "槑槑正在思考与整理中..."
+      };
 	      state.messages.push(assistant);
 	      state.followOutput = true;
 	      state.hasNewWhilePaused = false;
@@ -7191,9 +7241,12 @@
             try {
               const event = JSON.parse(payload);
 	              if (event.type === "search_status") {
-	                assistant.sources = event.sources || [];
-	                if (event.count) setStatus("chatStatus", "找到 " + event.count + " 个来源，正在生成...", "ok");
-	                updateStreamingMessage(assistant, { sources: true });
+                assistant.sources = event.sources || [];
+                if (event.count) {
+                  assistant._activityStatus = "槑槑已找到 " + event.count + " 个来源，正在整理资料...";
+                  setStatus("chatStatus", "找到 " + event.count + " 个来源，正在生成...", "ok");
+                }
+                updateStreamingMessage(assistant, { sources: true, activity: true });
 	                continue;
 	              }
 	              if (event.usage) {
@@ -7227,9 +7280,10 @@
 	                responseEventReasoning ||
 	                "";
 	              if (reasoningPiece) {
-	                if (!assistant._reasoningStartedAt) assistant._reasoningStartedAt = Date.now();
-	                assistant.reasoning_content = (assistant.reasoning_content || "") + reasoningPiece;
-	                updateStreamingMessage(assistant, { reasoning: true });
+                if (!assistant._reasoningStartedAt) assistant._reasoningStartedAt = Date.now();
+                assistant._activityStatus = "槑槑正在梳理思路...";
+                assistant.reasoning_content = (assistant.reasoning_content || "") + reasoningPiece;
+                updateStreamingMessage(assistant, { reasoning: true, activity: true });
 	              }
 	              if (piece) {
 	                enqueueAssistantText(assistant, piece);
@@ -7238,6 +7292,8 @@
 	          }
 	        }
 	        completeReasoning(assistant);
+	        assistant._upstreamActive = false;
+	        assistant._streamPaused = false;
 	        assistant.thinking = false;
 	        await drainAssistantQueue();
 	        if (!assistant.content) {
@@ -7249,6 +7305,8 @@
 	        setStatus("chatStatus", "");
 	      } catch (err) {
 	        completeReasoning(assistant);
+	        assistant._upstreamActive = false;
+	        assistant._streamPaused = false;
 	        assistant.thinking = false;
 	        if (state.userStopped || err?.name === "AbortError") {
 	          if (assistant.content) {

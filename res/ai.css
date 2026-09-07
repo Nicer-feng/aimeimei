@@ -1293,6 +1293,33 @@
       color: var(--accent-strong);
       font-weight: 650;
     }
+    .stream-activity {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+      animation: streamActivityBreathe 1.7s ease-in-out infinite;
+    }
+    .stream-activity[hidden] { display: none; }
+    .stream-activity-pulse {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 0 rgba(217, 143, 168, .32);
+      animation: streamActivityPulse 1.5s ease-out infinite;
+    }
+    @keyframes streamActivityBreathe {
+      0%, 100% { opacity: .58; }
+      50% { opacity: 1; }
+    }
+    @keyframes streamActivityPulse {
+      0% { box-shadow: 0 0 0 0 rgba(217, 143, 168, .34); }
+      70%, 100% { box-shadow: 0 0 0 7px rgba(217, 143, 168, 0); }
+    }
     .thinking-dots {
       display: inline-flex;
       gap: 4px;
@@ -8428,4 +8455,8 @@
       .top-title .top-meta .chat-usage {
         display: none;
       }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .stream-activity, .stream-activity-pulse { animation: none; }
     }
