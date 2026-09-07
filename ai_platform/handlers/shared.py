@@ -96,6 +96,7 @@ from ..usage import (
     add_daily_usage,
     estimate_request_cost,
     message_token_usage,
+    parse_usage_cache_tokens,
     parse_price,
     parse_usage_tokens,
 )

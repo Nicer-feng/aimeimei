@@ -3692,7 +3692,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.13" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.14" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -7711,6 +7711,7 @@
 	        ["总请求数", summary.total_requests || 0],
 	        ["累计输入 Token", summary.prompt_tokens || 0],
 	        ["累计输出 Token", summary.completion_tokens || 0],
+	        ["缓存命中", summary.cached_tokens || 0],
 	        ["累计 Token", summary.total_tokens || 0]
 	      ];
 	      box.innerHTML = cards.map(([label, value]) => (
@@ -7726,6 +7727,7 @@
 	      const cards = [
 	        ["总模型数", summary.total_models || 0],
 	        ["总请求数", summary.total_requests || 0],
+	        ["缓存命中", summary.cached_tokens || 0],
 	        ["累计 Token", summary.total_tokens || 0],
 	        ["使用最多模型", topRequest],
 	        ["Token最高模型", topToken]
@@ -7764,6 +7766,7 @@
         ["总请求数", summary.total_requests || 0],
         ["当天输入 Token", summary.prompt_tokens || 0],
         ["当天输出 Token", summary.completion_tokens || 0],
+        ["缓存命中", summary.cached_tokens || 0],
         ["当天 Token", summary.total_tokens || 0]
       ];
       box.innerHTML = cards.map(([label, value]) => (
@@ -7834,6 +7837,7 @@
           '<span>输入 <b>' + tokenNumber(user.prompt_tokens) + '</b></span>' +
           '<span>输出 <b>' + tokenNumber(user.completion_tokens) + '</b></span>' +
           '<span>总计 <b>' + tokenNumber(user.total_tokens) + '</b></span>' +
+          (Number(user.cached_tokens || 0) > 0 ? '<span title="百炼返回的上下文缓存命中 Token">缓存命中 <b>' + tokenNumber(user.cached_tokens) + '</b></span>' : "") +
           (user.estimated_cost > 0 ? '<span>花费 <b>' + escapeHTML(moneyNumber(user.estimated_cost)) + '</b></span>' : "");
         main.append(title, meta, stats);
         const actions = document.createElement("div");
@@ -8074,7 +8078,8 @@
 	          '<span>请求 <b>' + tokenNumber(user.request_count) + '</b></span>' +
 	          '<span>输入 <b>' + tokenNumber(user.prompt_tokens) + '</b></span>' +
 	          '<span>输出 <b>' + tokenNumber(user.completion_tokens) + '</b></span>' +
-	          '<span>总计 <b>' + tokenNumber(user.total_tokens) + '</b></span>';
+	          '<span>总计 <b>' + tokenNumber(user.total_tokens) + '</b></span>' +
+          (Number(user.cached_tokens || 0) > 0 ? '<span title="百炼返回的上下文缓存命中 Token">缓存命中 <b>' + tokenNumber(user.cached_tokens) + '</b></span>' : "");
 	        main.append(title, meta, stats);
 	        const actions = document.createElement("div");
 	        actions.className = "library-actions";
@@ -8146,7 +8151,8 @@
 	          '<span>账号 <b>' + tokenNumber(model.user_count) + '</b></span>' +
 	          '<span>输入 <b>' + tokenNumber(model.prompt_tokens) + '</b></span>' +
 	          '<span>输出 <b>' + tokenNumber(model.completion_tokens) + '</b></span>' +
-	          '<span>总计 <b>' + tokenNumber(model.total_tokens) + '</b></span>';
+	          '<span>总计 <b>' + tokenNumber(model.total_tokens) + '</b></span>' +
+          (Number(model.cached_tokens || 0) > 0 ? '<span title="百炼返回的上下文缓存命中 Token">缓存命中 <b>' + tokenNumber(model.cached_tokens) + '</b></span>' : "");
 	        main.append(title, meta, stats);
 	        const actions = document.createElement("div");
 	        actions.className = "library-actions";

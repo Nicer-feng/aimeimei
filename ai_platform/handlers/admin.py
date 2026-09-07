@@ -248,7 +248,9 @@ class AdminHandlersMixin:
                 CASE WHEN COALESCE(m.total_tokens, 0) > 0
                   THEN COALESCE(m.total_tokens, 0)
                   ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
-                END ELSE 0 END), 0) AS total_tokens
+                END ELSE 0 END), 0) AS total_tokens,
+              COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.cached_tokens, 0) ELSE 0 END), 0) AS cached_tokens,
+              COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.cache_creation_tokens, 0) ELSE 0 END), 0) AS cache_creation_tokens
             FROM users u
             LEFT JOIN messages m ON m.user_id=u.id
             """
@@ -418,6 +420,8 @@ class AdminHandlersMixin:
                   COALESCE(SUM(input_tokens), 0) AS prompt_tokens,
                   COALESCE(SUM(output_tokens), 0) AS completion_tokens,
                   COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                  COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                  COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
                   COALESCE(SUM(estimated_cost), 0) AS estimated_cost
                 FROM daily_usage
                 WHERE date=?
@@ -436,6 +440,8 @@ class AdminHandlersMixin:
                   d.input_tokens AS prompt_tokens,
                   d.output_tokens AS completion_tokens,
                   d.total_tokens,
+                  d.cached_tokens,
+                  d.cache_creation_tokens,
                   d.estimated_cost,
                   d.updated_at
                 FROM daily_usage d
@@ -458,6 +464,8 @@ class AdminHandlersMixin:
                 "prompt_tokens": int(row["prompt_tokens"] or 0),
                 "completion_tokens": int(row["completion_tokens"] or 0),
                 "total_tokens": int(row["total_tokens"] or 0),
+                "cached_tokens": int(row["cached_tokens"] or 0),
+                "cache_creation_tokens": int(row["cache_creation_tokens"] or 0),
                 "estimated_cost": float(row["estimated_cost"] or 0),
                 "updated_at": int(row["updated_at"] or 0),
             }
@@ -474,6 +482,8 @@ class AdminHandlersMixin:
                     "prompt_tokens": int(summary_row["prompt_tokens"] or 0),
                     "completion_tokens": int(summary_row["completion_tokens"] or 0),
                     "total_tokens": int(summary_row["total_tokens"] or 0),
+                    "cached_tokens": int(summary_row["cached_tokens"] or 0),
+                    "cache_creation_tokens": int(summary_row["cache_creation_tokens"] or 0),
                     "estimated_cost": float(summary_row["estimated_cost"] or 0),
                 },
                 "users": users,
@@ -544,6 +554,8 @@ class AdminHandlersMixin:
                       THEN COALESCE(m.total_tokens, 0)
                       ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
                     END ELSE 0 END), 0) AS total_tokens,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.cached_tokens, 0) ELSE 0 END), 0) AS cached_tokens,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.cache_creation_tokens, 0) ELSE 0 END), 0) AS cache_creation_tokens,
                   MAX(CASE WHEN m.role='assistant' THEN m.created_at ELSE NULL END) AS last_used_at
                 FROM users u
                 LEFT JOIN conversations c ON c.user_id=u.id
@@ -573,6 +585,8 @@ class AdminHandlersMixin:
                       THEN COALESCE(m.total_tokens, 0)
                       ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
                     END ELSE 0 END), 0) AS total_tokens,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.cached_tokens, 0) ELSE 0 END), 0) AS cached_tokens,
+                  COALESCE(SUM(CASE WHEN m.role='assistant' THEN COALESCE(m.cache_creation_tokens, 0) ELSE 0 END), 0) AS cache_creation_tokens,
                   COUNT(DISTINCT CASE WHEN m.role='assistant' THEN c.user_id ELSE NULL END) AS user_count,
                   MAX(CASE WHEN m.role='assistant' THEN m.created_at ELSE NULL END) AS last_used_at
                 FROM models mo
@@ -609,6 +623,8 @@ class AdminHandlersMixin:
                     "prompt_tokens": int(row["prompt_tokens"] or 0),
                     "completion_tokens": int(row["completion_tokens"] or 0),
                     "total_tokens": int(row["total_tokens"] or 0),
+                    "cached_tokens": int(row["cached_tokens"] or 0),
+                    "cache_creation_tokens": int(row["cache_creation_tokens"] or 0),
                     "last_used_at": row["last_used_at"] or 0,
                     **({"recent_requests": details.get(row["id"], [])} if view == "all" else {}),
                 }
@@ -627,6 +643,8 @@ class AdminHandlersMixin:
                     "prompt_tokens": int(row["prompt_tokens"] or 0),
                     "completion_tokens": int(row["completion_tokens"] or 0),
                     "total_tokens": int(row["total_tokens"] or 0),
+                    "cached_tokens": int(row["cached_tokens"] or 0),
+                    "cache_creation_tokens": int(row["cache_creation_tokens"] or 0),
                     "user_count": int(row["user_count"] or 0),
                     "last_used_at": row["last_used_at"] or 0,
                     **({"recent_requests": model_details.get(row["id"], [])} if view == "all" else {}),
@@ -644,11 +662,15 @@ class AdminHandlersMixin:
                     "prompt_tokens": int(summary["prompt_tokens"] or 0),
                     "completion_tokens": int(summary["completion_tokens"] or 0),
                     "total_tokens": int(summary["total_tokens"] or 0),
+                    "cached_tokens": int(summary["cached_tokens"] or 0),
+                    "cache_creation_tokens": int(summary["cache_creation_tokens"] or 0),
                 },
                 "model_summary": {
                     "total_models": len(models),
                     "total_requests": int(summary["total_requests"] or 0),
                     "total_tokens": int(summary["total_tokens"] or 0),
+                    "cached_tokens": int(summary["cached_tokens"] or 0),
+                    "cache_creation_tokens": int(summary["cache_creation_tokens"] or 0),
                     "top_request_model": top_request_model,
                     "top_token_model": top_token_model,
                 },

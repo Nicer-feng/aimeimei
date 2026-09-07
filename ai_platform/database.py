@@ -128,6 +128,8 @@ def init_db(secrets_data=None):
               prompt_tokens INTEGER NOT NULL DEFAULT 0,
               completion_tokens INTEGER NOT NULL DEFAULT 0,
               total_tokens INTEGER NOT NULL DEFAULT 0,
+              cached_tokens INTEGER NOT NULL DEFAULT 0,
+              cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
               estimated_cost REAL NOT NULL DEFAULT 0,
               cost_input_price REAL NOT NULL DEFAULT 0,
               cost_output_price REAL NOT NULL DEFAULT 0,
@@ -175,6 +177,8 @@ def init_db(secrets_data=None):
               input_tokens INTEGER NOT NULL DEFAULT 0,
               output_tokens INTEGER NOT NULL DEFAULT 0,
               total_tokens INTEGER NOT NULL DEFAULT 0,
+              cached_tokens INTEGER NOT NULL DEFAULT 0,
+              cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
               estimated_cost REAL NOT NULL DEFAULT 0,
               updated_at INTEGER NOT NULL,
               UNIQUE(user_id, date)
@@ -468,6 +472,17 @@ def init_db(secrets_data=None):
         for column in ("estimated_cost", "cost_input_price", "cost_output_price"):
             if column not in message_columns:
                 conn.execute(f"ALTER TABLE messages ADD COLUMN {column} REAL NOT NULL DEFAULT 0")
+        for column in ("cached_tokens", "cache_creation_tokens"):
+            if column not in message_columns:
+                conn.execute(
+                    f"ALTER TABLE messages ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
+                )
+        daily_usage_columns = table_columns(conn, "daily_usage")
+        for column in ("cached_tokens", "cache_creation_tokens"):
+            if column not in daily_usage_columns:
+                conn.execute(
+                    f"ALTER TABLE daily_usage ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
+                )
         if "cost_model_id" not in message_columns:
             conn.execute("ALTER TABLE messages ADD COLUMN cost_model_id TEXT NOT NULL DEFAULT ''")
         if "actual_model" not in message_columns:

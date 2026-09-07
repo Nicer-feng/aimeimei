@@ -2,6 +2,14 @@ from .shared import *
 
 
 class ChatHandlersMixin:
+    @staticmethod
+    def dashscope_qwen_session_cache_enabled(base_url, model):
+        endpoint = str(base_url or "").strip().lower()
+        model_name = str(model or "").strip().lower()
+        return model_name.startswith("qwen") and (
+            "dashscope.aliyuncs.com" in endpoint or ".maas.aliyuncs.com" in endpoint
+        )
+
     def side_discussion_disabled_error(self):
         return self.error(HTTPStatus.FORBIDDEN, "侧边讨论已由管理员关闭")
 
@@ -991,6 +999,7 @@ class ChatHandlersMixin:
 
         def open_upstream(payload, native_search=False):
             endpoint = "/responses" if native_search else "/chat/completions"
+            use_session_cache = native_search and self.dashscope_qwen_session_cache_enabled(convo["base_url"], convo["model"])
             request = urllib.request.Request(
                 convo["base_url"].rstrip("/") + endpoint,
                 data=json.dumps(payload).encode(),
@@ -999,6 +1008,7 @@ class ChatHandlersMixin:
                     "Content-Type": "application/json",
                     "Accept": "text/event-stream",
                     "User-Agent": "ai-platform/2.0",
+                    **({"x-dashscope-session-cache": "enable"} if use_session_cache else {}),
                 },
                 method="POST",
             )
@@ -1276,6 +1286,7 @@ class ChatHandlersMixin:
         if think_reasoning:
             reasoning_text = (reasoning_text + "\n\n" + think_reasoning).strip()
         prompt_tokens, completion_tokens, total_tokens = parse_usage_tokens(usage_data)
+        cached_tokens, cache_creation_tokens = parse_usage_cache_tokens(usage_data)
         message_created_at = now()
         input_price_snapshot = parse_price(convo["input_price_per_million"])
         output_price_snapshot = parse_price(convo["output_price_per_million"])
@@ -1292,11 +1303,11 @@ class ChatHandlersMixin:
                     """
                     INSERT INTO messages(
                       user_id, conversation_id, role, content, reasoning_content,
-                      prompt_tokens, completion_tokens, total_tokens,
+                      prompt_tokens, completion_tokens, total_tokens, cached_tokens, cache_creation_tokens,
                       estimated_cost, cost_input_price, cost_output_price, cost_model_id, actual_model,
                       created_at
                     )
-                    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user_id,
@@ -1306,6 +1317,8 @@ class ChatHandlersMixin:
                         prompt_tokens,
                         completion_tokens,
                         total_tokens,
+                        cached_tokens,
+                        cache_creation_tokens,
                         estimated_cost,
                         input_price_snapshot if convo["cost_enabled"] else 0,
                         output_price_snapshot if convo["cost_enabled"] else 0,
@@ -1342,6 +1355,8 @@ class ChatHandlersMixin:
                     completion_tokens,
                     total_tokens,
                     estimated_cost,
+                    cached_tokens,
+                    cache_creation_tokens,
                 )
             saved_event = {
                 "type": "message_saved",
@@ -1352,6 +1367,8 @@ class ChatHandlersMixin:
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
                     "estimated_cost": estimated_cost,
+                    "cached_tokens": cached_tokens,
+                    "cache_creation_tokens": cache_creation_tokens,
                 },
                 "sources": public_sources(search_results),
             }
