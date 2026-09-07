@@ -138,6 +138,10 @@ class AppHandler(
             return self.require_admin(self.handle_admin_tts)
         if path == "/api/admin/search":
             return self.require_admin(self.handle_admin_search)
+        if path == "/api/admin/token-stats/daily":
+            return self.require_admin(self.handle_admin_daily_token_stats)
+        if path == "/api/admin/token-stats/daily/details":
+            return self.require_admin(self.handle_admin_daily_token_details)
         if path == "/api/admin/features":
             return self.require_admin(self.handle_admin_features)
         if path == "/api/admin/token-stats":

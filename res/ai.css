@@ -2336,6 +2336,9 @@
       gap: 10px;
       align-items: end;
     }
+    .daily-token-filter-row {
+      grid-template-columns: 154px minmax(0, 1fr) 160px auto;
+    }
     .token-user-row {
       align-items: start;
     }

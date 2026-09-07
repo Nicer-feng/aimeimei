@@ -321,6 +321,165 @@ class AdminHandlersMixin:
             rows = self._token_recent_requests(conn, kind, item_id)
         return self.json({"type": kind, "id": item_id, "recent_requests": rows})
 
+    def _daily_token_date(self, value):
+        date_value = str(value or "").strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_value):
+            return None
+        try:
+            time.strptime(date_value, "%Y-%m-%d")
+        except ValueError:
+            return None
+        return date_value
+
+    def _daily_token_recent_requests(self, conn, user_id, usage_date):
+        day_start = int(time.mktime(time.strptime(usage_date, "%Y-%m-%d")))
+        day_end = day_start + 86400
+        rows = conn.execute(
+            """
+            WITH recent AS (
+              SELECT m.id, m.user_id, m.conversation_id, m.created_at,
+                     m.prompt_tokens, m.completion_tokens,
+                     CASE WHEN COALESCE(m.total_tokens, 0) > 0
+                       THEN m.total_tokens
+                       ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
+                     END AS total_tokens
+              FROM messages m INDEXED BY idx_messages_user_recent
+              WHERE m.user_id=? AND m.role='assistant'
+                AND m.created_at>=? AND m.created_at<?
+              ORDER BY m.created_at DESC, m.id DESC
+              LIMIT 20
+            )
+            SELECT m.*, c.title AS conversation_title,
+                   mo.name AS model_name, mo.model AS model_code,
+                   EXISTS(SELECT 1 FROM message_sources s WHERE s.message_id=m.id) AS web_search
+            FROM recent m
+            LEFT JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
+            LEFT JOIN models mo ON mo.id=c.model_id
+            ORDER BY m.created_at DESC, m.id DESC
+            """,
+            (user_id, day_start, day_end),
+        ).fetchall()
+        return [
+            {
+                "message_id": row["id"],
+                "conversation_id": row["conversation_id"],
+                "conversation_title": row["conversation_title"] or "未命名对话",
+                "created_at": row["created_at"],
+                "model_name": row["model_name"] or "",
+                "model_code": row["model_code"] or "",
+                "prompt_tokens": int(row["prompt_tokens"] or 0),
+                "completion_tokens": int(row["completion_tokens"] or 0),
+                "total_tokens": int(row["total_tokens"] or 0),
+                "duration_ms": None,
+                "web_search": bool(row["web_search"]),
+            }
+            for row in rows
+        ]
+
+    def handle_admin_daily_token_details(self):
+        params = parse_qs(urlparse(self.path).query)
+        usage_date = self._daily_token_date((params.get("date") or [""])[0])
+        user_id = str((params.get("user_id") or [""])[0] or "").strip()
+        if not usage_date or not user_id or len(user_id) > 200:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid daily statistics target")
+        with db() as conn:
+            if not conn.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
+                return self.error(HTTPStatus.NOT_FOUND, "statistics user not found")
+            rows = self._daily_token_recent_requests(conn, user_id, usage_date)
+        return self.json({"date": usage_date, "user_id": user_id, "recent_requests": rows})
+
+    def handle_admin_daily_token_stats(self):
+        params = parse_qs(urlparse(self.path).query)
+        usage_date = self._daily_token_date((params.get("date") or [today_text()])[0])
+        if not usage_date:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid statistics date")
+        query = str((params.get("q") or [""])[0] or "").strip().lower()[:80]
+        sort = str((params.get("sort") or ["tokens"])[0] or "tokens").strip().lower()
+        if sort not in ("tokens", "requests", "cost"):
+            sort = "tokens"
+        order_sql = {
+            "tokens": "total_tokens DESC, request_count DESC, d.updated_at DESC",
+            "requests": "request_count DESC, total_tokens DESC, d.updated_at DESC",
+            "cost": "estimated_cost DESC, total_tokens DESC, request_count DESC",
+        }[sort]
+        where_sql = "WHERE d.date=?"
+        args = [usage_date]
+        if query:
+            like = "%" + like_escape(query) + "%"
+            where_sql += " AND (lower(u.username) LIKE ? ESCAPE '\\' OR lower(u.display_name) LIKE ? ESCAPE '\\')"
+            args.extend([like, like])
+
+        with db() as conn:
+            summary_row = conn.execute(
+                """
+                SELECT
+                  COUNT(DISTINCT user_id) AS active_users,
+                  COALESCE(SUM(request_count), 0) AS total_requests,
+                  COALESCE(SUM(input_tokens), 0) AS prompt_tokens,
+                  COALESCE(SUM(output_tokens), 0) AS completion_tokens,
+                  COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                  COALESCE(SUM(estimated_cost), 0) AS estimated_cost
+                FROM daily_usage
+                WHERE date=?
+                """,
+                (usage_date,),
+            ).fetchone()
+            rows = conn.execute(
+                f"""
+                SELECT
+                  u.id,
+                  u.username,
+                  u.display_name,
+                  u.role,
+                  u.is_active,
+                  d.request_count,
+                  d.input_tokens AS prompt_tokens,
+                  d.output_tokens AS completion_tokens,
+                  d.total_tokens,
+                  d.estimated_cost,
+                  d.updated_at
+                FROM daily_usage d
+                JOIN users u ON u.id=d.user_id
+                {where_sql}
+                ORDER BY {order_sql}
+                LIMIT 200
+                """,
+                args,
+            ).fetchall()
+
+        users = [
+            {
+                "id": row["id"],
+                "username": row["username"],
+                "display_name": row["display_name"],
+                "role": row["role"],
+                "is_active": bool(row["is_active"]),
+                "request_count": int(row["request_count"] or 0),
+                "prompt_tokens": int(row["prompt_tokens"] or 0),
+                "completion_tokens": int(row["completion_tokens"] or 0),
+                "total_tokens": int(row["total_tokens"] or 0),
+                "estimated_cost": float(row["estimated_cost"] or 0),
+                "updated_at": int(row["updated_at"] or 0),
+            }
+            for row in rows
+        ]
+        return self.json(
+            {
+                "date": usage_date,
+                "query": query,
+                "sort": sort,
+                "summary": {
+                    "active_users": int(summary_row["active_users"] or 0),
+                    "total_requests": int(summary_row["total_requests"] or 0),
+                    "prompt_tokens": int(summary_row["prompt_tokens"] or 0),
+                    "completion_tokens": int(summary_row["completion_tokens"] or 0),
+                    "total_tokens": int(summary_row["total_tokens"] or 0),
+                    "estimated_cost": float(summary_row["estimated_cost"] or 0),
+                },
+                "users": users,
+            }
+        )
+
     def handle_admin_token_stats(self):
         params = parse_qs(urlparse(self.path).query)
         view = (params.get("view") or ["all"])[0]

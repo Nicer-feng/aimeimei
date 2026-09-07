@@ -83,6 +83,7 @@
 	      tokenStatsTab: "users",
 	      tokenStatsExpandedUserId: "",
 	      tokenStatsExpandedModelId: "",
+      tokenStatsExpandedDailyUserId: "",
 	      tokenStatsTimer: 0,
           tokenStatsCache: {},
           tokenStatsRequest: null,
@@ -3691,7 +3692,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.11" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.12" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -7279,7 +7280,7 @@
 	      search: { title: "联网搜索", desc: "配置 Tavily/Brave、搜索策略、搜索深度和结果数量。" },
 	      tts: { title: "语音服务", desc: "配置豆包 TTS、可用音色、默认语速和 OSS 音频缓存。" },
 	      plugins: { title: "插件管理", desc: "查看图片、听悟、搜索、提示词等功能状态，后续可扩展独立开关。" },
-	      tokens: { title: "Token统计", desc: "按账号查看累计 Token 用量和最近请求记录。" },
+	      tokens: { title: "Token统计", desc: "按账号、模型和日期查看 Token 用量，明细按需加载。" },
 	      costs: { title: "成本统计", desc: "根据模型价格快照查看平台成本、模型排行和用户排行。" },
 	      system: { title: "系统设置", desc: "修改登录密码并查看系统基础信息。" }
 	    };
@@ -7748,14 +7749,123 @@
       state.tokenStatsDetailsPending.clear();
       state.tokenStatsExpandedUserId = "";
       state.tokenStatsExpandedModelId = "";
-      for (const id of ["tokenStatsList", "modelTokenStatsList", "tokenSummaryGrid", "modelTokenSummaryGrid"]) {
+      state.tokenStatsExpandedDailyUserId = "";
+      for (const id of ["tokenStatsList", "modelTokenStatsList", "dailyTokenStatsList", "tokenSummaryGrid", "modelTokenSummaryGrid", "dailyTokenSummaryGrid"]) {
         const element = $(id);
         if (element) element.replaceChildren();
       }
     }
 
+    function renderDailyTokenSummary(summary = {}) {
+      const box = $("dailyTokenSummaryGrid");
+      if (!box) return;
+      const cards = [
+        ["活跃账号", summary.active_users || 0],
+        ["总请求数", summary.total_requests || 0],
+        ["当天输入 Token", summary.prompt_tokens || 0],
+        ["当天输出 Token", summary.completion_tokens || 0],
+        ["当天 Token", summary.total_tokens || 0]
+      ];
+      box.innerHTML = cards.map(([label, value]) => (
+        '<div class="token-summary-card"><span>' + escapeHTML(label) + '</span><strong>' + tokenNumber(value) + '</strong></div>'
+      )).join("");
+    }
+
+    function renderDailyLazyTokenDetail(user, usageDate) {
+      const key = "daily:" + usageDate + ":" + user.id;
+      const cached = state.tokenStatsDetails.get(key);
+      const render = (rows) => renderTokenUserDetail({ ...user, recent_requests: rows });
+      if (cached && Date.now() - cached.at < tokenStatsCacheMs) return render(cached.rows);
+      const detail = document.createElement("div");
+      detail.className = "token-detail";
+      detail.setAttribute("role", "status");
+      detail.setAttribute("aria-live", "polite");
+      detail.textContent = "正在加载当天最近 20 次请求...";
+      const epoch = state.tokenStatsEpoch;
+      let pending = state.tokenStatsDetailsPending.get(key);
+      if (!pending) {
+        const params = new URLSearchParams({ date: usageDate, user_id: user.id });
+        pending = (async () => {
+          const res = await adminApi("/api/admin/token-stats/daily/details?" + params);
+          if (!res.ok) throw new Error(await readError(res, "当天详情加载失败，请重试。"));
+          const data = await res.json();
+          const rows = data.recent_requests || [];
+          if (epoch === state.tokenStatsEpoch) state.tokenStatsDetails.set(key, { rows, at: Date.now() });
+          return rows;
+        })();
+        state.tokenStatsDetailsPending.set(key, pending);
+      }
+      pending.then((rows) => {
+        if (epoch === state.tokenStatsEpoch && detail.isConnected) detail.replaceWith(render(rows));
+      }).catch((err) => {
+        if (epoch !== state.tokenStatsEpoch || !detail.isConnected) return;
+        detail.textContent = friendlyError(err, "当天详情加载失败，请重试。") + " ";
+        const retry = createIconButton("refresh-cw", "重试");
+        retry.addEventListener("click", () => detail.replaceWith(renderDailyLazyTokenDetail(user, usageDate)));
+        detail.appendChild(retry);
+      }).finally(() => {
+        if (state.tokenStatsDetailsPending.get(key) === pending) state.tokenStatsDetailsPending.delete(key);
+      });
+      return detail;
+    }
+
+    function renderDailyTokenStatsList(users, usageDate) {
+      const box = $("dailyTokenStatsList");
+      if (!box) return;
+      box.innerHTML = "";
+      if (!users.length) {
+        box.appendChild(createEmptyState("calendar-days", "当天暂无 Token 记录", "选择其它日期，或等待账号发起聊天请求。", { compact: true }));
+        queueLucideRefresh();
+        return;
+      }
+      for (const user of users) {
+        const row = document.createElement("div");
+        row.className = "model-row token-user-row";
+        const main = document.createElement("div");
+        main.className = "token-user-main";
+        const title = document.createElement("strong");
+        title.textContent = (user.display_name || user.username) + " · " + user.username + (user.is_active ? "" : "（已禁用）");
+        const meta = document.createElement("span");
+        meta.textContent = usageDate + " · 更新 " + (user.updated_at ? formatTime(user.updated_at) : "暂无");
+        const stats = document.createElement("div");
+        stats.className = "token-user-stats";
+        stats.innerHTML =
+          '<span>请求 <b>' + tokenNumber(user.request_count) + '</b></span>' +
+          '<span>输入 <b>' + tokenNumber(user.prompt_tokens) + '</b></span>' +
+          '<span>输出 <b>' + tokenNumber(user.completion_tokens) + '</b></span>' +
+          '<span>总计 <b>' + tokenNumber(user.total_tokens) + '</b></span>' +
+          (user.estimated_cost > 0 ? '<span>花费 <b>' + escapeHTML(formatMoney(user.estimated_cost)) + '</b></span>' : "");
+        main.append(title, meta, stats);
+        const actions = document.createElement("div");
+        actions.className = "library-actions";
+        const expanded = state.tokenStatsExpandedDailyUserId === user.id;
+        const detailBtn = createIconButton(expanded ? "chevron-up" : "chevron-down", expanded ? "收起" : "详情", { fallback: expanded ? "收" : "详" });
+        detailBtn.addEventListener("click", () => {
+          state.tokenStatsExpandedDailyUserId = expanded ? "" : user.id;
+          renderDailyTokenStatsList(state.tokenStats?.daily_users || [], usageDate);
+        });
+        actions.append(detailBtn);
+        row.append(main, actions);
+        if (expanded) row.appendChild(renderDailyLazyTokenDetail(user, usageDate));
+        box.appendChild(row);
+      }
+      queueLucideRefresh();
+    }
+
+    function tokenStatsItems(tab) {
+      if (tab === "models") return state.tokenStats?.models;
+      if (tab === "daily") return state.tokenStats?.daily_users;
+      return state.tokenStats?.users;
+    }
+
+    function localDateValue() {
+      const date = new Date();
+      const pad = (value) => String(value).padStart(2, "0");
+      return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+    }
+
     function switchTokenStatsTab(tab) {
-      const key = tab === "models" ? "models" : "users";
+      const key = ["users", "models", "daily"].includes(tab) ? tab : "users";
       state.tokenStatsTab = key;
       clearTimeout(state.tokenStatsTimer);
       document.querySelectorAll(".token-tab[data-token-tab]").forEach((button) => {
@@ -7771,9 +7881,13 @@
     }
 
     function renderTokenStatsStatus() {
-      const items = state.tokenStats?.[state.tokenStatsTab];
-      setStatus("tokenStatsStatus", !items || items.length ? "" :
-        (state.tokenStatsTab === "models" ? "没有匹配的模型。" : "没有匹配的账号。"));
+      const items = tokenStatsItems(state.tokenStatsTab);
+      const emptyMessage = state.tokenStatsTab === "models"
+        ? "没有匹配的模型。"
+        : state.tokenStatsTab === "daily"
+          ? "这一天没有匹配的账号用量。"
+          : "没有匹配的账号。";
+      setStatus("tokenStatsStatus", !items || items.length ? "" : emptyMessage);
     }
 
     function scheduleTokenStatsLoad() {
@@ -7790,6 +7904,9 @@
       if (tab === "models") {
         renderModelTokenSummary(data.model_summary || {});
         renderModelTokenStatsList(data.models || []);
+      } else if (tab === "daily") {
+        renderDailyTokenSummary(data.daily_summary || {});
+        renderDailyTokenStatsList(data.daily_users || [], data.daily_date || "");
       } else {
         renderTokenSummary(data.summary || {});
         renderTokenStatsList(data.users || []);
@@ -7800,22 +7917,37 @@
     async function loadTokenStats(options = {}) {
       clearTimeout(state.tokenStatsTimer);
       const tab = state.tokenStatsTab;
-      const list = $(tab === "models" ? "modelTokenStatsList" : "tokenStatsList");
+      const isModels = tab === "models";
+      const isDaily = tab === "daily";
+      const list = $(isModels ? "modelTokenStatsList" : isDaily ? "dailyTokenStatsList" : "tokenStatsList");
       if (!hasAdminAccess()) {
         resetTokenStats();
         if (list) list.innerHTML = "";
         renderTokenSummary({});
         renderModelTokenSummary({});
+        renderDailyTokenSummary({});
         setStatus("tokenStatsStatus", "管理员账号或管理密钥可查看 Token 统计。");
         return;
       }
-      const isModels = tab === "models";
-      const query = ($(isModels ? "modelTokenStatsQuery" : "tokenStatsQuery")?.value || "").trim();
-      const sort = $(isModels ? "modelTokenStatsSort" : "tokenStatsSort")?.value || "tokens";
-      const params = new URLSearchParams({ view: tab });
-      params.set(isModels ? "model_q" : "q", query);
-      params.set(isModels ? "model_sort" : "sort", sort);
-      const key = params.toString();
+      const queryInput = $(isModels ? "modelTokenStatsQuery" : isDaily ? "dailyTokenStatsQuery" : "tokenStatsQuery");
+      const sortInput = $(isModels ? "modelTokenStatsSort" : isDaily ? "dailyTokenStatsSort" : "tokenStatsSort");
+      const query = (queryInput?.value || "").trim();
+      const sort = sortInput?.value || "tokens";
+      const params = new URLSearchParams();
+      let endpoint = "/api/admin/token-stats";
+      if (isDaily) {
+        const dateInput = $("dailyTokenStatsDate");
+        if (dateInput && !dateInput.value) dateInput.value = localDateValue();
+        endpoint = "/api/admin/token-stats/daily";
+        params.set("date", dateInput?.value || localDateValue());
+        params.set("q", query);
+        params.set("sort", sort);
+      } else {
+        params.set("view", tab);
+        params.set(isModels ? "model_q" : "q", query);
+        params.set(isModels ? "model_sort" : "sort", sort);
+      }
+      const key = tab + ":" + params.toString();
       if (state.tokenStatsRequest?.key === key) return state.tokenStatsRequest.promise;
       state.tokenStatsRequest?.controller.abort();
       state.tokenStatsRequest = null;
@@ -7836,14 +7968,15 @@
       state.tokenStatsRequest = pending;
       pending.promise = (async () => {
         try {
-          const res = await adminApi("/api/admin/token-stats?" + key, { signal: controller.signal });
+          const res = await adminApi(endpoint + "?" + params, { signal: controller.signal });
           if (!res.ok) throw new Error(await readError(res, "Token 统计加载失败，稍后再试一下。"));
           const data = await res.json();
           if (seq !== state.tokenStatsSeq) return;
-          // Keep each tab's cache independent; the API may include empty arrays for the other tab.
           const activeData = isModels
             ? { summary: data.summary, model_summary: data.model_summary, models: data.models }
-            : { summary: data.summary, users: data.users };
+            : isDaily
+              ? { daily_summary: data.summary, daily_users: data.users, daily_date: data.date }
+              : { summary: data.summary, users: data.users };
           state.tokenStatsCache[tab] = { key, at: Date.now(), data: activeData };
           if (state.tokenStatsTab === tab) applyTokenStats(activeData, tab);
         } catch (err) {
@@ -8947,6 +9080,11 @@
 	    $("modelTokenStatsQuery").addEventListener("input", scheduleTokenStatsLoad);
 	    $("modelTokenStatsSort").addEventListener("change", loadTokenStats);
 	    $("refreshModelTokenStats").addEventListener("click", () => loadTokenStats({ force: true }));
+    if (!$("dailyTokenStatsDate").value) $("dailyTokenStatsDate").value = localDateValue();
+    $("dailyTokenStatsDate").addEventListener("change", () => { state.tokenStatsExpandedDailyUserId = ""; loadTokenStats({ force: true }); });
+    $("dailyTokenStatsQuery").addEventListener("input", scheduleTokenStatsLoad);
+    $("dailyTokenStatsSort").addEventListener("change", loadTokenStats);
+    $("refreshDailyTokenStats").addEventListener("click", () => loadTokenStats({ force: true }));
 	    $("costStatsRange").addEventListener("change", loadCostStats);
 	    $("refreshCostStats").addEventListener("click", loadCostStats);
 	    $("recalculateCostStats").addEventListener("click", recalculateCostStats);
