@@ -2246,7 +2246,44 @@
 	      renderProfilePopover();
 	    }
 
-	    function updateProfileEditorMeta() {
+	    function renderContextMode() {
+      const button = $("contextModeToggle");
+      if (!button) return;
+      const smart = !state.currentConversation || state.currentConversation.context_mode !== "full";
+      const suffix = smart ? "智能压缩" : "完整保留";
+      button.classList.toggle("active", !smart);
+      button.title = "上下文：" + suffix + "（点击切换）";
+      button.setAttribute("aria-label", button.title);
+      button.setAttribute("aria-pressed", smart ? "false" : "true");
+    }
+
+    async function toggleConversationContextMode() {
+      if (!state.currentConversation) {
+        setStatus("chatStatus", "先进入一个对话，再设置上下文模式。", "err");
+        return;
+      }
+      if (state.sending) {
+        setStatus("chatStatus", "当前正在生成，完成后再切换上下文模式。", "err");
+        return;
+      }
+      const nextMode = state.currentConversation.context_mode === "full" ? "smart" : "full";
+      const res = await api(`/api/conversations/${state.currentConversation.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ context_mode: nextMode })
+      });
+      if (!res.ok) {
+        setStatus("chatStatus", await readError(res, "上下文模式保存失败。"), "err");
+        return;
+      }
+      const data = await res.json();
+      state.currentConversation = data.conversation || { ...state.currentConversation, context_mode: nextMode };
+      upsertConversation(state.currentConversation);
+      renderContextMode();
+      renderConversations();
+      setStatus("chatStatus", nextMode === "smart" ? "已启用智能上下文：早期内容会自动压缩。" : "已切到完整上下文：会保留更多原始历史。", "ok");
+    }
+
+    function updateProfileEditorMeta() {
 	      const meta = $("profileEditorMeta");
 	      if (!meta) return;
 	      const stats = profileTextStats($("profileTitle").value.trim(), $("profileContent").value.trim());
@@ -3678,6 +3715,7 @@
       updateChatUsage();
       renderProfileStatus();
       renderProfilePopover();
+      renderContextMode();
       renderModelSelect();
     }
 
@@ -3692,7 +3730,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.14" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.15" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8870,6 +8908,7 @@
 	    $("profileTitle").addEventListener("input", updateProfileEditorMeta);
 	    $("profileContent").addEventListener("input", updateProfileEditorMeta);
 	    $("profileStatus").addEventListener("click", toggleProfilePopover);
+    $("contextModeToggle").addEventListener("click", toggleConversationContextMode);
 	    $("disableProfileForConversation").addEventListener("change", () => setProfileDisabledForCurrentConversation($("disableProfileForConversation").checked));
 	    document.addEventListener("click", handleProfileOutsideClick);
 	    document.querySelectorAll("[data-version-trigger]").forEach((button) => {

@@ -46,6 +46,8 @@ def conversation_row(row):
         "supports_native_web_search": bool(row["supports_native_web_search"]) if "supports_native_web_search" in row.keys() else False,
         "pinned": bool(row["pinned"]) if "pinned" in row.keys() else False,
         "pinned_at": row["pinned_at"] if "pinned_at" in row.keys() else 0,
+        "context_mode": row["context_mode"] if "context_mode" in row.keys() else "smart",
+        "context_summary_updated_at": row["context_summary_updated_at"] if "context_summary_updated_at" in row.keys() else 0,
         "updated_at": row["updated_at"],
         "created_at": row["created_at"],
     }

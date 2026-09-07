@@ -113,6 +113,10 @@ def init_db(secrets_data=None):
               archived INTEGER NOT NULL DEFAULT 0,
               pinned INTEGER NOT NULL DEFAULT 0,
               pinned_at INTEGER NOT NULL DEFAULT 0,
+              context_mode TEXT NOT NULL DEFAULT 'smart',
+              context_summary TEXT NOT NULL DEFAULT '',
+              context_summary_message_id INTEGER NOT NULL DEFAULT 0,
+              context_summary_updated_at INTEGER NOT NULL DEFAULT 0,
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL,
               FOREIGN KEY (model_id) REFERENCES models(id)
@@ -525,6 +529,15 @@ def init_db(secrets_data=None):
             (default_user_id,),
         )
         conn.execute("UPDATE sessions SET user_id=? WHERE user_id='' OR user_id IS NULL", (default_user_id,))
+        conversation_columns = table_columns(conn, "conversations")
+        if "context_mode" not in conversation_columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN context_mode TEXT NOT NULL DEFAULT 'smart'")
+        if "context_summary" not in conversation_columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN context_summary TEXT NOT NULL DEFAULT ''")
+        if "context_summary_message_id" not in conversation_columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN context_summary_message_id INTEGER NOT NULL DEFAULT 0")
+        if "context_summary_updated_at" not in conversation_columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN context_summary_updated_at INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             "UPDATE conversations SET user_id=? WHERE user_id=? AND NOT EXISTS (SELECT 1 FROM users WHERE id=conversations.user_id)",
             (default_user_id, DEFAULT_AI_USER_ID),
@@ -543,6 +556,7 @@ def init_db(secrets_data=None):
         )
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations(user_id, archived, updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_context_summary ON conversations(user_id, context_mode, context_summary_message_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_conversation ON messages(user_id, conversation_id, id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_recent ON messages(user_id, role, created_at DESC, id DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_message_sources_message ON message_sources(message_id)")
