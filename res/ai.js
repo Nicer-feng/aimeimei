@@ -3692,7 +3692,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.12" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.13" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -7834,7 +7834,7 @@
           '<span>输入 <b>' + tokenNumber(user.prompt_tokens) + '</b></span>' +
           '<span>输出 <b>' + tokenNumber(user.completion_tokens) + '</b></span>' +
           '<span>总计 <b>' + tokenNumber(user.total_tokens) + '</b></span>' +
-          (user.estimated_cost > 0 ? '<span>花费 <b>' + escapeHTML(formatMoney(user.estimated_cost)) + '</b></span>' : "");
+          (user.estimated_cost > 0 ? '<span>花费 <b>' + escapeHTML(moneyNumber(user.estimated_cost)) + '</b></span>' : "");
         main.append(title, meta, stats);
         const actions = document.createElement("div");
         actions.className = "library-actions";
@@ -7864,6 +7864,24 @@
       return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
     }
 
+    async function loadDailyTokenStatsUsers() {
+      const select = $("dailyTokenStatsUser");
+      if (!select || !hasAdminAccess()) return;
+      if (!state.adminUsers.length) {
+        const res = await adminApi("/api/admin/users");
+        if (!res.ok) return;
+        const data = await res.json();
+        state.adminUsers = data.users || [];
+      }
+      const selected = select.value;
+      select.replaceChildren(new Option("全部账号", ""));
+      for (const user of state.adminUsers) {
+        const label = (user.display_name || user.username) + " · " + user.username + (user.is_active ? "" : "（已禁用）");
+        select.appendChild(new Option(label, user.username));
+      }
+      select.value = Array.from(select.options).some((option) => option.value === selected) ? selected : "";
+    }
+
     function switchTokenStatsTab(tab) {
       const key = ["users", "models", "daily"].includes(tab) ? tab : "users";
       state.tokenStatsTab = key;
@@ -7876,7 +7894,8 @@
       document.querySelectorAll(".token-panel[data-token-panel]").forEach((panel) => {
         panel.classList.toggle("active", panel.dataset.tokenPanel === key);
       });
-      loadTokenStats();
+      if (key === "daily") loadDailyTokenStatsUsers().finally(() => loadTokenStats());
+      else loadTokenStats();
       queueLucideRefresh();
     }
 
@@ -7929,7 +7948,7 @@
         setStatus("tokenStatsStatus", "管理员账号或管理密钥可查看 Token 统计。");
         return;
       }
-      const queryInput = $(isModels ? "modelTokenStatsQuery" : isDaily ? "dailyTokenStatsQuery" : "tokenStatsQuery");
+      const queryInput = $(isModels ? "modelTokenStatsQuery" : isDaily ? "dailyTokenStatsUser" : "tokenStatsQuery");
       const sortInput = $(isModels ? "modelTokenStatsSort" : isDaily ? "dailyTokenStatsSort" : "tokenStatsSort");
       const query = (queryInput?.value || "").trim();
       const sort = sortInput?.value || "tokens";
@@ -9082,7 +9101,10 @@
 	    $("refreshModelTokenStats").addEventListener("click", () => loadTokenStats({ force: true }));
     if (!$("dailyTokenStatsDate").value) $("dailyTokenStatsDate").value = localDateValue();
     $("dailyTokenStatsDate").addEventListener("change", () => { state.tokenStatsExpandedDailyUserId = ""; loadTokenStats({ force: true }); });
-    $("dailyTokenStatsQuery").addEventListener("input", scheduleTokenStatsLoad);
+    $("dailyTokenStatsUser").addEventListener("change", () => {
+      state.tokenStatsExpandedDailyUserId = "";
+      loadTokenStats({ force: true });
+    });
     $("dailyTokenStatsSort").addEventListener("change", loadTokenStats);
     $("refreshDailyTokenStats").addEventListener("click", () => loadTokenStats({ force: true }));
 	    $("costStatsRange").addEventListener("change", loadCostStats);
