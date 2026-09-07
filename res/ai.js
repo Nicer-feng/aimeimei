@@ -31,6 +31,8 @@
 	      streamPace: null,
 	      reasoningClockTimer: 0,
 	      activeReasoningMessage: null,
+	      activityClockTimer: 0,
+	      activeActivityMessage: null,
 	      newConversationPromise: null,
 	      newConversationModelId: "",
 	      firstTokenAt: null,
@@ -3730,7 +3732,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.16" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.17" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -5959,7 +5961,7 @@
 	      quotePanel.className = "message-quote-reference";
 	      quotePanel.hidden = true;
 	      const activity = document.createElement("div");
-      activity.className = "stream-activity";
+      activity.className = "assistant-stream-activity";
       activity.hidden = true;
       const copy = document.createElement("button");
 	      copy.className = "copy-btn";
@@ -6061,12 +6063,7 @@
 	        wrap.dataset.liveState = "thinking";
 	        text.className = "message-content";
 	        text.hidden = Boolean(reasoningContent);
-	        text.innerHTML = `
-	          <div class="thinking">
-	            <img class="thinking-avatar" src="/res/meimei-avatar.png" alt="">
-	            <span class="thinking-dots"><span></span><span></span><span></span></span>
-	            <span data-thinking-label><strong>槑槑</strong>${assistantActivityLabel(message)}</span>
-	          </div>`;
+	        text.innerHTML = renderAssistantActivity(message);
 	        if (imagePanel) imagePanel.hidden = true;
 	        copy.hidden = true;
 	        if (actions) actions.hidden = true;
@@ -6306,7 +6303,7 @@
 	      const tts = wrap.querySelector(".tts-action");
 	      const share = wrap.querySelector(".share-action");
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
-	      const activity = wrap.querySelector(".stream-activity");
+	      const activity = wrap.querySelector(".assistant-stream-activity");
 	      const displayContent = visibleMessageContent(message);
 	      const reasoningContent = messageReasoningContent(message);
 	      const shouldUpdateReasoning = Boolean(
@@ -6326,16 +6323,15 @@
 	        if (wrap.dataset.liveState !== "thinking") {
 	          wrap.dataset.liveState = "thinking";
 	          text.className = "message-content";
-	          text.innerHTML = `
-	            <div class="thinking">
-	              <img class="thinking-avatar" src="/res/meimei-avatar.png" alt="">
-	              <span class="thinking-dots"><span></span><span></span><span></span></span>
-	              <span data-thinking-label><strong>槑槑</strong>${assistantActivityLabel(message)}</span>
-	            </div>`;
+	          text.innerHTML = renderAssistantActivity(message);
 	        }
-	        const label = text.querySelector("[data-thinking-label]");
-	        if (label) label.innerHTML = "<strong>槑槑</strong>" + escapeHTML(assistantActivityLabel(message));
-	        if (activity) activity.hidden = true;
+        if (options.activity || !text.querySelector(".assistant-activity")) {
+          text.innerHTML = renderAssistantActivity(message);
+        } else {
+          updateAssistantActivityElement(text.querySelector(".assistant-activity"), message);
+        }
+        ensureAssistantActivityClock(message);
+        if (activity) activity.hidden = true;
 	        copy.hidden = true;
 	        if (actions) actions.hidden = true;
 	        return iconsChanged;
@@ -6356,7 +6352,10 @@
       const showActivity = Boolean(message._streamPaused && message._upstreamActive && displayContent);
       if (activity) {
         activity.hidden = !showActivity;
-        if (showActivity) activity.innerHTML = '<span class="stream-activity-pulse" aria-hidden="true"></span><span>' + escapeHTML(assistantActivityLabel(message)) + '</span>';
+        if (showActivity) {
+          activity.innerHTML = renderAssistantActivity(message, { compact: true });
+          ensureAssistantActivityClock(message);
+        }
       }
 	      copy.hidden = true;
 	      const hasContent = Boolean(displayContent);
@@ -6939,7 +6938,70 @@
       return value || "槑槑正在整理思路...";
     }
 
+    function assistantActivityStage(message) {
+      const label = assistantActivityLabel(message);
+      if (/上网|资料|来源|联网/.test(label)) return "正在联网搜索";
+      if (/继续|后续/.test(label)) return "正在继续生成";
+      if (/组织|回答/.test(label)) return "正在组织回答";
+      if (/梳理|思考|整理/.test(label)) return "正在思考";
+      return "正在处理中";
+    }
+
+    function assistantActivityDetail(message) {
+      return assistantActivityLabel(message)
+        .replace(/^槑槑/, "")
+        .replace(/[。.…]+$/g, "") || "正在处理中";
+    }
+
+    function assistantActivitySeconds(message) {
+      const startedAt = Number(message?._activityStartedAt || message?._thinkingStartedAt || Date.now());
+      return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    }
+
+    function renderAssistantActivity(message, options = {}) {
+      const compact = Boolean(options.compact);
+      const className = compact ? "assistant-activity assistant-activity-compact" : "assistant-activity";
+      return `<div class="${className}" role="status" aria-live="polite">
+        <span class="assistant-activity-spinner" aria-hidden="true"></span>
+        <span class="assistant-activity-copy">
+          <strong data-activity-stage>${escapeHTML(assistantActivityStage(message))}</strong>
+          <small><span data-activity-detail>${escapeHTML(assistantActivityDetail(message))}</span><span data-activity-elapsed> · 已等待 ${assistantActivitySeconds(message)} 秒</span></small>
+        </span>
+      </div>`;
+    }
+
+    function updateAssistantActivityElement(element, message) {
+      if (!element) return;
+      const stage = element.querySelector("[data-activity-stage]");
+      const detail = element.querySelector("[data-activity-detail]");
+      const elapsed = element.querySelector("[data-activity-elapsed]");
+      if (stage) stage.textContent = assistantActivityStage(message);
+      if (detail) detail.textContent = assistantActivityDetail(message);
+      if (elapsed) elapsed.textContent = " · 已等待 " + assistantActivitySeconds(message) + " 秒";
+    }
+
+    function stopAssistantActivityClock(message) {
+      if (message && state.activeActivityMessage !== message) return;
+      if (state.activityClockTimer) clearTimeout(state.activityClockTimer);
+      state.activityClockTimer = 0;
+      state.activeActivityMessage = null;
+    }
+
+    function ensureAssistantActivityClock(message) {
+      state.activeActivityMessage = message;
+      if (state.activityClockTimer) return;
+      const tick = () => {
+        state.activityClockTimer = 0;
+        if (state.activeActivityMessage !== message || !message._upstreamActive) return;
+        const wrap = $("messages")?.querySelector(`[data-message-key="${messageKey(message)}"]`);
+        wrap?.querySelectorAll(".assistant-activity").forEach((element) => updateAssistantActivityElement(element, message));
+        state.activityClockTimer = setTimeout(tick, 1000);
+      };
+      state.activityClockTimer = setTimeout(tick, 1000);
+    }
+
 	    function resetStreamState() {
+      stopAssistantActivityClock();
 	      if (state.streamTimer) clearTimeout(state.streamTimer);
 	      state.streamMessage = null;
 	      state.streamQueue = "";
@@ -7203,13 +7265,14 @@
 	      state.messages.push({ role: "user", content: userContent, images: sentImages, created_at: sentAt });
 	      const assistant = {
         role: "assistant", content: "", reasoning_content: "", sources: [], thinking: true,
-        created_at: sentAt, _thinkingStartedAt: Date.now(), _upstreamActive: true,
+        created_at: sentAt, _thinkingStartedAt: Date.now(), _activityStartedAt: Date.now(), _upstreamActive: true,
         _activityStatus: useWebSearch ? "槑槑正在上网查资料中..." : "槑槑正在思考与整理中..."
       };
 	      state.messages.push(assistant);
 	      state.followOutput = true;
 	      state.hasNewWhilePaused = false;
 	      appendMessageElements(state.messages.slice(-2), { forceScroll: true });
+      ensureAssistantActivityClock(assistant);
 	      const searchStatusText = options.statusText || (
 	        mode === "always" ? "正在联网搜索..." :
 	        mode === "auto" ? (useWebSearch ? "正在联网搜索..." : "AI 思考中，必要时会自动联网...") :

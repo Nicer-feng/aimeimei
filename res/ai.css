@@ -1293,32 +1293,75 @@
       color: var(--accent-strong);
       font-weight: 650;
     }
-    .stream-activity {
+    .assistant-activity {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      margin-top: 10px;
+      gap: 10px;
+      width: min(100%, 430px);
+      min-height: 48px;
+      padding: 10px 12px;
+      border: 1px solid rgba(145, 111, 93, .14);
+      border-radius: 14px;
+      color: var(--muted);
+      background: rgba(255, 252, 248, .72);
+      box-shadow: 0 8px 24px rgba(94, 69, 56, .06);
+    }
+    .assistant-activity-spinner {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      border: 2px solid rgba(217, 143, 168, .22);
+      border-top-color: var(--accent-strong);
+      border-radius: 999px;
+      animation: assistantActivitySpin .82s linear infinite;
+    }
+    .assistant-activity-copy {
+      display: grid;
+      min-width: 0;
+      gap: 2px;
+    }
+    .assistant-activity-copy strong {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 680;
+      line-height: 1.25;
+    }
+    .assistant-activity-copy small {
+      overflow: hidden;
       color: var(--muted);
       font-size: 12px;
-      line-height: 1.4;
-      animation: streamActivityBreathe 1.7s ease-in-out infinite;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .stream-activity[hidden] { display: none; }
-    .stream-activity-pulse {
-      width: 6px;
-      height: 6px;
-      border-radius: 999px;
-      background: var(--accent);
-      box-shadow: 0 0 0 0 rgba(217, 143, 168, .32);
-      animation: streamActivityPulse 1.5s ease-out infinite;
+    .assistant-activity-compact {
+      width: auto;
+      min-height: 0;
+      margin-top: 10px;
+      padding: 6px 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
     }
-    @keyframes streamActivityBreathe {
-      0%, 100% { opacity: .58; }
-      50% { opacity: 1; }
+    .assistant-activity-compact .assistant-activity-spinner {
+      width: 12px;
+      height: 12px;
+      border-width: 1.75px;
     }
-    @keyframes streamActivityPulse {
-      0% { box-shadow: 0 0 0 0 rgba(217, 143, 168, .34); }
-      70%, 100% { box-shadow: 0 0 0 7px rgba(217, 143, 168, 0); }
+    .assistant-activity-compact .assistant-activity-copy {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+    }
+    .assistant-activity-compact .assistant-activity-copy strong,
+    .assistant-activity-compact .assistant-activity-copy small {
+      font-size: 12px;
+    }
+    .assistant-stream-activity { margin-top: 0; }
+    .assistant-stream-activity[hidden] { display: none; }
+    @keyframes assistantActivitySpin {
+      to { transform: rotate(360deg); }
     }
     .thinking-dots {
       display: inline-flex;
@@ -8458,5 +8501,5 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .stream-activity, .stream-activity-pulse { animation: none; }
+      .assistant-activity-spinner { animation: none; }
     }
