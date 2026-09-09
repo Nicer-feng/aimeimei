@@ -7,8 +7,8 @@
 - 项目名称：AI槑槑。
 - GitHub：`git@github.com:Nicer-feng/aimeimei.git`。
 - 主分支：`main`。
-- 当前基线版本：`2.23.0`。
-- 当前基线构建：`20260909-114500`。
+- 当前基线版本：`2.23.1`。
+- 当前基线构建：`20260909-190000`。
 - 当前基线提交：以 `git log -1 --oneline` 为准（发布后需同步本段）。
 - 本地实际仓库：`/Users/feng/Documents/文稿 - Unknown/aliyun3129`。
 - SSH 别名：`aliyun_3129`。

@@ -1457,7 +1457,7 @@
     }
     .input-row {
       display: grid;
-      grid-template-columns: 42px minmax(0, 1fr) 42px 42px auto;
+      grid-template-columns: 42px 42px minmax(0, 1fr) 42px 42px auto;
       gap: 8px;
       align-items: end;
     }
@@ -2834,7 +2834,7 @@
       .model-select { width: 100%; }
       .search-toggle { width: fit-content; }
       .scroll-latest { bottom: 152px; }
-      .input-row { grid-template-columns: 38px minmax(0, 1fr) 38px 38px 44px; }
+      .input-row { grid-template-columns: 38px 38px minmax(0, 1fr) 38px 38px 44px; }
       .bubble-shell { max-width: 100%; }
       .bubble.user,
       .bubble.assistant { justify-items: stretch; }
@@ -4159,7 +4159,7 @@
       background: var(--surface);
     }
     .input-row {
-      grid-template-columns: 42px minmax(0, 1fr) 42px 42px 46px;
+      grid-template-columns: 42px 42px minmax(0, 1fr) 42px 42px 46px;
       gap: 8px;
       align-items: end;
     }
@@ -5193,7 +5193,7 @@
         min-height: 58px;
       }
       .input-row {
-        grid-template-columns: 42px minmax(0, 1fr) 42px 42px 46px;
+        grid-template-columns: 42px 42px minmax(0, 1fr) 42px 42px 46px;
       }
       #send {
         width: 46px;
@@ -6536,7 +6536,7 @@
       color: var(--color-text-primary);
     }
     .input-row {
-      grid-template-columns: 40px minmax(0, 1fr) 40px 40px 44px;
+      grid-template-columns: 40px 40px minmax(0, 1fr) 40px 40px 44px;
       gap: 6px;
     }
     #prompt {
@@ -7928,7 +7928,7 @@
         border-radius: 20px;
       }
       .input-row {
-        grid-template-columns: 40px minmax(0, 1fr) 40px 40px 44px;
+        grid-template-columns: 40px 40px minmax(0, 1fr) 40px 40px 44px;
         gap: 4px;
       }
       #prompt {
