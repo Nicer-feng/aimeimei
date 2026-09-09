@@ -16,6 +16,7 @@ from ai_platform.handlers import (
     ChatHandlersMixin,
     LibraryHandlersMixin,
     MediaHandlersMixin,
+    OcrHandlersMixin,
     ShareHandlersMixin,
     TTSHandlersMixin,
 )
@@ -48,6 +49,7 @@ class AppHandler(
     AdminHandlersMixin,
     LibraryHandlersMixin,
     MediaHandlersMixin,
+    OcrHandlersMixin,
     ShareHandlersMixin,
     TTSHandlersMixin,
     ChatHandlersMixin,
@@ -130,6 +132,10 @@ class AppHandler(
             return self.require_user(self.handle_chat_image_view)
         if path == "/api/media/tasks":
             return self.require_user(self.handle_media_tasks)
+        if path == "/api/ocr/tasks":
+            return self.require_user(self.handle_ocr_tasks)
+        if path.startswith("/api/ocr/tasks/"):
+            return self.require_user(self.handle_ocr_task_item)
         if path.startswith("/api/media/tasks/"):
             return self.require_user(self.handle_media_task_item)
         if path == "/api/admin/models":
@@ -229,6 +235,10 @@ class AppHandler(
             return self.require_user(self.handle_chat_images)
         if path == "/api/media/upload-policy":
             return self.require_user(self.handle_media_upload_policy)
+        if path == "/api/ocr/upload-policy":
+            return self.require_user(self.handle_ocr_upload_policy)
+        if path == "/api/ocr/tasks":
+            return self.require_user(self.handle_ocr_tasks)
         if path == "/api/media/tasks":
             return self.require_user(self.handle_media_tasks)
         if path.startswith("/api/media/tasks/") and path.endswith("/refresh"):
@@ -297,6 +307,8 @@ class AppHandler(
             return self.require_user(self.handle_favorite_item)
         if path.startswith("/api/media/tasks/"):
             return self.require_user(self.handle_media_task_item)
+        if path.startswith("/api/ocr/tasks/"):
+            return self.require_user(self.handle_ocr_task_item)
         if path.startswith("/api/conversation-shares/"):
             return self.require_user(self.handle_conversation_share_item)
         if path.startswith("/api/conversations/"):

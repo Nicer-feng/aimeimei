@@ -21,6 +21,10 @@ from .settings import (
     MEDIA_MAX_UPLOAD_BYTES,
     MEDIA_OSS_DIR,
     TTS_OSS_DIR,
+    OCR_ALLOWED_EXTENSIONS,
+    OCR_ALLOWED_MIME_TYPES,
+    OCR_MAX_IMAGE_BYTES,
+    OCR_OSS_DIR,
 )
 
 
@@ -260,6 +264,29 @@ def oss_signed_get_url(config, oss_key, expires_seconds=21600):
     )
     base = config["public_base"].rstrip("/")
     return f"{base}/{quote(oss_key, safe='/-_.~')}?{query}", expires
+
+
+def ocr_oss_config(secrets_data):
+    base = cat_oss_config(secrets_data)
+    config = secrets_data.get("ocr_oss") or {}
+    directory = str(os.environ.get("OCR_OSS_DIR") or config.get("dir") or OCR_OSS_DIR).strip("/") or OCR_OSS_DIR
+    return {**base, "directory": directory, "max_size": OCR_MAX_IMAGE_BYTES,
+            "configured": bool(base["bucket"] and base["access_key_id"] and base["access_key_secret"] and base["endpoint"])}
+
+
+def ocr_oss_prefix(config, user_id):
+    return f"{config['directory'].strip('/')}/{user_id}/{time.strftime('%Y/%m/%d', time.localtime())}/"
+
+
+def ocr_upload_policy(config, user_id):
+    prefix = ocr_oss_prefix(config, user_id)
+    policy = {"expiration": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now() + 600)),
+              "conditions": [["starts-with", "$key", prefix], ["starts-with", "$Content-Type", "image/"], ["content-length-range", 1, config["max_size"]]]}
+    encoded_policy = base64.b64encode(json.dumps(policy, separators=(",", ":")).encode()).decode()
+    signature = base64.b64encode(hmac.new(config["access_key_secret"].encode(), encoded_policy.encode(), hashlib.sha1).digest()).decode()
+    return {"host": config["endpoint"], "access_key_id": config["access_key_id"], "policy": encoded_policy,
+            "signature": signature, "key_prefix": prefix, "max_size": config["max_size"],
+            "allowed_extensions": sorted(OCR_ALLOWED_EXTENSIONS), "allowed_mime_types": sorted(OCR_ALLOWED_MIME_TYPES), "expires_at": now() + 600}
 
 
 def tts_oss_config(secrets_data):

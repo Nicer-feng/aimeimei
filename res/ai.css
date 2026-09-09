@@ -1564,6 +1564,7 @@
 	    .favorite-dialog,
 	    .profile-dialog,
 	    .media-dialog,
+      .ocr-dialog,
 	    .token-activity-dialog {
       position: fixed;
       inset: 0;
@@ -1581,6 +1582,7 @@
 	    .favorite-dialog.show,
 	    .profile-dialog.show,
 	    .media-dialog.show,
+      .ocr-dialog.show,
 	    .token-activity-dialog.show { display: grid; }
     .confirm-dialog { z-index: 40; }
     .share-dialog { z-index: 42; }
@@ -5690,6 +5692,7 @@
 	      .favorite-dialog,
 	      .profile-dialog,
 	      .media-dialog,
+      .ocr-dialog,
 	      .theme-dialog,
       .copy-dialog,
       .confirm-dialog {
@@ -8503,3 +8506,7 @@
     @media (prefers-reduced-motion: reduce) {
       .assistant-activity-spinner { animation: none; }
     }
+
+    .ocr-dialog .media-upload { background: color-mix(in srgb, var(--accent-soft) 18%, var(--color-surface)); }
+    .ocr-dialog .media-result { min-height: 260px; }
+    .ocr-dialog .library-card > p { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

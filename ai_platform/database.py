@@ -319,6 +319,22 @@ def init_db(secrets_data=None):
               updated_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS ocr_tasks (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              filename TEXT NOT NULL,
+              mime_type TEXT NOT NULL DEFAULT '',
+              file_size INTEGER NOT NULL DEFAULT 0,
+              oss_key TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'completed',
+              recognized_text TEXT NOT NULL DEFAULT '',
+              block_count INTEGER NOT NULL DEFAULT 0,
+              request_id TEXT NOT NULL DEFAULT '',
+              error_message TEXT NOT NULL DEFAULT '',
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS sessions (
               token_hash TEXT PRIMARY KEY,
               user_id TEXT NOT NULL DEFAULT 'default',
@@ -574,6 +590,7 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_user_updated ON media_analysis_tasks(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_task_id ON media_analysis_tasks(task_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_conversation ON media_analysis_tasks(conversation_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ocr_tasks_user_updated ON ocr_tasks(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_login_captchas_expiry ON login_captchas(expires_at)")
 
         daily_count = conn.execute("SELECT COUNT(*) AS n FROM daily_usage").fetchone()["n"]

@@ -41,6 +41,7 @@ from ..presenters import (
     conversation_row,
     favorite_row,
     media_task_public,
+    ocr_task_public,
     private_model,
     profile_totals,
     prompt_template_row,
@@ -79,6 +80,9 @@ from ..storage import (
     oss_signed_get_url,
     oss_put_bytes,
     tts_oss_config,
+    ocr_oss_config,
+    ocr_oss_prefix,
+    ocr_upload_policy,
 )
 from ..tingwu import (
     extract_tingwu_task_id,

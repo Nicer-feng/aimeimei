@@ -16,6 +16,9 @@
 	      mediaTab: "summary",
 	      mediaUploading: false,
 	      mediaPollTimer: null,
+      ocrTasks: [],
+      selectedOcrTaskId: null,
+      ocrUploading: false,
 	      conversations: [],
 	      currentConversation: null,
 	      conversationStats: null,
@@ -1422,7 +1425,7 @@
     }
 
     function setDialogOpenState() {
-	      const open = ["promptDialog", "profileDialog", "favoriteDialog", "mediaDialog", "accentDialog", "copyDialog", "globalSearchDialog", "modelPickerDialog", "changelogDialog", "confirmDialog", "shareDialog"].some((id) => {
+	      const open = ["promptDialog", "profileDialog", "favoriteDialog", "mediaDialog", "ocrDialog", "accentDialog", "copyDialog", "globalSearchDialog", "modelPickerDialog", "changelogDialog", "confirmDialog", "shareDialog"].some((id) => {
         const el = $(id);
         return el && el.classList.contains("show");
       });
@@ -3309,7 +3312,55 @@
 	      }
 	    }
 
-		    function toggleReasoning(message) {
+	    function ocrStatusText(status) { return status === "completed" ? "已完成" : status === "failed" ? "识别失败" : "处理中"; }
+    async function openHandwritingOcr() { $("ocrDialog").classList.add("show"); setDialogOpenState(); await loadOcrTasks(); }
+    function closeHandwritingOcr() { $("ocrDialog").classList.remove("show"); setDialogOpenState(); }
+    async function loadOcrTasks() {
+      try { const res = await api("/api/ocr/tasks"); if (!res.ok) throw new Error(await readError(res, "手写识别记录加载失败。")); const data = await res.json(); state.ocrTasks = data.tasks || []; if (!state.selectedOcrTaskId && state.ocrTasks[0]) state.selectedOcrTaskId = state.ocrTasks[0].id; renderOcrTasks(); renderOcrDetail(); }
+      catch (err) { state.ocrTasks = []; renderOcrTasks(); renderOcrDetail(); setStatus("ocrStatus", friendlyError(err, "手写识别记录加载失败。"), "err"); }
+    }
+    function currentOcrTask() { return state.ocrTasks.find((task) => task.id === state.selectedOcrTaskId) || state.ocrTasks[0] || null; }
+    function selectOcrTask(id) { state.selectedOcrTaskId = id; renderOcrTasks(); renderOcrDetail(); }
+    function renderOcrTasks() {
+      const list = $("ocrTaskList"); list.replaceChildren();
+      if (!state.ocrTasks.length) { list.appendChild(createEmptyState("scan-text", "还没有识别记录", "上传一张手写笔记、板书或表单图片，槑槑会提取其中的文字。", { compact: true })); queueLucideRefresh(); return; }
+      for (const task of state.ocrTasks) {
+        const card = document.createElement("article"); card.className = "library-card" + (task.id === state.selectedOcrTaskId ? " active" : "");
+        const title = document.createElement("strong"); title.textContent = task.filename || "手写图片";
+        const meta = document.createElement("div"); meta.className = "library-card-meta"; meta.textContent = ocrStatusText(task.status) + " · " + formatFileSize(task.file_size) + " · " + formatTime(task.updated_at);
+        const preview = document.createElement("p"); preview.textContent = task.error_message || task.recognized_text || "等待识别结果";
+        const actions = document.createElement("div"); actions.className = "library-actions";
+        const view = document.createElement("button"); view.type = "button"; view.className = (task.id === state.selectedOcrTaskId ? "primary ui-btn ui-btn-primary" : "ui-btn ui-btn-secondary") + " inline-flex items-center gap-2"; view.innerHTML = iconLabel("eye", "查看", "看"); view.addEventListener("click", () => selectOcrTask(task.id));
+        actions.appendChild(view); card.append(title, meta, preview, actions); list.appendChild(card);
+      } queueLucideRefresh();
+    }
+    function renderOcrDetail() {
+      const detail = $("ocrTaskDetail"); const task = currentOcrTask();
+      if (!task) { detail.replaceChildren(createEmptyState("pen-line", "上传一张图片", "识别完成后，提取出的文字会显示在这里，可以直接复制。")); queueLucideRefresh(); return; }
+      state.selectedOcrTaskId = task.id; detail.replaceChildren();
+      const head = document.createElement("div"); head.className = "media-task-head"; const headCopy = document.createElement("div"); const title = document.createElement("strong"); title.textContent = task.filename || "手写图片"; const meta = document.createElement("div"); meta.className = "library-card-meta"; meta.textContent = "识别于 " + formatTime(task.created_at) + (task.block_count ? " · " + task.block_count + " 个文字块" : ""); headCopy.append(title, meta); const badge = document.createElement("span"); badge.className = "media-task-badge"; badge.innerHTML = iconLabel(task.status === "completed" ? "check-circle" : "alert-circle", ocrStatusText(task.status), "•"); head.append(headCopy, badge);
+      const result = document.createElement("section"); result.className = "media-result"; const pre = document.createElement("pre"); pre.textContent = task.error_message || task.recognized_text || "暂无可展示的文字。"; result.appendChild(pre);
+      const actions = document.createElement("div"); actions.className = "library-actions";
+      if (task.recognized_text) { const copyButton = document.createElement("button"); copyButton.type = "button"; copyButton.className = "primary ui-btn ui-btn-primary inline-flex items-center gap-2"; copyButton.innerHTML = iconLabel("copy", "复制文字", "⧉"); copyButton.addEventListener("click", () => copyText(task.recognized_text, copyButton)); actions.appendChild(copyButton); }
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "ui-btn ui-btn-secondary inline-flex items-center gap-2"; remove.innerHTML = iconLabel("trash-2", "删除记录", "×"); remove.addEventListener("click", () => deleteOcrTask(task.id)); actions.appendChild(remove); detail.append(head, result, actions); queueLucideRefresh();
+    }
+    function safeOcrFilename(name) { return String(name || "handwriting").replace(/[\\/]+/g, "_").replace(/[^\w.\-\u4e00-\u9fa5]+/g, "_").slice(0, 120); }
+    async function uploadOcrTask() {
+      if (state.ocrUploading) return; const file = $("ocrFile").files?.[0]; if (!file) { setStatus("ocrStatus", "先选择一张手写图片。", "err"); return; }
+      state.ocrUploading = true; $("uploadOcrTask").disabled = true; setStatus("ocrStatus", "正在获取上传凭证...", "");
+      try {
+        const policyRes = await api("/api/ocr/upload-policy", { method: "POST" }); if (!policyRes.ok) throw new Error(await readError(policyRes, "上传配置不可用。")); const { policy } = await policyRes.json(); const extension = "." + String(file.name || "").split(".").pop().toLowerCase(); if (!policy.allowed_extensions.includes(extension)) throw new Error("仅支持 JPG、PNG、BMP、GIF、TIFF、WebP 图片"); if (file.size > policy.max_size) throw new Error("单张图片不能超过 10MB");
+        const key = policy.key_prefix + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + "-" + safeOcrFilename(file.name); const form = new FormData(); form.append("key", key); form.append("OSSAccessKeyId", policy.access_key_id); form.append("policy", policy.policy); form.append("Signature", policy.signature); form.append("success_action_status", "200"); form.append("Content-Type", file.type || "application/octet-stream"); form.append("file", file); setStatus("ocrStatus", "正在上传到 OSS...", ""); const uploaded = await fetch(policy.host, { method: "POST", body: form }); if (!uploaded.ok) throw new Error("上传 OSS 失败");
+        setStatus("ocrStatus", "槑槑正在识别手写内容...", ""); const createRes = await api("/api/ocr/tasks", { method: "POST", body: JSON.stringify({ filename: file.name, mime_type: file.type || "", file_size: file.size, oss_key: key }) }); if (!createRes.ok) throw new Error(await readError(createRes, "手写识别失败。")); const data = await createRes.json(); const task = data.task; state.ocrTasks = [task, ...state.ocrTasks.filter((item) => item.id !== task.id)]; state.selectedOcrTaskId = task.id; $("ocrFile").value = ""; renderOcrTasks(); renderOcrDetail(); setStatus("ocrStatus", task.status === "completed" ? "识别完成，结果已保存。" : "识别失败，请查看详情。", task.status === "completed" ? "ok" : "err");
+      } catch (err) { setStatus("ocrStatus", friendlyError(err, "手写识别失败。"), "err"); }
+      finally { state.ocrUploading = false; $("uploadOcrTask").disabled = false; }
+    }
+    async function deleteOcrTask(id) {
+      const task = state.ocrTasks.find((item) => item.id === id); const ok = await confirmAction({ title: "删除识别记录", message: `确定删除“${task?.filename || "这条记录"}”吗？不会删除 OSS 原图。`, confirmText: "删除", danger: true }); if (!ok) return;
+      const res = await api(`/api/ocr/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }); if (!res.ok) { setStatus("ocrStatus", await readError(res, "删除记录失败。"), "err"); return; } state.ocrTasks = state.ocrTasks.filter((item) => item.id !== id); if (state.selectedOcrTaskId === id) state.selectedOcrTaskId = state.ocrTasks[0]?.id || null; renderOcrTasks(); renderOcrDetail();
+    }
+
+	    function toggleReasoning(message) {
 	      if (!message) return;
 	      message.reasoning_open = !message.reasoning_open;
 	      const box = $("messages");
@@ -3732,7 +3783,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.21.17" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.22.0" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -9046,6 +9097,10 @@
 	      if (event.target === $("favoriteDialog")) closeFavorites();
 	    });
 	    $("openMediaAnalysis").addEventListener("click", openMediaAnalysis);
+    $("openHandwritingOcr").addEventListener("click", openHandwritingOcr);
+    $("closeOcrDialog").addEventListener("click", closeHandwritingOcr);
+    $("ocrDialog").addEventListener("click", (event) => { if (event.target === $("ocrDialog")) closeHandwritingOcr(); });
+    $("uploadOcrTask").addEventListener("click", uploadOcrTask);
 	    $("closeMediaDialog").addEventListener("click", closeMediaAnalysis);
 	    $("mediaDialog").addEventListener("click", (event) => {
 	      if (event.target === $("mediaDialog")) closeMediaAnalysis();
