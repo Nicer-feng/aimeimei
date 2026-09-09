@@ -8,6 +8,7 @@ from .ocr import _signed_rpc_url
 
 def docmind_config(secrets_data):
     config = secrets_data.get("docmind") or {}
+    media = secrets_data.get("media_oss") or {}
     cat = secrets_data.get("cat_oss") or {}
 
     def read(env_name, key, fallback=""):
@@ -17,8 +18,8 @@ def docmind_config(secrets_data):
     if endpoint and not endpoint.startswith(("http://", "https://")):
         endpoint = "https://" + endpoint
     return {
-        "access_key_id": read("DOCMIND_ACCESS_KEY_ID", "access_key_id", os.environ.get("CAT_OSS_ACCESS_KEY_ID") or cat.get("access_key_id") or ""),
-        "access_key_secret": read("DOCMIND_ACCESS_KEY_SECRET", "access_key_secret", os.environ.get("CAT_OSS_ACCESS_KEY_SECRET") or cat.get("access_key_secret") or ""),
+        "access_key_id": read("DOCMIND_ACCESS_KEY_ID", "access_key_id", os.environ.get("MEDIA_OSS_ACCESS_KEY_ID") or media.get("access_key_id") or os.environ.get("CAT_OSS_ACCESS_KEY_ID") or cat.get("access_key_id") or ""),
+        "access_key_secret": read("DOCMIND_ACCESS_KEY_SECRET", "access_key_secret", os.environ.get("MEDIA_OSS_ACCESS_KEY_SECRET") or media.get("access_key_secret") or os.environ.get("CAT_OSS_ACCESS_KEY_SECRET") or cat.get("access_key_secret") or ""),
         "endpoint": endpoint.rstrip("/"),
         "version": read("DOCMIND_VERSION", "version", "2022-07-11"),
     }

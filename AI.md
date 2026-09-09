@@ -7,8 +7,8 @@
 - 项目名称：AI槑槑。
 - GitHub：`git@github.com:Nicer-feng/aimeimei.git`。
 - 主分支：`main`。
-- 当前基线版本：`2.23.1`。
-- 当前基线构建：`20260909-190000`。
+- 当前基线版本：`2.23.2`。
+- 当前基线构建：`20260909-193000`。
 - 当前基线提交：以 `git log -1 --oneline` 为准（发布后需同步本段）。
 - 本地实际仓库：`/Users/feng/Documents/文稿 - Unknown/aliyun3129`。
 - SSH 别名：`aliyun_3129`。
@@ -170,7 +170,7 @@ ExecStart=/usr/bin/python3 /opt/ai-platform/app.py
 
 - 小猫书/通用 OSS：`CAT_OSS_*`。
 - 聊天图片：可复用 `CAT_OSS_*`，目录为 `chat-images`。
-- 对话材料：复用 `CAT_OSS_*`，目录为 `documents`；单个办公文档上限 50MB、单张图片上限 20MB；阿里云 RAM 凭据需有 `AliyunDocmindFullAccess`，可选 `DOCMIND_ACCESS_KEY_ID`、`DOCMIND_ACCESS_KEY_SECRET`、`DOCMIND_ENDPOINT`、`DOCMIND_VERSION`（默认 `2022-07-11`），未单配时复用 CAT OSS 凭据。
+- 对话材料：优先使用 `DOCUMENT_OSS_*`，未单配时复用 `MEDIA_OSS_*`，再回退 `CAT_OSS_*`，目录为 `documents`；单个办公文档上限 50MB、单张图片上限 20MB。阿里云 RAM 凭据需有 `AliyunDocmindFullAccess`；可选 `DOCMIND_ACCESS_KEY_ID`、`DOCMIND_ACCESS_KEY_SECRET`、`DOCMIND_ENDPOINT`、`DOCMIND_VERSION`（默认 `2022-07-11`），未单配时按相同顺序复用 OSS 凭据。
 - 听悟媒体：`TINGWU_*`、`MEDIA_OSS_*`，未单配时复用 CAT OSS。
 - TTS：`AI_TTS_*`、`VOLC_TTS_*`，音频目录为 `tts`。
 - 联网：后台保存的 Tavily/Brave 配置；Qwen 百炼原生联网复用模型 API Key。

@@ -294,11 +294,41 @@ def ocr_upload_policy(config, user_id):
 
 
 def document_oss_config(secrets_data):
-    base = cat_oss_config(secrets_data)
+    # Prefer a document-specific bucket, then reuse the working media store.
+    # This keeps document parsing aligned with Tingwu/TTS deployments that only
+    # configure MEDIA_OSS_* instead of duplicating CAT_OSS_* credentials.
+    base = media_oss_config(secrets_data)
     config = secrets_data.get("document_oss") or {}
-    directory = str(os.environ.get("DOCUMENT_OSS_DIR") or config.get("dir") or DOCUMENT_OSS_DIR).strip("/") or DOCUMENT_OSS_DIR
-    return {**base, "directory": directory, "max_size": DOCUMENT_MAX_UPLOAD_BYTES,
-            "configured": bool(base["bucket"] and base["access_key_id"] and base["access_key_secret"] and base["endpoint"])}
+
+    def read(name, key, fallback=""):
+        return str(os.environ.get(name) or config.get(key) or fallback).strip()
+
+    bucket = read("DOCUMENT_OSS_BUCKET", "bucket", base["bucket"])
+    region = read("DOCUMENT_OSS_REGION", "region", base["region"])
+    endpoint = read("DOCUMENT_OSS_ENDPOINT", "endpoint", base["endpoint"])
+    access_key_id = read("DOCUMENT_OSS_ACCESS_KEY_ID", "access_key_id", base["access_key_id"])
+    access_key_secret = read("DOCUMENT_OSS_ACCESS_KEY_SECRET", "access_key_secret", base["access_key_secret"])
+    public_base = read("DOCUMENT_OSS_PUBLIC_BASE", "public_base", base["public_base"])
+    directory = read("DOCUMENT_OSS_DIR", "dir", DOCUMENT_OSS_DIR).strip("/") or DOCUMENT_OSS_DIR
+    if endpoint and not endpoint.startswith(("http://", "https://")):
+        endpoint = "https://" + endpoint
+    if not endpoint and bucket and region:
+        endpoint = f"https://{bucket}.oss-{region}.aliyuncs.com"
+    if public_base and not public_base.startswith(("http://", "https://")):
+        public_base = "https://" + public_base
+    if not public_base:
+        public_base = endpoint
+    return {
+        "bucket": bucket,
+        "region": region,
+        "endpoint": endpoint.rstrip("/") if endpoint else "",
+        "public_base": public_base.rstrip("/") if public_base else "",
+        "access_key_id": access_key_id,
+        "access_key_secret": access_key_secret,
+        "directory": directory,
+        "max_size": DOCUMENT_MAX_UPLOAD_BYTES,
+        "configured": bool(bucket and access_key_id and access_key_secret and endpoint),
+    }
 
 
 def document_oss_prefix(config, user_id):

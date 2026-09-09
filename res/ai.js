@@ -1134,6 +1134,8 @@
       if (/title and content are required/i.test(text)) return "标题和内容都要填写。";
       if (/content too long/i.test(text)) return "内容太长了，稍微精简一下再保存。";
 	      if (/only assistant messages can be favorited/i.test(text)) return "只能收藏 AI 的回答。";
+	      if (/材料文件 OSS.*还没有配置/i.test(text)) return "材料上传存储还没配置好。";
+	      if (/阿里云文档解析.*还没有配置/i.test(text)) return "材料解析服务还没配置好。";
 	      if (/音视频 OSS|OSS 还没有配置/i.test(text)) return "音视频上传存储还没配置好。";
 	      if (/通义听悟还没有配置/i.test(text)) return "通义听悟还没配置好。";
 	      if (/文件大小超出限制/i.test(text)) return "文件太大了，换个小一点的文件试试。";
@@ -3794,7 +3796,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.23.1" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.23.2" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
