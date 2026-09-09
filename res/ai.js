@@ -3796,7 +3796,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.23.2" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.23.3" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -6868,6 +6868,63 @@
       finally { state.uploadingDocuments = false; }
     }
 
+    const composerVisionImagePattern = /\.(?:jpe?g|png|webp)$/i;
+    const composerDocumentPattern = /\.(?:pdf|docx?|xlsx?|xlsm|pptx?|jpe?g|png|bmp|gif|webp|txt|md|markdown|html?|rtf)$/i;
+
+    function isFileDrag(event) {
+      return Array.from(event.dataTransfer?.types || []).includes("Files");
+    }
+
+    async function handleComposerDrop(fileList) {
+      const files = Array.from(fileList || []).filter((file) => file && file.size >= 0);
+      if (!files.length) return;
+      const visionFiles = [];
+      const documentFiles = [];
+      const unsupported = [];
+      const supportsVision = selectedModelSupportsVision();
+      for (const file of files) {
+        const name = String(file.name || "");
+        if (composerVisionImagePattern.test(name) && supportsVision) visionFiles.push(file);
+        else if (composerDocumentPattern.test(name)) documentFiles.push(file);
+        else unsupported.push(name || "未命名文件");
+      }
+      if (unsupported.length) {
+        setStatus("chatStatus", `已忽略 ${unsupported.length} 个不支持的文件。`, "err");
+      }
+      if (visionFiles.length) await handleImageFiles(visionFiles);
+      if (documentFiles.length) await handleDocumentFiles(documentFiles);
+    }
+
+    function setupComposerDropzone() {
+      const composer = $("composerBox");
+      if (!composer) return;
+      const clear = () => composer.classList.remove("is-file-dragover");
+      composer.addEventListener("dragenter", (event) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        composer.classList.add("is-file-dragover");
+      });
+      composer.addEventListener("dragover", (event) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+        composer.classList.add("is-file-dragover");
+      });
+      composer.addEventListener("dragleave", (event) => {
+        if (!isFileDrag(event) || composer.contains(event.relatedTarget)) return;
+        clear();
+      });
+      composer.addEventListener("drop", (event) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        clear();
+        handleComposerDrop(event.dataTransfer?.files).catch((error) => {
+          setStatus("chatStatus", friendlyError(error, "文件上传失败。"), "err");
+        });
+      });
+      window.addEventListener("dragend", clear);
+    }
+
     function openImagePreview(url) {
 	      if (!url) return;
 	      $("imagePreviewFull").src = url;
@@ -9244,6 +9301,7 @@
     $("documentInput")?.addEventListener("change", (event) => {
       handleDocumentFiles(event.target.files).catch((err) => setStatus("chatStatus", friendlyError(err, "材料上传失败。"), "err"));
     });
+    setupComposerDropzone();
 	    $("insertNewline").addEventListener("click", insertNewlineAtCursor);
 	    $("shareConversation").addEventListener("click", () => openShareDialog());
 	    $("closeShareDialog").addEventListener("click", closeShareDialog);

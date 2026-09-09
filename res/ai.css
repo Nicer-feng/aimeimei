@@ -6517,6 +6517,47 @@
     .composer-box:focus-within {
       box-shadow: var(--glass-shadow-strong), 0 0 0 3px var(--focus-ring);
     }
+    .composer-box {
+      position: relative;
+    }
+    .composer-drop-hint {
+      position: absolute;
+      inset: 7px;
+      z-index: 6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      border: 1px dashed color-mix(in srgb, var(--primary) 58%, var(--color-border));
+      border-radius: calc(var(--radius-xl) - 5px);
+      background: color-mix(in srgb, var(--color-surface) 84%, var(--primary) 16%);
+      color: var(--color-text-primary);
+      font-size: 13px;
+      font-weight: 700;
+      opacity: 0;
+      pointer-events: none;
+      transform: scale(.985);
+      transition: opacity var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+    }
+    .composer-drop-hint .lucide {
+      width: 18px;
+      height: 18px;
+      color: var(--primary);
+    }
+    .composer-box.is-file-dragover .composer-drop-hint {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .composer-box.is-file-dragover > :not(.composer-drop-hint) {
+      opacity: .24;
+      transition: opacity var(--motion-fast) var(--ease-standard);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .composer-drop-hint,
+      .composer-box.is-file-dragover > :not(.composer-drop-hint) {
+        transition: none;
+      }
+    }
     .composer-chip-row {
       gap: 5px;
       padding: 0 2px;
