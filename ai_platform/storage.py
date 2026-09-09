@@ -25,6 +25,9 @@ from .settings import (
     OCR_ALLOWED_MIME_TYPES,
     OCR_MAX_IMAGE_BYTES,
     OCR_OSS_DIR,
+    DOCUMENT_ALLOWED_EXTENSIONS,
+    DOCUMENT_MAX_UPLOAD_BYTES,
+    DOCUMENT_OSS_DIR,
 )
 
 
@@ -288,6 +291,29 @@ def ocr_upload_policy(config, user_id):
             "signature": signature, "key_prefix": prefix, "max_size": config["max_size"],
             "allowed_extensions": sorted(OCR_ALLOWED_EXTENSIONS), "allowed_mime_types": sorted(OCR_ALLOWED_MIME_TYPES), "expires_at": now() + 600}
 
+
+
+def document_oss_config(secrets_data):
+    base = cat_oss_config(secrets_data)
+    config = secrets_data.get("document_oss") or {}
+    directory = str(os.environ.get("DOCUMENT_OSS_DIR") or config.get("dir") or DOCUMENT_OSS_DIR).strip("/") or DOCUMENT_OSS_DIR
+    return {**base, "directory": directory, "max_size": DOCUMENT_MAX_UPLOAD_BYTES,
+            "configured": bool(base["bucket"] and base["access_key_id"] and base["access_key_secret"] and base["endpoint"])}
+
+
+def document_oss_prefix(config, user_id):
+    return f"{config['directory'].strip('/')}/{user_id}/{time.strftime('%Y/%m/%d', time.localtime())}/"
+
+
+def document_upload_policy(config, user_id):
+    prefix = document_oss_prefix(config, user_id)
+    policy = {"expiration": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now() + 600)),
+              "conditions": [["starts-with", "$key", prefix], ["content-length-range", 1, config["max_size"]]]}
+    encoded_policy = base64.b64encode(json.dumps(policy, separators=(",", ":")).encode()).decode()
+    signature = base64.b64encode(hmac.new(config["access_key_secret"].encode(), encoded_policy.encode(), hashlib.sha1).digest()).decode()
+    return {"host": config["endpoint"], "access_key_id": config["access_key_id"], "policy": encoded_policy,
+            "signature": signature, "key_prefix": prefix, "max_size": config["max_size"],
+            "max_count": DOCUMENT_MAX_COUNT, "allowed_extensions": sorted(DOCUMENT_ALLOWED_EXTENSIONS), "expires_at": now() + 600}
 
 def tts_oss_config(secrets_data):
     base = media_oss_config(secrets_data)

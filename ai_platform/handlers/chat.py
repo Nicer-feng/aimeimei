@@ -1,4 +1,5 @@
 from .shared import *
+from ..docmind import build_document_context
 
 import threading
 
@@ -931,8 +932,18 @@ class ChatHandlersMixin:
                 image_ids.append(value)
         if len(image_ids) > CHAT_IMAGE_MAX_COUNT:
             return self.error(HTTPStatus.BAD_REQUEST, "单次最多上传 5 张图片")
+        raw_document_ids = data.get("document_ids") or []
+        if not isinstance(raw_document_ids, list):
+            raw_document_ids = []
+        document_ids = []
+        for item in raw_document_ids:
+            value = str(item or "").strip()
+            if value and value not in document_ids:
+                document_ids.append(value)
+        if len(document_ids) > DOCUMENT_MAX_COUNT:
+            return self.error(HTTPStatus.BAD_REQUEST, "单次最多使用 5 份材料")
         requested_web_search = bool(data.get("web_search"))
-        if not content and not image_ids:
+        if not content and not image_ids and not document_ids:
             return self.error(HTTPStatus.BAD_REQUEST, "content required")
 
         search_results = []
@@ -981,6 +992,37 @@ class ChatHandlersMixin:
                 if any(row is None for row in image_rows):
                     return self.error(HTTPStatus.BAD_REQUEST, "图片附件不存在或已被使用")
 
+            document_rows = []
+            if document_ids:
+                placeholders = ",".join("?" for _ in document_ids)
+                rows = conn.execute(
+                    f"SELECT * FROM document_files WHERE id IN ({placeholders}) AND user_id=?",
+                    (*document_ids, user_id),
+                ).fetchall()
+                row_by_id = {row["id"]: row for row in rows}
+                document_rows = [row_by_id.get(item) for item in document_ids]
+                if any(row is None or row["status"] != "completed" for row in document_rows):
+                    return self.error(HTTPStatus.BAD_REQUEST, "材料不存在或仍在解析中")
+                conn.execute("DELETE FROM conversation_documents WHERE conversation_id=? AND user_id=?", (conversation_id, user_id))
+                conn.executemany(
+                    "INSERT INTO conversation_documents(conversation_id,document_id,user_id,created_at) VALUES (?,?,?,?)",
+                    [(conversation_id, row["id"], user_id, now()) for row in document_rows],
+                )
+            else:
+                document_rows = conn.execute(
+                    "SELECT d.* FROM conversation_documents cd JOIN document_files d ON d.id=cd.document_id WHERE cd.conversation_id=? AND cd.user_id=? AND d.status='completed' ORDER BY cd.created_at ASC",
+                    (conversation_id, user_id),
+                ).fetchall()
+            document_context = ""
+            if document_rows:
+                doc_ids = [row["id"] for row in document_rows]
+                placeholders = ",".join("?" for _ in doc_ids)
+                chunks = conn.execute(
+                    f"SELECT document_id, ordinal, title, content, page_number FROM document_chunks WHERE document_id IN ({placeholders}) AND user_id=? ORDER BY ordinal ASC",
+                    (*doc_ids, user_id),
+                ).fetchall()
+                document_context = build_document_context(document_rows, chunks, content or "请根据这些材料分析")
+
             use_native_search = bool(
                 use_web_search and convo["supports_native_web_search"]
             )
@@ -1005,7 +1047,7 @@ class ChatHandlersMixin:
                     return self.error(HTTPStatus.BAD_GATEWAY, "web search returned no results")
 
             ts = now()
-            user_message_content = content or "请分析这些图片。"
+            user_message_content = content or ("请根据这些材料分析。" if document_rows else "请分析这些图片。")
             cursor = conn.execute(
                 "INSERT INTO messages(user_id, conversation_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)",
                 (user_id, conversation_id, user_message_content, ts),
@@ -1120,6 +1162,8 @@ class ChatHandlersMixin:
                 upstream_messages.append(
                     {"role": "system", "content": build_search_context(results)}
                 )
+            if document_context:
+                upstream_messages.append({"role": "system", "content": document_context})
             upstream_messages.extend(upstream_message_from_history(row) for row in history)
             return upstream_messages
 

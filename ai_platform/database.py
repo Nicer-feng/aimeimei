@@ -319,6 +319,42 @@ def init_db(secrets_data=None):
               updated_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS document_files (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              filename TEXT NOT NULL,
+              mime_type TEXT NOT NULL DEFAULT '',
+              file_size INTEGER NOT NULL DEFAULT 0,
+              oss_key TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'uploaded',
+              parser_task_id TEXT NOT NULL DEFAULT '',
+              parsed_text TEXT NOT NULL DEFAULT '',
+              page_count INTEGER NOT NULL DEFAULT 0,
+              chunk_count INTEGER NOT NULL DEFAULT 0,
+              error_message TEXT NOT NULL DEFAULT '',
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS document_chunks (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              document_id TEXT NOT NULL,
+              user_id TEXT NOT NULL,
+              ordinal INTEGER NOT NULL,
+              title TEXT NOT NULL DEFAULT '',
+              content TEXT NOT NULL,
+              page_number INTEGER NOT NULL DEFAULT 0,
+              created_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS conversation_documents (
+              conversation_id TEXT NOT NULL,
+              document_id TEXT NOT NULL,
+              user_id TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              PRIMARY KEY (conversation_id, document_id)
+            );
+
             CREATE TABLE IF NOT EXISTS ocr_tasks (
               id TEXT PRIMARY KEY,
               user_id TEXT NOT NULL,
@@ -590,6 +626,9 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_user_updated ON media_analysis_tasks(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_task_id ON media_analysis_tasks(task_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_tasks_conversation ON media_analysis_tasks(conversation_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_user_updated ON document_files(user_id, updated_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_document_chunks_document ON document_chunks(document_id, user_id, ordinal)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversation_documents_user ON conversation_documents(conversation_id, user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ocr_tasks_user_updated ON ocr_tasks(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_login_captchas_expiry ON login_captchas(expires_at)")
 

@@ -44,6 +44,16 @@ OCR_OSS_DIR = "ocr"
 OCR_MAX_IMAGE_BYTES = 10 * 1024 * 1024
 OCR_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".tif", ".webp"}
 OCR_ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/bmp", "image/gif", "image/tiff", "image/webp"}
+
+DOCUMENT_OSS_DIR = "documents"
+DOCUMENT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+DOCUMENT_MAX_IMAGE_BYTES = 20 * 1024 * 1024
+DOCUMENT_MAX_COUNT = 5
+DOCUMENT_ALLOWED_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".xlsm", ".ppt", ".pptx",
+    ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp",
+    ".txt", ".md", ".markdown", ".html", ".htm", ".rtf",
+}
 MEDIA_MAX_UPLOAD_BYTES = (
     int(os.environ.get("MEDIA_MAX_UPLOAD_MB", "500") or "500") * 1024 * 1024
 )

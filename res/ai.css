@@ -8510,3 +8510,12 @@
     .ocr-dialog .media-upload { background: color-mix(in srgb, var(--accent-soft) 18%, var(--color-surface)); }
     .ocr-dialog .media-result { min-height: 260px; }
     .ocr-dialog .library-card > p { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+    .document-preview-row { display:flex; flex-wrap:wrap; gap:6px; padding:0 2px 8px; }
+    .document-preview-chip { display:inline-flex; align-items:center; max-width:100%; gap:6px; min-height:30px; padding:4px 7px 4px 9px; border:1px solid var(--color-border); border-radius:10px; background:color-mix(in srgb, var(--color-surface) 88%, var(--accent-soft)); color:var(--color-text-secondary); font-size:12px; }
+    .document-preview-chip > i { width:14px; height:14px; flex:0 0 auto; }
+    .document-preview-chip > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .document-preview-chip > button { width:22px; height:22px; min-width:22px; border:0; background:transparent; color:inherit; }
+    .document-preview-chip.is-ready { color:var(--color-text-primary); border-color:color-mix(in srgb, var(--accent) 24%, var(--color-border)); }
+    .document-preview-chip.is-processing { opacity:.78; }
+    .document-preview-chip.is-error { color:#b34b61; border-color:#efc3ca; }

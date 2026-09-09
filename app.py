@@ -16,6 +16,7 @@ from ai_platform.handlers import (
     ChatHandlersMixin,
     LibraryHandlersMixin,
     MediaHandlersMixin,
+    DocumentHandlersMixin,
     OcrHandlersMixin,
     ShareHandlersMixin,
     TTSHandlersMixin,
@@ -49,6 +50,7 @@ class AppHandler(
     AdminHandlersMixin,
     LibraryHandlersMixin,
     MediaHandlersMixin,
+    DocumentHandlersMixin,
     OcrHandlersMixin,
     ShareHandlersMixin,
     TTSHandlersMixin,
@@ -132,6 +134,12 @@ class AppHandler(
             return self.require_user(self.handle_chat_image_view)
         if path == "/api/media/tasks":
             return self.require_user(self.handle_media_tasks)
+        if path == "/api/documents":
+            return self.require_user(self.handle_documents)
+        if path.startswith("/api/documents/"):
+            return self.require_user(self.handle_document_item)
+        if path.startswith("/api/conversations/") and path.endswith("/documents"):
+            return self.require_user(self.handle_conversation_documents)
         if path == "/api/ocr/tasks":
             return self.require_user(self.handle_ocr_tasks)
         if path.startswith("/api/ocr/tasks/"):
@@ -235,12 +243,20 @@ class AppHandler(
             return self.require_user(self.handle_chat_images)
         if path == "/api/media/upload-policy":
             return self.require_user(self.handle_media_upload_policy)
+        if path == "/api/documents/upload-policy":
+            return self.require_user(self.handle_document_upload_policy)
+        if path == "/api/documents":
+            return self.require_user(self.handle_documents)
         if path == "/api/ocr/upload-policy":
             return self.require_user(self.handle_ocr_upload_policy)
         if path == "/api/ocr/tasks":
             return self.require_user(self.handle_ocr_tasks)
         if path == "/api/media/tasks":
             return self.require_user(self.handle_media_tasks)
+        if path.startswith("/api/documents/") and path.endswith("/refresh"):
+            return self.require_user(self.handle_document_item)
+        if path.startswith("/api/conversations/") and path.endswith("/documents"):
+            return self.require_user(self.handle_conversation_documents)
         if path.startswith("/api/media/tasks/") and path.endswith("/refresh"):
             return self.require_user(self.handle_media_task_refresh)
         if path.startswith("/api/media/tasks/") and path.endswith("/enhance"):
@@ -309,6 +325,8 @@ class AppHandler(
             return self.require_user(self.handle_media_task_item)
         if path.startswith("/api/ocr/tasks/"):
             return self.require_user(self.handle_ocr_task_item)
+        if path.startswith("/api/documents/"):
+            return self.require_user(self.handle_document_item)
         if path.startswith("/api/conversation-shares/"):
             return self.require_user(self.handle_conversation_share_item)
         if path.startswith("/api/conversations/"):

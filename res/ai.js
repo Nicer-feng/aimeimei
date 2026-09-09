@@ -25,6 +25,9 @@
 	      messages: [],
 	      attachments: [],
 	      uploadingImages: false,
+      documentAttachments: [],
+      uploadingDocuments: false,
+      documentPollTimer: 0,
 	      sending: false,
 	      editingConversationId: null,
 	      streamMessage: null,
@@ -3646,7 +3649,7 @@
 	      setStatus("chatStatus", conv.pinned ? "已取消置顶" : "已置顶", "ok");
 	    }
 
-    async function newConversation(modelId = $("modelSelect").value) {
+    async function newConversation(modelId = $("modelSelect").value, options = {}) {
       if (!modelId && state.models[0]) modelId = state.models[0].id;
       if (!modelId) {
         setStatus("chatStatus", "还没有可用模型，请先在模型管理里配置。", "err");
@@ -3677,6 +3680,10 @@
 	      setUserStorage("lastConversationId", state.currentConversation.id);
         state.conversationStats = null;
         state.messages = [];
+        if (!options.preserveDocuments) {
+          state.documentAttachments = [];
+          renderDocumentPreviews();
+        }
         await loadConversations();
         updateChatHeader();
         renderProfileStatus();
@@ -3697,6 +3704,10 @@
 	    async function selectConversation(id, options = {}) {
 	      closeReferenceSources();
 	      if (state.currentConversation?.id !== id) {
+        if (state.documentPollTimer) clearTimeout(state.documentPollTimer);
+        state.documentPollTimer = 0;
+        state.documentAttachments = [];
+        renderDocumentPreviews();
 	        stopCurrentTts();
 	        saveCurrentDraft();
 	        closeSideDiscussion();
@@ -3723,7 +3734,7 @@
 	      restoreCurrentDraft();
         const targetMessageId = Number(options.messageId || 0);
         renderMessages({ forceScroll: !targetMessageId });
-	        await Promise.all([loadConversationStats(id), loadSideDiscussions(id)]);
+	        await Promise.all([loadConversationStats(id), loadSideDiscussions(id), loadConversationDocuments(id)]);
         closeSidebar();
         if (targetMessageId) {
           requestAnimationFrame(() => scrollToMessageId(targetMessageId));
@@ -3783,7 +3794,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.22.0" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.23.0" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -6774,7 +6785,88 @@
 	      updateVisionUI();
 	    }
 
-	    function openImagePreview(url) {
+	    function documentStatusText(status) { return status === "completed" ? "可对话" : status === "failed" ? "解析失败" : status === "processing" ? "解析中" : "等待解析"; }
+
+    function renderDocumentPreviews() {
+      const row = $("documentPreviewRow"); if (!row) return;
+      row.replaceChildren(); row.hidden = !state.documentAttachments.length;
+      for (const item of state.documentAttachments) {
+        const chip = document.createElement("div");
+        chip.className = "document-preview-chip" + (item.status === "completed" ? " is-ready" : item.status === "failed" ? " is-error" : " is-processing");
+        const icon = document.createElement("i"); icon.setAttribute("data-lucide", /\.(xlsx?|xlsm)$/i.test(item.filename || "") ? "sheet" : /\.(png|jpe?g|gif|bmp|webp)$/i.test(item.filename || "") ? "image" : "file-text");
+        const text = document.createElement("span"); text.textContent = (item.filename || "材料文件") + " · " + documentStatusText(item.status);
+        const remove = document.createElement("button"); remove.type = "button"; remove.className = "ui-icon-btn"; remove.title = "移除材料"; remove.innerHTML = iconMarkup("x", "×"); remove.addEventListener("click", () => removeDocumentAttachment(item.id));
+        chip.append(icon, text, remove); row.appendChild(chip);
+      }
+      queueLucideRefresh(); syncComposerLayout();
+    }
+
+    async function loadConversationDocuments(id = state.currentConversation?.id) {
+      if (!id) { state.documentAttachments = []; renderDocumentPreviews(); return; }
+      try {
+        const res = await api(`/api/conversations/${encodeURIComponent(id)}/documents`);
+        if (!res.ok) throw new Error(await readError(res, "材料暂时加载失败。"));
+        state.documentAttachments = (await res.json()).documents || [];
+        renderDocumentPreviews();
+        pollDocumentAttachments();
+      } catch {
+        state.documentAttachments = [];
+        renderDocumentPreviews();
+      }
+    }
+
+    async function syncConversationDocuments() {
+      const id = state.currentConversation?.id;
+      if (!id) return;
+      const readyIds = state.documentAttachments.filter((item) => item.status === "completed" && item.id).map((item) => item.id);
+      const res = await api(`/api/conversations/${encodeURIComponent(id)}/documents`, {
+        method: "POST", body: JSON.stringify({ document_ids: readyIds })
+      });
+      if (!res.ok) throw new Error(await readError(res, "材料关联更新失败。"));
+    }
+
+    function removeDocumentAttachment(id) {
+      state.documentAttachments = state.documentAttachments.filter((item) => item.id !== id);
+      renderDocumentPreviews();
+      syncConversationDocuments().catch((err) => setStatus("chatStatus", friendlyError(err, "材料关联更新失败。"), "err"));
+    }
+    function safeDocumentFilename(name) { return String(name || "document").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "document"; }
+
+    async function uploadDocumentFile(file) {
+      const policyRes = await api("/api/documents/upload-policy", { method: "POST" });
+      if (!policyRes.ok) throw new Error(await readError(policyRes, "材料上传配置不可用。"));
+      const { policy } = await policyRes.json(); const extension = "." + String(file.name || "").split(".").pop().toLowerCase();
+      if (!policy.allowed_extensions.includes(extension)) throw new Error("支持 PDF、Word、Excel、PPT、图片、TXT、Markdown、HTML");
+      if (file.size > policy.max_size) throw new Error("单个材料文件不能超过 50MB");
+      const key = policy.key_prefix + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + "-" + safeDocumentFilename(file.name);
+      const form = new FormData(); form.append("key", key); form.append("OSSAccessKeyId", policy.access_key_id); form.append("policy", policy.policy); form.append("Signature", policy.signature); form.append("success_action_status", "200"); form.append("Content-Type", file.type || "application/octet-stream"); form.append("file", file);
+      await uploadFormWithProgress(policy.host, form, () => {});
+      const created = await api("/api/documents", { method: "POST", body: JSON.stringify({ filename: file.name, mime_type: file.type || "", file_size: file.size, oss_key: key }) });
+      if (!created.ok) throw new Error(await readError(created, "材料解析任务创建失败。"));
+      return (await created.json()).document;
+    }
+
+    function pollDocumentAttachments() {
+      if (state.documentPollTimer) clearTimeout(state.documentPollTimer);
+      const pending = state.documentAttachments.filter((item) => ["submitted", "processing", "uploaded"].includes(item.status));
+      if (!pending.length) return;
+      state.documentPollTimer = setTimeout(async () => {
+        try { for (const item of pending) { const res = await api(`/api/documents/${encodeURIComponent(item.id)}/refresh`, { method: "POST" }); if (res.ok) Object.assign(item, (await res.json()).document || {}); } renderDocumentPreviews(); }
+        finally { pollDocumentAttachments(); }
+      }, 4000);
+    }
+
+    async function handleDocumentFiles(fileList) {
+      const input = $("documentInput"), files = Array.from(fileList || []); if (input) input.value = "";
+      if (!files.length) return;
+      if (state.documentAttachments.length + files.length > 5) return setStatus("chatStatus", "单次最多添加 5 份材料。", "err");
+      state.uploadingDocuments = true; setStatus("chatStatus", "正在上传并提交材料解析...", "");
+      try { for (const file of files) { state.documentAttachments.push(await uploadDocumentFile(file)); renderDocumentPreviews(); } setStatus("chatStatus", "材料已提交解析，完成后即可对话。", "ok"); pollDocumentAttachments(); }
+      catch (err) { setStatus("chatStatus", friendlyError(err, "材料上传失败。"), "err"); }
+      finally { state.uploadingDocuments = false; }
+    }
+
+    function openImagePreview(url) {
 	      if (!url) return;
 	      $("imagePreviewFull").src = url;
 	      $("imagePreviewDialog").classList.add("show");
@@ -7238,20 +7330,29 @@
 	      const readyAttachments = hasOverride ? [] : state.attachments.filter((item) => item.status === "ready" && item.id);
 	      const failedAttachments = hasOverride ? [] : state.attachments.filter((item) => item.status === "error");
 	      const uploadingAttachments = hasOverride ? [] : state.attachments.filter((item) => item.status === "uploading");
+      const readyDocuments = hasOverride ? [] : state.documentAttachments.filter((item) => item.status === "completed" && item.id);
+      const failedDocuments = hasOverride ? [] : state.documentAttachments.filter((item) => item.status === "failed");
+      const processingDocuments = hasOverride ? [] : state.documentAttachments.filter((item) => ["submitted", "processing", "uploaded"].includes(item.status));
 	      if (state.sending) return;
-	      if (!content && !readyAttachments.length) {
-	        if (state.uploadingImages || uploadingAttachments.length) setStatus("chatStatus", "图片还在上传，稍等一下再发送。", "err");
-	        else if (failedAttachments.length) setStatus("chatStatus", "有图片上传失败，请移除后重试。", "err");
-	        return;
-	      }
-	      if (state.uploadingImages || uploadingAttachments.length) {
-	        setStatus("chatStatus", "图片还在上传，稍等一下再发送。", "err");
-	        return;
-	      }
-	      if (failedAttachments.length) {
-	        setStatus("chatStatus", "有图片上传失败，请移除后重试。", "err");
-	        return;
-	      }
+      if (!content && !readyAttachments.length && !readyDocuments.length) {
+        if (state.uploadingImages || uploadingAttachments.length) setStatus("chatStatus", "图片还在上传，稍等一下再发送。", "err");
+        else if (state.uploadingDocuments || processingDocuments.length) setStatus("chatStatus", "材料还在解析，完成后即可对话。", "err");
+        else if (failedAttachments.length) setStatus("chatStatus", "有图片上传失败，请移除后重试。", "err");
+        else if (failedDocuments.length) setStatus("chatStatus", "有材料解析失败，请移除后重试。", "err");
+        return;
+      }
+      if (state.uploadingImages || uploadingAttachments.length) {
+        setStatus("chatStatus", "图片还在上传，稍等一下再发送。", "err");
+        return;
+      }
+      if (state.uploadingDocuments || processingDocuments.length) {
+        setStatus("chatStatus", "材料还在解析，完成后即可对话。", "err");
+        return;
+      }
+      if (failedAttachments.length || failedDocuments.length) {
+        setStatus("chatStatus", failedDocuments.length ? "有材料解析失败，请移除后重试。" : "有图片上传失败，请移除后重试。", "err");
+        return;
+      }
 	      if (readyAttachments.length && !selectedModelSupportsVision()) {
 	        setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
 	        return;
@@ -7271,7 +7372,7 @@
 
 	      if (!state.currentConversation) {
 	        try {
-	          await newConversation(selectedModelId);
+	          await newConversation(selectedModelId, { preserveDocuments: readyDocuments.length > 0 });
 	        } catch (err) {
 	          setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err");
 	          return;
@@ -7312,7 +7413,7 @@
 	        file_size: item.file_size || item.file?.size || 0
 	      }));
 	      if (!hasOverride) clearAttachments();
-	      const userContent = content || "请分析这些图片。";
+	      const userContent = content || (readyDocuments.length ? "请根据这些材料分析。" : "请分析这些图片。");
 	      state.messages.push({ role: "user", content: userContent, images: sentImages, created_at: sentAt });
 	      const assistant = {
         role: "assistant", content: "", reasoning_content: "", sources: [], thinking: true,
@@ -7335,7 +7436,7 @@
 	        const useProfile = !profileDisabledForConversation(state.currentConversation.id);
 	        const res = await api(`/api/conversations/${state.currentConversation.id}/messages`, {
 	          method: "POST",
-	          body: JSON.stringify({ content: userContent, web_search: useWebSearch, use_profile: useProfile, image_ids: readyAttachments.map((item) => item.id) }),
+	          body: JSON.stringify({ content: userContent, web_search: useWebSearch, use_profile: useProfile, image_ids: readyAttachments.map((item) => item.id), document_ids: readyDocuments.map((item) => item.id) }),
 	          signal: state.abortController.signal
 	        });
         if (!res.ok) throw new Error(await readError(res, "发送失败，稍后再试一下。"));
@@ -9137,6 +9238,10 @@
 	    $("imageInput").addEventListener("change", (event) => {
 	      handleImageFiles(event.target.files).catch((err) => setStatus("chatStatus", friendlyError(err, "图片上传失败。"), "err"));
 	    });
+    $("attachDocument")?.addEventListener("click", () => $("documentInput")?.click());
+    $("documentInput")?.addEventListener("change", (event) => {
+      handleDocumentFiles(event.target.files).catch((err) => setStatus("chatStatus", friendlyError(err, "材料上传失败。"), "err"));
+    });
 	    $("insertNewline").addEventListener("click", insertNewlineAtCursor);
 	    $("shareConversation").addEventListener("click", () => openShareDialog());
 	    $("closeShareDialog").addEventListener("click", closeShareDialog);

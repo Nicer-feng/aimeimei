@@ -177,6 +177,13 @@ def favorite_row(row):
     }
 
 
+def document_file_public(row):
+    return {"id": row["id"], "filename": row["filename"], "mime_type": row["mime_type"],
+            "file_size": int(row["file_size"] or 0), "status": row["status"],
+            "page_count": int(row["page_count"] or 0), "chunk_count": int(row["chunk_count"] or 0),
+            "error_message": row["error_message"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
+
+
 def ocr_task_public(row):
     return {"id": row["id"], "filename": row["filename"], "mime_type": row["mime_type"],
             "file_size": int(row["file_size"] or 0), "status": row["status"],

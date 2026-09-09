@@ -7,8 +7,8 @@
 - 项目名称：AI槑槑。
 - GitHub：`git@github.com:Nicer-feng/aimeimei.git`。
 - 主分支：`main`。
-- 当前基线版本：`2.22.0`。
-- 当前基线构建：`20260909-100500`。
+- 当前基线版本：`2.23.0`。
+- 当前基线构建：`20260909-114500`。
 - 当前基线提交：以 `git log -1 --oneline` 为准（发布后需同步本段）。
 - 本地实际仓库：`/Users/feng/Documents/文稿 - Unknown/aliyun3129`。
 - SSH 别名：`aliyun_3129`。
@@ -34,7 +34,8 @@ AI槑槑已经不是最初的家庭密码单页，而是一个多账号轻量 AI
 - 图片直传 OSS、Vision 消息、缩略图与上传进度。
 - AI 档案、提示词库、收藏、个人 Token Activity。
 - 通义听悟音视频分析、AI 二次加工和创建分析会话。
-- 阿里云通用手写体 OCR：图片直传 OSS、按账号保存识别记录与文本复制；多页 PDF 解析待后续接入。
+- 阿里云通用手写体 OCR：图片直传 OSS、按账号保存识别记录与文本复制。
+- 对话材料附件：支持一次添加最多 5 份 PDF、Word、Excel、PPT、图片与文本，私有 OSS 上传后通过阿里云文档智能异步解析；每轮仅检索相关片段进入模型上下文。
 - 火山引擎/豆包 TTS，按用户点击生成、OSS 缓存、多音色。
 - 选区引用和右侧并行讨论；管理员可全局关闭这两个功能。
 - Qwen 百炼原生联网，以及 Tavily/Brave 兼容搜索。
@@ -79,6 +80,8 @@ AI槑槑已经不是最初的家庭密码单页，而是一个多账号轻量 AI
 | `ai_platform/handlers/admin.py` | 模型、用户、联网配置、功能开关、Token/费用统计 |
 | `ai_platform/handlers/library.py` | AI 档案、提示词、收藏 |
 | `ai_platform/handlers/media.py` | 聊天图片、OSS 上传、听悟任务、AI 增强 |
+| `ai_platform/handlers/documents.py` | 对话材料上传、阿里云文档解析任务、会话材料关联 |
+| `ai_platform/docmind.py` | 阿里云文档智能 API 签名、异步任务查询、解析结果分块与检索 |
 | `ai_platform/handlers/tts.py` | TTS 管理接口、生成与音频读取 |
 | `ai_platform/handlers/share.py` | 会话临时分享和公开分享页接口 |
 | `ai_platform/handlers/cats.py` | 小猫书全部业务 |
@@ -111,6 +114,7 @@ AI槑槑已经不是最初的家庭密码单页，而是一个多账号轻量 AI
 - `message_sources`：回答对应的参考来源和摘要。
 - `source_snippet_cache`：按 URL 缓存来源摘要，避免重复抓取。
 - `chat_message_images`：聊天图片 OSS 元数据。
+- `document_files`、`document_chunks`、`conversation_documents`：私有材料文件、解析文本片段和会话级材料关联。
 - `message_tts`：消息 TTS 缓存。
 - `favorite_messages`：收藏。
 - `prompt_templates`：默认/个人提示词预留。
@@ -166,6 +170,7 @@ ExecStart=/usr/bin/python3 /opt/ai-platform/app.py
 
 - 小猫书/通用 OSS：`CAT_OSS_*`。
 - 聊天图片：可复用 `CAT_OSS_*`，目录为 `chat-images`。
+- 对话材料：复用 `CAT_OSS_*`，目录为 `documents`；单个办公文档上限 50MB、单张图片上限 20MB；阿里云 RAM 凭据需有 `AliyunDocmindFullAccess`，可选 `DOCMIND_ACCESS_KEY_ID`、`DOCMIND_ACCESS_KEY_SECRET`、`DOCMIND_ENDPOINT`、`DOCMIND_VERSION`（默认 `2022-07-11`），未单配时复用 CAT OSS 凭据。
 - 听悟媒体：`TINGWU_*`、`MEDIA_OSS_*`，未单配时复用 CAT OSS。
 - TTS：`AI_TTS_*`、`VOLC_TTS_*`，音频目录为 `tts`。
 - 联网：后台保存的 Tavily/Brave 配置；Qwen 百炼原生联网复用模型 API Key。
