@@ -9,6 +9,7 @@ from ..docmind import (
     response_error,
     response_status,
     response_task_id,
+    safe_docmind_error,
     submit_doc_parser_job,
 )
 from ..presenters import document_file_public
@@ -82,8 +83,8 @@ class DocumentHandlersMixin:
                 status, error_message = "failed", "文档解析没有返回任务 ID"
         except urllib.error.HTTPError as exc:
             status, error_message = "failed", f"文档解析提交失败：HTTP {exc.code}"
-        except Exception:
-            status, error_message = "failed", "文档解析提交失败，请稍后重试"
+        except Exception as exc:
+            status, error_message = "failed", safe_docmind_error(exc)
         with db() as conn:
             conn.execute("""INSERT INTO document_files
                 (id,user_id,filename,mime_type,file_size,oss_key,status,parser_task_id,error_message,created_at,updated_at)

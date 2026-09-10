@@ -45,8 +45,22 @@ def submit_doc_parser_job(config, file_url, filename):
     return _request(config, "SubmitDocParserJob", {
         "FileUrl": file_url,
         "FileName": filename,
-        "OutputFormat": "markdown",
+        # Document Mind defines OutputFormat as List<String>. RPC list values
+        # must use numbered parameters instead of a scalar OutputFormat field.
+        "OutputFormat.1": "markdown",
     })
+
+
+def safe_docmind_error(error):
+    """Keep useful provider diagnostics without persisting URLs or credentials."""
+    text = " ".join(str(error or "").split())
+    text = re.sub(r"https?://[^\s'\"<>]+", "[已隐藏 URL]", text, flags=re.I)
+    text = re.sub(
+        r"(?i)(access[_-]?key(?:id|secret)?|signature|token|secret)\s*([=:])\s*[^\s,;]+",
+        r"\1\2***",
+        text,
+    )
+    return text[:300] or "文档解析提交失败，请稍后重试"
 
 
 def query_doc_parser_status(config, task_id):

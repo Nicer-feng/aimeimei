@@ -3796,7 +3796,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.23.4" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.23.5" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -6797,6 +6797,7 @@
         chip.className = "document-preview-chip" + (item.status === "completed" ? " is-ready" : item.status === "failed" ? " is-error" : " is-processing");
         const icon = document.createElement("i"); icon.setAttribute("data-lucide", /\.(xlsx?|xlsm)$/i.test(item.filename || "") ? "sheet" : /\.(png|jpe?g|gif|bmp|webp)$/i.test(item.filename || "") ? "image" : "file-text");
         const text = document.createElement("span"); text.textContent = (item.filename || "材料文件") + " · " + documentStatusText(item.status);
+        if (item.status === "failed" && item.error_message) chip.title = item.error_message;
         const remove = document.createElement("button"); remove.type = "button"; remove.className = "ui-icon-btn"; remove.title = "移除材料"; remove.innerHTML = iconMarkup("x", "×"); remove.addEventListener("click", () => removeDocumentAttachment(item.id));
         chip.append(icon, text, remove); row.appendChild(chip);
       }
