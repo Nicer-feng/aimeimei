@@ -355,6 +355,14 @@ def init_db(secrets_data=None):
               PRIMARY KEY (conversation_id, document_id)
             );
 
+            CREATE TABLE IF NOT EXISTS message_documents (
+              message_id INTEGER NOT NULL,
+              document_id TEXT NOT NULL,
+              user_id TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              PRIMARY KEY (message_id, document_id)
+            );
+
             CREATE TABLE IF NOT EXISTS ocr_tasks (
               id TEXT PRIMARY KEY,
               user_id TEXT NOT NULL,
@@ -629,6 +637,7 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_user_updated ON document_files(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_document_chunks_document ON document_chunks(document_id, user_id, ordinal)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_conversation_documents_user ON conversation_documents(conversation_id, user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_message_documents_user_message ON message_documents(user_id, message_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ocr_tasks_user_updated ON ocr_tasks(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_login_captchas_expiry ON login_captchas(expires_at)")
 

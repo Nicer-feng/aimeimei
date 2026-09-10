@@ -881,6 +881,18 @@ class ChatHandlersMixin:
                 """,
                 (user_id, conversation_id, conversation_id, user_id),
             ).fetchall()
+            documents = conn.execute(
+                """
+                SELECT md.message_id, d.*
+                FROM message_documents md JOIN document_files d ON d.id=md.document_id
+                WHERE md.user_id=? AND md.message_id IN (
+                  SELECT id FROM messages WHERE conversation_id=? AND user_id=?
+                  AND role!="system"
+                )
+                ORDER BY md.created_at ASC
+                """,
+                (user_id, conversation_id, user_id),
+            ).fetchall()
         sources_by_message = {}
         for source in sources:
             sources_by_message.setdefault(source["message_id"], []).append(
@@ -895,6 +907,9 @@ class ChatHandlersMixin:
         images_by_message = {}
         for image in images:
             images_by_message.setdefault(image["message_id"], []).append(chat_image_public(image))
+        documents_by_message = {}
+        for document in documents:
+            documents_by_message.setdefault(document["message_id"], []).append(document_file_public(document))
         return self.json(
             {
                 "messages": [
@@ -908,6 +923,7 @@ class ChatHandlersMixin:
                         "sources": sources_by_message.get(row["id"], []),
                         "favorite_id": favorite_by_message.get(row["id"]),
                         "images": images_by_message.get(row["id"], []),
+                        "documents": documents_by_message.get(row["id"], []),
                     }
                     for row in messages
                 ]
@@ -992,7 +1008,7 @@ class ChatHandlersMixin:
                 if any(row is None for row in image_rows):
                     return self.error(HTTPStatus.BAD_REQUEST, "图片附件不存在或已被使用")
 
-            document_rows = []
+            message_document_rows = []
             if document_ids:
                 placeholders = ",".join("?" for _ in document_ids)
                 rows = conn.execute(
@@ -1000,19 +1016,16 @@ class ChatHandlersMixin:
                     (*document_ids, user_id),
                 ).fetchall()
                 row_by_id = {row["id"]: row for row in rows}
-                document_rows = [row_by_id.get(item) for item in document_ids]
-                if any(row is None or row["status"] != "completed" for row in document_rows):
+                message_document_rows = [row_by_id.get(item) for item in document_ids]
+                if any(row is None or row["status"] != "completed" for row in message_document_rows):
                     return self.error(HTTPStatus.BAD_REQUEST, "材料不存在或仍在解析中")
-                conn.execute("DELETE FROM conversation_documents WHERE conversation_id=? AND user_id=?", (conversation_id, user_id))
-                conn.executemany(
-                    "INSERT INTO conversation_documents(conversation_id,document_id,user_id,created_at) VALUES (?,?,?,?)",
-                    [(conversation_id, row["id"], user_id, now()) for row in document_rows],
-                )
-            else:
-                document_rows = conn.execute(
-                    "SELECT d.* FROM conversation_documents cd JOIN document_files d ON d.id=cd.document_id WHERE cd.conversation_id=? AND cd.user_id=? AND d.status='completed' ORDER BY cd.created_at ASC",
-                    (conversation_id, user_id),
-                ).fetchall()
+            persistent_document_rows = conn.execute(
+                'SELECT d.* FROM conversation_documents cd JOIN document_files d ON d.id=cd.document_id WHERE cd.conversation_id=? AND cd.user_id=? AND d.status="completed" ORDER BY cd.created_at ASC',
+                (conversation_id, user_id),
+            ).fetchall()
+            document_rows = list(persistent_document_rows)
+            existing_document_ids = {row["id"] for row in document_rows}
+            document_rows.extend(row for row in message_document_rows if row["id"] not in existing_document_ids)
             document_context = ""
             if document_rows:
                 doc_ids = [row["id"] for row in document_rows]
@@ -1057,6 +1070,11 @@ class ChatHandlersMixin:
                 conn.executemany(
                     "UPDATE chat_message_images SET session_id=?, message_id=? WHERE id=? AND user_id=?",
                     [(conversation_id, user_message_id, row["id"], user_id) for row in image_rows],
+                )
+            if message_document_rows:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO message_documents(message_id,document_id,user_id,created_at) VALUES (?,?,?,?)",
+                    [(user_message_id, row["id"], user_id, ts) for row in message_document_rows],
                 )
             if convo["title"] == "新对话":
                 title = visible_user_question(user_message_content).replace("\n", " ")[:28] or "图片理解"

@@ -129,6 +129,7 @@ class DocumentHandlersMixin:
                 return self.error(HTTPStatus.NOT_FOUND, "document not found")
             if self.command == "DELETE":
                 conn.execute("DELETE FROM conversation_documents WHERE document_id=? AND user_id=?", (document_id,user_id))
+                conn.execute("DELETE FROM message_documents WHERE document_id=? AND user_id=?", (document_id,user_id))
                 conn.execute("DELETE FROM document_chunks WHERE document_id=? AND user_id=?", (document_id,user_id))
                 conn.execute("DELETE FROM document_files WHERE id=? AND user_id=?", (document_id,user_id))
                 return self.json({"ok": True})

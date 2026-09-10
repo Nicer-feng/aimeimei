@@ -26,6 +26,9 @@
 	      attachments: [],
 	      uploadingImages: false,
       documentAttachments: [],
+      persistentDocuments: [],
+      conversationFiles: [],
+      conversationFileSelection: new Set(),
       uploadingDocuments: false,
       documentPollTimer: 0,
 	      sending: false,
@@ -1631,6 +1634,7 @@
 	        const data = await res.json();
 	        state.models = data.models || [];
 	        renderModelSelect();
+      renderConversationFilesButton();
 	        if (!state.currentConversation && state.models.length) {
 	          $("chatModel").textContent = "准备使用 " + state.models[0].name;
 	        }
@@ -3684,7 +3688,9 @@
         state.messages = [];
         if (!options.preserveDocuments) {
           state.documentAttachments = [];
+          state.persistentDocuments = [];
           renderDocumentPreviews();
+          renderConversationFilesButton();
         }
         await loadConversations();
         updateChatHeader();
@@ -3709,6 +3715,7 @@
         if (state.documentPollTimer) clearTimeout(state.documentPollTimer);
         state.documentPollTimer = 0;
         state.documentAttachments = [];
+        state.persistentDocuments = [];
         renderDocumentPreviews();
 	        stopCurrentTts();
 	        saveCurrentDraft();
@@ -3783,6 +3790,7 @@
       renderProfilePopover();
       renderContextMode();
       renderModelSelect();
+      renderConversationFilesButton();
     }
 
 		    function renderEmpty() {
@@ -3793,10 +3801,12 @@
 	      renderProfileStatus();
 	      renderProfilePopover();
 	      hideConversationMinimap();
+      state.persistentDocuments = [];
+      renderConversationFilesButton();
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.23.5" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.24.0" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -6021,7 +6031,10 @@
 	      const imagePanel = document.createElement("div");
 	      imagePanel.className = "message-images";
 	      imagePanel.hidden = true;
-	      const quotePanel = document.createElement("div");
+      const documentPanel = document.createElement("div");
+      documentPanel.className = "message-documents";
+      documentPanel.hidden = true;
+      const quotePanel = document.createElement("div");
 	      quotePanel.className = "message-quote-reference";
 	      quotePanel.hidden = true;
 	      const activity = document.createElement("div");
@@ -6076,7 +6089,7 @@
 	      reason.addEventListener("click", () => toggleReasoning(message));
 	      actions.append(favorite, regenerate, continueWrite, tts, share, copyAction);
 
-	      shell.append(reasoningPanel, imagePanel, quotePanel, text, activity, copy);
+	      shell.append(reasoningPanel, imagePanel, documentPanel, quotePanel, text, activity, copy);
 	      wrap.append(role, shell, sourcesPanel, time, actions);
 	      updateMessageElement(wrap, message);
 	      return wrap;
@@ -6100,7 +6113,8 @@
 	      const reason = wrap.querySelector(".reason-action");
 	      const reasoningPanel = wrap.querySelector(".reasoning-panel");
 	      const imagePanel = wrap.querySelector(".message-images");
-	      const quotePanel = wrap.querySelector(".message-quote-reference");
+      const documentPanel = wrap.querySelector(".message-documents");
+      const quotePanel = wrap.querySelector(".message-quote-reference");
 	      role.replaceChildren();
 	      if (message.role === "user") {
 	        role.textContent = "你";
@@ -6121,7 +6135,8 @@
 	      const reasoningContent = messageReasoningContent(message);
 	      renderReasoningPanel(reasoningPanel, message, reasoningContent);
 	      renderMessageImages(imagePanel, messageImages(message));
-	      renderMessageQuoteReference(quotePanel, message);
+      renderMessageDocuments(documentPanel, messageDocuments(message));
+      renderMessageQuoteReference(quotePanel, message);
 
 	      if (message.role === "assistant" && message.thinking && !displayContent) {
 	        wrap.dataset.liveState = "thinking";
@@ -6129,6 +6144,7 @@
 	        text.hidden = Boolean(reasoningContent);
 	        text.innerHTML = renderAssistantActivity(message);
 	        if (imagePanel) imagePanel.hidden = true;
+        if (documentPanel) documentPanel.hidden = true;
 	        copy.hidden = true;
 	        if (actions) actions.hidden = true;
 	        return;
@@ -6731,7 +6747,51 @@
 	      container.hidden = !container.children.length;
 	    }
 
-	    function renderAttachmentPreviews() {
+	    function messageDocuments(message) {
+      return Array.isArray(message?.documents) ? message.documents : [];
+    }
+
+    function documentIconName(filename) {
+      const lower = String(filename || "").toLowerCase();
+      if ([".xls", ".xlsx", ".xlsm", ".csv"].some((ext) => lower.endsWith(ext))) return "sheet";
+      if ([".ppt", ".pptx", ".key"].some((ext) => lower.endsWith(ext))) return "presentation";
+      if (lower.endsWith(".pdf")) return "file-type-2";
+      if ([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"].some((ext) => lower.endsWith(ext))) return "image";
+      return "file-text";
+    }
+
+    function formatDocumentSize(value) {
+      const size = Number(value || 0);
+      if (!size) return "";
+      if (size < 1024 * 1024) return Math.max(1, Math.round(size / 1024)) + " KB";
+      return (size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1) + " MB";
+    }
+
+    function renderMessageDocuments(container, documents = []) {
+      if (!container) return;
+      container.replaceChildren();
+      for (const item of documents) {
+        const chip = document.createElement("div");
+        chip.className = "message-document-chip";
+        chip.title = item.filename || "材料文件";
+        const icon = document.createElement("i");
+        icon.setAttribute("data-lucide", documentIconName(item.filename));
+        const copy = document.createElement("span");
+        copy.className = "message-document-copy";
+        const name = document.createElement("strong");
+        name.textContent = item.filename || "材料文件";
+        const meta = document.createElement("small");
+        const details = [formatDocumentSize(item.file_size), item.chunk_count ? item.chunk_count + " 段材料" : "本次参考"];
+        meta.textContent = details.filter(Boolean).join(" · ");
+        copy.append(name, meta);
+        chip.append(icon, copy);
+        container.appendChild(chip);
+      }
+      container.hidden = !container.children.length;
+      if (container.children.length) queueLucideRefresh();
+    }
+
+    function renderAttachmentPreviews() {
 	      const row = $("attachmentPreviewRow");
 	      if (!row) return;
 	      row.replaceChildren();
@@ -6805,34 +6865,123 @@
     }
 
     async function loadConversationDocuments(id = state.currentConversation?.id) {
-      if (!id) { state.documentAttachments = []; renderDocumentPreviews(); return; }
+      if (!id) { state.persistentDocuments = []; renderConversationFilesButton(); return; }
       try {
-        const res = await api(`/api/conversations/${encodeURIComponent(id)}/documents`);
+        const res = await api("/api/conversations/" + encodeURIComponent(id) + "/documents");
         if (!res.ok) throw new Error(await readError(res, "材料暂时加载失败。"));
-        state.documentAttachments = (await res.json()).documents || [];
-        renderDocumentPreviews();
-        pollDocumentAttachments();
+        state.persistentDocuments = (await res.json()).documents || [];
       } catch {
-        state.documentAttachments = [];
-        renderDocumentPreviews();
+        state.persistentDocuments = [];
       }
+      renderConversationFilesButton();
     }
 
     async function syncConversationDocuments() {
       const id = state.currentConversation?.id;
       if (!id) return;
-      const readyIds = state.documentAttachments.filter((item) => item.status === "completed" && item.id).map((item) => item.id);
-      const res = await api(`/api/conversations/${encodeURIComponent(id)}/documents`, {
+      const readyIds = state.persistentDocuments.filter((item) => item.status === "completed" && item.id).map((item) => item.id);
+      const res = await api("/api/conversations/" + encodeURIComponent(id) + "/documents", {
         method: "POST", body: JSON.stringify({ document_ids: readyIds })
       });
-      if (!res.ok) throw new Error(await readError(res, "材料关联更新失败。"));
+      if (!res.ok) throw new Error(await readError(res, "持续参考材料更新失败。"));
+      state.persistentDocuments = (await res.json()).documents || [];
+      renderConversationFilesButton();
     }
 
     function removeDocumentAttachment(id) {
       state.documentAttachments = state.documentAttachments.filter((item) => item.id !== id);
       renderDocumentPreviews();
-      syncConversationDocuments().catch((err) => setStatus("chatStatus", friendlyError(err, "材料关联更新失败。"), "err"));
     }
+    function renderConversationFilesButton() {
+      const button = document.getElementById("openConversationFiles");
+      const badge = document.getElementById("conversationFileCount");
+      const count = state.persistentDocuments.length;
+      if (button) button.disabled = !state.currentConversation;
+      if (badge) { badge.hidden = !count; badge.textContent = String(count); }
+    }
+
+    function renderConversationFiles() {
+      const list = document.getElementById("conversationFilesList");
+      const empty = document.getElementById("conversationFilesEmpty");
+      if (!list || !empty) return;
+      list.replaceChildren();
+      const files = state.conversationFiles;
+      empty.hidden = files.length > 0;
+      for (const item of files) {
+        const row = document.createElement("label");
+        row.className = "conversation-file-row" + (state.conversationFileSelection.has(item.id) ? " is-selected" : "");
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        check.checked = state.conversationFileSelection.has(item.id);
+        check.disabled = item.status !== "completed";
+        check.addEventListener("change", () => {
+          if (check.checked) state.conversationFileSelection.add(item.id);
+          else state.conversationFileSelection.delete(item.id);
+          renderConversationFiles();
+        });
+        const icon = document.createElement("i");
+        icon.setAttribute("data-lucide", documentIconName(item.filename));
+        const copy = document.createElement("span");
+        copy.className = "conversation-file-copy";
+        const title = document.createElement("strong");
+        title.textContent = item.filename || "材料文件";
+        const meta = document.createElement("small");
+        const values = [documentStatusText(item.status), formatDocumentSize(item.file_size), item.chunk_count ? item.chunk_count + " 段" : ""];
+        meta.textContent = values.filter(Boolean).join(" · ");
+        copy.append(title, meta);
+        const note = document.createElement("em");
+        note.textContent = item.status === "completed" ? (check.checked ? "持续参考" : "仅消息附件") : "等待解析完成";
+        row.append(check, icon, copy, note);
+        list.appendChild(row);
+      }
+      queueLucideRefresh();
+    }
+
+    async function openConversationFiles() {
+      if (!state.currentConversation) return setStatus("chatStatus", "先打开一个对话，再管理持续参考材料。", "err");
+      const dialog = document.getElementById("conversationFilesDialog");
+      if (!dialog) return;
+      document.getElementById("conversationFilesStatus").textContent = "正在读取文件...";
+      dialog.classList.add("show");
+      document.body.classList.add("dialog-open");
+      try {
+        const res = await api("/api/documents");
+        if (!res.ok) throw new Error(await readError(res, "文件暂时加载失败。"));
+        const allFiles = (await res.json()).documents || [];
+        const currentFileIds = new Set([
+          ...state.persistentDocuments.map((item) => item.id),
+          ...state.documentAttachments.map((item) => item.id),
+          ...state.messages.flatMap((message) => messageDocuments(message).map((item) => item.id))
+        ].filter(Boolean));
+        state.conversationFiles = allFiles.filter((item) => currentFileIds.has(item.id));
+        state.conversationFileSelection = new Set(state.persistentDocuments.map((item) => item.id));
+        document.getElementById("conversationFilesStatus").textContent = "";
+        renderConversationFiles();
+      } catch (err) {
+        document.getElementById("conversationFilesStatus").textContent = friendlyError(err, "文件暂时加载失败。");
+      }
+    }
+
+    function closeConversationFiles() {
+      const dialog = document.getElementById("conversationFilesDialog");
+      if (dialog) dialog.classList.remove("show");
+      document.body.classList.remove("dialog-open");
+    }
+
+    async function saveConversationFiles() {
+      const selected = state.conversationFiles.filter((item) => state.conversationFileSelection.has(item.id) && item.status === "completed");
+      if (selected.length > 5) return document.getElementById("conversationFilesStatus").textContent = "最多持续参考 5 份材料。";
+      state.persistentDocuments = selected;
+      try {
+        await syncConversationDocuments();
+        document.getElementById("conversationFilesStatus").textContent = "已保存，后续提问会参考这些材料。";
+        renderConversationFiles();
+        setStatus("chatStatus", "持续参考材料已更新", "ok");
+      } catch (err) {
+        document.getElementById("conversationFilesStatus").textContent = friendlyError(err, "保存持续参考材料失败。");
+      }
+    }
+
     function safeDocumentFilename(name) { return String(name || "document").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "document"; }
 
     async function uploadDocumentFile(file) {
@@ -7472,9 +7621,14 @@
 	        mime_type: item.mime_type || item.file?.type || "",
 	        file_size: item.file_size || item.file?.size || 0
 	      }));
-	      if (!hasOverride) clearAttachments();
-	      const userContent = content || (readyDocuments.length ? "请根据这些材料分析。" : "请分析这些图片。");
-	      state.messages.push({ role: "user", content: userContent, images: sentImages, created_at: sentAt });
+      const sentDocuments = readyDocuments.map((item) => ({ ...item }));
+      if (!hasOverride) {
+        clearAttachments();
+        state.documentAttachments = [];
+        renderDocumentPreviews();
+      }
+      const userContent = content || (readyDocuments.length ? "请根据这些材料分析。" : "请分析这些图片。");
+      state.messages.push({ role: "user", content: userContent, images: sentImages, documents: sentDocuments, created_at: sentAt });
 	      const assistant = {
         role: "assistant", content: "", reasoning_content: "", sources: [], thinking: true,
         created_at: sentAt, _thinkingStartedAt: Date.now(), _activityStartedAt: Date.now(), _upstreamActive: true,
@@ -9241,7 +9395,12 @@
 	    $("profileTitle").addEventListener("input", updateProfileEditorMeta);
 	    $("profileContent").addEventListener("input", updateProfileEditorMeta);
 	    $("profileStatus").addEventListener("click", toggleProfilePopover);
-    $("contextModeToggle").addEventListener("click", toggleConversationContextMode);
+    document.getElementById("contextModeToggle").addEventListener("click", toggleConversationContextMode);
+    document.getElementById("openConversationFiles")?.addEventListener("click", openConversationFiles);
+    document.getElementById("closeConversationFiles")?.addEventListener("click", closeConversationFiles);
+    document.getElementById("conversationFilesDialog")?.addEventListener("click", (event) => { if (event.target === document.getElementById("conversationFilesDialog")) closeConversationFiles(); });
+    document.getElementById("saveConversationFiles")?.addEventListener("click", saveConversationFiles);
+    document.getElementById("addConversationFile")?.addEventListener("click", () => { closeConversationFiles(); document.getElementById("documentInput")?.click(); });
 	    $("disableProfileForConversation").addEventListener("change", () => setProfileDisabledForCurrentConversation($("disableProfileForConversation").checked));
 	    document.addEventListener("click", handleProfileOutsideClick);
 	    document.querySelectorAll("[data-version-trigger]").forEach((button) => {
@@ -9412,6 +9571,7 @@
 	        closeGlobalSearch();
 	        closeChangelog();
 	        closeShareDialog();
+        closeConversationFiles();
 	        closeProfilePopover();
 	        closeProfiles();
 	        closeTokenActivity();
