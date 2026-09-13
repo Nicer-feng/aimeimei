@@ -1192,6 +1192,7 @@ class AdminHandlersMixin:
         system_prompt = str(data.get("system_prompt") or "").strip()
         supports_vision = 1 if data.get("supports_vision") else 0
         supports_native_web_search = 1 if data.get("supports_native_web_search") else 0
+        supports_reasoning_control = 1 if data.get("supports_reasoning_control") else 0
         enabled = 1 if data.get("enabled", True) else 0
         input_price = parse_price(data.get("input_price_per_million"))
         output_price = parse_price(data.get("output_price_per_million"))
@@ -1208,9 +1209,9 @@ class AdminHandlersMixin:
                 """
                 INSERT INTO models
                 (id, name, provider, base_url, api_key, model, system_prompt, supports_vision,
-                 supports_native_web_search, enabled,
+                 supports_native_web_search, supports_reasoning_control, enabled,
                  input_price_per_million, output_price_per_million, cost_enabled, cost_note, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     model_id,
@@ -1222,6 +1223,7 @@ class AdminHandlersMixin:
                     system_prompt,
                     supports_vision,
                     supports_native_web_search,
+                    supports_reasoning_control,
                     enabled,
                     input_price,
                     output_price,
@@ -1269,6 +1271,9 @@ class AdminHandlersMixin:
             supports_native_web_search = 1 if data.get(
                 "supports_native_web_search", bool(row["supports_native_web_search"])
             ) else 0
+            supports_reasoning_control = 1 if data.get(
+                "supports_reasoning_control", bool(row["supports_reasoning_control"])
+            ) else 0
             enabled = 1 if data.get("enabled", bool(row["enabled"])) else 0
             input_price = parse_price(data.get("input_price_per_million", row["input_price_per_million"]))
             output_price = parse_price(data.get("output_price_per_million", row["output_price_per_million"]))
@@ -1287,7 +1292,7 @@ class AdminHandlersMixin:
                 """
                 UPDATE models
                 SET name=?, provider=?, base_url=?, api_key=?, model=?, system_prompt=?, supports_vision=?,
-                    supports_native_web_search=?, enabled=?,
+                    supports_native_web_search=?, supports_reasoning_control=?, enabled=?,
                     input_price_per_million=?, output_price_per_million=?, cost_enabled=?, cost_note=?, updated_at=?
                 WHERE id=?
                 """,
@@ -1300,6 +1305,7 @@ class AdminHandlersMixin:
                     system_prompt,
                     supports_vision,
                     supports_native_web_search,
+                    supports_reasoning_control,
                     enabled,
                     input_price,
                     output_price,

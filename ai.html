@@ -58,7 +58,7 @@
   <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.24.0">
+  <link rel="stylesheet" href="/res/ai.css?v=2.24.1">
 
   <link rel="stylesheet" href="/res/markdown.css">
 </head>
@@ -69,7 +69,7 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.24.0</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.24.1</button>
       </div>
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
@@ -86,7 +86,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.24.0</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.24.1</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -99,7 +99,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.24.0</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.24.1</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -153,7 +153,7 @@
 	          </button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.24.0</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.24.1</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -242,6 +242,19 @@
 	                </button>
 	                <select class="model-select ui-select is-native-hidden" id="modelSelect" tabindex="-1" aria-hidden="true"></select>
 	              </div>
+              <div class="reasoning-picker" id="reasoningPicker" hidden>
+                <button class="reasoning-picker-button" id="reasoningPickerButton" type="button" aria-haspopup="menu" aria-expanded="false" title="思考力度">
+                  <i data-lucide="brain" aria-hidden="true"></i><span class="reasoning-picker-label" id="reasoningPickerLabel">平衡</span><i data-lucide="chevron-down" aria-hidden="true"></i>
+                </button>
+                <select id="reasoningMode" hidden aria-hidden="true" tabindex="-1">
+                  <option value="fast">快速</option><option value="balanced">平衡</option><option value="deep">深度</option>
+                </select>
+                <div class="reasoning-picker-menu" id="reasoningPickerMenu" role="menu" hidden>
+                  <button type="button" data-reasoning-mode="fast" role="menuitem"><i data-lucide="zap" aria-hidden="true"></i><span><strong>快速</strong><small>直接回答，首字更快</small></span><i data-lucide="check" aria-hidden="true"></i></button>
+                  <button type="button" data-reasoning-mode="balanced" role="menuitem"><i data-lucide="brain" aria-hidden="true"></i><span><strong>平衡</strong><small>适合日常工作与分析</small></span><i data-lucide="check" aria-hidden="true"></i></button>
+                  <button type="button" data-reasoning-mode="deep" role="menuitem"><i data-lucide="sparkles" aria-hidden="true"></i><span><strong>深度</strong><small>复杂任务，耗时更多</small></span><i data-lucide="check" aria-hidden="true"></i></button>
+                </div>
+              </div>
 		              <label class="search-toggle inline-flex items-center gap-2" id="webSearchLabel" title="联网搜索">
 		                <input id="webSearchToggle" type="checkbox">
 		                <i data-lucide="globe-2" aria-hidden="true"></i><span class="icon-fallback">⌁</span>
@@ -758,6 +771,12 @@
 	                <option value="1">百炼原生联网（Responses API）</option>
 	              </select>
 	            </label>
+            <label>思考档位
+              <select id="supportsReasoningControl">
+                <option value="0">不支持 / 不展示</option>
+                <option value="1">支持快速、平衡、深度</option>
+              </select>
+            </label>
 	            <div class="grid2">
 	              <label>输入价格（元 / 百万 Token）<input id="inputPricePerMillion" type="number" min="0" step="0.0001" placeholder="例如 2.4"></label>
 	              <label>输出价格（元 / 百万 Token）<input id="outputPricePerMillion" type="number" min="0" step="0.0001" placeholder="例如 9.6"></label>
@@ -993,7 +1012,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.24.0</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.24.1</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -1005,7 +1024,7 @@
 	    </div>
 	  </section>
 
-	  <script src="/res/ai.js?v=2.24.0"></script>
+	  <script src="/res/ai.js?v=2.24.1"></script>
 
 </body>
 </html>

@@ -38,6 +38,7 @@
 	      streamTimer: null,
 	      streamResolve: null,
 	      streamPace: null,
+	      reasoningPickerOpen: false,
 	      reasoningClockTimer: 0,
 	      activeReasoningMessage: null,
 	      activityClockTimer: 0,
@@ -1726,6 +1727,65 @@
 	      }
 	    }
 
+    const REASONING_MODE_META = {
+      fast: { label: "快速", title: "快速：关闭思考，优先响应速度" },
+      balanced: { label: "平衡", title: "平衡：中等思考力度，适合日常使用" },
+      deep: { label: "深度", title: "深度：高思考力度，适合复杂任务" }
+    };
+
+    function normalizeReasoningMode(value) { return REASONING_MODE_META[value] ? value : "balanced"; }
+    function selectedModelSupportsReasoningControl() { return Boolean(selectedModel()?.supports_reasoning_control || state.currentConversation?.supports_reasoning_control); }
+    function reasoningModeForCurrentModel() {
+      const modelId = $("modelSelect")?.value || state.currentConversation?.model_id || "";
+      if (state.currentConversation && state.currentConversation.model_id === modelId) return normalizeReasoningMode(state.currentConversation.reasoning_mode);
+      return normalizeReasoningMode(getUserStorage("reasoning_mode:" + modelId, "balanced"));
+    }
+    function closeReasoningPicker() {
+      state.reasoningPickerOpen = false;
+      $("reasoningPickerButton")?.setAttribute("aria-expanded", "false");
+      if ($("reasoningPickerMenu")) $("reasoningPickerMenu").hidden = true;
+    }
+    function renderReasoningControl() {
+      const picker = $("reasoningPicker"), button = $("reasoningPickerButton"), label = $("reasoningPickerLabel"), select = $("reasoningMode"), menu = $("reasoningPickerMenu");
+      if (!picker || !button || !label || !select || !menu) return;
+      const supported = selectedModelSupportsReasoningControl();
+      picker.hidden = !supported;
+      if (!supported) { closeReasoningPicker(); return; }
+      const mode = reasoningModeForCurrentModel();
+      select.value = mode;
+      label.textContent = REASONING_MODE_META[mode].label;
+      button.title = REASONING_MODE_META[mode].title;
+      menu.querySelectorAll("[data-reasoning-mode]").forEach((item) => item.classList.toggle("selected", item.dataset.reasoningMode === mode));
+      if (state.reasoningPickerOpen) { menu.hidden = false; button.setAttribute("aria-expanded", "true"); }
+      queueLucideRefresh();
+    }
+    function toggleReasoningPicker(event) {
+      event?.stopPropagation();
+      if (!selectedModelSupportsReasoningControl()) return;
+      state.reasoningPickerOpen = !state.reasoningPickerOpen;
+      renderReasoningControl();
+    }
+    async function chooseReasoningMode(mode) {
+      mode = normalizeReasoningMode(mode);
+      if (state.sending) return setStatus("chatStatus", "槑槑正在回复，下一条生成完再切换思考力度。", "err");
+      const modelId = $("modelSelect")?.value || state.currentConversation?.model_id || "";
+      if (!modelId || !selectedModelSupportsReasoningControl()) return;
+      setUserStorage("reasoning_mode:" + modelId, mode);
+      if (state.currentConversation) {
+        const res = await api(`/api/conversations/${state.currentConversation.id}`, { method: "PATCH", body: JSON.stringify({ reasoning_mode: mode }) });
+        if (!res.ok) return setStatus("chatStatus", await readError(res, "思考力度切换失败，稍后再试一下。"), "err");
+        const data = await res.json();
+        state.currentConversation = data.conversation || { ...state.currentConversation, reasoning_mode: mode };
+        upsertConversation(state.currentConversation);
+      }
+      closeReasoningPicker();
+      renderReasoningControl();
+      setStatus("chatStatus", "已切换为" + REASONING_MODE_META[mode].label + "思考", "ok");
+    }
+    function handleReasoningPickerOutsidePointer(event) {
+      if (state.reasoningPickerOpen && !$("reasoningPicker")?.contains(event.target)) closeReasoningPicker();
+    }
+
 	    function renderModelSelect() {
       const select = $("modelSelect");
       select.innerHTML = "";
@@ -1748,6 +1808,7 @@
         select.value = state.currentConversation.model_id;
       }
       updateVisionUI();
+      renderReasoningControl();
       syncModelPickerButton();
       renderModelPickerList();
     }
@@ -1941,7 +2002,7 @@
       if (!model) return false;
       const res = await api(`/api/conversations/${state.currentConversation.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ model_id: modelId })
+        body: JSON.stringify({ model_id: modelId, reasoning_mode: reasoningModeForCurrentModel() })
       });
       if (!res.ok) {
         setStatus("chatStatus", await readError(res, "切换模型失败，稍后再试一下。"), "err");
@@ -1954,7 +2015,9 @@
         model_name: model.name,
         model: model.model,
         supports_vision: Boolean(model.supports_vision),
-        supports_native_web_search: Boolean(model.supports_native_web_search)
+        supports_native_web_search: Boolean(model.supports_native_web_search),
+        supports_reasoning_control: Boolean(model.supports_reasoning_control),
+        reasoning_mode: state.currentConversation.reasoning_mode || reasoningModeForCurrentModel()
       };
       upsertConversation(state.currentConversation);
       $("modelSelect").value = state.currentConversation.model_id;
@@ -2020,6 +2083,7 @@
       select.dispatchEvent(new Event("change", { bubbles: true }));
       if (!state.currentConversation) {
         $("chatModel").textContent = "准备使用 " + model.name;
+        renderReasoningControl();
       }
       setStatus("chatStatus", "已选择 " + model.name + "，新对话会使用它。", "ok");
       $("prompt").focus();
@@ -3806,7 +3870,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.24.0" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.24.1" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -9006,6 +9070,7 @@
         info.querySelector("span").textContent = model.model
           + (model.supports_vision ? " · 支持图片理解" : "")
           + (model.supports_native_web_search ? " · 百炼原生联网" : "")
+          + (model.supports_reasoning_control ? " · 支持思考档位" : "")
           + " · " + model.base_url
           + (model.has_api_key ? " · Key 已保存" : " · 未配置 Key")
           + costText;
@@ -9084,7 +9149,8 @@
 	        system_prompt: model.system_prompt || "",
 	        enabled: Boolean(model.enabled),
 	        supports_vision: Boolean(model.supports_vision),
-	        supports_native_web_search: Boolean(model.supports_native_web_search)
+	        supports_native_web_search: Boolean(model.supports_native_web_search),
+        supports_reasoning_control: Boolean(model.supports_reasoning_control)
 	      };
 	      const res = await adminApi(`/api/admin/models/${modelId}`, {
 	        method: "PUT",
@@ -9112,6 +9178,7 @@
       $("enabled").value = model.enabled ? "1" : "0";
       $("supportsVision").value = model.supports_vision ? "1" : "0";
       $("supportsNativeWebSearch").value = model.supports_native_web_search ? "1" : "0";
+      $("supportsReasoningControl").value = model.supports_reasoning_control ? "1" : "0";
       $("inputPricePerMillion").value = model.input_price_per_million || "";
       $("outputPricePerMillion").value = model.output_price_per_million || "";
       $("costEnabled").value = model.cost_enabled ? "1" : "0";
@@ -9131,6 +9198,7 @@
       $("enabled").value = "1";
       $("supportsVision").value = "0";
       $("supportsNativeWebSearch").value = "0";
+      $("supportsReasoningControl").value = "0";
       $("costEnabled").value = "0";
       $("apiKey").placeholder = "留空则保持原值";
       setStatus("modelStatus", "");
@@ -9148,6 +9216,7 @@
         enabled: $("enabled").value === "1",
         supports_vision: $("supportsVision").value === "1",
         supports_native_web_search: $("supportsNativeWebSearch").value === "1",
+        supports_reasoning_control: $("supportsReasoningControl").value === "1",
         input_price_per_million: Number($("inputPricePerMillion").value || 0),
         output_price_per_million: Number($("outputPricePerMillion").value || 0),
         cost_enabled: $("costEnabled").value === "1" || Number($("inputPricePerMillion").value || 0) > 0 || Number($("outputPricePerMillion").value || 0) > 0,
@@ -9371,6 +9440,11 @@
     $("globalSearchInput").addEventListener("input", scheduleGlobalSearch);
     $("globalSearchInput").addEventListener("keydown", handleGlobalSearchKeydown);
     $("modelPickerButton").addEventListener("click", openModelPicker);
+    $("reasoningPickerButton")?.addEventListener("click", toggleReasoningPicker);
+    $("reasoningPickerMenu")?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-reasoning-mode]");
+      if (button) chooseReasoningMode(button.dataset.reasoningMode).catch((err) => setStatus("chatStatus", friendlyError(err, "思考力度切换失败。"), "err"));
+    });
     $("modelPickerDialog").addEventListener("click", (event) => {
       if (event.target === $("modelPickerDialog")) closeModelPicker();
     });
@@ -9434,6 +9508,7 @@
 	      if (event.target?.matches?.("[data-feature-toggle]")) saveAdminFeatures();
 	    });
 	    document.addEventListener("pointerdown", handleSidebarToolsOutsidePointer);
+    document.addEventListener("pointerdown", handleReasoningPickerOutsidePointer);
 	    $("closeTokenActivity").addEventListener("click", closeTokenActivity);
 	    $("tokenActivityDialog").addEventListener("click", (event) => {
 	      if (event.target === $("tokenActivityDialog")) closeTokenActivity();

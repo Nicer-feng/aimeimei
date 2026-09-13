@@ -27,6 +27,23 @@ class ChatHandlersMixin:
         return "full" if str(value or "").strip().lower() == "full" else "smart"
 
     @staticmethod
+    def reasoning_mode(value):
+        value = str(value or "").strip().lower()
+        return value if value in ("fast", "balanced", "deep") else "balanced"
+
+    @classmethod
+    def reasoning_request_options(cls, conversation, native_search=False):
+        if not bool(conversation["supports_reasoning_control"]):
+            return {}
+        mode = cls.reasoning_mode(conversation["reasoning_mode"])
+        if native_search:
+            effort = {"fast": "none", "balanced": "medium", "deep": "xhigh"}[mode]
+            return {"reasoning": {"effort": effort}}
+        if mode == "fast":
+            return {"enable_thinking": False}
+        return {"reasoning_effort": {"balanced": "medium", "deep": "xhigh"}[mode]}
+
+    @staticmethod
     def context_summary_prompt(previous_summary, rows):
         parts = []
         if previous_summary:
@@ -578,10 +595,10 @@ class ChatHandlersMixin:
             title = ("侧边讨论：" + discussion["title"])[:80]
             conn.execute(
                 """
-                INSERT INTO conversations(id, user_id, title, model_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO conversations(id, user_id, title, model_id, reasoning_mode, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (conversation_id, user_id, title, discussion["model_id"], ts, ts),
+                (conversation_id, user_id, title, discussion["model_id"], "balanced", ts, ts),
             )
             source_role = "槑槑回复" if discussion["source_role"] == "assistant" else "用户消息"
             source_message = (
@@ -617,7 +634,7 @@ class ChatHandlersMixin:
             row = conn.execute(
                 """
                 SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
-                       m.supports_native_web_search
+                       m.supports_native_web_search, m.supports_reasoning_control
                 FROM conversations c
                 JOIN models m ON m.id=c.model_id
                 WHERE c.id=? AND c.user_id=?
@@ -634,7 +651,7 @@ class ChatHandlersMixin:
                 rows = conn.execute(
                     """
                     SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
-                           m.supports_native_web_search
+                           m.supports_native_web_search, m.supports_reasoning_control
                     FROM conversations c
                     JOIN models m ON m.id = c.model_id
                     WHERE c.archived=0 AND c.user_id=?
@@ -662,15 +679,15 @@ class ChatHandlersMixin:
             ts = now()
             conn.execute(
                 """
-                INSERT INTO conversations(id, user_id, title, model_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO conversations(id, user_id, title, model_id, reasoning_mode, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (conversation_id, user_id, title, model_id, ts, ts),
+                (conversation_id, user_id, title, model_id, self.reasoning_mode(data.get("reasoning_mode")), ts, ts),
             )
             row = conn.execute(
                 """
                 SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
-                       m.supports_native_web_search
+                       m.supports_native_web_search, m.supports_reasoning_control
                 FROM conversations c JOIN models m ON m.id=c.model_id
                 WHERE c.id=? AND c.user_id=?
                 """,
@@ -702,7 +719,7 @@ class ChatHandlersMixin:
             row = conn.execute(
                 """
                 SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
-                       m.supports_native_web_search
+                       m.supports_native_web_search, m.supports_reasoning_control
                 FROM conversations c
                 JOIN models m ON m.id = c.model_id
                 WHERE c.id=? AND c.user_id=?
@@ -802,6 +819,7 @@ class ChatHandlersMixin:
             title = str(data.get("title") or row["title"]).strip()[:80] or row["title"]
             model_id = str(data.get("model_id") or row["model_id"]).strip()
             context_mode = self.context_mode(data.get("context_mode", row["context_mode"] if "context_mode" in row.keys() else "smart"))
+            reasoning_mode = self.reasoning_mode(data.get("reasoning_mode", row["reasoning_mode"] if "reasoning_mode" in row.keys() else "balanced"))
             if model_id != row["model_id"]:
                 model = conn.execute(
                     "SELECT id FROM models WHERE id=? AND enabled=1", (model_id,)
@@ -809,13 +827,13 @@ class ChatHandlersMixin:
                 if not model:
                     return self.error(HTTPStatus.BAD_REQUEST, "model not found")
             conn.execute(
-                "UPDATE conversations SET title=?, model_id=?, context_mode=?, updated_at=? WHERE id=? AND user_id=?",
-                (title, model_id, context_mode, now(), conversation_id, user_id),
+                "UPDATE conversations SET title=?, model_id=?, context_mode=?, reasoning_mode=?, updated_at=? WHERE id=? AND user_id=?",
+                (title, model_id, context_mode, reasoning_mode, now(), conversation_id, user_id),
             )
             updated = conn.execute(
                 """
                 SELECT c.*, m.name AS model_name, m.model AS model, m.supports_vision,
-                       m.supports_native_web_search
+                       m.supports_native_web_search, m.supports_reasoning_control
                 FROM conversations c JOIN models m ON m.id=c.model_id
                 WHERE c.id=? AND c.user_id=?
                 """,
@@ -972,7 +990,7 @@ class ChatHandlersMixin:
             convo = conn.execute(
                 """
                 SELECT c.*, m.name AS model_name, m.base_url, m.api_key, m.model, m.system_prompt,
-                       m.supports_vision, m.supports_native_web_search, m.enabled,
+                       m.supports_vision, m.supports_native_web_search, m.supports_reasoning_control, m.enabled,
                        m.input_price_per_million,
                        m.output_price_per_million, m.cost_enabled
                 FROM conversations c JOIN models m ON m.id=c.model_id
@@ -1193,18 +1211,21 @@ class ChatHandlersMixin:
             }
             if include_usage:
                 payload["stream_options"] = {"include_usage": True}
+            payload.update(self.reasoning_request_options(convo))
             return payload
 
         def make_native_search_payload(include_extractor=True):
             tools = [{"type": "web_search"}]
             if include_extractor:
                 tools.append({"type": "web_extractor"})
-            return {
+            payload = {
                 "model": convo["model"],
                 "input": responses_input_from_messages(make_upstream_messages([])),
                 "tools": tools,
                 "stream": True,
             }
+            payload.update(self.reasoning_request_options(convo, native_search=True))
+            return payload
 
         def open_upstream(payload, native_search=False):
             endpoint = "/responses" if native_search else "/chat/completions"

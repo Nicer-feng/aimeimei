@@ -85,6 +85,7 @@ def init_db(secrets_data=None):
               system_prompt TEXT NOT NULL DEFAULT '',
               supports_vision INTEGER NOT NULL DEFAULT 0,
               supports_native_web_search INTEGER NOT NULL DEFAULT 0,
+              supports_reasoning_control INTEGER NOT NULL DEFAULT 0,
               enabled INTEGER NOT NULL DEFAULT 1,
               input_price_per_million REAL NOT NULL DEFAULT 0,
               output_price_per_million REAL NOT NULL DEFAULT 0,
@@ -117,6 +118,7 @@ def init_db(secrets_data=None):
               context_summary TEXT NOT NULL DEFAULT '',
               context_summary_message_id INTEGER NOT NULL DEFAULT 0,
               context_summary_updated_at INTEGER NOT NULL DEFAULT 0,
+              reasoning_mode TEXT NOT NULL DEFAULT 'balanced',
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL,
               FOREIGN KEY (model_id) REFERENCES models(id)
@@ -503,6 +505,21 @@ def init_db(secrets_data=None):
                   )
                 """
             )
+        if "supports_reasoning_control" not in model_columns:
+            conn.execute(
+                "ALTER TABLE models ADD COLUMN supports_reasoning_control INTEGER NOT NULL DEFAULT 0"
+            )
+            conn.execute(
+                """
+                UPDATE models
+                SET supports_reasoning_control=1
+                WHERE lower(model) LIKE 'qwen3.%'
+                  AND (
+                    lower(base_url) LIKE '%dashscope.aliyuncs.com%'
+                    OR lower(base_url) LIKE '%.maas.aliyuncs.com%'
+                  )
+                """
+            )
         for column in ("input_price_per_million", "output_price_per_million"):
             if column not in model_columns:
                 conn.execute(f"ALTER TABLE models ADD COLUMN {column} REAL NOT NULL DEFAULT 0")
@@ -598,6 +615,8 @@ def init_db(secrets_data=None):
             conn.execute("ALTER TABLE conversations ADD COLUMN context_summary_message_id INTEGER NOT NULL DEFAULT 0")
         if "context_summary_updated_at" not in conversation_columns:
             conn.execute("ALTER TABLE conversations ADD COLUMN context_summary_updated_at INTEGER NOT NULL DEFAULT 0")
+        if "reasoning_mode" not in conversation_columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN reasoning_mode TEXT NOT NULL DEFAULT 'balanced'")
         conn.execute(
             "UPDATE conversations SET user_id=? WHERE user_id=? AND NOT EXISTS (SELECT 1 FROM users WHERE id=conversations.user_id)",
             (default_user_id, DEFAULT_AI_USER_ID),
