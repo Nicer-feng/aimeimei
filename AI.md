@@ -493,3 +493,7 @@ RAM 补充权限已生效。Bucket 管理请求 403 的具体原因是 `V1 url s
 ### 文件分享中心 v0.1.3 待部署
 
 本地新增IP2Location归属地列和后台缓存查询，版本0.1.3；线上仍为0.1.2。Key仅保存在本地Git忽略的ip2location.key，部署需单独配置服务端数据目录同名文件，不得输出密钥。实现及验证见file_share/README.md和ACCEPTANCE.md。本次未请求或执行生产部署。
+
+### v0.1.3 最终上线状态
+
+用户明确授权后，v0.1.3（20260914-202421）已上线。Key单独配置在/opt/ai-platform/ip2location.key，0600、ai-platform所有，不在Git和前端。生产服务账号真实查询公开测试IP成功并缓存；公网版本资源、权限及各产品基础访问通过。备份在/opt/ai-platform-release-backups/file-share-0.1.3-20260914-202421/。

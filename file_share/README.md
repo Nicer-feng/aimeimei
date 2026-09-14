@@ -1,6 +1,6 @@
 # 文件分享中心 v0.1.3
 
-当前为本地待部署版本；线上版本为0.1.2。
+当前线上版本为0.1.3。
 
 2026-09-14 16:57 已上线：https://feng.asia/admin/share 。真实 OSS 和浏览器闭环通过。
 
@@ -119,7 +119,7 @@ python3 file_share/tests/run.py
 
 ## IP归属地配置
 
-服务端读取 IP2LOCATION_API_KEY 环境变量、secrets.json中的ip2location_api_key，或数据目录AI_PLATFORM_DATA下的ip2location.key（权限0600，归服务账号）。Key禁止入Git及前端。当前本地Key已保存到Git忽略的ip2location.key，部署时需单独安全配置，不能放进代码发布包。
+服务端读取 IP2LOCATION_API_KEY 环境变量、secrets.json中的ip2location_api_key，或数据目录AI_PLATFORM_DATA下的ip2location.key（权限0600，归服务账号）。Key禁止入Git及前端。Key已单独配置到生产数据目录ip2location.key，权限0600；本地文件由Git忽略，不能放进代码发布包。
 
 当前页日志按IP去重，后台2个工作线程、64个排队任务；公网IP结果缓存7天，失败缓存1小时；401/403/429暂停新查询1小时，网络异常暂停30秒。无Key不调用接口，内网IP不发送给第三方。只查询当前查看的日志，不扫描整库。成功结果不覆写原访问记录，仅关联缓存；缓存最多10000条，并从脱敏备份排除。
 
