@@ -22,6 +22,7 @@ from .security import classify, client_info, hash_password, verify_password
 
 ROOT = Path(__file__).resolve().parent
 PART_SIZE = 8 * 1024 * 1024
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 UPLOAD_LOCKS = [threading.Lock() for _ in range(64)]
 INVALID = "该分享已失效或已被取消。"
 
@@ -147,13 +148,14 @@ class FileShareHandlersMixin:
                               'changelog': (ROOT / 'CHANGELOG.md').read_text()})
         if path == '/settings':
             with transaction() as conn:
-                conn.execute('INSERT OR IGNORE INTO share_settings(user_id) VALUES(?)', (user_id,))
+                conn.execute('INSERT OR IGNORE INTO share_settings(user_id,max_upload_bytes) VALUES(?,?)', (user_id,MAX_UPLOAD_BYTES))
                 if method == 'POST':
-                    maximum = int(data.get('max_upload_bytes', 5368709120))
-                    require(1 <= maximum <= 20 * 1024**3, '单文件上限为 1 字节至 20 GB')
+                    maximum = int(data.get('max_upload_bytes', MAX_UPLOAD_BYTES))
+                    require(1 <= maximum <= MAX_UPLOAD_BYTES, '单文件最大上传容量为 500 MB')
                     conn.execute('UPDATE share_settings SET display_name=?,max_upload_bytes=? WHERE user_id=?', (str(data.get('display_name', ''))[:80], maximum, user_id))
                     self.fs_audit(conn, user_id, 'UPDATE_SETTINGS', user_id)
                 row = dict(conn.execute('SELECT * FROM share_settings WHERE user_id=?', (user_id,)).fetchone())
+            row['max_upload_bytes'] = min(row['max_upload_bytes'], MAX_UPLOAD_BYTES)
             config = shared_storage_config(self.server.secrets)
             row.update(oss_configured=config['configured'], bucket=config['bucket'], signed_url_seconds=300, version=(ROOT / 'VERSION').read_text().strip())
             return self.json(row)
@@ -347,7 +349,7 @@ class FileShareHandlersMixin:
         oss = self.fs_oss()
         with transaction() as conn:
             settings = conn.execute('SELECT * FROM share_settings WHERE user_id=?',(user_id,)).fetchone()
-            require(0 < size <= (settings['max_upload_bytes'] if settings else 5*1024**3),'文件为空或超过上传大小限制')
+            require(0 < size <= min(settings['max_upload_bytes'] if settings else MAX_UPLOAD_BYTES, MAX_UPLOAD_BYTES),'文件为空或超过上传大小限制（最高 500 MB）',413)
             pending = conn.execute("SELECT count(*) FROM share_files WHERE user_id=? AND status='UPLOADING'",(user_id,)).fetchone()[0]
             require(pending < 30,'未完成上传过多，请先清理失败上传',429)
             upload_id = None
@@ -375,6 +377,8 @@ class FileShareHandlersMixin:
             if action == 'complete' and row['status'] == 'READY':
                 return self.json(public_file(row))
             require(row['status']=='UPLOADING','上传任务不可用',409)
+            if action in ('part', 'complete'):
+                require(row['size'] <= MAX_UPLOAD_BYTES, '单文件最大上传容量为 500 MB，请取消该上传任务', 413)
             oss = self.fs_oss(row)
             if action == 'part':
                 part = int(data.get('part_number',0))

@@ -37,7 +37,7 @@ assert req(a,rename,{'filename':'新名称.png'})[0]==200
 assert req(anon,base+'/open',{})[1]['files'][0]['filename']=='新名称.png'
 assert req(a,f'/api/file-share/admin/shares/{sid}')[1]['files'][0]['filename']=='新名称.png'
 assert req(a,'/api/file-share/admin/files?search='+urllib.parse.quote('新名称'))[1]['total']==1
-assert req(a,'/api/file-share/admin/version')[1]['version']=='0.1.4'
+assert req(a,'/api/file-share/admin/version')[1]['version']=='0.1.5'
 assert req(anon,'/api/file-share/admin/version')[0]==401
 assert req(a,rename,{'filename':'test.png'})[0]==200
 print('PASS: rename authorization, unsafe names, immutable extension, existing share and search, version endpoint')
@@ -112,3 +112,16 @@ assert len(reset['generated_password'])>=4
 assert req(a,f'/api/file-share/admin/files/{new_id}/trash',{})[0]==200
 assert req(a,f'/api/file-share/admin/files/{new_id}/purge',{})[0]==200
 print('PASS: two-part upload, MIME spoof denied, generated password reset, permanent deletion')
+
+# Upload cap boundary checks do not allocate or transfer a large file.
+cap=500*1024*1024
+assert req(a,'/api/file-share/admin/settings')[1]['max_upload_bytes']==cap
+assert req(a,'/api/file-share/admin/settings',{'max_upload_bytes':cap+1})[0]==400
+assert req(a,'/api/file-share/admin/uploads',{'filename':'large.bin','size':cap+1,'sha256':'a'*64})[0]==413
+status,limit_upload=req(a,'/api/file-share/admin/uploads',{'filename':'boundary.bin','size':cap,'sha256':'a'*64})
+assert status==200,(status,limit_upload)
+assert req(a,f"/api/file-share/admin/uploads/{limit_upload['id']}/abort",{})[0]==200
+assert req(a,'/api/file-share/admin/settings',{'max_upload_bytes':1})[0]==200
+assert req(a,'/api/file-share/admin/uploads',{'filename':'small.bin','size':2,'sha256':'a'*64})[0]==413
+assert req(a,'/api/file-share/admin/settings',{'max_upload_bytes':cap})[0]==200
+print('PASS: 500 MB boundary, oversized upload denied, settings cannot exceed cap, stricter user limit preserved')

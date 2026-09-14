@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS share_rate_limits (
  rate_key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, count INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS share_settings (
- user_id TEXT PRIMARY KEY, display_name TEXT NOT NULL DEFAULT '', max_upload_bytes INTEGER NOT NULL DEFAULT 5368709120
+ user_id TEXT PRIMARY KEY, display_name TEXT NOT NULL DEFAULT '', max_upload_bytes INTEGER NOT NULL DEFAULT 524288000
 );
 CREATE TABLE IF NOT EXISTS share_audit_logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, action TEXT NOT NULL,
@@ -49,3 +49,6 @@ CREATE TABLE IF NOT EXISTS infrastructure_ip_locations (
  city TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ip_locations_expiry ON infrastructure_ip_locations(expires_at);
+
+-- Preserve stricter per-user limits; clamp legacy settings to the platform cap.
+UPDATE share_settings SET max_upload_bytes=524288000 WHERE max_upload_bytes>524288000;

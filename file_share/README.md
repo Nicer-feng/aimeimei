@@ -1,6 +1,6 @@
-# 文件分享中心 v0.1.4
+# 文件分享中心 v0.1.5
 
-当前线上版本为0.1.4。
+当前线上版本为0.1.5。
 
 2026-09-14 16:57 已上线：https://feng.asia/admin/share 。真实 OSS 和浏览器闭环通过。
 
@@ -12,7 +12,7 @@
 - 独立接口：`/api/file-share/admin/*`、`/api/file-share/public/*`。
 - 独立后端：`file_share/`；静态资源：`res/file-share/`。
 - 独立数据表：`share_files`、`shares`、`share_files_relation`、`share_access_logs`、`share_sessions`、`share_settings`、`share_rate_limits`、`share_audit_logs`。
-- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.1.4`。
+- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.1.5`。
 - 不进入 AI槑槑后台菜单；共享已有管理员登录 Session、SQLite 连接以及 OSS 配置。
 - 第一版仍由现有 Python 进程承载，更新后端需要重启该进程，因此暂时不是独立部署单元。后续可以在保持接口和产品目录不变的前提下拆进程。
 - AI 对话分享仍使用 `/ai/share/{43位令牌}`，原 `/share/{43位令牌}` 兼容保留。
@@ -50,7 +50,7 @@ AI_PLATFORM_DATA=/tmp/share-dev AI_PLATFORM_LISTEN=127.0.0.1:8080 python3 app.py
 - 服务端只读取头部 4 KB 检测格式，不代理大文件流量。HTML/SVG 默认普通文件，禁止内联预览；内容与声明类型不匹配的上传拒绝登记。
 - MIME 采用扩展名白名单、客户端 MIME 和服务端文件头检查。正确类型在上传初始化时写入 OSS，不通过 URL 覆盖 Content-Type。TXT 以 `textContent` 呈现；下载使用 attachment 和安全 Content-Disposition。
 - SHA256 来自管理员浏览器增量计算；分片 Content-MD5 由 OSS 校验，不以 MD5 存储密码。
-- 默认单文件上限 5 GB，可在设置调整，最高 20 GB；最大 30 个未完成上传。
+- 单文件上限 500 MB（524288000 字节），设置可调低，不能超过平台上限；最大 30 个未完成上传。
 - 预览和下载都校验有效分享、验证 Session、文件关联、回收站状态和权限，然后签发 300 秒 GET URL。
 - 不改变整个共享 Bucket 的 ACL，避免破坏小猫书已有图片；分享对象必须单独私有。真实 Bucket Policy/CORS 仍需上线前检查。
 
