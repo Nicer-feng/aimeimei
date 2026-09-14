@@ -1,6 +1,6 @@
-# 文件分享中心 v0.1.3
+# 文件分享中心 v0.1.4
 
-当前线上版本为0.1.3。
+当前线上版本为0.1.4。
 
 2026-09-14 16:57 已上线：https://feng.asia/admin/share 。真实 OSS 和浏览器闭环通过。
 
@@ -12,7 +12,7 @@
 - 独立接口：`/api/file-share/admin/*`、`/api/file-share/public/*`。
 - 独立后端：`file_share/`；静态资源：`res/file-share/`。
 - 独立数据表：`share_files`、`shares`、`share_files_relation`、`share_access_logs`、`share_sessions`、`share_settings`、`share_rate_limits`、`share_audit_logs`。
-- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.1.3`。
+- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.1.4`。
 - 不进入 AI槑槑后台菜单；共享已有管理员登录 Session、SQLite 连接以及 OSS 配置。
 - 第一版仍由现有 Python 进程承载，更新后端需要重启该进程，因此暂时不是独立部署单元。后续可以在保持接口和产品目录不变的前提下拆进程。
 - AI 对话分享仍使用 `/ai/share/{43位令牌}`，原 `/share/{43位令牌}` 兼容保留。
