@@ -28,3 +28,7 @@
 ## v0.1.3 - 已上线
 
 新增IP归属地查询及日志列。需要发布infrastructure/ip_geolocation.py、file_share/schema.sql及相关界面/版本文件、ai_platform/backup.py；新增缓存表幂等创建。Key单独配置在生产数据目录ip2location.key，权限0600、归ai-platform账号；不通过Git或前端分发。用户明确授权后已部署，服务正常。备份：/opt/ai-platform-release-backups/file-share-0.1.3-20260914-202421/。生产服务账号真实IP查询及缓存验证通过，Key权限0600；公网页面、资源哈希和其它产品基础访问检查通过。
+
+## v0.1.4 - 待部署
+
+登录页、全部后台页面和外部分享页新增备案页脚，直接复用AI槑槑号码、查询链接及/res/public-security-badge.png。仅页面、样式与版本改动，无数据库或配置变更。

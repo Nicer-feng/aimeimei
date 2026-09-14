@@ -29,3 +29,14 @@ label>.select-trigger{width:100%;margin-top:7px}
 @media(max-width:700px){.update-notice{right:16px;bottom:max(16px,env(safe-area-inset-bottom));padding:16px}}
 
 .geo-attribution{font-size:11px;text-align:right;margin:12px 0}.geo-attribution a{text-decoration:underline}
+
+.filing-footer{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:10px 18px;padding:20px 24px;color:var(--muted);font-size:11px;line-height:1.6;text-align:center}
+.filing-footer a{display:inline-flex;align-items:center;gap:5px;color:inherit;text-decoration:none}
+.filing-footer a:hover{color:var(--accent);text-decoration:underline}
+.filing-footer a:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:3px}
+.filing-footer img{width:14px;height:14px;object-fit:contain}
+.login-shell{display:flex;flex-direction:column;justify-content:center;gap:20px}
+.login-shell>.filing-footer{padding:0;flex-shrink:0}
+.main{display:flex;flex-direction:column;min-width:0}.main>.page{flex:1;width:100%}
+.public-body>.filing-footer{padding-top:0;padding-bottom:28px}
+@media(max-width:700px){.filing-footer{flex-direction:column;gap:8px;padding:20px 12px}.login-shell{padding-bottom:24px}}
