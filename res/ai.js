@@ -1728,9 +1728,9 @@
 	    }
 
     const REASONING_MODE_META = {
-      fast: { label: "快速", title: "快速：关闭思考，优先响应速度" },
-      balanced: { label: "平衡", title: "平衡：中等思考力度，适合日常使用" },
-      deep: { label: "深度", title: "深度：高思考力度，适合复杂任务" }
+      fast: { label: "快速", icon: "zap", title: "快速：关闭思考，优先响应速度" },
+      balanced: { label: "平衡", icon: "brain", title: "平衡：中等思考力度，适合日常使用" },
+      deep: { label: "深度", icon: "sparkles", title: "深度：高思考力度，适合复杂任务" }
     };
 
     function normalizeReasoningMode(value) { return REASONING_MODE_META[value] ? value : "balanced"; }
@@ -1746,15 +1746,17 @@
       if ($("reasoningPickerMenu")) $("reasoningPickerMenu").hidden = true;
     }
     function renderReasoningControl() {
-      const picker = $("reasoningPicker"), button = $("reasoningPickerButton"), label = $("reasoningPickerLabel"), select = $("reasoningMode"), menu = $("reasoningPickerMenu");
+      const picker = $("reasoningPicker"), button = $("reasoningPickerButton"), icon = $("reasoningPickerIcon"), label = $("reasoningPickerLabel"), select = $("reasoningMode"), menu = $("reasoningPickerMenu");
       if (!picker || !button || !label || !select || !menu) return;
       const supported = selectedModelSupportsReasoningControl();
       picker.hidden = !supported;
       if (!supported) { closeReasoningPicker(); return; }
       const mode = reasoningModeForCurrentModel();
+      const meta = REASONING_MODE_META[mode];
       select.value = mode;
-      label.textContent = REASONING_MODE_META[mode].label;
-      button.title = REASONING_MODE_META[mode].title;
+      if (icon) icon.innerHTML = iconMarkup(meta.icon);
+      label.textContent = meta.label;
+      button.title = meta.title;
       menu.querySelectorAll("[data-reasoning-mode]").forEach((item) => item.classList.toggle("selected", item.dataset.reasoningMode === mode));
       if (state.reasoningPickerOpen) { menu.hidden = false; button.setAttribute("aria-expanded", "true"); }
       queueLucideRefresh();
@@ -3870,7 +3872,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.24.1" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.24.2" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
