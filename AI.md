@@ -149,7 +149,7 @@ Group=ai-platform
 WorkingDirectory=/opt/ai-platform
 AI_PLATFORM_LISTEN=127.0.0.1:8000
 AI_PLATFORM_DATA=/opt/ai-platform
-ExecStart=/usr/bin/python3 /opt/ai-platform/app.py
+ExecStart=/opt/ai-platform/.venv/bin/python /opt/ai-platform/app.py
 ```
 
 代码文件可由 `root:root 0644` 持有，运行数据必须允许 `ai-platform` 用户写入。数据库当前为 `ai-platform:ai-platform 0644`，`secrets.json` 为 `ai-platform:ai-platform 0600`。
@@ -450,3 +450,34 @@ sed -n '1,160p' CHANGELOG.md
 ```
 
 然后按用户本次需求用 `rg` 定位相关模块。先理解，后修改；完成实现、测试、版本、提交、推送、部署和公网验证的完整闭环。
+
+## 19. 文件分享中心（2026-09-14，本地开发完成，未部署）
+
+- 独立产品目录 `file_share/`，静态资源 `res/file-share/`；后台 `/admin/share`，公网 `/share/{16位短码}`。不进入 AI 后台菜单。
+- 通用私有 OSS 适配器 `infrastructure/storage.py` 复用 MEDIA → CAT 配置，分享对象单独私有，不改整个共享 Bucket ACL。
+- 文件分享版本记录在 `file_share/VERSION` 与 `file_share/CHANGELOG.md`，不随本次改动抬升 AI 版本。当前仍共享 Python 进程，部署需协调重启。
+- 新增 Argon2 密码依赖，`file_share/requirements.txt`；本机隔离测试 `python3 file_share/tests/run.py`。
+- `app.py` 将短码与现有 43 位 AI 分享令牌区分，旧 `/ai/share/` 与 `/share/` 链接兼容。
+- 现有备份新增文件分享凭证脱敏，恢复后需要重建分享链接。
+- 生产未安装 Argon2、新路由未配置、代码未上传。自动审批拒绝读取/使用生产 OSS 凭据，不能通过其它方式绕过。后续需要用户明确批准生产凭据验收与部署配置变更后继续。
+- 具体实施与验收事实见 `file_share/DEPLOYMENT.md`、`file_share/ACCEPTANCE.md`，不要把本地模拟 OSS 验收写成真实阿里云已通过。
+
+### 2026-09-14 用户已批准生产验收与部署
+
+用户回复“允许”后，之前的 Codex 生产凭据授权阻塞已解决，不要再次请求同一授权。备份、暂存代码和安装 `/opt/ai-platform/.venv` 已完成。实际 OSS `feng-asia`（北京）分片上传成功，但对象私有 ACL 下未签名 GET 仍成功，配置读取/删除/预检受限，因此未切换服务。需要用户给现有 RAM 用户追加 `file_share/deploy/oss-supplemental-policy.json`，才能继续检查 Bucket Policy/CORS 并清理本次 4 字节测试对象。部署状态和后续步骤以 `file_share/deploy/OSS-BLOCKER.md` 为准。
+
+### OSS 复核结果更新
+
+RAM 补充权限已生效。Bucket 管理请求 403 的具体原因是 `V1 url signature is forbidden`，文件分享已改用官方 OSS SDK V4 签名。已读取策略并清理临时对象。Bucket Policy 匿名全量 Allow 与 CORS 缺 PUT 是目前确认的两项阻塞。待执行的具体改动见 `file_share/deploy/OSS-BLOCKER.md` 和 `oss-bucket-policy-private-share.json`，不要让用户反复增加 RAM 权限。
+
+### 文件分享最终上线状态（2026-09-14 16:57）
+
+此前OSS阻塞已解决，不要重复要求修改权限。后台 https://feng.asia/admin/share ，版本0.1.0；AI版本保持2.24.2。备份在 /opt/ai-platform-release-backups/file-share-deploy-20260914-165716/。服务通过90-file-share-python.conf使用.venv/bin/python，包含Argon2和OSS SDK V4。上传时写入安全MIME，不覆盖URL Content-Type。用户正常登录的浏览器已完成3种文件真实上传、密码分享、二维码、预览、视频拖动、下载、撤回和复用。两条验收分享已撤回，三个样例保留。未读取密码、未绕过登录、未修改现有业务文件。最终事实见file_share/ACCEPTANCE.md。
+
+### 文件分享中心 v0.1.1（2026-09-14）
+
+文件分享中心独立版本升级至0.1.1，构建20260914-193510；共享下拉组件res/file-share/select.js，管理员版本接口/api/file-share/admin/version，文件重命名接口POST /api/file-share/admin/files/{id}/rename。保留原扩展名、OSS key及分享关系，写入RENAME_FILE审计。部署只更新该产品文件，AI版本保持2.24.2。
+
+### 共仓管理约定
+
+主页、AI槑槑、小猫书和文件分享继续共仓；版本与发布标签按产品区分，详见 REPOSITORY.md。不要将根目录 AI 版本当作整站统一版本。

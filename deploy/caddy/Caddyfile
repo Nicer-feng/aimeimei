@@ -7,6 +7,11 @@
 feng.asia, www.feng.asia {
 	root * /var/www/aimeimei
 
+	@file_share path /admin/share /admin/share/* /share/*
+	handle @file_share {
+		reverse_proxy 127.0.0.1:8000
+	}
+
 	handle /cat {
 		reverse_proxy 127.0.0.1:8000
 	}

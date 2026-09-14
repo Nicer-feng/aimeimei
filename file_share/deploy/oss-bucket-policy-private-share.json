@@ -1,0 +1,75 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Principal": [
+        "209940882136301774"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "acs:oss:*:1734785390837604:feng-asia/*"
+      ],
+      "Action": [
+        "oss:GetObject",
+        "oss:PutObject",
+        "oss:GetObjectAcl",
+        "oss:PutObjectAcl",
+        "oss:ListObjects",
+        "oss:AbortMultipartUpload",
+        "oss:ListParts",
+        "oss:RestoreObject",
+        "oss:GetVodPlaylist",
+        "oss:PostVodPlaylist",
+        "oss:PublishRtmpStream",
+        "oss:ListObjectVersions",
+        "oss:GetObjectVersion",
+        "oss:GetObjectVersionAcl",
+        "oss:RestoreObjectVersion"
+      ]
+    },
+    {
+      "Principal": [
+        "209940882136301774"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "acs:oss:*:1734785390837604:feng-asia"
+      ],
+      "Condition": {
+        "StringLike": {
+          "oss:Prefix": [
+            "*"
+          ]
+        }
+      },
+      "Action": [
+        "oss:ListObjects",
+        "oss:GetObject"
+      ]
+    },
+    {
+      "Principal": [
+        "*"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "acs:oss:*:1734785390837604:feng-asia/backups/*",
+        "acs:oss:*:1734785390837604:feng-asia/cat/*",
+        "acs:oss:*:1734785390837604:feng-asia/chat-images/*",
+        "acs:oss:*:1734785390837604:feng-asia/documents/*",
+        "acs:oss:*:1734785390837604:feng-asia/ocr/*",
+        "acs:oss:*:1734785390837604:feng-asia/tingwu/*",
+        "acs:oss:*:1734785390837604:feng-asia/tts/*"
+      ],
+      "Action": [
+        "oss:GetObject",
+        "oss:GetObjectAcl",
+        "oss:RestoreObject",
+        "oss:GetVodPlaylist",
+        "oss:GetObjectVersion",
+        "oss:GetObjectVersionAcl",
+        "oss:RestoreObjectVersion"
+      ]
+    }
+  ]
+}

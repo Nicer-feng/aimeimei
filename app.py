@@ -8,6 +8,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from file_share.handlers import FileShareHandlersMixin
+from file_share.database import init_share_db
+
 from ai_platform.database import db, init_db
 from ai_platform.handlers import (
     AdminHandlersMixin,
@@ -45,6 +48,7 @@ from ai_platform.settings import (
 
 
 class AppHandler(
+    FileShareHandlersMixin,
     AuthHandlersMixin,
     CatHandlersMixin,
     AdminHandlersMixin,
@@ -64,6 +68,12 @@ class AppHandler(
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path in ("/admin/share", "/admin/share/"):
+            return self.file_share_page(admin=True)
+        if path.startswith("/api/file-share/"):
+            return self.fs_dispatch()
+        if path.startswith("/share/") and len(path.rstrip("/").split("/")[-1]) <= 16:
+            return self.file_share_page()
         if path == "/":
             return self.ai_page()
         if path in ("/dev/markdown", "/dev/markdown/"):
@@ -195,6 +205,8 @@ class AppHandler(
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/file-share/"):
+            return self.fs_dispatch()
         if path == "/cat/api/login":
             return self.handle_cat_login()
         if path == "/cat/api/logout":
@@ -515,6 +527,7 @@ def parse_listen(value):
 def main():
     secrets_data = ensure_secrets()
     init_db(secrets_data)
+    init_share_db()
     address = parse_listen(LISTEN)
     server = AIPlatformServer(address, AppHandler, secrets_data)
     print(f"ai-platform listening on {LISTEN}")

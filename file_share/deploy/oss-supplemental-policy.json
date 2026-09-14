@@ -1,0 +1,21 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["oss:GetBucketAcl", "oss:GetBucketCORS", "oss:GetBucketPolicy"],
+      "Resource": ["acs:oss:*:*:feng-asia"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["oss:ListObjects"],
+      "Resource": ["acs:oss:*:*:feng-asia"],
+      "Condition": {"StringLike": {"oss:Prefix": ["share/*"]}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["oss:PutObject", "oss:GetObject", "oss:PutObjectAcl", "oss:GetObjectAcl", "oss:DeleteObject", "oss:AbortMultipartUpload", "oss:ListParts"],
+      "Resource": ["acs:oss:*:*:feng-asia/share/*"]
+    }
+  ]
+}
