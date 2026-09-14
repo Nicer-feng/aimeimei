@@ -1,4 +1,6 @@
-# 文件分享中心 v0.1.2
+# 文件分享中心 v0.1.3
+
+当前为本地待部署版本；线上版本为0.1.2。
 
 2026-09-14 16:57 已上线：https://feng.asia/admin/share 。真实 OSS 和浏览器闭环通过。
 
@@ -10,7 +12,7 @@
 - 独立接口：`/api/file-share/admin/*`、`/api/file-share/public/*`。
 - 独立后端：`file_share/`；静态资源：`res/file-share/`。
 - 独立数据表：`share_files`、`shares`、`share_files_relation`、`share_access_logs`、`share_sessions`、`share_settings`、`share_rate_limits`、`share_audit_logs`。
-- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.1.2`。
+- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.1.3`。
 - 不进入 AI槑槑后台菜单；共享已有管理员登录 Session、SQLite 连接以及 OSS 配置。
 - 第一版仍由现有 Python 进程承载，更新后端需要重启该进程，因此暂时不是独立部署单元。后续可以在保持接口和产品目录不变的前提下拆进程。
 - AI 对话分享仍使用 `/ai/share/{43位令牌}`，原 `/share/{43位令牌}` 兼容保留。
@@ -72,7 +74,7 @@ POST 接口要求 JSON、`X-Share-Request: 1` 并检查 Origin / Sec-Fetch-Site�
 - 关闭下载无法防止接收者保存已经在线预览的内容。
 - 回收站中的文件立即不能通过分享取得新 URL，恢复后未失效的分享可重新访问。永久删除保留元数据墓碑，删除 OSS 原文件。中断的永久删除可以从回收站重试。
 
-访问日志区分成功/失败，记录 IP、UA、浏览器、系统、设备、Referer、行为和时间。没有引入新 IP 地理解析服务，因此地区为空时显示 IP。默认只信任环回代理地址的 X-Forwarded-For 最后一跳，可通过 `SHARE_TRUSTED_PROXIES` 配置受信代理 IP，不能随意信任公网请求头。
+访问日志区分成功/失败，记录 IP、UA、浏览器、系统、设备、Referer、行为和时间。IP归属地使用IP2Location.io，返回英文国家、省份、城市；失败或内网IP显示横线，原始IP始终保留。默认只信任环回代理地址的 X-Forwarded-For 最后一跳，可通过 `SHARE_TRUSTED_PROXIES` 配置受信代理 IP，不能随意信任公网请求头。
 
 ## API 概要
 
@@ -114,3 +116,11 @@ python3 file_share/tests/run.py
 现有聊天脱敏备份排除文件分享密码、分享码、验证 Session、访问日志和 upload ID，保留文件元数据。恢复此类备份后必须重新创建分享；若要完整灾备，需另行设计安全的全库备份，不能把脱敏聊天快照当完整恢复方案。
 
 技术参考：[OSS 签名直传](https://www.alibabacloud.com/help/en/oss/user-guide/upload-files-using-presigned-urls)、[Argon2 PasswordHasher](https://argon2-cffi.readthedocs.io/en/stable/api.html)。
+
+## IP归属地配置
+
+服务端读取 IP2LOCATION_API_KEY 环境变量、secrets.json中的ip2location_api_key，或数据目录AI_PLATFORM_DATA下的ip2location.key（权限0600，归服务账号）。Key禁止入Git及前端。当前本地Key已保存到Git忽略的ip2location.key，部署时需单独安全配置，不能放进代码发布包。
+
+当前页日志按IP去重，后台2个工作线程、64个排队任务；公网IP结果缓存7天，失败缓存1小时；401/403/429暂停新查询1小时，网络异常暂停30秒。无Key不调用接口，内网IP不发送给第三方。只查询当前查看的日志，不扫描整库。成功结果不覆写原访问记录，仅关联缓存；缓存最多10000条，并从脱敏备份排除。
+
+日志接口保留country、province、city字段，新增geolocation_status：pending、ready、unavailable、private、unconfigured。列表最多自动重查20次，也可以手动刷新。页面保留IP2Location来源标注。

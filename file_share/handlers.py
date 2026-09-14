@@ -15,6 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 import uuid
 
+from infrastructure.ip_geolocation import enrich_logs
 from infrastructure.storage import PrivateOSS, StorageSecurityError, shared_storage_config
 from .database import transaction
 from .security import classify, client_info, hash_password, verify_password
@@ -325,7 +326,7 @@ class FileShareHandlersMixin:
             values.append(share_id)
         total = conn.execute('SELECT count(*) FROM share_access_logs l JOIN shares s ON s.id=l.share_id WHERE ' + where, values).fetchone()[0]
         rows = conn.execute('SELECT l.*,s.title,f.filename FROM share_access_logs l JOIN shares s ON s.id=l.share_id LEFT JOIN share_files f ON f.id=l.file_id WHERE ' + where + ' ORDER BY l.id DESC LIMIT ? OFFSET ?',(*values,limit,offset)).fetchall()
-        return [dict(r) for r in rows],total
+        return enrich_logs(conn, [dict(r) for r in rows], self.server.secrets),total
 
     def fs_upload_start(self, data, user_id):
         file_id = uuid.uuid4().hex

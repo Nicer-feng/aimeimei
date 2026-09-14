@@ -54,3 +54,53 @@ with patch.object(oss,'request',return_value=BytesIO(b'<AccessControlPolicy><Acc
     except StorageSecurityError:
         pass
 print('PASS: object ACL and anonymous-access fail-closed verification')
+
+# IP geolocation enrichment is asynchronous, cached and never uses real keys.
+import time
+from contextlib import closing
+from unittest.mock import Mock
+from urllib.error import HTTPError
+from infrastructure import ip_geolocation as geo
+from ai_platform.database import db
+assert geo.public_ip('127.0.0.1') is None
+assert geo.public_ip('192.168.1.1') is None
+assert geo.public_ip('::1') is None
+assert geo.public_ip('not-an-ip') is None
+assert geo.public_ip('::ffff:114.114.114.114') == '114.114.114.114'
+assert geo.public_ip('2001:4860:4860::8888')
+with closing(db()) as conn, conn:
+    conn.execute('DELETE FROM infrastructure_ip_locations')
+rows=[{'ip':'114.114.114.114'}, {'ip':'114.114.114.114'}, {'ip':'127.0.0.1'}]
+with patch.object(geo,'api_key',return_value='test-key'), patch.object(geo,'lookup',return_value={'country':'China','province':'Jiangsu','city':'Nanjing'}) as lookup:
+    with closing(db()) as conn:
+        started=time.monotonic()
+        result=geo.enrich_logs(conn,rows,{})
+        assert time.monotonic()-started<1
+        assert result[0]['geolocation_status']=='pending' and result[2]['geolocation_status']=='private'
+    geo._jobs.join()
+    assert lookup.call_count==1
+    with closing(db()) as conn:
+        result=geo.enrich_logs(conn,[{'ip':'114.114.114.114'}],{})
+        assert result[0]['city']=='Nanjing' and result[0]['geolocation_status']=='ready'
+    assert lookup.call_count==1
+with patch.object(geo,'lookup',side_effect=HTTPError('',429,'limited',{},None)):
+    geo._resolve('8.8.8.8','test-key')
+assert not geo.schedule('1.1.1.1','test-key')
+with closing(db()) as conn:
+    assert conn.execute("SELECT status FROM infrastructure_ip_locations WHERE ip='8.8.8.8'").fetchone()[0]=='unavailable'
+geo._blocked_until=0
+with patch.object(geo,'api_key',return_value=''):
+    with closing(db()) as conn:
+        assert geo.enrich_logs(conn,[{'ip':'1.1.1.1'}],{})[0]['geolocation_status']=='unconfigured'
+with patch.object(geo,'urlopen') as fetch:
+    fetch.return_value.__enter__.return_value.read.return_value=b'{"ip":"114.114.114.114","country_name":"China","region_name":"Jiangsu","city_name":"Nanjing"}'
+    assert geo.lookup('114.114.114.114','test-key')['city']=='Nanjing'
+    request=fetch.call_args.args[0]
+    assert 'test-key' not in request.full_url
+    assert request.get_header('Authorization')=='Bearer test-key'
+    assert fetch.call_args.kwargs['timeout']==4
+snapshot=DATA_DIR/'geo-sanitized.db'
+create_sanitized_snapshot(DB_PATH,snapshot)
+with sqlite3.connect(snapshot) as conn:
+    assert conn.execute('SELECT count(*) FROM infrastructure_ip_locations').fetchone()[0]==0
+print('PASS: geolocation async enrichment, duplicate IP dedup, cache, private IPv4/IPv6, quota backoff, key isolation, sanitized backup')

@@ -43,3 +43,9 @@ CREATE TABLE IF NOT EXISTS share_audit_logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, action TEXT NOT NULL,
  target_id TEXT NOT NULL, ip TEXT NOT NULL, created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS infrastructure_ip_locations (
+ ip TEXT PRIMARY KEY, country TEXT NOT NULL DEFAULT '', province TEXT NOT NULL DEFAULT '',
+ city TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ip_locations_expiry ON infrastructure_ip_locations(expires_at);

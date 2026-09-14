@@ -27,3 +27,5 @@ label>.select-trigger{width:100%;margin-top:7px}
 .update-notice strong{font-size:14px}.update-notice p{font-size:12px;color:var(--muted);margin:8px 0 14px}
 .update-notice button{font-size:12px;min-height:34px;padding:7px 11px}
 @media(max-width:700px){.update-notice{right:16px;bottom:max(16px,env(safe-area-inset-bottom));padding:16px}}
+
+.geo-attribution{font-size:11px;text-align:right;margin:12px 0}.geo-attribution a{text-decoration:underline}

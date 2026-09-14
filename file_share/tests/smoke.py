@@ -37,7 +37,7 @@ assert req(a,rename,{'filename':'新名称.png'})[0]==200
 assert req(anon,base+'/open',{})[1]['files'][0]['filename']=='新名称.png'
 assert req(a,f'/api/file-share/admin/shares/{sid}')[1]['files'][0]['filename']=='新名称.png'
 assert req(a,'/api/file-share/admin/files?search='+urllib.parse.quote('新名称'))[1]['total']==1
-assert req(a,'/api/file-share/admin/version')[1]['version']=='0.1.2'
+assert req(a,'/api/file-share/admin/version')[1]['version']=='0.1.3'
 assert req(anon,'/api/file-share/admin/version')[0]==401
 assert req(a,rename,{'filename':'test.png'})[0]==200
 print('PASS: rename authorization, unsafe names, immutable extension, existing share and search, version endpoint')

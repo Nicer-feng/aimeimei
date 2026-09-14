@@ -79,7 +79,7 @@ def create_sanitized_snapshot(source_path, snapshot_path):
 
         for table_name in ("sessions", "cat_sessions", "conversation_shares", "login_captchas",
                            "share_sessions", "share_files_relation", "share_access_logs",
-                           "shares", "share_rate_limits"):
+                           "shares", "share_rate_limits", "infrastructure_ip_locations"):
             if _table_exists(destination, table_name):
                 destination.execute('DELETE FROM "{}"'.format(table_name))
 
