@@ -1,5 +1,6 @@
 """Independent file distribution API; no AI admin menu or conversation coupling."""
 import hashlib
+import html
 import json
 import math
 import os
@@ -65,7 +66,8 @@ def public_share(row):
 
 class FileShareHandlersMixin:
     def file_share_page(self, admin=False):
-        return self.html((ROOT / ('admin.html' if admin else 'public.html')).read_text())
+        page = (ROOT / ('admin.html' if admin else 'public.html')).read_text()
+        return self.html(page.replace('__FILE_SHARE_BUILD__', html.escape((ROOT / 'BUILD_ID').read_text().strip(), quote=True)))
 
     def fs_body(self):
         require(self.headers.get('X-Share-Request') == '1', '请求来源无效', 403)

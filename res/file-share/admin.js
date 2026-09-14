@@ -4,8 +4,36 @@
   const base='/api/file-share/admin';
   const sections=[['overview','概览','layout-dashboard','让每一次文件交付，简单而有序。'],['files','文件','files','管理文件，为它们创建安全的分享链接。'],['shares','分享','link','决定谁可以访问，以及何时结束。'],['logs','访问记录','activity','查看每一次访问、预览与下载请求。'],['trash','回收站','trash-2','误删的文件可以恢复，永久删除前会再次确认。'],['settings','设置','settings-2','分享中心的独立偏好设置。']];
   let section='overview',page=1,filters={search:'',type:'',sort:'newest'},currentFiles=[],selected=new Map(),renderId=0,captchaId='',uploading=false;
+
+  const loadedBuild=document.querySelector('meta[name="file-share-build"]').content;
+  let checkingVersion=false,pendingBuild='',snoozedBuild='',snoozedUntil=0;
+  async function checkVersion(){
+    if(checkingVersion||document.hidden||$('app').hidden)return;
+    checkingVersion=true;
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),8000);
+    try{
+      const response=await fetch(base+'/version',{credentials:'same-origin',cache:'no-store',signal:controller.signal});
+      if(!response.ok)return;
+      const info=await response.json();
+      if(!info.build_id||info.build_id===loadedBuild){$('updateNotice').hidden=true;pendingBuild='';return;}
+      pendingBuild=info.build_id;
+      if(snoozedBuild===pendingBuild&&Date.now()<snoozedUntil)return;
+      $('updateMeta').textContent='v'+info.version+' · '+info.build_id;
+      $('updateNotice').hidden=false;
+    }catch{}finally{clearTimeout(timeout);checkingVersion=false;}
+  }
+  $('snoozeUpdate').onclick=()=>{snoozedBuild=pendingBuild;snoozedUntil=Date.now()+10*60*1000;$('updateNotice').hidden=true;};
+  $('refreshUpdate').onclick=()=>{
+    if(uploading){toast('文件正在上传，请等待上传完成后再刷新更新');return;}
+    if($('dialog').open){toast('请先完成或关闭当前弹窗，再刷新更新');return;}
+    location.reload();
+  };
+  setInterval(checkVersion,60000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkVersion();});
+  window.addEventListener('focus',checkVersion);
+
   async function captcha(){const data=await api('/api/captcha');captchaId=data.captcha_id;$('captchaImage').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(data.image_svg);}
-  async function authenticated(){const me=await api('/api/me');if(!me.authenticated||me.user.role!=='admin'){$('login').hidden=false;$('app').hidden=true;await captcha();refreshIcons();return false;}$('login').hidden=true;$('app').hidden=false;$('account').textContent=me.user.display_name||me.user.username;await navigate(location.hash.slice(1)||'overview');return true;}
+  async function authenticated(){const me=await api('/api/me');if(!me.authenticated||me.user.role!=='admin'){$('login').hidden=false;$('app').hidden=true;await captcha();refreshIcons();return false;}$('login').hidden=true;$('app').hidden=false;$('account').textContent=me.user.display_name||me.user.username;await navigate(location.hash.slice(1)||'overview');checkVersion();return true;}
   $('captchaRefresh').onclick=()=>captcha().catch(e=>toast(e.message));
   $('loginForm').onsubmit=async event=>{event.preventDefault();const b=event.submitter;b.disabled=true;$('loginError').textContent='';try{const d=Object.fromEntries(new FormData(event.target));d.captcha_id=captchaId;const result=await api('/api/login',d);if(result.user.role!=='admin')throw new Error('该账号没有管理员权限');await authenticated();}catch(e){$('loginError').textContent=e.message;await captcha();}finally{b.disabled=false;}};
   $('logout').onclick=async()=>{await api('/api/logout',{});location.reload();};
