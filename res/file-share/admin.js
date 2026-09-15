@@ -93,7 +93,7 @@
       const [heading,...lines]=entry.trim().split('\n');
       return '<section class="release-entry"><h3>'+esc(heading)+'</h3><ul>'+lines.filter(line=>line.startsWith('- ')).map(line=>'<li>'+esc(line.slice(2))+'</li>').join('')+'</ul></section>';
     }).join('');
-    dialog('版本信息', '<div class="release-summary">'+icon('history')+'<div><strong>文件分享中心 v'+esc(d.version)+'</strong><p class="muted">构建 '+esc(d.build_id)+'</p></div></div><div class="release-history">'+entries+'</div>');
+    dialog('版本信息', '<div class="release-summary">'+icon('history')+'<div><strong>槑槑云 v'+esc(d.version)+'</strong><p class="muted">构建 '+esc(d.build_id)+'</p></div></div><div class="release-history">'+entries+'</div>');
   }
   $('versionButton').onclick=()=>showVersion().catch(e=>toast(e.message));
   function renameFile(file){

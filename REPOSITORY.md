@@ -7,7 +7,7 @@
 | 产品 | 主要代码 | 版本与记录 | 后续发布标签 |
 |---|---|---|---|
 | AI槑槑 | ai.html、res/ai.*、ai_platform/ | 根目录 VERSION、BUILD_ID、CHANGELOG.md | ai/v版本号 |
-| 文件分享中心 | file_share/、res/file-share/ | file_share/VERSION、BUILD_ID、CHANGELOG.md | file-share/v版本号 |
+| 槑槑云 | file_share/、res/file-share/ | file_share/VERSION、BUILD_ID、CHANGELOG.md | file-share/v版本号 |
 | 小猫书 | cat.html、ai_platform/handlers/cats.py | 尚未独立版本化，下次功能发布时建立 products/cat/ 下的版本和更新记录 | cat/v版本号 |
 | 主页 | index.html 及引用资源 | 尚未独立版本化，下次功能发布时建立 products/home/ 下的版本和更新记录 | home/v版本号 |
 | 共用基础设施 | app.py、数据库连接、infrastructure/、deploy/ | 在受影响产品的更新记录中说明 | 随对应产品发布 |

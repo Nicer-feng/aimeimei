@@ -4,13 +4,13 @@ AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实
 
 AI槑槑当前版本：`2.24.2`
 
-## 独立产品：文件分享中心
+## 独立产品：槑槑云
 
-文件分享中心独立版本为 `0.1.5`，后台 `/admin/share`，外部分享 `/share/{shareCode}`。与 AI槑槑共仓库，页面、业务、数据表和版本记录独立，复用现有登录、SQLite 和 OSS。已上线并完成真实 OSS 与浏览器验收。详见 [产品说明](file_share/README.md)、[验收记录](file_share/ACCEPTANCE.md) 和 [部署清单](file_share/DEPLOYMENT.md)。
+槑槑云独立版本为 `0.1.6`，后台 `/admin/share`，外部分享 `/share/{shareCode}`。与 AI槑槑共仓库，页面、业务、数据表和版本记录独立，复用现有登录、SQLite 和 OSS。已上线并完成真实 OSS 与浏览器验收。详见 [产品说明](file_share/README.md)、[验收记录](file_share/ACCEPTANCE.md) 和 [部署清单](file_share/DEPLOYMENT.md)。
 
 ## 多产品共仓管理
 
-主页、AI槑槑、小猫书和文件分享中心继续使用本仓库，分别维护产品版本和发布标签。现有目录无需搬迁，管理规则见 [共仓管理约定](REPOSITORY.md)。
+主页、AI槑槑、小猫书和槑槑云继续使用本仓库，分别维护产品版本和发布标签。现有目录无需搬迁，管理规则见 [共仓管理约定](REPOSITORY.md)。
 
 ## 目录说明
 
