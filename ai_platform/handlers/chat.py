@@ -1,7 +1,13 @@
 from .shared import *
 from ..docmind import build_document_context
 
+import codecs
 import threading
+
+
+def sse_text_decoder():
+    """Return a decoder that preserves UTF-8 characters split across SSE chunks."""
+    return codecs.getincrementaldecoder("utf-8")("replace")
 
 
 CONTEXT_RECENT_MESSAGE_LIMIT = 18
@@ -439,6 +445,7 @@ class ChatHandlersMixin:
         reasoning_parts = []
         usage_data = None
         buffer = ""
+        decoder = sse_text_decoder()
         try:
             while True:
                 chunk = response.read(8192)
@@ -449,7 +456,7 @@ class ChatHandlersMixin:
                     self.wfile.flush()
                 except Exception:
                     pass
-                buffer += chunk.decode(errors="ignore")
+                buffer += decoder.decode(chunk)
                 lines = buffer.splitlines(keepends=True)
                 if lines and not lines[-1].endswith(("\n", "\r")):
                     buffer = lines.pop()
@@ -1378,6 +1385,7 @@ class ChatHandlersMixin:
             except Exception:
                 pass
         buffer = ""
+        decoder = sse_text_decoder()
         try:
             while True:
                 chunk = response.read(8192)
@@ -1386,7 +1394,7 @@ class ChatHandlersMixin:
                 if not use_native_search:
                     self.wfile.write(chunk)
                     self.wfile.flush()
-                buffer += chunk.decode(errors="ignore")
+                buffer += decoder.decode(chunk)
                 lines = buffer.splitlines(keepends=True)
                 if lines and not lines[-1].endswith(("\n", "\r")):
                     buffer = lines.pop()
