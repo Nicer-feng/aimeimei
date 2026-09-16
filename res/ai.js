@@ -3745,7 +3745,7 @@
 	        state.activeSideDiscussion = null;
 	        state.sideDiscussionMessages = [];
 	        updateSideDiscussionEntry();
-	        const res = await api("/api/conversations", { method: "POST", body: JSON.stringify({ model_id: modelId }) });
+	        const res = await api("/api/conversations", { method: "POST", body: JSON.stringify({ model_id: modelId, writing_mode: getUserStorage("writingMode", "0") === "1" }) });
         if (!res.ok) throw new Error(await readError(res, "新建对话失败，稍后再试一下。"));
         const data = await res.json();
         state.currentConversation = data.conversation;
@@ -3847,7 +3847,131 @@
       return true;
     }
 
+    let writingWorkspace = null;
+    let writingConversationId = null;
+    const writingFieldLabels = {project:"客户／项目", audience:"目标受众", account:"账号／博主视角", format:"交付格式", tone:"表达风格", focus:"传播重点与必带卖点", facts:"材料事实与限定条件", shooting:"拍摄条件与可用素材", notes:"其他要求", required:"必带词（逐行填写，按原文检查）", forbidden:"避用词（仅本单，逐行填写）", missing:"待补信息（逐行填写）", min_chars:"正文最少字数（0 表示未指定）", max_chars:"正文最多字数（0 表示未指定）"};
+    function renderWritingMode() {
+      const enabled = state.currentConversation ? Boolean(state.currentConversation.writing_mode) : getUserStorage("writingMode", "0") === "1";
+      const button = $("writingModeToggle");
+      button.classList.toggle("active", enabled);
+      button.setAttribute("aria-pressed", String(enabled));
+      button.textContent = enabled ? "写稿中" : "写稿";
+      button.title = enabled ? "关闭写稿模式" : "开启写稿模式";
+      button.disabled = state.sending;
+      $("openWritingWorkspace").hidden = !enabled;
+      $("openWritingWorkspace").disabled = state.sending;
+    }
+    async function writingFetch(id, suffix = "") {
+      const response = await api(`/api/conversations/${id}/writing${suffix}`);
+      if (!response.ok) throw new Error(await readError(response, "本单要求加载失败"));
+      return response.json();
+    }
+    async function toggleWritingMode() {
+      if (state.sending) return;
+      const enabled = !(state.currentConversation ? state.currentConversation.writing_mode : getUserStorage("writingMode", "0") === "1");
+      try {
+        if (state.currentConversation) {
+          const id = state.currentConversation.id;
+          const data = await writingFetch(id);
+          const response = await api(`/api/conversations/${id}/writing`, {method:"PATCH", body:JSON.stringify({revision:data.writing.revision, enabled})});
+          if (!response.ok) throw new Error(await readError(response, "模式保存失败"));
+          if (state.currentConversation?.id === id) { state.currentConversation.writing_mode = enabled; upsertConversation(state.currentConversation); }
+        }
+        setUserStorage("writingMode", enabled ? "1" : "0");
+        renderWritingMode();
+        setStatus("chatStatus", enabled ? "写稿模式已开启：自动整理本单要求并保存稿件版本。" : "已关闭写稿模式，本单记录保留。", "ok");
+      } catch (err) { setStatus("chatStatus", friendlyError(err, "模式保存失败"), "err"); }
+    }
+    function renderWritingWorkspace() {
+      const box = $("writingFields"); box.replaceChildren();
+      for (const [key, title] of Object.entries(writingFieldLabels)) {
+        const label = document.createElement("label"); label.textContent = title;
+        const numeric = key.endsWith("chars");
+        const input = document.createElement(numeric ? "input" : "textarea");
+        input.id = "writingField_" + key;
+        if (numeric) { input.type = "number"; input.min = "0"; input.max = "50000"; input.value = writingWorkspace.requirements[key] || 0; }
+        else { input.rows = ["facts", "focus", "notes"].includes(key) ? 3 : 2; input.maxLength = ["required","forbidden","missing"].includes(key) ? 12000 : 6000; const value = writingWorkspace.requirements[key]; input.value = Array.isArray(value) ? value.join("\n") : value || ""; }
+        label.append(input); box.append(label);
+      }
+      $("writingNotice").textContent = writingWorkspace.notice || "要求由材料和反馈自动整理，可在这里纠正；仅用于当前对话。";
+      const select = $("writingVersions"); select.replaceChildren(new Option("选择历史稿件", ""));
+      for (const version of writingWorkspace.versions) select.add(new Option(`${version.label} · ${formatMessageTime(version.created_at)} · #${version.id}`, String(version.id)));
+      select.value = String(writingWorkspace.current_version_id || "");
+      $("writingDraft").value = writingWorkspace.current?.content || "";
+      $("writingLock").checked = Boolean(writingWorkspace.locked_version_id);
+      $("writingDraftState").textContent = writingWorkspace.locked_version_id ? "正文已锁定，转分镜将逐字校验。" : "选择准确底稿，或直接粘贴完整正文后保存。";
+      const messages = $("writingMessages"); messages.replaceChildren(new Option("从当前聊天选一条作为底稿", ""));
+      state.messages.forEach((m, index) => { if (m.role === "assistant" && m.content && !m.thinking) messages.add(new Option(m.content.replace(/\s+/g," ").slice(0,55), String(index))); });
+    }
+    async function openWritingWorkspace() {
+      if (state.sending) return;
+      try {
+        if (!state.currentConversation) await newConversation();
+        if (!state.currentConversation) return;
+        const id = state.currentConversation.id;
+        const data = await writingFetch(id);
+        if (id !== state.currentConversation?.id) return;
+        writingConversationId = id; writingWorkspace = data.writing;
+        renderWritingWorkspace();
+        $("writingDialog").showModal();
+      } catch (err) { setStatus("chatStatus", friendlyError(err,"本单要求加载失败"), "err"); }
+    }
+    async function saveWritingWorkspace(action) {
+      if (state.sending || writingConversationId !== state.currentConversation?.id) return;
+      const buttons = $("writingDialog").querySelectorAll("button");
+      buttons.forEach(b => b.disabled = true);
+      try {
+        const body = {revision:writingWorkspace.revision};
+        if (action === "requirements") {
+          body.requirements = {};
+          for (const key of Object.keys(writingFieldLabels)) {
+            const value = $("writingField_" + key).value;
+            body.requirements[key] = key.endsWith("chars") ? Number(value || 0) : ["required","forbidden","missing"].includes(key) ? value.split("\n").map(x=>x.trim()).filter(Boolean) : value;
+          }
+        } else {
+          body.draft = $("writingDraft").value;
+          body.locked = $("writingLock").checked;
+        }
+        const response = await api(`/api/conversations/${writingConversationId}/writing`, {method:"PATCH",body:JSON.stringify(body)});
+        if (!response.ok) throw new Error(await readError(response,"保存失败"));
+        const data = await response.json(); writingWorkspace = data.writing;
+        // Do not discard unsaved edits in the other section.
+        $("writingNotice").textContent = action === "requirements" ? "本单要求已保存。" : "稿件已保存" + (body.locked ? "并锁定。" : "。" );
+        if (action !== "requirements") {
+          $("writingDraftState").textContent = body.locked ? "正文已锁定，转分镜将逐字校验。" : "当前底稿已更新。";
+          const select = $("writingVersions"); select.replaceChildren(new Option("选择历史稿件", ""));
+          writingWorkspace.versions.forEach(v=>select.add(new Option(`${v.label} · #${v.id}`,String(v.id))));
+          select.value = String(writingWorkspace.current_version_id);
+        }
+      } catch (err) { $("writingNotice").textContent = friendlyError(err,"保存失败"); }
+      finally { buttons.forEach(b => b.disabled = false); }
+    }
+    function renderWritingCheck(wrap, message) {
+      let panel = wrap.querySelector(".writing-check");
+      if (!message.writing_check || message.thinking) { if (panel) panel.remove(); return; }
+      if (!panel) { panel = document.createElement("details"); panel.className = "writing-check"; wrap.querySelector(".bubble-shell").append(panel); }
+      panel.replaceChildren();
+      const issues = message.writing_check.issues || [];
+      const summary = document.createElement("summary"); summary.textContent = issues.length ? `交稿检查 · ${issues.length} 项待确认` : "交稿检查 · 查看"; panel.append(summary);
+      const text = document.createElement("p"); text.textContent = (message.writing_check.body_chars || []).map((n,i)=>`正文${i+1}约${n}字`).join("；") + "。" + (message.writing_check.count_note || ""); panel.append(text);
+      if (issues.length) { const list = document.createElement("ul"); issues.forEach(issue=>{const li=document.createElement("li");li.textContent=issue;list.append(li);});panel.append(list); }
+      const note = document.createElement("p"); note.textContent=message.writing_check.scope || "";panel.append(note);
+    }
+    $("writingModeToggle").addEventListener("click", toggleWritingMode);
+    $("openWritingWorkspace").addEventListener("click", openWritingWorkspace);
+    $("closeWritingWorkspace").addEventListener("click", ()=>$("writingDialog").close());
+    $("saveWritingRequirements").addEventListener("click", ()=>saveWritingWorkspace("requirements"));
+    $("saveWritingDraft").addEventListener("click", ()=>saveWritingWorkspace("draft"));
+    $("writingMessages").addEventListener("change", event=>{ if (event.target.value !== "") { $("writingDraft").value = state.messages[Number(event.target.value)].content; $("writingLock").checked=false; $("writingDraftState").textContent="已载入消息，保存后才会用作底稿。"; } });
+    $("writingVersions").addEventListener("change", async event=>{
+      if (!event.target.value) return;
+      const selectedId = event.target.value, cid = writingConversationId;
+      try { const data = await writingFetch(cid, "?version_id=" + encodeURIComponent(selectedId)); if (cid !== writingConversationId || selectedId !== $("writingVersions").value) return; $("writingDraft").value=data.writing.selected.content; $("writingLock").checked=false; $("writingDraftState").textContent="已载入历史稿件，保存后才会用作底稿。"; }
+      catch(err) { $("writingNotice").textContent=friendlyError(err,"版本加载失败"); }
+    });
+
     function updateChatHeader() {
+      renderWritingMode();
       const conv = state.currentConversation;
       $("chatTitle").textContent = conv ? conv.title : "新对话";
       $("chatModel").textContent = conv ? (conv.model_name + (conv.supports_vision ? " · 可看图" : "") + " · " + conv.model) : "请选择模型";
@@ -3860,6 +3984,7 @@
     }
 
 		    function renderEmpty() {
+          renderWritingMode();
 		      $("chatTitle").textContent = "新对话";
 		      $("chatModel").textContent = state.models[0] ? "准备使用 " + state.models[0].name : "请选择模型";
 	      state.conversationStats = null;
@@ -3872,7 +3997,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.24.3" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.25.0" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -6203,6 +6328,7 @@
 	      renderMessageImages(imagePanel, messageImages(message));
       renderMessageDocuments(documentPanel, messageDocuments(message));
       renderMessageQuoteReference(quotePanel, message);
+      renderWritingCheck(wrap, message);
 
 	      if (message.role === "assistant" && message.thinking && !displayContent) {
 	        wrap.dataset.liveState = "thinking";
@@ -6569,6 +6695,7 @@
 	      } else {
 	        iconsChanged = updateLiveMessageElement(wrap, message, options);
 	      }
+	      if (options.final || options.saved) renderWritingCheck(wrap, message);
 	      settleMessageScroll(previousTop, shouldFollow);
 	      if (options.usage || options.final) updateChatUsage();
 	      if (iconsChanged) queueLucideRefresh();
@@ -7433,6 +7560,7 @@
 	    function setSendingUI(isSending) {
 	      const send = $("send");
 	      state.sending = Boolean(isSending);
+      renderWritingMode();
 	      send.disabled = false;
 	      send.classList.toggle("is-stop", state.sending);
 	      send.title = state.sending ? "停止生成" : "发送";
@@ -7750,6 +7878,7 @@
 	              }
 	              if (event.type === "message_saved" && event.message_id) {
 	                assistant.id = event.message_id;
+                assistant.writing_check = event.writing_check || null;
 	                assistant.favorite_id = null;
 	                assistant.usage = event.usage || assistant.usage || null;
 	                if (Array.isArray(event.sources)) assistant.sources = event.sources;

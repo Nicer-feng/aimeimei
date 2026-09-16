@@ -1,5 +1,6 @@
 from .shared import *
 from ..docmind import build_document_context
+from .. import writing
 
 import codecs
 import threading
@@ -476,6 +477,8 @@ class ChatHandlersMixin:
                     if isinstance(event.get("usage"), dict):
                         usage_data = event["usage"]
                     choice = (event.get("choices") or [{}])[0]
+                    if choice.get("finish_reason") is not None:
+                        writing_completion = choice["finish_reason"] == "stop"
                     if isinstance(choice.get("usage"), dict):
                         usage_data = choice["usage"]
                     delta = choice.get("delta") or {}
@@ -602,10 +605,10 @@ class ChatHandlersMixin:
             title = ("侧边讨论：" + discussion["title"])[:80]
             conn.execute(
                 """
-                INSERT INTO conversations(id, user_id, title, model_id, reasoning_mode, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO conversations(id, user_id, title, model_id, reasoning_mode, writing_mode, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (conversation_id, user_id, title, discussion["model_id"], "balanced", ts, ts),
+                (conversation_id, user_id, title, discussion["model_id"], "balanced", 0, ts, ts),
             )
             source_role = "槑槑回复" if discussion["source_role"] == "assistant" else "用户消息"
             source_message = (
@@ -686,10 +689,10 @@ class ChatHandlersMixin:
             ts = now()
             conn.execute(
                 """
-                INSERT INTO conversations(id, user_id, title, model_id, reasoning_mode, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO conversations(id, user_id, title, model_id, reasoning_mode, writing_mode, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (conversation_id, user_id, title, model_id, self.reasoning_mode(data.get("reasoning_mode")), ts, ts),
+                (conversation_id, user_id, title, model_id, self.reasoning_mode(data.get("reasoning_mode")), int(data.get("writing_mode") is True), ts, ts),
             )
             row = conn.execute(
                 """
@@ -918,6 +921,9 @@ class ChatHandlersMixin:
                 """,
                 (user_id, conversation_id, user_id),
             ).fetchall()
+        with db() as conn:
+            checks = conn.execute("SELECT wc.message_id,wc.result_json FROM writing_checks wc JOIN messages m ON m.id=wc.message_id WHERE wc.user_id=? AND m.user_id=? AND m.conversation_id=?", (user_id,user_id,conversation_id)).fetchall()
+        checks_by_message = {r["message_id"]: writing.decode(r["result_json"], {}) for r in checks}
         sources_by_message = {}
         for source in sources:
             sources_by_message.setdefault(source["message_id"], []).append(
@@ -949,6 +955,7 @@ class ChatHandlersMixin:
                         "favorite_id": favorite_by_message.get(row["id"]),
                         "images": images_by_message.get(row["id"], []),
                         "documents": documents_by_message.get(row["id"], []),
+                        "writing_check": checks_by_message.get(row["id"]),
                     }
                     for row in messages
                 ]
@@ -956,6 +963,15 @@ class ChatHandlersMixin:
         )
 
     def handle_send_message(self):
+        lock = writing.task_lock(self.current_user()["id"], self.conversation_id_from_path())
+        if not lock.acquire(blocking=False):
+            return self.error(HTTPStatus.CONFLICT, "当前对话正在生成，请完成后再发送")
+        try:
+            return self._handle_send_message()
+        finally:
+            lock.release()
+
+    def _handle_send_message(self):
         conversation_id = self.conversation_id_from_path()
         user_id = self.current_user()["id"]
         try:
@@ -1121,7 +1137,7 @@ class ChatHandlersMixin:
                 FROM (
                   SELECT id, role, content
                   FROM messages
-                  WHERE conversation_id=? AND user_id=?
+                  WHERE conversation_id=? AND user_id=? AND role IN ('user','assistant')
                   ORDER BY id DESC
                   LIMIT ?
                 ) AS recent_messages
@@ -1129,6 +1145,12 @@ class ChatHandlersMixin:
                 """,
                 (conversation_id, user_id, history_limit),
             ).fetchall()
+            if convo["writing_mode"]:
+                task_state = writing.get_state(conn, conversation_id, user_id)
+                start_id = task_state["history_start_id"]
+                if start_id:
+                    history = [r for r in history if r["id"] >= start_id]
+                    context_summary = ""
             if use_profile:
                 profile_rows = conn.execute(
                     """
@@ -1151,6 +1173,13 @@ class ChatHandlersMixin:
                 """,
                 (user_id, conversation_id, conversation_id, user_id),
             ).fetchall()
+
+        writing_run = None
+        if convo["writing_mode"]:
+            writing_run = self.prepare_writing(convo, user_message_content, document_context, history)
+            if writing_run[0]["history_start_id"]:
+                history = [r for r in history if r["id"] >= writing_run[0]["history_start_id"]]
+                context_summary = ""
 
         images_by_history_message = {}
         for image in history_images:
@@ -1207,6 +1236,8 @@ class ChatHandlersMixin:
                 )
             if document_context:
                 upstream_messages.append({"role": "system", "content": document_context})
+            if writing_run:
+                upstream_messages.append({"role": "system", "content": writing.prompt_context(*writing_run)})
             upstream_messages.extend(upstream_message_from_history(row) for row in history)
             return upstream_messages
 
@@ -1355,8 +1386,12 @@ class ChatHandlersMixin:
         assistant_parts = []
         reasoning_parts = []
         usage_data = None
+        writing_completion = False
+        protect_storyboard = bool(writing_run and writing_run[0]["locked_version_id"] and writing_run[1] and writing_run[2]["intent"] == "storyboard")
 
         def emit_client_event(event):
+            if protect_storyboard and (event.get("choices") or [{}])[0].get("delta", {}).get("content"):
+                return True
             try:
                 self.wfile.write(
                     ("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode()
@@ -1391,7 +1426,7 @@ class ChatHandlersMixin:
                 chunk = response.read(8192)
                 if not chunk:
                     break
-                if not use_native_search:
+                if not use_native_search and not protect_storyboard:
                     self.wfile.write(chunk)
                     self.wfile.flush()
                 buffer += decoder.decode(chunk)
@@ -1478,12 +1513,15 @@ class ChatHandlersMixin:
                                     )
                         elif event_type == "response.completed":
                             completed = event.get("response") or {}
+                            writing_completion = completed.get("status", "completed") == "completed"
                             if isinstance(completed.get("usage"), dict):
                                 usage_data = completed.get("usage")
                         continue
                     if isinstance(event.get("usage"), dict):
                         usage_data = event.get("usage")
                     choice = (event.get("choices") or [{}])[0]
+                    if choice.get("finish_reason") is not None:
+                        writing_completion = choice["finish_reason"] == "stop"
                     if isinstance(choice.get("usage"), dict):
                         usage_data = choice.get("usage")
                     delta = choice.get("delta") or {}
@@ -1535,6 +1573,16 @@ class ChatHandlersMixin:
             output_price_snapshot,
             bool(convo["cost_enabled"]),
         )
+        if writing_run and not writing_completion:
+            writing_run[0]["notice"] = "上游未确认完整生成，本轮回复可能不完整，未更新当前底稿。"
+            writing_run[2]["intent"] = "question"
+        if protect_storyboard and assistant_text:
+            assistant_text, protection_notice = writing.preserve_storyboard(writing_run[1]["content"], assistant_text, user_message_content)
+            if protection_notice:
+                writing_run[0]["notice"] = protection_notice
+            protect_storyboard = False
+            emit_client_event({"choices": [{"delta": {"content": assistant_text}}]})
+        writing_check = None
         if assistant_text:
             with db() as conn:
                 cursor = conn.execute(
@@ -1566,6 +1614,8 @@ class ChatHandlersMixin:
                     ),
                 )
                 message_id = cursor.lastrowid
+                if writing_run:
+                    writing_check = self.finish_writing(conn, *writing_run, assistant_text, message_id)
                 for index, item in enumerate(search_results, 1):
                     conn.execute(
                         """
@@ -1637,6 +1687,7 @@ class ChatHandlersMixin:
                     "cache_creation_tokens": cache_creation_tokens,
                 },
                 "sources": public_sources(search_results),
+                "writing_check": writing_check,
             }
             try:
                 self.wfile.write(

@@ -528,6 +528,29 @@ def init_db(secrets_data=None):
         if "cost_note" not in model_columns:
             conn.execute("ALTER TABLE models ADD COLUMN cost_note TEXT NOT NULL DEFAULT ''")
         conversation_columns = table_columns(conn, "conversations")
+        if "writing_mode" not in conversation_columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN writing_mode INTEGER NOT NULL DEFAULT 0")
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS writing_tasks (
+              conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+              user_id TEXT NOT NULL, requirements_json TEXT NOT NULL DEFAULT '{}',
+              current_version_id INTEGER NOT NULL DEFAULT 0, locked_version_id INTEGER NOT NULL DEFAULT 0,
+              revision INTEGER NOT NULL DEFAULT 0, notice TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL,
+              history_start_id INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS writing_versions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+              user_id TEXT NOT NULL, message_id INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL,
+              label TEXT NOT NULL, created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_writing_versions_owner ON writing_versions(user_id,conversation_id,id);
+            CREATE TABLE IF NOT EXISTS writing_checks (
+              message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+              user_id TEXT NOT NULL, result_json TEXT NOT NULL
+            );
+        """)
+        if "history_start_id" not in table_columns(conn, "writing_tasks"):
+            conn.execute("ALTER TABLE writing_tasks ADD COLUMN history_start_id INTEGER NOT NULL DEFAULT 0")
         if "user_id" not in conversation_columns:
             conn.execute(
                 f"ALTER TABLE conversations ADD COLUMN user_id TEXT NOT NULL DEFAULT '{DEFAULT_AI_USER_ID}'"

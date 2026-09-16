@@ -17,6 +17,7 @@ from ai_platform.handlers import (
     AuthHandlersMixin,
     CatHandlersMixin,
     ChatHandlersMixin,
+    WritingHandlersMixin,
     LibraryHandlersMixin,
     MediaHandlersMixin,
     DocumentHandlersMixin,
@@ -59,6 +60,7 @@ class AppHandler(
     ShareHandlersMixin,
     TTSHandlersMixin,
     ChatHandlersMixin,
+    WritingHandlersMixin,
     BaseHTTPRequestHandler,
 ):
     server_version = "AIPlatform/2.0"
@@ -184,6 +186,8 @@ class AppHandler(
             return self.require_user(self.handle_side_discussions)
         if path.startswith("/api/side-discussions/"):
             return self.require_user(self.handle_side_discussion_item)
+        if path.startswith("/api/conversations/") and path.endswith("/writing"):
+            return self.require_user(self.handle_writing)
         if path == "/api/conversations":
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
@@ -313,6 +317,8 @@ class AppHandler(
         path = urlparse(self.path).path
         if path.startswith("/api/profiles/"):
             return self.require_user(self.handle_profile_item)
+        if path.startswith("/api/conversations/") and path.endswith("/writing"):
+            return self.require_user(self.handle_writing)
         if path.startswith("/api/conversations/"):
             return self.require_user(self.handle_conversation_item)
         return self.error(HTTPStatus.NOT_FOUND, "not found")

@@ -1,3 +1,4 @@
+from .writing import WritingHandlersMixin
 from .admin import AdminHandlersMixin
 from .auth import AuthHandlersMixin
 from .cats import CatHandlersMixin
@@ -15,6 +16,7 @@ __all__ = [
     "AuthHandlersMixin",
     "CatHandlersMixin",
     "ChatHandlersMixin",
+    "WritingHandlersMixin",
     "LibraryHandlersMixin",
     "MediaHandlersMixin",
     "DocumentHandlersMixin",

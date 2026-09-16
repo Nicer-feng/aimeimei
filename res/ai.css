@@ -8687,3 +8687,27 @@
     .document-preview-chip.is-ready { color:var(--color-text-primary); border-color:color-mix(in srgb, var(--accent) 24%, var(--color-border)); }
     .document-preview-chip.is-processing { opacity:.78; }
     .document-preview-chip.is-error { color:#b34b61; border-color:#efc3ca; }
+
+/* Writing workspace: ordinary chat remains unchanged when disabled. */
+.writing-mode-chip { border:1px solid var(--line, #ddd); border-radius:999px; padding:5px 12px; background:transparent; color:inherit; font:inherit; font-size:12px; cursor:pointer; }
+.writing-mode-chip.active { background:var(--accent-soft, #fbe5ec); border-color:var(--accent, #cc7691); }
+.writing-dialog { width:min(800px, calc(100vw - 24px)); max-height:88dvh; box-sizing:border-box; padding:22px; border:1px solid var(--line, #ddd); border-radius:18px; background:var(--surface, #fffaf8); color:var(--text, #30292b); overflow:auto; }
+.writing-dialog::backdrop { background:rgba(20,15,20,.38); }
+.writing-dialog header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.writing-dialog details { margin:18px 0; border-top:1px solid var(--line, #ddd); padding-top:14px; }
+.writing-dialog summary { cursor:pointer; font-weight:600; margin-bottom:12px; }
+.writing-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.writing-dialog label { display:flex; flex-direction:column; gap:6px; font-size:13px; margin:8px 0; min-width:0; }
+.writing-dialog textarea, .writing-dialog select, .writing-dialog input[type=number] { box-sizing:border-box; width:100%; border:1px solid var(--line, #ddd); border-radius:8px; padding:9px; background:var(--bg, #fff); color:inherit; font:inherit; }
+.writing-dialog textarea { resize:vertical; }
+.writing-dialog button { border:1px solid var(--line, #ddd); border-radius:8px; padding:8px 12px; background:var(--accent-soft, #fbe5ec); color:inherit; cursor:pointer; }
+.writing-dialog button:disabled { opacity:.5; cursor:wait; }
+.writing-dialog .writing-lock { flex-direction:row; align-items:center; }
+.writing-lock input { width:auto; }
+.writing-help, .writing-notice { font-size:12px; line-height:1.7; opacity:.8; }
+.writing-check { font-size:12px; opacity:.85; padding:10px 0; line-height:1.7; overflow-wrap:anywhere; }
+.writing-check summary { cursor:pointer; }
+.writing-check p { margin:6px 0; }
+@media (max-width:600px) { .writing-fields { grid-template-columns:1fr; } .writing-dialog { padding:16px; } }
+
+.writing-mode-chip { white-space:nowrap; flex-shrink:0; }
