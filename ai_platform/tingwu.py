@@ -3,9 +3,12 @@ import hmac
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
+
+from .runtime import b64_token
 
 
 def tingwu_config(secrets_data):
