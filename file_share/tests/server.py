@@ -13,11 +13,19 @@ from ai_platform.runtime import password_hash
 from file_share.database import init_share_db
 from file_share.handlers import FileShareHandlersMixin
 secrets_data={'admin_key':'test-key','family_password_hash':password_hash('test-password')}
+# Test-only SMS provider: no real keys, phone messages or external calls.
+secrets_data['sms_auth']={'enabled':True,'access_key_id':'test-id','access_key_secret':'test-secret','sign_name':'test','template_code':'test'}
+import ai_platform.handlers.auth as auth_module
+auth_module.send_verify_code=lambda *args: None
+auth_module.check_verify_code=lambda config,phone,code,out_id: code=='123456'
 init_db(secrets_data);init_share_db()
 with db() as conn:
  conn.execute("UPDATE users SET password_hash=? WHERE username='admin'",(password_hash('test-password'),))
  for uid,role in [('other-admin','admin'),('member','family')]:
   conn.execute('INSERT OR IGNORE INTO users(id,username,display_name,password_hash,role,is_active,created_at,updated_at) VALUES(?,?,?,?,?,1,0,0)',(uid,uid,uid,password_hash('test-password'),role))
+with db() as conn:
+ conn.execute("UPDATE users SET phone='13800000000',phone_verified_at=1 WHERE username='admin'")
+ conn.execute("UPDATE users SET phone='13800000001',phone_verified_at=1 WHERE username='member'")
 objects={}; uploads={};parts={}
 class FakeOSS:
  config={'bucket':'test-private-bucket'}

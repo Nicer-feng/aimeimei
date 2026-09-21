@@ -34,9 +34,74 @@
   window.addEventListener('focus',checkVersion);
 
   async function captcha(){const data=await api('/api/captcha');captchaId=data.captcha_id;$('captchaImage').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(data.image_svg);}
-  async function authenticated(){const me=await api('/api/me');if(!me.authenticated||me.user.role!=='admin'){$('login').hidden=false;$('app').hidden=true;await captcha();refreshIcons();return false;}$('login').hidden=true;$('app').hidden=false;$('account').textContent=me.user.display_name||me.user.username;await navigate(location.hash.slice(1)||'overview');checkVersion();return true;}
+  async function authenticated(){const me=await api('/api/me');if(!me.authenticated||me.user.role!=='admin'){$('login').hidden=false;$('app').hidden=true;await Promise.all([captcha(),loadSmsConfig()]);refreshIcons();return false;}$('login').hidden=true;$('app').hidden=false;$('account').textContent=me.user.display_name||me.user.username;await navigate(location.hash.slice(1)||'overview');checkVersion();return true;}
   $('captchaRefresh').onclick=()=>captcha().catch(e=>toast(e.message));
-  $('loginForm').onsubmit=async event=>{event.preventDefault();const b=event.submitter;b.disabled=true;$('loginError').textContent='';try{const d=Object.fromEntries(new FormData(event.target));d.captcha_id=captchaId;const result=await api('/api/login',d);if(result.user.role!=='admin')throw new Error('该账号没有管理员权限');await authenticated();}catch(e){$('loginError').textContent=e.message;await captcha();}finally{b.disabled=false;}};
+
+  let loginMode='password',smsConfigured=false,smsChallenge='',smsPhone='',smsSending=false,loginBusy=false,smsUntil=0,smsTimer;
+  const loginCaptcha=$('loginForm').elements.captcha;
+  function setLoginMode(mode){
+    if(loginBusy||smsSending)return;
+    loginMode=mode==='sms'&&smsConfigured?'sms':'password';
+    for(const [key,id] of [['password','passwordFields'],['sms','smsFields']]){
+      const active=key===loginMode;$(id).hidden=!active;
+      $(id).querySelectorAll('input').forEach(input=>input.disabled=!active);
+      $(key+'LoginTab').setAttribute('aria-pressed',String(active));
+    }
+    loginCaptcha.required=loginMode==='password';
+    $('loginError').textContent='';
+  }
+  function smsCountdown(){
+    const seconds=Math.max(0,Math.ceil((smsUntil-Date.now())/1000));
+    $('sendSms').disabled=smsSending||loginBusy||seconds>0||!smsConfigured;
+    $('sendSms').textContent=smsSending?'发送中…':seconds>0?seconds+' 秒后重发':'获取验证码';
+    if(!seconds&&smsTimer){clearInterval(smsTimer);smsTimer=null;}
+  }
+  function startCountdown(seconds){smsUntil=Date.now()+Math.max(1,Math.min(600,Number(seconds)||60))*1000;clearInterval(smsTimer);smsTimer=setInterval(smsCountdown,500);smsCountdown();}
+  async function loadSmsConfig(){
+    try{smsConfigured=Boolean((await api('/api/sms-login/config')).sms_auth?.configured);}catch{smsConfigured=false;}
+    $('smsLoginTab').disabled=!smsConfigured;
+    $('smsAvailability').textContent=smsConfigured?'短信登录仅支持已绑定并启用的管理员手机号。':'短信登录暂不可用，请使用账号密码登录。';
+    setLoginMode(loginMode);smsCountdown();
+  }
+  $('passwordLoginTab').onclick=()=>setLoginMode('password');
+  $('smsLoginTab').onclick=()=>setLoginMode('sms');
+  $('smsPhone').oninput=()=>{smsChallenge='';smsPhone='';$('smsCode').value='';};
+  $('smsCode').oninput=()=>{$('smsCode').value=$('smsCode').value.replace(/\D/g,'').slice(0,6);};
+  const normalizedPhone=()=> $('smsPhone').value.trim().replace(/^\+?86/,'');
+  $('sendSms').onclick=async()=>{
+    if(smsSending||loginBusy||Date.now()<smsUntil||!smsConfigured)return;
+    const phone=normalizedPhone();
+    if(!/^1[3-9]\d{9}$/.test(phone)){$('loginError').textContent='请输入正确的中国大陆手机号';$('smsPhone').focus();return;}
+    if(!loginCaptcha.value.trim()){$('loginError').textContent='请先填写图形验证码';loginCaptcha.focus();return;}
+    smsSending=true;smsCountdown();$('smsPhone').disabled=true;$('loginSubmit').disabled=true;$('loginError').textContent='';
+    try{
+      const result=await api('/api/sms-login/send',{phone,captcha_id:captchaId,captcha:loginCaptcha.value.trim()});
+      smsChallenge=result.challenge_id;smsPhone=phone;$('smsCode').value='';
+      startCountdown(result.resend_after);$('smsNotice').textContent=result.message||'验证码已发送，请查看手机短信。';$('smsCode').focus();
+    }catch(error){$('loginError').textContent=error.message;if(error.status===429)startCountdown(60);}
+    finally{smsSending=false;$('smsPhone').disabled=false;$('loginSubmit').disabled=false;smsCountdown();loginCaptcha.value='';try{await captcha();}catch{ $('loginError').textContent='图形验证码加载失败，请点击图片重试';}}
+  };
+  $('loginForm').onsubmit=async event=>{
+    event.preventDefault();if(loginBusy||smsSending)return;
+    const mode=loginMode,button=$('loginSubmit');loginBusy=true;button.disabled=true;smsCountdown();$('loginError').textContent='';
+    try{
+      let result;
+      if(mode==='sms'){
+        const phone=normalizedPhone();
+        if(!smsChallenge||phone!==smsPhone)throw new Error('请先获取当前手机号的短信验证码');
+        if(!/^\d{6}$/.test($('smsCode').value))throw new Error('请输入6位短信验证码');
+        result=await api('/api/sms-login/verify',{phone,code:$('smsCode').value,challenge_id:smsChallenge});
+      }else{
+        const data=Object.fromEntries(new FormData(event.target));data.captcha_id=captchaId;
+        result=await api('/api/login',data);
+      }
+      if(result.user?.role!=='admin')throw new Error('该账号没有管理员权限，请使用管理员账号登录');
+      clearInterval(smsTimer);smsChallenge='';$('smsCode').value='';$('loginForm').elements.password.value='';
+      await authenticated();
+    }catch(error){$('loginError').textContent=error.message;if(mode==='password'){loginCaptcha.value='';try{await captcha();}catch{}}}
+    finally{loginBusy=false;button.disabled=false;smsCountdown();}
+  };
+
   $('logout').onclick=async()=>{await api('/api/logout',{});location.reload();};
   $('nav').innerHTML=sections.map(([key,label,image])=>`<button data-section="${key}">${icon(image)}${label}</button>`).join('');
   $('nav').onclick=e=>{const b=e.target.closest('[data-section]');if(b)navigate(b.dataset.section).catch(error=>toast(error.message));};

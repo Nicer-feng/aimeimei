@@ -1,6 +1,6 @@
-# 槑槑云 v0.1.6
+# 槑槑云 v0.1.7
 
-当前线上版本为0.1.6。
+当前线上版本为0.1.7。
 
 2026-09-14 16:57 已上线：https://feng.asia/admin/share 。真实 OSS 和浏览器闭环通过。
 
@@ -12,7 +12,7 @@
 - 独立接口：`/api/file-share/admin/*`、`/api/file-share/public/*`。
 - 独立后端：`file_share/`；静态资源：`res/file-share/`。
 - 独立数据表：`share_files`、`shares`、`share_files_relation`、`share_access_logs`、`share_sessions`、`share_settings`、`share_rate_limits`、`share_audit_logs`。
-- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.1.6`。
+- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.1.7`。
 - 不进入 AI槑槑后台菜单；共享已有管理员登录 Session、SQLite 连接以及 OSS 配置。
 - 第一版仍由现有 Python 进程承载，更新后端需要重启该进程，因此暂时不是独立部署单元。后续可以在保持接口和产品目录不变的前提下拆进程。
 - AI 对话分享仍使用 `/ai/share/{43位令牌}`，原 `/share/{43位令牌}` 兼容保留。
@@ -124,3 +124,7 @@ python3 file_share/tests/run.py
 当前页日志按IP去重，后台2个工作线程、64个排队任务；公网IP结果缓存7天，失败缓存1小时；401/403/429暂停新查询1小时，网络异常暂停30秒。无Key不调用接口，内网IP不发送给第三方。只查询当前查看的日志，不扫描整库。成功结果不覆写原访问记录，仅关联缓存；缓存最多10000条，并从脱敏备份排除。
 
 日志接口保留country、province、city字段，新增geolocation_status：pending、ready、unavailable、private、unconfigured。列表最多自动重查20次，也可以手动刷新。页面保留IP2Location来源标注。
+
+## 短信登录
+
+登录页可切换账号密码或短信登录。完全复用AI槑槑的/api/sms-login/config、/send、/verify与现有Session、已绑定并启用手机号及短信配置，不单独保存签名/模板/Key。未配置时回退密码登录。发送前校验图形验证码，重发时间按服务端返回值倒计时。短信核验成功仍需管理员身份；普通用户无法进入文件后台，后端管理员接口继续返回401。

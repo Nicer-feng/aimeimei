@@ -36,7 +36,7 @@ with sqlite3.connect(snapshot) as conn:
 snapshot.unlink()
 
 opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
-for path,expected in [('/admin/share','文件分享中心'),('/share/abcdefghijklmnop','文件分享中心'),('/share/'+'a'*43,'对话分享'),('/ai/share/'+'a'*43,'对话分享'),('/cat','小猫书'),('/xiaoji','槑槑小记'),('/','AI槑槑')]:
+for path,expected in [('/admin/share','槑槑云'),('/share/abcdefghijklmnop','槑槑云'),('/share/'+'a'*43,'对话分享'),('/ai/share/'+'a'*43,'对话分享'),('/cat','小猫书'),('/xiaoji','槑槑小记'),('/','AI槑槑')]:
     with opener.open('http://127.0.0.1:18765'+path) as response:
         assert expected in response.read().decode(),path
 print('PASS: canonical OSS signature, HTML/SVG safety, backup sanitization, legacy AI/cat/home routes')

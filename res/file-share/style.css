@@ -40,3 +40,10 @@ label>.select-trigger{width:100%;margin-top:7px}
 .main{display:flex;flex-direction:column;min-width:0}.main>.page{flex:1;width:100%}
 .public-body>.filing-footer{padding-top:0;padding-bottom:28px}
 @media(max-width:700px){.filing-footer{flex-direction:column;gap:8px;padding:20px 12px}.login-shell{padding-bottom:24px}}
+
+.login-methods{display:flex;gap:4px;padding:4px;background:var(--accent-soft);border-radius:12px;margin:20px 0 14px}
+.login-methods button{flex:1;background:transparent;border:0;font-size:13px}
+.login-methods button[aria-pressed=true]{background:var(--surface);color:var(--accent);box-shadow:0 2px 6px #30362f12}
+.sms-code-row{display:flex;gap:8px;align-items:center;margin-top:7px}.sms-code-row input{min-width:0;flex:1;margin:0}
+.sms-code-row button{white-space:nowrap;flex-shrink:0;font-size:12px;padding:10px}
+#smsNotice,#smsAvailability{font-size:12px;line-height:1.6}
