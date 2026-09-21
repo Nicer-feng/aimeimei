@@ -47,7 +47,11 @@
       $(id).querySelectorAll('input').forEach(input=>input.disabled=!active);
       $(key+'LoginTab').setAttribute('aria-pressed',String(active));
     }
-    loginCaptcha.required=loginMode==='password';
+    const captchaField=$('captchaField');
+    const passwordMode=loginMode==='password';
+    captchaField.hidden=!passwordMode;
+    loginCaptcha.disabled=!passwordMode;
+    loginCaptcha.required=passwordMode;
     $('loginError').textContent='';
   }
   function smsCountdown(){
@@ -72,14 +76,13 @@
     if(smsSending||loginBusy||Date.now()<smsUntil||!smsConfigured)return;
     const phone=normalizedPhone();
     if(!/^1[3-9]\d{9}$/.test(phone)){$('loginError').textContent='请输入正确的中国大陆手机号';$('smsPhone').focus();return;}
-    if(!loginCaptcha.value.trim()){$('loginError').textContent='请先填写图形验证码';loginCaptcha.focus();return;}
     smsSending=true;smsCountdown();$('smsPhone').disabled=true;$('loginSubmit').disabled=true;$('loginError').textContent='';
     try{
-      const result=await api('/api/sms-login/send',{phone,captcha_id:captchaId,captcha:loginCaptcha.value.trim()});
+      const result=await api('/api/sms-login/send',{phone});
       smsChallenge=result.challenge_id;smsPhone=phone;$('smsCode').value='';
       startCountdown(result.resend_after);$('smsNotice').textContent=result.message||'验证码已发送，请查看手机短信。';$('smsCode').focus();
     }catch(error){$('loginError').textContent=error.message;if(error.status===429)startCountdown(60);}
-    finally{smsSending=false;$('smsPhone').disabled=false;$('loginSubmit').disabled=false;smsCountdown();loginCaptcha.value='';try{await captcha();}catch{ $('loginError').textContent='图形验证码加载失败，请点击图片重试';}}
+    finally{smsSending=false;$('smsPhone').disabled=false;$('loginSubmit').disabled=false;smsCountdown();}
   };
   $('loginForm').onsubmit=async event=>{
     event.preventDefault();if(loginBusy||smsSending)return;

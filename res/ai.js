@@ -1386,6 +1386,8 @@
       state.loginMode = next;
       $("loginPasswordFields").hidden = next !== "password";
       $("loginSmsFields").hidden = next !== "sms";
+      const captchaFields = $("loginCaptchaFields");
+      if (captchaFields) captchaFields.hidden = next === "sms";
       $("loginPasswordMode").classList.toggle("active", next === "password");
       $("loginSmsMode").classList.toggle("active", next === "sms");
       $("loginPasswordMode").setAttribute("aria-selected", next === "password" ? "true" : "false");
@@ -1657,17 +1659,9 @@
     async function sendLoginSms() {
       setStatus("loginStatus", "");
       const phone = normalizeLoginPhone();
-      normalizeCaptchaInput();
-      const captcha = $("loginCaptcha")?.value.trim() || "";
-      const captcha_id = $("captchaId")?.value.trim() || "";
       if (!/^1[3-9]\d{9}$/.test(phone.replace(/^\+86/, ""))) {
         setStatus("loginStatus", "请输入正确的中国大陆手机号。", "err");
         $("loginPhone")?.focus();
-        return;
-      }
-      if (!captcha_id || captcha.length !== 4) {
-        setStatus("loginStatus", "请先输入右侧图片里的 4 位验证码。", "err");
-        $("loginCaptcha")?.focus();
         return;
       }
       const button = $("sendLoginSms");
@@ -1676,20 +1670,18 @@
       try {
         const res = await request("/api/sms-login/send", {
           method: "POST",
-          body: JSON.stringify({ phone, captcha_id, captcha })
+          body: JSON.stringify({ phone })
         });
         if (!res.ok) throw new Error(await readError(res, "验证码发送失败，请稍后重试。"));
         const data = await res.json();
         $("smsLoginChallengeId").value = data.challenge_id || "";
         setStatus("loginStatus", data.message || "验证码已发送。", "ok");
         startSmsResendCountdown(data.resend_after || 60);
-        await refreshLoginCaptcha({ quiet: true });
         $("loginSmsCode")?.focus();
       } catch (err) {
         setStatus("loginStatus", friendlyError(err, "验证码发送失败，请稍后重试。"), "err");
         button.disabled = false;
         button.textContent = "获取验证码";
-        await refreshLoginCaptcha({ quiet: true });
       }
     }
 
@@ -4126,7 +4118,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.0" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.1" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>

@@ -126,12 +126,8 @@ class AuthHandlersMixin:
         if not sms_auth_configured(config):
             return self.error(HTTPStatus.SERVICE_UNAVAILABLE, "短信登录暂未配置")
         phone = normalize_phone(data.get("phone"))
-        captcha_id = str(data.get("captcha_id") or "").strip()
-        captcha = str(data.get("captcha") or "").strip()
         if not phone:
             return self.error(HTTPStatus.BAD_REQUEST, "手机号格式不正确")
-        if not self.verify_login_captcha(captcha_id, captcha):
-            return self.error(HTTPStatus.UNAUTHORIZED, "captcha incorrect")
 
         ts = now()
         phone_hash = token_hash(phone)
