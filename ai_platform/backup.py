@@ -70,6 +70,8 @@ def create_sanitized_snapshot(source_path, snapshot_path):
 
         _execute_if_column(destination, "models", "api_key", "UPDATE models SET api_key='' ")
         _execute_if_column(destination, "users", "password_hash", "UPDATE users SET password_hash='' ")
+        _execute_if_column(destination, "users", "phone", "UPDATE users SET phone='' ")
+        _execute_if_column(destination, "users", "phone_verified_at", "UPDATE users SET phone_verified_at=0 ")
         _execute_if_column(destination, "cat_users", "password_hash", "UPDATE cat_users SET password_hash='' ")
         _execute_if_column(destination, "media_analysis_tasks", "file_url", "UPDATE media_analysis_tasks SET file_url='' ")
         _execute_if_column(destination, "media_analysis_tasks", "file_url_expires_at", "UPDATE media_analysis_tasks SET file_url_expires_at=0")
@@ -78,7 +80,7 @@ def create_sanitized_snapshot(source_path, snapshot_path):
         _execute_if_column(destination, "message_tts", "error_message", "UPDATE message_tts SET error_message='' ")
 
         for table_name in ("sessions", "cat_sessions", "conversation_shares", "login_captchas",
-                           "share_sessions", "share_files_relation", "share_access_logs",
+                           "sms_login_challenges", "share_sessions", "share_files_relation", "share_access_logs",
                            "shares", "share_rate_limits", "infrastructure_ip_locations"):
             if _table_exists(destination, table_name):
                 destination.execute('DELETE FROM "{}"'.format(table_name))

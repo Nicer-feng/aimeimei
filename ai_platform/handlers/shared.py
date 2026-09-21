@@ -32,6 +32,7 @@ from ..content import (
 from ..database import db
 from ..features import feature_enabled, feature_flags
 from ..presenters import (
+    ai_user_admin,
     ai_user_public,
     build_user_profile_context,
     cat_comment_public,
@@ -100,6 +101,14 @@ from ..tingwu import (
     tingwu_get_task_info,
 )
 from ..tts import public_tts_config, tts_config
+from ..sms_auth import (
+    check_verify_code,
+    normalize_phone,
+    public_sms_auth_config,
+    send_verify_code,
+    sms_auth_config,
+    sms_auth_configured,
+)
 from ..usage import (
     add_daily_usage,
     estimate_request_cost,

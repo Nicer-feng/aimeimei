@@ -32,6 +32,50 @@ class AdminHandlersMixin:
         write_private(SECRETS_PATH, json.dumps(self.server.secrets, indent=2) + "\n")
         return self.json({"ok": True, "features": updated})
 
+    def handle_admin_sms_auth(self):
+        if self.command == "GET":
+            return self.json({"sms_auth": public_sms_auth_config(sms_auth_config(self.server.secrets), include_admin=True)})
+        try:
+            data = self.read_body()
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+
+        current = dict(self.server.secrets.get("sms_auth") or {})
+        enabled = bool(data.get("enabled"))
+        sign_name = str(data.get("sign_name") or "").strip()[:64]
+        template_code = str(data.get("template_code") or "").strip()[:64]
+        scheme_name = str(data.get("scheme_name") or "").strip()[:20]
+        code_param_name = str(data.get("code_param_name") or "code").strip()[:32]
+        minutes_param_name = str(data.get("minutes_param_name") or "").strip()[:32]
+        try:
+            valid_seconds = max(60, min(1800, int(data.get("valid_seconds") or 300)))
+            resend_seconds = max(60, min(600, int(data.get("resend_seconds") or 60)))
+        except (TypeError, ValueError):
+            return self.error(HTTPStatus.BAD_REQUEST, "短信有效期或发送间隔不合法")
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", code_param_name):
+            return self.error(HTTPStatus.BAD_REQUEST, "验证码参数名不合法")
+        if minutes_param_name and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", minutes_param_name):
+            return self.error(HTTPStatus.BAD_REQUEST, "有效期参数名不合法")
+
+        current.update({
+            "enabled": enabled,
+            "sign_name": sign_name,
+            "template_code": template_code,
+            "scheme_name": scheme_name,
+            "code_param_name": code_param_name,
+            "minutes_param_name": minutes_param_name,
+            "valid_seconds": valid_seconds,
+            "resend_seconds": resend_seconds,
+        })
+        candidate_secrets = {**self.server.secrets, "sms_auth": current}
+        config = sms_auth_config(candidate_secrets)
+        if enabled and not sms_auth_configured(config):
+            return self.error(HTTPStatus.BAD_REQUEST, "请先填写签名、模板，并确认服务端 RAM 凭据已配置短信认证权限")
+        self.server.secrets["sms_auth"] = current
+        write_private(SECRETS_PATH, json.dumps(self.server.secrets, indent=2) + "\n")
+        return self.json({"ok": True, "sms_auth": public_sms_auth_config(config, include_admin=True)})
+
+
     def handle_global_search(self):
         user_id = self.current_user()["id"]
         params = parse_qs(urlparse(self.path).query)
@@ -1343,7 +1387,7 @@ class AdminHandlersMixin:
                 rows = conn.execute(
                     "SELECT * FROM users ORDER BY created_at ASC"
                 ).fetchall()
-            return self.json({"users": [ai_user_public(row) for row in rows]})
+            return self.json({"users": [ai_user_admin(row) for row in rows]})
 
         try:
             data = self.read_body()
@@ -1353,9 +1397,14 @@ class AdminHandlersMixin:
         username = str(data.get("username") or "").strip().lower()
         display_name = str(data.get("display_name") or username).strip()[:40]
         password = str(data.get("password") or "")
+        phone_raw = str(data.get("phone") or "").strip()
+        phone = normalize_phone(phone_raw) if phone_raw else ""
+        phone_verified_at = now() if phone and bool(data.get("phone_verified")) else 0
         role = str(data.get("role") or "family").strip().lower()
         is_active = 1 if data.get("is_active", True) else 0
 
+        if phone_raw and not phone:
+            return self.error(HTTPStatus.BAD_REQUEST, "手机号格式不正确")
         if not USERNAME_RE.match(username):
             return self.error(HTTPStatus.BAD_REQUEST, "username invalid")
         if role not in ("admin", "family"):
@@ -1372,14 +1421,16 @@ class AdminHandlersMixin:
                 conn.execute(
                     """
                     INSERT INTO users
-                    (id, username, display_name, password_hash, role, is_active, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, username, display_name, password_hash, phone, phone_verified_at, role, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user_id,
                         username,
                         display_name,
                         password_hash(password),
+                        phone,
+                        phone_verified_at,
                         role,
                         is_active,
                         ts,
@@ -1388,8 +1439,8 @@ class AdminHandlersMixin:
                 )
                 row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         except sqlite3.IntegrityError:
-            return self.error(HTTPStatus.CONFLICT, "username already exists")
-        return self.json({"user": ai_user_public(row)}, HTTPStatus.CREATED)
+            return self.error(HTTPStatus.CONFLICT, "账号或手机号已被绑定")
+        return self.json({"user": ai_user_admin(row)}, HTTPStatus.CREATED)
 
     def admin_user_id_from_path(self):
         return urlparse(self.path).path.rstrip("/").rsplit("/", 1)[-1]
@@ -1412,6 +1463,13 @@ class AdminHandlersMixin:
                 return self.error(HTTPStatus.BAD_REQUEST, "role invalid")
             is_active = 1 if data.get("is_active", bool(row["is_active"])) else 0
             password = str(data.get("password") or "")
+            phone_raw = str(data.get("phone", row["phone"] if "phone" in row.keys() else "") or "").strip()
+            phone = normalize_phone(phone_raw) if phone_raw else ""
+            if phone_raw and not phone:
+                return self.error(HTTPStatus.BAD_REQUEST, "手机号格式不正确")
+            was_verified = bool(row["phone_verified_at"]) if "phone_verified_at" in row.keys() else False
+            phone_verified = bool(data.get("phone_verified", was_verified)) if phone else False
+            phone_verified_at = (row["phone_verified_at"] if phone == (row["phone"] if "phone" in row.keys() else "") and was_verified and phone_verified else (now() if phone_verified else 0))
 
             if (row["role"] == "admin" and (role != "admin" or not is_active)):
                 active_admins = conn.execute(
@@ -1422,7 +1480,7 @@ class AdminHandlersMixin:
                     return self.error(HTTPStatus.BAD_REQUEST, "at least one active admin is required")
 
             password_clause = ""
-            params = [display_name, role, is_active, now()]
+            params = [display_name, phone, phone_verified_at, role, is_active, now()]
             if password:
                 if len(password) < 6:
                     return self.error(HTTPStatus.BAD_REQUEST, "password must be at least 6 characters")
@@ -1432,7 +1490,7 @@ class AdminHandlersMixin:
             conn.execute(
                 f"""
                 UPDATE users
-                SET display_name=?, role=?, is_active=?, updated_at=?{password_clause}
+                SET display_name=?, phone=?, phone_verified_at=?, role=?, is_active=?, updated_at=?{password_clause}
                 WHERE id=?
                 """,
                 tuple(params),
@@ -1440,4 +1498,4 @@ class AdminHandlersMixin:
             if not is_active:
                 conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-        return self.json({"user": ai_user_public(row)})
+        return self.json({"user": ai_user_admin(row)})

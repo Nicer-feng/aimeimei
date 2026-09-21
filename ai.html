@@ -58,7 +58,7 @@
   <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.25.1">
+  <link rel="stylesheet" href="/res/ai.css?v=2.26.0">
 
   <link rel="stylesheet" href="/res/markdown.css">
 </head>
@@ -69,10 +69,27 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.25.1</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.26.0</button>
       </div>
+      <div class="login-mode-tabs" role="tablist" aria-label="登录方式">
+        <button class="login-mode-tab active" id="loginPasswordMode" type="button" role="tab" aria-selected="true"><i data-lucide="key-round" aria-hidden="true"></i><span>密码登录</span></button>
+        <button class="login-mode-tab" id="loginSmsMode" type="button" role="tab" aria-selected="false"><i data-lucide="message-square-text" aria-hidden="true"></i><span>短信登录</span></button>
+      </div>
+      <div id="loginPasswordFields" class="login-mode-fields">
 	      <label>账号<input id="loginUsername" autocomplete="username" placeholder="默认账号：admin"></label>
 	      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入账号密码"></label>
+      </div>
+      <div id="loginSmsFields" class="login-mode-fields" hidden>
+        <label>手机号<input id="loginPhone" type="tel" autocomplete="tel" inputmode="numeric" maxlength="13" placeholder="仅支持已绑定的中国大陆手机号"></label>
+        <label>短信验证码
+          <span class="sms-code-row">
+            <input id="loginSmsCode" autocomplete="one-time-code" inputmode="numeric" maxlength="6" placeholder="6位验证码">
+            <button id="sendLoginSms" class="ui-btn ui-btn-secondary" type="button">获取验证码</button>
+          </span>
+        </label>
+        <input id="smsLoginChallengeId" type="hidden">
+        <p class="login-sms-hint" id="loginSmsHint">仅已由管理员绑定并启用的手机号可使用短信登录。</p>
+      </div>
       <label class="captcha-field">
         <span>验证码</span>
         <span class="captcha-row">
@@ -86,7 +103,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.25.1</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.26.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -99,7 +116,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.25.1</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.26.0</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -153,7 +170,7 @@
 	          </button>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.25.1</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.26.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -741,6 +758,11 @@
 	              <label>角色<select id="accountRole"><option value="family">家庭成员</option><option value="admin">管理员</option></select></label>
 	              <label>状态<select id="accountActive"><option value="1">启用</option><option value="0">禁用</option></select></label>
 	            </div>
+	            <div class="grid2">
+	              <label>手机号<input id="accountPhone" type="tel" inputmode="numeric" autocomplete="off" placeholder="可选，用于短信登录"></label>
+	              <label>短信登录<select id="accountPhoneVerified"><option value="0">未启用</option><option value="1">已验证并启用</option></select></label>
+	            </div>
+	            <p class="admin-field-help">手机号由管理员确认后才能免密登录；留空不会影响原有密码登录。</p>
 	            <label>密码<input id="accountPassword" type="password" autocomplete="new-password" placeholder="新增账号必填，编辑时留空保持原密码"></label>
 	            <div class="library-actions">
 		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveAccount"><i data-lucide="save" aria-hidden="true"></i><span>保存账号</span></button>
@@ -1014,12 +1036,34 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.25.1</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.26.0</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
 	              <div><span>运行方式</span><strong>Python 标准库</strong></div>
 	            </div>
+	          </section>
+	          <section class="panel" id="smsAuthAdminPanel">
+	            <h2 class="panel-title"><i data-lucide="message-square-text" aria-hidden="true"></i><span>短信登录</span></h2>
+	            <p class="admin-field-help">使用阿里云号码认证服务。RAM 凭据仅在服务端读取，页面不会显示密钥。</p>
+	            <div class="grid2">
+	              <label>启用短信登录<select id="smsAuthEnabled"><option value="0">关闭</option><option value="1">开启</option></select></label>
+	              <label>方案名称（可选）<input id="smsAuthSchemeName" maxlength="20" placeholder="默认方案"></label>
+	            </div>
+	            <div class="grid2">
+	              <label>阿里云短信签名<input id="smsAuthSignName" maxlength="64" placeholder="控制台中的签名名称"></label>
+	              <label>验证码模板 Code<input id="smsAuthTemplateCode" maxlength="64" placeholder="例如 100001"></label>
+	            </div>
+	            <div class="grid2">
+	              <label>验证码参数名<input id="smsAuthCodeParam" maxlength="32" value="code" placeholder="code"></label>
+	              <label>有效期参数名（可空）<input id="smsAuthMinutesParam" maxlength="32" value="min" placeholder="min"></label>
+	            </div>
+	            <div class="grid2">
+	              <label>验证码有效期（秒）<input id="smsAuthValidSeconds" type="number" min="60" max="1800" value="300"></label>
+	              <label>重发间隔（秒）<input id="smsAuthResendSeconds" type="number" min="60" max="600" value="60"></label>
+	            </div>
+	            <div class="library-actions"><button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveSmsAuthConfig" type="button"><i data-lucide="save" aria-hidden="true"></i><span>保存短信配置</span></button></div>
+	            <div class="status" id="smsAuthStatus"></div>
 	          </section>
 	        </section>
 	      </div>
@@ -1039,7 +1083,7 @@
       <p id="writingDraftState" class="writing-help"></p><button type="button" id="saveWritingDraft">保存稿件与定稿状态</button>
     </details>
   </dialog>
-	  <script src="/res/ai.js?v=2.25.1"></script>
+	  <script src="/res/ai.js?v=2.26.0"></script>
 
 </body>
 </html>

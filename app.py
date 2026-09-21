@@ -118,6 +118,8 @@ class AppHandler(
             return self.handle_changelog()
         if path == "/api/captcha":
             return self.handle_captcha()
+        if path == "/api/sms-login/config":
+            return self.handle_sms_login_config()
         if path.startswith("/api/public/shares/") and "/images/" in path:
             return self.handle_public_share_image()
         if path.startswith("/api/public/shares/"):
@@ -162,6 +164,8 @@ class AppHandler(
             return self.require_admin(self.handle_admin_models)
         if path == "/api/admin/tts":
             return self.require_admin(self.handle_admin_tts)
+        if path == "/api/admin/sms-auth":
+            return self.require_admin(self.handle_admin_sms_auth)
         if path == "/api/admin/search":
             return self.require_admin(self.handle_admin_search)
         if path == "/api/admin/token-stats/daily":
@@ -227,12 +231,18 @@ class AppHandler(
             return self.require_cat_admin(self.handle_cat_admin_users)
         if path == "/api/login":
             return self.handle_login()
+        if path == "/api/sms-login/send":
+            return self.handle_sms_login_send()
+        if path == "/api/sms-login/verify":
+            return self.handle_sms_login_verify()
         if path == "/api/logout":
             return self.handle_logout()
         if path == "/api/admin/models":
             return self.require_admin(self.handle_admin_models)
         if path == "/api/admin/tts":
             return self.require_admin(self.handle_admin_tts)
+        if path == "/api/admin/sms-auth":
+            return self.require_admin(self.handle_admin_sms_auth)
         if path == "/api/admin/search":
             return self.require_admin(self.handle_admin_search)
         if path == "/api/admin/features":

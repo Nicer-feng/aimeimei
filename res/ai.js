@@ -113,6 +113,11 @@
 	      changelogAnchor: null,
 	      versionInfo: null,
 	      initialBuildId: "",
+      loginMode: "password",
+      smsLoginConfig: null,
+      smsResendTimer: 0,
+      smsResendUntil: 0,
+      adminSmsAuth: null,
 	      pendingBuildId: "",
 	      versionCheckTimer: 0,
 	      versionCheckInFlight: false,
@@ -1372,12 +1377,79 @@
       return state.featureFlags;
     }
 
+    function setLoginMode(mode, options = {}) {
+      const next = mode === "sms" ? "sms" : "password";
+      if (next === "sms" && !state.smsLoginConfig?.configured) {
+        setStatus("loginStatus", "短信登录暂未配置，请使用账号密码登录。", "err");
+        return;
+      }
+      state.loginMode = next;
+      $("loginPasswordFields").hidden = next !== "password";
+      $("loginSmsFields").hidden = next !== "sms";
+      $("loginPasswordMode").classList.toggle("active", next === "password");
+      $("loginSmsMode").classList.toggle("active", next === "sms");
+      $("loginPasswordMode").setAttribute("aria-selected", next === "password" ? "true" : "false");
+      $("loginSmsMode").setAttribute("aria-selected", next === "sms" ? "true" : "false");
+      setStatus("loginStatus", "");
+      if (options.focus !== false) requestAnimationFrame(() => $(next === "sms" ? "loginPhone" : "loginUsername")?.focus());
+    }
+
+    function normalizeLoginPhone() {
+      const input = $("loginPhone");
+      if (!input) return "";
+      input.value = input.value.replace(/[^\d+]/g, "").replace(/^0086/, "+86").slice(0, 13);
+      return input.value;
+    }
+
+    function normalizeSmsCode() {
+      const input = $("loginSmsCode");
+      if (input) input.value = input.value.replace(/\D/g, "").slice(0, 6);
+    }
+
+    function updateSmsResendButton() {
+      const button = $("sendLoginSms");
+      if (!button) return;
+      const seconds = Math.max(0, Math.ceil((state.smsResendUntil - Date.now()) / 1000));
+      button.disabled = seconds > 0;
+      button.textContent = seconds > 0 ? seconds + " 秒后重发" : "获取验证码";
+      if (!seconds && state.smsResendTimer) {
+        clearInterval(state.smsResendTimer);
+        state.smsResendTimer = 0;
+      }
+    }
+
+    function startSmsResendCountdown(seconds) {
+      state.smsResendUntil = Date.now() + Math.max(1, Number(seconds) || 60) * 1000;
+      if (state.smsResendTimer) clearInterval(state.smsResendTimer);
+      updateSmsResendButton();
+      state.smsResendTimer = window.setInterval(updateSmsResendButton, 500);
+    }
+
+    async function loadSmsLoginConfig() {
+      try {
+        const res = await request("/api/sms-login/config");
+        if (!res.ok) throw new Error();
+        state.smsLoginConfig = (await res.json()).sms_auth || {};
+      } catch {
+        state.smsLoginConfig = { enabled: false, configured: false };
+      }
+      const enabled = Boolean(state.smsLoginConfig.configured);
+      $("loginSmsMode").disabled = !enabled;
+      $("loginSmsMode").title = enabled ? "使用已绑定手机号登录" : "管理员尚未配置短信登录";
+      $("loginSmsHint").textContent = enabled
+        ? "仅已由管理员绑定并启用的手机号可使用短信登录。"
+        : "管理员尚未完成短信登录配置，请使用账号密码登录。";
+      if (!enabled && state.loginMode === "sms") setLoginMode("password", { focus: false });
+      return state.smsLoginConfig;
+    }
+
 	    function showLogin() {
 	      $("loginView").style.display = "grid";
 	      $("appView").style.display = "none";
 	      updateDesktopPetVisibility();
       refreshLoginCaptcha({ quiet: true });
-	      $("loginUsername").focus();
+      loadSmsLoginConfig();
+      setLoginMode("password");
 	    }
 
     function showApp() {
@@ -1570,11 +1642,80 @@
       input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
     }
 
+    async function finishLogin(data) {
+      $("loginPassword").value = "";
+      $("loginSmsCode").value = "";
+      $("smsLoginChallengeId").value = "";
+      if ($("loginCaptcha")) $("loginCaptcha").value = "";
+      applyCurrentUser(data.user || null);
+      loadUserPreferences();
+      state.authed = true;
+      showApp();
+      await Promise.all([loadModels(), loadSearchConfig(), loadFeatureFlags(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
+    }
+
+    async function sendLoginSms() {
+      setStatus("loginStatus", "");
+      const phone = normalizeLoginPhone();
+      normalizeCaptchaInput();
+      const captcha = $("loginCaptcha")?.value.trim() || "";
+      const captcha_id = $("captchaId")?.value.trim() || "";
+      if (!/^1[3-9]\d{9}$/.test(phone.replace(/^\+86/, ""))) {
+        setStatus("loginStatus", "请输入正确的中国大陆手机号。", "err");
+        $("loginPhone")?.focus();
+        return;
+      }
+      if (!captcha_id || captcha.length !== 4) {
+        setStatus("loginStatus", "请先输入右侧图片里的 4 位验证码。", "err");
+        $("loginCaptcha")?.focus();
+        return;
+      }
+      const button = $("sendLoginSms");
+      button.disabled = true;
+      button.textContent = "发送中…";
+      try {
+        const res = await request("/api/sms-login/send", {
+          method: "POST",
+          body: JSON.stringify({ phone, captcha_id, captcha })
+        });
+        if (!res.ok) throw new Error(await readError(res, "验证码发送失败，请稍后重试。"));
+        const data = await res.json();
+        $("smsLoginChallengeId").value = data.challenge_id || "";
+        setStatus("loginStatus", data.message || "验证码已发送。", "ok");
+        startSmsResendCountdown(data.resend_after || 60);
+        await refreshLoginCaptcha({ quiet: true });
+        $("loginSmsCode")?.focus();
+      } catch (err) {
+        setStatus("loginStatus", friendlyError(err, "验证码发送失败，请稍后重试。"), "err");
+        button.disabled = false;
+        button.textContent = "获取验证码";
+        await refreshLoginCaptcha({ quiet: true });
+      }
+    }
+
     async function login(event) {
-	      event.preventDefault();
-	      setStatus("loginStatus", "");
-	      const username = $("loginUsername").value.trim();
-	      const password = $("loginPassword").value;
+      event.preventDefault();
+      setStatus("loginStatus", "");
+      if (state.loginMode === "sms") {
+        const phone = normalizeLoginPhone();
+        normalizeSmsCode();
+        const code = $("loginSmsCode")?.value.trim() || "";
+        const challenge_id = $("smsLoginChallengeId")?.value.trim() || "";
+        if (!/^1[3-9]\d{9}$/.test(phone.replace(/^\+86/, "")) || code.length !== 6 || !challenge_id) {
+          setStatus("loginStatus", "请填写手机号和 6 位验证码；如未收到，请重新获取。", "err");
+          return;
+        }
+        try {
+          const res = await request("/api/sms-login/verify", { method: "POST", body: JSON.stringify({ phone, code, challenge_id }) });
+          if (!res.ok) throw new Error(await readError(res, "验证码不正确或已过期。"));
+          await finishLogin(await res.json());
+        } catch (err) {
+          setStatus("loginStatus", friendlyError(err, "验证码不正确或已过期。"), "err");
+        }
+        return;
+      }
+      const username = $("loginUsername").value.trim();
+      const password = $("loginPassword").value;
       normalizeCaptchaInput();
       const captcha = $("loginCaptcha")?.value.trim() || "";
       const captcha_id = $("captchaId")?.value.trim() || "";
@@ -1588,28 +1729,16 @@
         $("loginCaptcha")?.focus();
         return;
       }
-	      let res;
-	      try {
-	        res = await request("/api/login", { method: "POST", body: JSON.stringify({ username, password, captcha_id, captcha }) });
+      try {
+        const res = await request("/api/login", { method: "POST", body: JSON.stringify({ username, password, captcha_id, captcha }) });
+        if (!res.ok) throw new Error(await readError(res, "密码或验证码不对，再检查一下。"));
+        await finishLogin(await res.json());
       } catch (err) {
         setStatus("loginStatus", friendlyError(err, "现在连不上服务，稍后再试一下。"), "err");
-        return;
-      }
-	      if (!res.ok) {
-		setStatus("loginStatus", await readError(res, "密码或验证码不对，再检查一下。"), "err");
         await refreshLoginCaptcha({ quiet: true });
         $("loginCaptcha")?.focus();
-		return;
-	      }
-	      const data = await res.json();
-		      $("loginPassword").value = "";
-      if ($("loginCaptcha")) $("loginCaptcha").value = "";
-		      applyCurrentUser(data.user || null);
-		      loadUserPreferences();
-		      state.authed = true;
-	      showApp();
-	      await Promise.all([loadModels(), loadSearchConfig(), loadFeatureFlags(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
-	    }
+      }
+    }
 
     async function logout() {
 	  saveCurrentDraft();
@@ -3997,7 +4126,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.25.1" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.0" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8033,6 +8162,7 @@
 	      }
 	      if (key === "tokens") loadTokenStats();
 	      if (key === "costs") loadCostStats();
+      if (key === "system") loadAdminSmsAuth();
 	      queueLucideRefresh();
 	    }
 
@@ -9398,6 +9528,54 @@
 	      setStatus("adminStatus", "登录密码已修改，需要重新登录", "ok");
 	    }
 
+    function renderAdminSmsAuth(config = {}) {
+      state.adminSmsAuth = config;
+      $("smsAuthEnabled").value = config.enabled ? "1" : "0";
+      $("smsAuthSignName").value = config.sign_name || "";
+      $("smsAuthTemplateCode").value = config.template_code || "";
+      $("smsAuthSchemeName").value = config.scheme_name || "";
+      $("smsAuthCodeParam").value = config.code_param_name || "code";
+      $("smsAuthMinutesParam").value = config.minutes_param_name || "";
+      $("smsAuthValidSeconds").value = config.valid_seconds || 300;
+      $("smsAuthResendSeconds").value = config.resend_seconds || 60;
+    }
+
+    async function loadAdminSmsAuth() {
+      if (!hasAdminAccess()) return;
+      setStatus("smsAuthStatus", "正在加载短信配置…", "");
+      const res = await adminApi("/api/admin/sms-auth");
+      if (!res.ok) {
+        setStatus("smsAuthStatus", await readError(res, "短信配置加载失败。"), "err");
+        return;
+      }
+      const config = (await res.json()).sms_auth || {};
+      renderAdminSmsAuth(config);
+      setStatus("smsAuthStatus", config.configured ? "短信认证服务已就绪" : "还需填写赠送签名、模板，并确认 RAM 权限。", config.configured ? "ok" : "");
+    }
+
+    async function saveAdminSmsAuth() {
+      const body = {
+        enabled: $("smsAuthEnabled").value === "1",
+        sign_name: $("smsAuthSignName").value.trim(),
+        template_code: $("smsAuthTemplateCode").value.trim(),
+        scheme_name: $("smsAuthSchemeName").value.trim(),
+        code_param_name: $("smsAuthCodeParam").value.trim() || "code",
+        minutes_param_name: $("smsAuthMinutesParam").value.trim(),
+        valid_seconds: Number($("smsAuthValidSeconds").value || 300),
+        resend_seconds: Number($("smsAuthResendSeconds").value || 60),
+      };
+      setStatus("smsAuthStatus", "正在保存短信配置…", "");
+      const res = await adminApi("/api/admin/sms-auth", { method: "POST", body: JSON.stringify(body) });
+      if (!res.ok) {
+        setStatus("smsAuthStatus", await readError(res, "短信配置保存失败。"), "err");
+        return;
+      }
+      const data = await res.json();
+      renderAdminSmsAuth(data.sms_auth || {});
+      setStatus("smsAuthStatus", "短信配置已保存。", "ok");
+      await loadSmsLoginConfig();
+    }
+
 	    async function loadAdminUsers() {
 	      const box = $("accountList");
 	      if (!hasAdminAccess()) {
@@ -9436,7 +9614,8 @@
 	        const info = document.createElement("div");
 	        info.innerHTML = `<strong></strong><span></span>`;
 	        info.querySelector("strong").textContent = (user.display_name || user.username) + (user.is_active ? "" : "（已禁用）");
-	        info.querySelector("span").textContent = user.username + " · " + (user.role === "admin" ? "管理员" : "家庭成员") + " · " + formatTime(user.created_at);
+        const phoneText = user.phone_masked ? (" · " + user.phone_masked + (user.phone_verified ? " · 短信已启用" : " · 短信未启用")) : " · 未绑定手机号";
+	        info.querySelector("span").textContent = user.username + " · " + (user.role === "admin" ? "管理员" : "家庭成员") + phoneText + " · " + formatTime(user.created_at);
 		        const actions = document.createElement("div");
 		        actions.className = "library-actions";
 		        const edit = createIconButton("pencil", "编辑", { fallback: "✎" });
@@ -9455,6 +9634,8 @@
 	      $("accountDisplayName").value = user.display_name || "";
 	      $("accountRole").value = user.role || "family";
 	      $("accountActive").value = user.is_active ? "1" : "0";
+      $("accountPhone").value = user.phone || "";
+      $("accountPhoneVerified").value = user.phone_verified ? "1" : "0";
 	      $("accountPassword").value = "";
 	      $("accountPassword").placeholder = "留空保持原密码";
 	      setStatus("accountStatus", "正在编辑：" + (user.display_name || user.username), "");
@@ -9467,6 +9648,8 @@
 	      $("accountDisplayName").value = "";
 	      $("accountRole").value = "family";
 	      $("accountActive").value = "1";
+      $("accountPhone").value = "";
+      $("accountPhoneVerified").value = "0";
 	      $("accountPassword").value = "";
 	      $("accountPassword").placeholder = "新增账号必填，编辑时留空保持原密码";
 	      setStatus("accountStatus", "");
@@ -9483,6 +9666,8 @@
 	        display_name: $("accountDisplayName").value.trim(),
 	        role: $("accountRole").value,
 	        is_active: $("accountActive").value === "1",
+        phone: $("accountPhone").value.trim(),
+        phone_verified: $("accountPhoneVerified").value === "1",
 	        password: $("accountPassword").value
 	      };
 	      const res = await adminApi(id ? `/api/admin/users/${id}` : "/api/admin/users", {
@@ -9558,6 +9743,11 @@
 
     $("globalSearchShortcut").textContent = globalSearchShortcutText();
     $("loginForm").addEventListener("submit", login);
+    $("loginPasswordMode")?.addEventListener("click", () => setLoginMode("password"));
+    $("loginSmsMode")?.addEventListener("click", () => setLoginMode("sms"));
+    $("sendLoginSms")?.addEventListener("click", sendLoginSms);
+    $("loginPhone")?.addEventListener("input", normalizeLoginPhone);
+    $("loginSmsCode")?.addEventListener("input", normalizeSmsCode);
     $("refreshCaptcha")?.addEventListener("click", () => refreshLoginCaptcha());
     $("loginCaptcha")?.addEventListener("input", normalizeCaptchaInput);
     $("logout").addEventListener("click", logout);
@@ -9837,6 +10027,7 @@
 	    $("inputPricePerMillion").addEventListener("input", syncCostEnabledFromPrices);
 	    $("outputPricePerMillion").addEventListener("input", syncCostEnabledFromPrices);
 		    $("changePassword").addEventListener("click", changePassword);
+    $("saveSmsAuthConfig")?.addEventListener("click", saveAdminSmsAuth);
 		    $("saveAccount").addEventListener("click", saveAccount);
 		    $("resetAccountForm").addEventListener("click", resetAccountForm);
         $("adminKey").addEventListener("change", () => {

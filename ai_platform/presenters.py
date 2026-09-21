@@ -24,16 +24,29 @@ def private_model(row):
 	return public_model(row)
 
 
+def mask_phone(phone):
+    value = str(phone or "")
+    return value[:3] + "****" + value[-4:] if len(value) == 11 else ""
+
+
 def ai_user_public(row):
+    phone = row["phone"] if "phone" in row.keys() else ""
+    verified_at = row["phone_verified_at"] if "phone_verified_at" in row.keys() else 0
     return {
         "id": row["id"],
         "username": row["username"],
         "display_name": row["display_name"],
         "role": row["role"],
         "is_active": bool(row["is_active"]),
+        "phone_masked": mask_phone(phone),
+        "phone_verified": bool(verified_at),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def ai_user_admin(row):
+    return {**ai_user_public(row), "phone": row["phone"] if "phone" in row.keys() else ""}
 
 
 def conversation_row(row):

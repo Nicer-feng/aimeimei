@@ -7,8 +7,8 @@
 - 项目名称：AI槑槑。
 - GitHub：`git@github.com:Nicer-feng/aimeimei.git`。
 - 主分支：`main`。
-- 当前基线版本：`2.25.0`。
-- 当前基线构建：`20260916-110352`。
+- 当前基线版本：`2.26.0`。
+- 当前基线构建：`20260921-172157`。
 - 当前材料附件行为：新上传材料默认只绑定本条用户消息；通过聊天顶部“当前对话文件”可显式设为持续参考，旧 `conversation_documents` 仍代表持续参考材料。
 - 当前基线提交：以 `git log -1 --oneline` 为准（发布后需同步本段）。
 - 本地实际仓库：`/Users/feng/Documents/文稿 - Unknown/aliyun3129`。
@@ -28,7 +28,7 @@
 
 AI槑槑已经不是最初的家庭密码单页，而是一个多账号轻量 AI 平台，主要能力包括：
 
-- 用户名和密码登录、图形验证码、服务端 Cookie Session、多账号数据隔离。
+- 用户名密码或已绑定手机号的短信验证码登录、图形验证码、服务端 Cookie Session、多账号数据隔离。
 - 多模型管理、API Key 管理、模型价格、视觉能力、推理能力、原生联网能力。
 - 会话新建、重命名、删除、置顶、统计、全局搜索、临时分享链接、智能上下文压缩（可切换完整模式）。
 - 流式回答（预缓冲与稳态播放）、reasoning 实时预览、Markdown/GFM、代码高亮、Mermaid、移动端表格滚动。
@@ -76,7 +76,7 @@ AI槑槑已经不是最初的家庭密码单页，而是一个多账号轻量 AI
 | `ai_platform/settings.py` | 路径、监听地址、上传限制、Cookie 名等常量 |
 | `ai_platform/runtime.py` | 时间、版本、密钥文件读取、Session/Token 等运行时工具 |
 | `ai_platform/database.py` | SQLite 连接、建表、旧数据迁移和索引 |
-| `ai_platform/handlers/auth.py` | 登录、退出、验证码、当前用户 |
+| `ai_platform/handlers/auth.py` | 密码/短信登录、退出、验证码、当前用户 |
 | `ai_platform/handlers/chat.py` | 主聊天、会话、统计、置顶、侧边讨论、模型流式调用 |
 | `ai_platform/handlers/admin.py` | 模型、用户、联网配置、功能开关、Token/费用统计 |
 | `ai_platform/handlers/library.py` | AI 档案、提示词、收藏 |
@@ -90,6 +90,7 @@ AI槑槑已经不是最初的家庭密码单页，而是一个多账号轻量 AI
 | `ai_platform/storage.py` | OSS 配置、签名上传/下载、图片和音频存储 |
 | `ai_platform/tingwu.py` | 通义听悟创建任务、查询和结果解析 |
 | `ai_platform/tts.py` | TTS Provider 配置与火山语音请求 |
+| `ai_platform/sms_auth.py` | 阿里云号码认证服务（PNVS）短信验证码签名、发送与核验 |
 | `ai_platform/usage.py` | Token 解析、费用计算、daily usage 累计 |
 | `ai_platform/backup.py` | 脱敏 SQLite 快照、压缩、加密、OSS 上传和保留策略 |
 | `ai_platform/presenters.py` | 数据库行到前端 JSON 的转换、Profile 上下文 |

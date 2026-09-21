@@ -100,6 +100,8 @@ def init_db(secrets_data=None):
               username TEXT NOT NULL UNIQUE,
               display_name TEXT NOT NULL,
               password_hash TEXT NOT NULL,
+              phone TEXT NOT NULL DEFAULT '',
+              phone_verified_at INTEGER NOT NULL DEFAULT 0,
               role TEXT NOT NULL DEFAULT 'family',
               is_active INTEGER NOT NULL DEFAULT 1,
               created_at INTEGER NOT NULL,
@@ -396,6 +398,16 @@ def init_db(secrets_data=None):
               attempts INTEGER NOT NULL DEFAULT 0
             );
 
+            CREATE TABLE IF NOT EXISTS sms_login_challenges (
+              id TEXT PRIMARY KEY,
+              phone_hash TEXT NOT NULL,
+              out_id TEXT NOT NULL,
+              ip_hash TEXT NOT NULL DEFAULT '',
+              created_at INTEGER NOT NULL,
+              expires_at INTEGER NOT NULL,
+              attempts INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS cat_users (
               id TEXT PRIMARY KEY,
               username TEXT NOT NULL UNIQUE,
@@ -551,6 +563,11 @@ def init_db(secrets_data=None):
         """)
         if "history_start_id" not in table_columns(conn, "writing_tasks"):
             conn.execute("ALTER TABLE writing_tasks ADD COLUMN history_start_id INTEGER NOT NULL DEFAULT 0")
+        user_columns = table_columns(conn, "users")
+        if "phone" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+        if "phone_verified_at" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN phone_verified_at INTEGER NOT NULL DEFAULT 0")
         if "user_id" not in conversation_columns:
             conn.execute(
                 f"ALTER TABLE conversations ADD COLUMN user_id TEXT NOT NULL DEFAULT '{DEFAULT_AI_USER_ID}'"
@@ -682,6 +699,10 @@ def init_db(secrets_data=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_message_documents_user_message ON message_documents(user_id, message_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ocr_tasks_user_updated ON ocr_tasks(user_id, updated_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_login_captchas_expiry ON login_captchas(expires_at)")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique ON users(phone) WHERE phone<>''")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_login_challenges_phone_created ON sms_login_challenges(phone_hash, created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_login_challenges_ip_created ON sms_login_challenges(ip_hash, created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_login_challenges_expiry ON sms_login_challenges(expires_at)")
 
         daily_count = conn.execute("SELECT COUNT(*) AS n FROM daily_usage").fetchone()["n"]
         if daily_count == 0:
