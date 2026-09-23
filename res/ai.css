@@ -7654,6 +7654,7 @@
       transition-delay: 0s;
     }
     .sidebar-tool-card {
+      text-decoration: none;
       width: 100%;
       min-width: 0;
       min-height: 74px;
