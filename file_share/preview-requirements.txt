@@ -1,0 +1,4 @@
+# Dedicated /opt/cloud-preview-venv, not the application's interpreter.
+openpyxl==3.1.5
+xlrd==2.0.2
+defusedxml==0.7.1

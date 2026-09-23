@@ -45,6 +45,17 @@ class FakeOSS:
  def access_url(self,key,filename,mime,download=False):
   return self.signed('GET',key,{'mime':mime,'download':int(download)})
 FileShareHandlersMixin.fs_oss=lambda self,row=None:FakeOSS()
+# Optional UI fixture mode uses outputs from the real isolated Linux converter.
+if os.environ.get('SHARE_TEST_PREVIEW_FIXTURES'):
+ import file_share.handlers as share_handlers
+ import time
+ def preview_fixture(row,oss):
+  if row['size']>20*1024**2:raise share_handlers.PreviewError('Office preview limit: 20 MB')
+  if row['filename'].startswith('slow'):time.sleep(1)
+  ext=Path(row['original_filename']).suffix.lstrip('.')
+  return json.loads((Path(os.environ['SHARE_TEST_PREVIEW_FIXTURES'])/('result-'+ext+'.json')).read_text())
+ share_handlers.office_preview=preview_fixture
+
 class Storage(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
  def cors(self):

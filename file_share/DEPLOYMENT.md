@@ -58,3 +58,7 @@
 ## 2026-09-23 v0.2.0
 
 构建20260923-093032。新增云独立权限表与平台统计，备份代码及数据库后重启共享服务，服务正常。备份 `/opt/ai-platform-release-backups/file-share-0.2.0-20260923-093032/`。AI版本仍为v2.26.1。公网新页面和三份JS/CSS哈希、匿名平台接口拒绝及权限表迁移已验证。
+
+## 2026-09-23 v0.3.0
+
+构建20260923-112828。部署DOC/DOCX、XLS/XLSX/CSV及大窗口预览；代码/数据库备份后重启服务。备份 `/opt/ai-platform-release-backups/file-share-0.3.0-20260923-112828/`。系统新增libreoffice-writer和bubblewrap，独立 `/opt/cloud-preview-venv` 安装预览依赖。服务账号与NoNewPrivileges下四种格式实际转换、缓存、损坏/超限拒绝、文件系统与网络隔离验证通过，未读取用户现有文档。公网四份资源SHA256、构建号、未登录保护和各产品基础路由通过，AI仍为v2.26.1。

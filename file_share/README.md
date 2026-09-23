@@ -1,6 +1,6 @@
 # 槑槑云 v0.1.8
 
-当前版本为0.2.0。
+当前版本为0.3.0。
 
 2026-09-14 16:57 已上线：https://feng.asia/admin/share 。真实 OSS 和浏览器闭环通过。
 
@@ -12,7 +12,7 @@
 - 独立接口：`/api/file-share/admin/*`、`/api/file-share/public/*`。
 - 独立后端：`file_share/`；静态资源：`res/file-share/`。
 - 独立数据表：`share_files`、`shares`、`share_files_relation`、`share_access_logs`、`share_sessions`、`share_settings`、`share_rate_limits`、`share_audit_logs`。
-- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.2.0`。
+- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.3.0`。
 - 不进入 AI槑槑后台菜单；共享已有管理员登录 Session、SQLite 连接以及 OSS 配置。
 - 第一版仍由现有 Python 进程承载，更新后端需要重启该进程，因此暂时不是独立部署单元。后续可以在保持接口和产品目录不变的前提下拆进程。
 - AI 对话分享仍使用 `/ai/share/{43位令牌}`，原 `/share/{43位令牌}` 兼容保留。
@@ -137,3 +137,13 @@ python3 file_share/tests/run.py
 - presence 记录最近进入云；从云登录页认证后另记最后云登录。共享登录状态不会伪造新的登录时间，历史未知留空。
 - 上传量按 COMPLETE_UPLOAD 审计和文件大小；下载申请量按成功 DOWNLOAD_FILE 和文件大小估算，不是 OSS 实际计费流量，不含失败分片、重试及预览 Range 字节。
 - 大图标名称两行、小图标一行省略，点击或勾选后展开，取消后恢复。
+
+## Office 预览（0.3.0）
+
+管理文件预览与外部分享预览都沿用原权限。DOC/DOCX 用 LibreOffice 生成 PDF，XLS/XLSX/CSV 用只读解析器展示工作表；20 MB 输入上限，Excel 最多20个可枚举表中的可见表、每表200行50列、总30000单元格与50万字符，单元格500字符。公式显示文件保存的缓存结果，图表、嵌入图片、格式和隐藏工作表不展示。
+
+转换依赖 CentOS 的 libreoffice-writer、bubblewrap（字体已随系统包安装），独立 `/opt/cloud-preview-venv` 安装 `preview-requirements.txt`。bwrap 使用用户/进程/网络命名空间，只挂载 `/usr`、字体/动态链接器配置、解析器运行时、单次临时目录和worker脚本；不挂载应用目录、数据库或密钥。LibreOffice 使用 svp 无界面后端与每任务独立配置，宏执行关闭。工作进程地址空间768 MB、CPU25秒、文件25 MB、进程64限制，宿主40秒超时杀进程组。全局单任务，按用户/分享IP每分钟最多12次预览申请。
+
+Office 原件经已验证权限后由服务器限量读取，只有首次转换有这部分流量；图片/音视频/普通PDF继续走短期 OSS 直链。缓存位于 DATA_DIR/share-preview-cache，目录700、文件600，按日过期、清理阈值100 MB（单次新增结果可再占最多20 MB），仅应用可读，没有公共缓存URL。结果经原预览POST返回，转换后再次校验权限。客户端关闭弹窗清理Blob URL，不影响原文件和分享码。
+
+PDF 使用浏览器原生阅读器；手机若内嵌阅读不完整，可点“在浏览器中打开 PDF”。Office首次转换失败、加密或超限会提示下载原文件，不阻塞其他文件操作。

@@ -153,6 +153,7 @@
     if($('refreshFiles'))$('refreshFiles').onclick=()=>refreshFiles(false);
     if($('dropzone')){const zone=$('dropzone');zone.onclick=()=>$('fileInput').click();zone.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('fileInput').click();}};}
     const workspace=$('fileWorkspace');
+    if(workspace)workspace.ondblclick=e=>{const tile=e.target.closest('[data-tile]'),cell=e.target.closest('.file-cell');const id=tile?.dataset.tile||cell?.closest('tr')?.querySelector('[data-action=preview]')?.dataset.file;if(id&&!e.target.closest('button,input')){const f=currentFiles.find(f=>f.id===id);preview(f,()=>api(base+'/files/'+f.id+'/preview',{}),async()=>{const d=await api(base+'/files/'+f.id+'/download',{});const a=document.createElement('a');a.href=d.url;a.click();});}};
     if(workspace){
       workspace.ondragover=e=>{if([...e.dataTransfer.types].includes('Files')){e.preventDefault();e.dataTransfer.dropEffect='copy';workspace.classList.add('drag');}};
       workspace.ondragleave=e=>{if(!workspace.contains(e.relatedTarget))workspace.classList.remove('drag');};
@@ -178,7 +179,7 @@
     if(b.dataset.singleShare)return await shareForm(null,[currentFiles.find(f=>f.id===b.dataset.singleShare)]);
     if(b.dataset.file){const file=currentFiles.find(f=>f.id===b.dataset.file),action=b.dataset.action;
       if(action==='rename')return renameFile(file);
-      if(action==='preview'){const d=await api(base+'/files/'+file.id+'/preview',{});return await preview(file,d.url);}
+      if(action==='preview')return await preview(file,()=>api(base+'/files/'+file.id+'/preview',{}),async()=>{const d=await api(base+'/files/'+file.id+'/download',{});const a=document.createElement('a');a.href=d.url;a.rel='noopener noreferrer';a.click();});
       return confirmAction(action==='purge'?'永久删除文件？':action==='trash'?'移入回收站？':'恢复文件？',action==='purge'?'OSS 原文件将永久删除，无法恢复。':action==='trash'?'已有分享将立即无法访问此文件。':'恢复后，仍有效的原分享可以再次访问此文件。',async()=>{await api(base+'/files/'+file.id+'/'+action,{});selected.delete(file.id);await render();toast('操作成功');});
     }
   }catch(error){toast(error.message);}};

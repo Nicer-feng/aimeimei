@@ -19,6 +19,7 @@ from infrastructure.ip_geolocation import enrich_logs
 from infrastructure.storage import PrivateOSS, StorageSecurityError, shared_storage_config
 from .database import transaction
 from .platform import platform_report
+from .office_preview import office_preview, PreviewError
 from .security import classify, client_info, hash_password, verify_password
 
 ROOT = Path(__file__).resolve().parent
@@ -103,6 +104,8 @@ class FileShareHandlersMixin:
                     return self.json({'platform_admin':user['role'] == 'admin'})
                 return self.fs_admin(path.removeprefix('/api/file-share/admin'), data, user['id'])
             return self.fs_public(path.removeprefix('/api/file-share/public/'), data)
+        except PreviewError as exc:
+            return self.error(422, str(exc))
         except StorageSecurityError as exc:
             return self.error(503, str(exc))
         except ShareError as exc:
@@ -244,10 +247,20 @@ class FileShareHandlersMixin:
             file_id, action = parts[1:]
             with transaction() as conn:
                 row = self.fs_owned_file(conn, file_id, user_id)
-                if action == 'preview':
+                if action in ('preview','download'):
                     require(row['status'] == 'READY', '文件不可用', 404)
-                    require(row['file_type'] in {'IMAGE','VIDEO','AUDIO','PDF','TEXT'}, '暂不支持在线预览，请下载查看')
-                    return self.json({'url': self.fs_oss(row).access_url(row['object_key'], row['filename'], row['mime_type'])})
+                    if action == 'preview' and row['file_type'] in {'WORD','EXCEL'}:
+                        require(self.fs_rate(conn,'office-owner:'+user_id,12,60),'文档预览请求过于频繁，请稍后重试',429)
+                        conn.commit()  # Conversion must not hold the database write lock.
+                        result = office_preview(row,self.fs_oss(row))
+                        user = self.current_user()
+                        conn.execute('BEGIN IMMEDIATE')
+                        member = conn.execute('SELECT enabled FROM share_members WHERE user_id=?',(user_id,)).fetchone()
+                        require(user and user['id']==user_id and (user['role']=='admin' or (member and member['enabled'])), '访问权限已失效',401)
+                        require(self.fs_owned_file(conn,file_id,user_id)['status']=='READY','文件不可用',404)
+                        return self.json(result)
+                    require(action=='download' or row['file_type'] in {'IMAGE','VIDEO','AUDIO','PDF','TEXT'}, '暂不支持在线预览，请下载查看')
+                    return self.json({'url': self.fs_oss(row).access_url(row['object_key'], row['filename'], row['mime_type'],action=='download')})
                 if action == 'rename':
                     require(row['status'] == 'READY', '只有正常文件可以重命名', 409)
                     filename = data.get('filename')
@@ -528,9 +541,21 @@ class FileShareHandlersMixin:
             if not session or not file or not row['allow_' + action]:
                 self.fs_log(conn,row,log_action,False,file_id if file else None)
                 return self.error(403,'当前分享不允许此操作，或访问验证已过期')
-            if action=='preview' and file['file_type'] not in {'IMAGE','VIDEO','AUDIO','PDF','TEXT'}:
+            if action=='preview' and file['file_type'] not in {'IMAGE','VIDEO','AUDIO','PDF','TEXT','WORD','EXCEL'}:
                 self.fs_log(conn,row,log_action,False,file_id)
                 return self.error(415,'暂不支持在线预览，请下载查看')
+            if action=='preview' and file['file_type'] in {'WORD','EXCEL'}:
+                require(self.fs_rate(conn,'office-share:'+row['id']+':'+client_info(self)['ip'],12,60),'文档预览请求过于频繁，请稍后重试',429)
+                conn.commit()
+                result=office_preview(file,self.fs_oss(file))
+                conn.execute('BEGIN IMMEDIATE')
+                latest=conn.execute('SELECT * FROM shares WHERE id=?',(row['id'],)).fetchone()
+                valid_session=conn.execute('SELECT 1 FROM share_sessions WHERE token_hash=? AND share_id=? AND auth_version=? AND expires_at>?',(hashlib.sha256(token.encode()).hexdigest(),row['id'],latest['auth_version'],timestamp())).fetchone()
+                current_file=conn.execute("SELECT 1 FROM share_files f JOIN share_files_relation r ON r.file_id=f.id WHERE f.id=? AND f.status='READY' AND r.share_id=?",(file_id,row['id'])).fetchone()
+                require(available(latest),INVALID,410)
+                require(valid_session and latest['allow_preview'] and current_file,'预览权限已失效',403)
+                self.fs_log(conn,latest,log_action,True,file_id)
+                return self.json(result)
             url = self.fs_oss(file).access_url(file['object_key'],file['filename'],file['mime_type'],action=='download')
             if action=='download':
                 changed=conn.execute('UPDATE shares SET download_count=download_count+1 WHERE id=? AND (max_downloads IS NULL OR download_count<max_downloads)',(row['id'],)).rowcount
