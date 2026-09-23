@@ -18,6 +18,7 @@ import uuid
 from infrastructure.ip_geolocation import enrich_logs
 from infrastructure.storage import PrivateOSS, StorageSecurityError, shared_storage_config
 from .database import transaction
+from .platform import platform_report
 from .security import classify, client_info, hash_password, verify_password
 
 ROOT = Path(__file__).resolve().parent
@@ -88,7 +89,18 @@ class FileShareHandlersMixin:
             data = self.fs_body() if self.command == 'POST' else {}
             if path.startswith('/api/file-share/admin'):
                 user = self.current_user()
-                require(user and user['role'] == 'admin', '请使用管理员账号登录', 401)
+                require(user, '请先登录', 401)
+                with transaction() as conn:
+                    member = conn.execute('SELECT enabled FROM share_members WHERE user_id=?', (user['id'],)).fetchone()
+                require(user['role'] == 'admin' or (member and member['enabled']), '该账号尚未开通槑槑云权限', 401)
+                if path.startswith('/api/file-share/admin/platform'):
+                    require(user['role'] == 'admin', '仅平台管理员可以访问', 403)
+                    return self.fs_platform(path.removeprefix('/api/file-share/admin/platform'), data, user['id'])
+                if path == '/api/file-share/admin/presence' and self.command == 'POST':
+                    with transaction() as conn:
+                        conn.execute('INSERT OR IGNORE INTO share_members(user_id) VALUES(?)', (user['id'],))
+                        conn.execute('UPDATE share_members SET last_visit_at=?,last_login_at=CASE WHEN ? THEN ? ELSE last_login_at END WHERE user_id=?', (timestamp(),data.get('login') is True,timestamp(),user['id']))
+                    return self.json({'platform_admin':user['role'] == 'admin'})
                 return self.fs_admin(path.removeprefix('/api/file-share/admin'), data, user['id'])
             return self.fs_public(path.removeprefix('/api/file-share/public/'), data)
         except StorageSecurityError as exc:
@@ -104,6 +116,27 @@ class FileShareHandlersMixin:
         except (HTTPError, URLError, TimeoutError, OSError):
             # Never return upstream URLs (which may contain signatures) or credentials.
             return self.error(502, '存储操作失败，请检查 OSS 配置、权限和网络后重试')
+
+    def fs_platform(self, path, data, actor):
+        if path == '/report' and self.command == 'GET':
+            qs = parse_qs(urlparse(self.path).query)
+            days = int(qs.get('days', ['7'])[0])
+            require(days in (7,30,90), '请选择 7、30 或 90 天')
+            page = max(1,min(100000,int(qs.get('page',['1'])[0])))
+            with transaction() as conn:
+                report = platform_report(conn, days, page, qs.get('search',[''])[0][:80], qs.get('user_id',[''])[0])
+            return self.json(report)
+        if path == '/access' and self.command == 'POST':
+            target = str(data.get('user_id',''))
+            require(type(data.get('enabled')) is bool, '权限参数不正确')
+            with transaction() as conn:
+                user = conn.execute('SELECT id,role FROM users WHERE id=?', (target,)).fetchone()
+                require(user, '用户不存在', 404)
+                require(user['role'] != 'admin', '平台管理员权限由统一账号体系管理')
+                conn.execute('INSERT INTO share_members(user_id,enabled) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled', (target,int(data['enabled'])))
+                self.fs_audit(conn,actor,'ENABLE_CLOUD' if data['enabled'] else 'DISABLE_CLOUD',target)
+            return self.json({'ok':True})
+        raise ShareError('接口不存在',404)
 
     def fs_oss(self, row=None):
         config = shared_storage_config(self.server.secrets)

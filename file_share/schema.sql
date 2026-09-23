@@ -52,3 +52,10 @@ CREATE INDEX IF NOT EXISTS ip_locations_expiry ON infrastructure_ip_locations(ex
 
 -- Preserve stricter per-user limits; clamp legacy settings to the platform cap.
 UPDATE share_settings SET max_upload_bytes=524288000 WHERE max_upload_bytes>524288000;
+
+CREATE TABLE IF NOT EXISTS share_members (
+ user_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
+ last_login_at INTEGER, last_visit_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS sal_time ON share_access_logs(created_at);
+CREATE INDEX IF NOT EXISTS share_audit_action_time ON share_audit_logs(action,created_at);

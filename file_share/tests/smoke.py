@@ -125,3 +125,27 @@ assert req(a,'/api/file-share/admin/settings',{'max_upload_bytes':1})[0]==200
 assert req(a,'/api/file-share/admin/uploads',{'filename':'small.bin','size':2,'sha256':'a'*64})[0]==413
 assert req(a,'/api/file-share/admin/settings',{'max_upload_bytes':cap})[0]==200
 print('PASS: 500 MB boundary, oversized upload denied, settings cannot exceed cap, stricter user limit preserved')
+
+# Platform access remains separate from private file ownership.
+platform='/api/file-share/admin/platform'
+assert req(anon,platform+'/report')[0]==401
+assert req(member,platform+'/report')[0]==401
+assert req(a,platform+'/report?days=10000')[0]==400
+assert req(a,platform+'/access',{'user_id':'member','enabled':True})[0]==200
+assert req(member,'/api/file-share/admin/files')[0]==200
+assert req(member,platform+'/report')[0]==403
+assert req(member,platform+'/access',{'user_id':'member','enabled':True})[0]==403
+assert req(member,f'/api/file-share/admin/files/{fid}/preview',{})[0]==404
+assert req(member,'/api/file-share/admin/presence',{'login':True})[1]['platform_admin'] is False
+_,report=req(a,platform+'/report?days=7')
+u=next(u for u in report['users'] if u['id']=='member')
+assert u['last_login_at'] and u['last_visit_at'] and u['cloud_enabled']
+assert report['period']['upload_bytes']>0 and report['period']['downloads']>=3
+assert report['period']['download_bytes']>=3*len(b'\x89PNG\r\n\x1a\nhello test')
+assert report['period']['download_bytes']==sum(d['download_bytes'] for d in report['daily'])
+assert len(report['daily'])==7
+assert not any(k in json.dumps(report) for k in ['password_hash','object_key','phone','upload_id'])
+assert req(a,platform+'/access',{'user_id':'member','enabled':False})[0]==200
+assert req(member,'/api/file-share/admin/files')[0]==401
+assert req(a,platform+'/report?user_id=member')[1]['period']['download_bytes']==0
+print('PASS: platform authorization, opt-in cloud member, owner isolation, presence, daily sums, estimated traffic, access revocation')

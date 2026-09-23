@@ -1,6 +1,6 @@
 # 槑槑云 v0.1.8
 
-当前线上版本为0.1.8。
+当前版本为0.2.0。
 
 2026-09-14 16:57 已上线：https://feng.asia/admin/share 。真实 OSS 和浏览器闭环通过。
 
@@ -12,7 +12,7 @@
 - 独立接口：`/api/file-share/admin/*`、`/api/file-share/public/*`。
 - 独立后端：`file_share/`；静态资源：`res/file-share/`。
 - 独立数据表：`share_files`、`shares`、`share_files_relation`、`share_access_logs`、`share_sessions`、`share_settings`、`share_rate_limits`、`share_audit_logs`。
-- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.1.8`。
+- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.2.0`。
 - 不进入 AI槑槑后台菜单；共享已有管理员登录 Session、SQLite 连接以及 OSS 配置。
 - 第一版仍由现有 Python 进程承载，更新后端需要重启该进程，因此暂时不是独立部署单元。后续可以在保持接口和产品目录不变的前提下拆进程。
 - AI 对话分享仍使用 `/ai/share/{43位令牌}`，原 `/share/{43位令牌}` 兼容保留。
@@ -36,7 +36,7 @@ AI_PLATFORM_DATA=/tmp/share-dev AI_PLATFORM_LISTEN=127.0.0.1:8080 python3 app.py
 
 建议使用虚拟环境。启动时幂等执行 `schema.sql`，只新增产品数据表。该项目是 Python/SQLite，不涉及 xonion 的 MySQL 或 AutoMigrate。
 
-登录复用 `/api/captcha`、`/api/login`、`/api/me` 和 `/api/logout`。分享后台要求有效管理员用户 Session，不接受无用户归属的 `X-Admin-Key` 作为文件所有者。
+登录复用 `/api/captcha`、`/api/login`、`/api/me` 和 `/api/logout`。分享工作空间要求有效管理员或已开通云权限的用户 Session，不接受无用户归属的 `X-Admin-Key` 作为文件所有者。
 
 ## OSS
 
@@ -127,4 +127,13 @@ python3 file_share/tests/run.py
 
 ## 短信登录
 
-登录页可切换账号密码或短信登录。完全复用AI槑槑的/api/sms-login/config、/send、/verify与现有Session、已绑定并启用手机号及短信配置，不单独保存签名/模板/Key。未配置时回退密码登录。发送前校验图形验证码，重发时间按服务端返回值倒计时。短信核验成功仍需管理员身份；普通用户无法进入文件后台，后端管理员接口继续返回401。
+登录页可切换账号密码或短信登录。完全复用AI槑槑的/api/sms-login/config、/send、/verify与现有Session、已绑定并启用手机号及短信配置，不单独保存签名/模板/Key。未配置时回退密码登录。短信模式不要求图形验证码，账号密码模式保留；重发时间按服务端返回值倒计时。普通用户需要先开通云权限。
+
+## 平台管理（0.2.0）
+
+- 独立入口仅 admin 可见，普通账号需在用户管理开通云权限，文件仍按账号隔离。
+- report 接口支持近7/30/90天、北京时间、按用户过滤和分页；仅返回基本账号信息和统计。
+- access 接口开通/停用云权限，不更改 AI 角色或账号整体状态。停用仅禁止工作空间，已有公开分享继续受原规则约束。
+- presence 记录最近进入云；从云登录页认证后另记最后云登录。共享登录状态不会伪造新的登录时间，历史未知留空。
+- 上传量按 COMPLETE_UPLOAD 审计和文件大小；下载申请量按成功 DOWNLOAD_FILE 和文件大小估算，不是 OSS 实际计费流量，不含失败分片、重试及预览 Range 字节。
+- 大图标名称两行、小图标一行省略，点击或勾选后展开，取消后恢复。

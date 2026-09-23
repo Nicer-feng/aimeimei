@@ -3,6 +3,8 @@
   const {$,esc,icon,fileIcon,refreshIcons,size,date,badge,actions,api,toast,dialog,close,copy,preview}=FS;
   const base='/api/file-share/admin';
   const sections=[['overview','概览','layout-dashboard','让每一次文件交付，简单而有序。'],['files','文件','files','管理文件，为它们创建安全的分享链接。'],['shares','分享','link','决定谁可以访问，以及何时结束。'],['logs','访问记录','activity','查看每一次访问、预览与下载请求。'],['trash','回收站','trash-2','误删的文件可以恢复，永久删除前会再次确认。'],['settings','设置','settings-2','分享中心的独立偏好设置。']];
+  let platformAdmin=false;
+  sections.push(['platform','平台管理','shield-check','查看槑槑云用户、存储和访问情况。']);
   let section='overview',page=1,filters={search:'',type:'',sort:'newest'},currentFiles=[],selected=new Map(),renderId=0,captchaId='',uploading=false;
 
   let fileView='list',fileRefreshBusy=false,lastFileRefresh=0;
@@ -37,7 +39,16 @@
   window.addEventListener('focus',checkVersion);
 
   async function captcha(){const data=await api('/api/captcha');captchaId=data.captcha_id;$('captchaImage').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(data.image_svg);}
-  async function authenticated(){const me=await api('/api/me');if(!me.authenticated||me.user.role!=='admin'){$('login').hidden=false;$('app').hidden=true;await Promise.all([captcha(),loadSmsConfig()]);refreshIcons();return false;}$('login').hidden=true;$('app').hidden=false;$('account').textContent=me.user.display_name||me.user.username;await navigate(location.hash.slice(1)||'overview');checkVersion();return true;}
+  async function authenticated(login=false){
+    const me=await api('/api/me');
+    let access=null,accessError='';
+    if(me.authenticated){try{access=await api(base+'/presence',{login});}catch(error){if(error.status!==401)throw error;accessError=error.message;}}
+    if(!access){$('login').hidden=false;$('app').hidden=true;await Promise.all([captcha(),loadSmsConfig()]);$('loginError').textContent=accessError;refreshIcons();return false;}
+    platformAdmin=access.platform_admin;
+    $('nav').innerHTML=sections.filter(s=>s[0]!=='platform'||platformAdmin).map(([key,label,image])=>`<button data-section="${key}">${icon(image)}${label}</button>`).join('');
+    $('login').hidden=true;$('app').hidden=false;$('account').textContent=me.user.display_name||me.user.username;
+    await navigate(location.hash.slice(1)||'overview');checkVersion();return true;
+  }
   $('captchaRefresh').onclick=()=>captcha().catch(e=>toast(e.message));
 
   let loginMode='password',smsConfigured=false,smsChallenge='',smsPhone='',smsSending=false,loginBusy=false,smsUntil=0,smsTimer;
@@ -67,7 +78,7 @@
   async function loadSmsConfig(){
     try{smsConfigured=Boolean((await api('/api/sms-login/config')).sms_auth?.configured);}catch{smsConfigured=false;}
     $('smsLoginTab').disabled=!smsConfigured;
-    $('smsAvailability').textContent=smsConfigured?'短信登录仅支持已绑定并启用的管理员手机号。':'短信登录暂不可用，请使用账号密码登录。';
+    $('smsAvailability').textContent=smsConfigured?'短信登录支持已绑定手机号且已开通槑槑云的账号。':'短信登录暂不可用，请使用账号密码登录。';
     setLoginMode(loginMode);smsCountdown();
   }
   $('passwordLoginTab').onclick=()=>setLoginMode('password');
@@ -101,9 +112,9 @@
         const data=Object.fromEntries(new FormData(event.target));data.captcha_id=captchaId;
         result=await api('/api/login',data);
       }
-      if(result.user?.role!=='admin')throw new Error('该账号没有管理员权限，请使用管理员账号登录');
+
       clearInterval(smsTimer);smsChallenge='';$('smsCode').value='';$('loginForm').elements.password.value='';
-      await authenticated();
+      await authenticated(true);
     }catch(error){$('loginError').textContent=error.message;if(mode==='password'){loginCaptcha.value='';try{await captcha();}catch{}}}
     finally{loginBusy=false;button.disabled=false;smsCountdown();}
   };
@@ -111,7 +122,7 @@
   $('logout').onclick=async()=>{await api('/api/logout',{});location.reload();};
   $('nav').innerHTML=sections.map(([key,label,image])=>`<button data-section="${key}">${icon(image)}${label}</button>`).join('');
   $('nav').onclick=e=>{const b=e.target.closest('[data-section]');if(b)navigate(b.dataset.section).catch(error=>toast(error.message));};
-  async function navigate(next){clearTimeout(logRefreshTimer);logRefreshAttempts=0;section=sections.some(s=>s[0]===next)?next:'overview';page=1;history.replaceState(null,'','#'+section);await render();}
+  async function navigate(next){clearTimeout(logRefreshTimer);logRefreshAttempts=0;section=sections.some(s=>s[0]===next&&(next!=='platform'||platformAdmin))?next:'overview';page=1;history.replaceState(null,'','#'+section);await render();}
   function empty(message='这里还没有内容',image='inbox'){return `<div class="empty">${icon(image)}<p>${esc(message)}</p></div>`;}
   function pagination(total){return `<div class="pagination"><span>共 ${total} 条 · 第 ${page} / ${Math.max(1,Math.ceil(total/20))} 页</span><button data-page="${page-1}" ${page<=1?'disabled':''}>上一页</button><button data-page="${page+1}" ${page*20>=total?'disabled':''}>下一页</button></div>`;}
   function logTable(logs){if(!logs.length)return empty('暂无访问记录','activity');return `<div class="table-wrap"><table><thead><tr><th>时间</th><th>访问者 IP</th><th>IP 归属地</th><th>浏览器 / 系统</th><th>行为</th><th>文件 / 分享</th><th>结果</th></tr></thead><tbody>${logs.map(l=>`<tr><td>${date(l.created_at)}</td><td>${esc(l.ip)}</td><td>${esc([...new Set([l.country,l.province,l.city].filter(Boolean))].join(' / ')||(l.geolocation_status==='pending'?'查询中…':'—'))}</td><td>${esc(l.browser)} / ${esc(l.os)}<br><small>${esc(l.device)}</small></td><td>${esc(actions[l.action]||l.action)}</td><td>${esc(l.filename||l.title)}</td><td>${l.success?'成功':'<span class="error">未通过</span>'}</td></tr>`).join('')}</tbody></table></div><p class="geo-attribution muted">IP geolocation by <a href="https://www.ip2location.io" target="_blank" rel="noopener noreferrer">IP2Location.io</a></p>`;}
@@ -121,7 +132,8 @@
     clearTimeout(logRefreshTimer);
     const requestId=++renderId;const def=sections.find(s=>s[0]===section);$('breadcrumb').textContent=def[1];$('pageTitle').textContent=def[1];$('pageDescription').textContent=def[3];document.querySelectorAll('[data-section]').forEach(b=>b.classList.toggle('active',b.dataset.section===section));if(!quiet)$('content').innerHTML=empty('正在加载…','loader-circle');refreshIcons();
     let html='',pendingLocations=false;
-    if(section==='overview'){
+    if(section==='platform'){html=await CloudPlatform.render(page);
+    }else if(section==='overview'){
       const d=await api(base+'/overview');html=`<div class="stats">${[['文件总数',d.file_count,'files'],['总存储量',size(d.total_size),'hard-drive'],['有效分享',d.active_shares,'link'],['今日访问',d.today_views,'eye'],['今日下载',d.today_downloads,'download']].map(([label,value,image])=>`<div class="stat"><div class="stat-label">${icon(image)}${label}</div><div class="stat-value">${value}</div></div>`).join('')}</div><div class="grid-two"><section class="panel"><div class="panel-header"><h3>最近分享</h3><button data-go="shares" class="quiet">查看全部 ${icon('arrow-up-right')}</button></div>${d.recent_shares.length?d.recent_shares.map(s=>`<div class="list-row"><span class="file-icon">${icon('link')}</span><div class="list-main"><strong>${esc(s.title)}</strong><small>${s.view_count} 次访问 · ${date(s.created_at)}</small></div>${badge(s.status)}<button class="icon-button quiet" data-detail="${s.id}" aria-label="查看分享详情">${icon('chevron-right')}</button></div>`).join(''):empty('上传第一份文件，开始分享','folder-output')}</section><section class="panel"><div class="panel-header"><h3>最近访问</h3><button data-go="logs" class="quiet">查看全部 ${icon('arrow-up-right')}</button></div>${d.recent_logs.length?d.recent_logs.map(l=>`<div class="list-row"><span class="file-icon">${icon(l.action==='DOWNLOAD_FILE'?'download':'eye')}</span><div class="list-main"><strong>${esc(actions[l.action])} · ${esc(l.filename||l.title)}</strong><small>${esc(l.ip)} · ${esc(l.browser)} · ${date(l.created_at)}</small></div>${l.success?'':'<span class="error">失败</span>'}</div>`).join(''):empty('分享后的访问足迹会出现在这里','activity')}</section></div>`;
     }else if(section==='files'||section==='trash'){
       const params=new URLSearchParams({...filters,page,trash:section==='trash'?'1':'0'});const d=await api(base+'/files?'+params);if(requestId!==renderId)return;currentFiles=d.items;lastFileRefresh=Date.now();d.items.forEach(f=>{if(selected.has(f.id))selected.set(f.id,f);});
@@ -136,6 +148,7 @@
     if(section==='logs'&&pendingLocations&&logRefreshAttempts<20){logRefreshAttempts++;logRefreshTimer=setTimeout(()=>render(true).catch(()=>{}),2000);}
   }
   function bindContent(){
+    if(section==='platform')CloudPlatform.bind(()=>{page=1;return render(true);},()=>render(true));
     if($('refreshLogs'))$('refreshLogs').onclick=()=>{logRefreshAttempts=0;render(true).catch(e=>toast(e.message));};
     if($('refreshFiles'))$('refreshFiles').onclick=()=>refreshFiles(false);
     if($('dropzone')){const zone=$('dropzone');zone.onclick=()=>$('fileInput').click();zone.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('fileInput').click();}};}
@@ -145,7 +158,7 @@
       workspace.ondragleave=e=>{if(!workspace.contains(e.relatedTarget))workspace.classList.remove('drag');};
       workspace.ondrop=e=>{e.preventDefault();workspace.classList.remove('drag');closeFileMenu();uploadFiles([...e.dataTransfer.files]).catch(error=>toast(error.message));};
       workspace.oncontextmenu=e=>{const tile=e.target.closest('[data-tile]');if(tile){e.preventDefault();openFileMenu(tile.dataset.tile,e.clientX,e.clientY,tile);}};
-      workspace.onkeydown=e=>{const tile=e.target.closest('[data-tile]');if(tile&&(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10'))){e.preventDefault();const r=tile.getBoundingClientRect();openFileMenu(tile.dataset.tile,r.left,r.top,tile);}};
+      workspace.onkeydown=e=>{const tile=e.target.closest('[data-tile]');if(tile&&e.target===tile&&['Enter',' '].includes(e.key)){e.preventDefault();tile.click();return;}if(tile&&(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10'))){e.preventDefault();const r=tile.getBoundingClientRect();openFileMenu(tile.dataset.tile,r.left,r.top,tile);}};
     }
     function search(){filters={search:$('searchFiles').value,type:$('typeFilter').value,sort:$('sortFilter').value};page=1;render().catch(e=>toast(e.message));}
     if($('searchButton')){$('searchButton').onclick=search;$('searchFiles').onkeydown=e=>{if(e.key==='Enter')search();};$('typeFilter').onchange=search;$('sortFilter').onchange=search;}
@@ -153,7 +166,7 @@
     if($('settingsForm'))$('settingsForm').onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));try{await api(base+'/settings',{display_name:data.display_name,max_upload_bytes:Math.round(Number(data.max_mb)*1024**2)});toast('设置已保存');}catch(error){toast(error.message);}};
   }
   $('content').onchange=e=>{if(e.target.dataset.select){const file=currentFiles.find(f=>f.id===e.target.dataset.select);if(e.target.checked)selected.set(file.id,file);else selected.delete(file.id);}};
-  $('content').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{
+  $('content').onclick=async e=>{const b=e.target.closest('button');if(!b){const tile=e.target.closest('[data-tile]');if(tile&&!e.target.closest('input')){const box=tile.querySelector('[data-select]');box.checked=!box.checked;box.dispatchEvent(new Event('change',{bubbles:true}));}return;}try{
     if(b.dataset.view){fileView=b.dataset.view;try{localStorage.setItem('cloud-file-view',fileView);}catch{}return await render(true);}
     if(b.dataset.menu){const r=b.getBoundingClientRect();return openFileMenu(b.dataset.menu,r.left,r.bottom,b);}
     if(b.hasAttribute('data-version'))return await showVersion();
