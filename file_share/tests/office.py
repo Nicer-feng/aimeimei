@@ -75,6 +75,9 @@ with admin.open(urllib.request.Request(permit['url'], data=original, headers=per
 assert req(admin, f'/api/file-share/admin/uploads/{file_id}/complete',
            {'parts': [{'part_number': 1, 'etag': etag}]})[0] == 200
 source_key = scalar('SELECT object_key FROM share_files WHERE id=?', (file_id,))
+status, files = req(admin, '/api/file-share/admin/files')
+assert status == 200 and files['items'][0]['last_edited_at'] is None, (status, files)
+assert req(other, '/api/file-share/admin/files')[1]['items'] == []
 status, share = req(admin, '/api/file-share/admin/shares', {'title': 'Office test', 'file_ids': [file_id]})
 assert status == 201, (status, share)
 public = '/api/file-share/public/' + share['share_code']
@@ -97,6 +100,7 @@ assert req(admin, f'/api/file-share/admin/files/{file_id}/trash', {})[0] == 409
 assert req(other, f'{route}/sessions/{session_id}/snapshot', {})[0] == 404
 initial_versions = req(admin, f'{route}/files/{file_id}/versions')[1]['items']
 assert len(initial_versions) == 1 and initial_versions[0]['published'] and initial_versions[0]['number'] == 1
+assert req(admin, '/api/file-share/admin/files')[1]['items'][0]['last_edited_at'] is None
 assert req(admin, f'{route}/files/{file_id}/publish', {'version_id': initial_versions[0]['id']})[0] == 409
 
 old_token = started['access_token']
@@ -114,6 +118,11 @@ with admin.open(urllib.request.Request(write_url, data=updated, method='PUT')) a
 status, saved = req(admin, f'{route}/sessions/{session_id}/snapshot', {})
 assert status == 200, (status, saved)
 assert saved['version']['number'] == 2 and not saved['version']['published']
+saved_at = scalar('SELECT created_at FROM share_office_versions WHERE id=?', (saved['version']['id'],))
+assert req(admin, '/api/file-share/admin/files')[1]['items'][0]['last_edited_at'] == saved_at
+assert req(admin, f'/api/file-share/admin/files/{file_id}/rename',
+           {'filename': 'renamed-report.docx'})[0] == 200
+assert req(admin, '/api/file-share/admin/files')[1]['items'][0]['last_edited_at'] == saved_at
 assert req(admin, f'{route}/sessions/{session_id}/snapshot', {})[1]['version']['id'] == saved['version']['id']
 version_key = scalar('SELECT object_key FROM share_office_versions WHERE id=?', (saved['version']['id'],))
 assert version_key != draft_key and version_key != source_key
@@ -124,6 +133,7 @@ assert status == 200 and source_key in old_download['url'], (status, old_downloa
 assert req(other, f'{route}/files/{file_id}/publish', {'version_id': saved['version']['id']})[0] == 404
 status, published = req(admin, f'{route}/files/{file_id}/publish', {'version_id': saved['version']['id']})
 assert status == 200 and published['version']['published'], (status, published)
+assert req(admin, '/api/file-share/admin/files')[1]['items'][0]['last_edited_at'] == saved_at
 assert scalar('SELECT object_key FROM share_files WHERE id=?', (file_id,)) == version_key
 assert scalar('SELECT sha256 FROM share_files WHERE id=?', (file_id,)) == hashlib.sha256(updated).hexdigest()
 status, new_download = req(anon, public + '/download', {'file_id': file_id})
@@ -150,6 +160,9 @@ status, reopened = req(admin, f'{route}/files/{file_id}/start', {})
 assert status == 200 and reopened['recovered'] is True, (status, reopened)
 status, recovered_version = req(admin, f"{route}/sessions/{reopened['session_id']}/snapshot", {})
 assert status == 200 and recovered_version['version']['number'] == 3, (status, recovered_version)
+recovered_at = scalar('SELECT created_at FROM share_office_versions WHERE id=?',
+                      (recovered_version['version']['id'],))
+assert req(admin, '/api/file-share/admin/files')[1]['items'][0]['last_edited_at'] == recovered_at
 assert scalar('SELECT sha256 FROM share_office_versions WHERE id=?', (recovered_version['version']['id'],)) == hashlib.sha256(unsaved).hexdigest()
 assert scalar('SELECT object_key FROM share_files WHERE id=?', (file_id,)) == version_key
 assert req(admin, f"{route}/sessions/{reopened['session_id']}/close", {})[0] == 200
@@ -157,6 +170,7 @@ assert req(admin, f"{route}/sessions/{reopened['session_id']}/close", {})[0] == 
 status, rollback = req(admin, f'{route}/files/{file_id}/publish',
     {'version_id': initial_versions[0]['id']})
 assert status == 200 and rollback['version']['number'] == 1, (status, rollback)
+assert req(admin, '/api/file-share/admin/files')[1]['items'][0]['last_edited_at'] == recovered_at
 assert scalar('SELECT object_key FROM share_files WHERE id=?', (file_id,)) == source_key
 status, after_rollback = req(admin, f'{route}/files/{file_id}/start', {})
 assert status == 200 and after_rollback['recovered'] is False, (status, after_rollback)
@@ -218,6 +232,9 @@ with admin.open(urllib.request.Request(second_write_url, data=second_v3, method=
 status, second_saved_v3 = req(admin, f'{route}/sessions/{second_session_id}/snapshot', {})
 assert status == 200 and second_saved_v3['version']['number'] == 3, (status, second_saved_v3)
 assert second_saved_v3['version']['id'] != second_saved_v2['version']['id']
+second_saved_at = scalar('SELECT MAX(created_at) FROM share_office_versions '
+                         'WHERE file_id=? AND source_session_id IS NOT NULL', (second_id,))
+assert req(admin, '/api/file-share/admin/files')[1]['items'][0]['last_edited_at'] == second_saved_at
 status, second_published = req(admin, f'{route}/files/{second_id}/publish',
                                {'version_id': second_saved_v2['version']['id']})
 assert status == 200 and second_published['version']['number'] == 2, (status, second_published)

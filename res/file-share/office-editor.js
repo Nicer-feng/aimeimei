@@ -175,6 +175,7 @@ window.CloudOffice=(()=>{
       const number=data.version?.number;
       setStatus('saved',number!=null?'已保存版本 v'+number+' · 尚未发布':'版本已保存 · 尚未发布');
       deps.toast('版本已保存，分享链接尚未切换');
+      try{await deps.onChanged?.();}catch{}
       return data.version;
     }catch(error){
       if($('officeStatus').dataset.state!=='failed')setStatus('failed','保存版本失败',error.message);
@@ -193,13 +194,16 @@ window.CloudOffice=(()=>{
     if(!session||busy)return;
     setBusy(true);
     const activeSession=session;
+    let savedOnClose=false;
     try{
       if(!force){
-        if(withVersion&&!pendingCloseVersionSaved){await flushDraft();const data=await deps.api(endpoint('sessions/'+encodeURIComponent(activeSession.id)+'/snapshot'),{});pendingCloseVersionSaved=true;deps.toast(data.version?.number!=null?'版本 v'+data.version.number+' 已保存，尚未发布':'版本已保存，尚未发布');}
+        if(withVersion&&!pendingCloseVersionSaved){await flushDraft();const data=await deps.api(endpoint('sessions/'+encodeURIComponent(activeSession.id)+'/snapshot'),{});pendingCloseVersionSaved=true;savedOnClose=true;deps.toast(data.version?.number!=null?'版本 v'+data.version.number+' 已保存，尚未发布':'版本已保存，尚未发布');}
         else await flushDraft();
       }
       await deps.api(endpoint('sessions/'+encodeURIComponent(activeSession.id)+'/close'),{});
+      const refreshList=savedOnClose||pendingCloseVersionSaved;
       destroy();
+      if(refreshList){try{await deps.onChanged?.();}catch{}}
     }catch(error){
       $('officeCloseError').textContent=error.message;
       if(!force){$('officeCloseDraft').dataset.force='1';$('officeCloseDraft').textContent='仍要关闭（可能丢失未同步内容）';}

@@ -90,3 +90,5 @@ dialog.office-versions{width:min(650px,calc(100vw - 24px));max-height:85dvh;padd
 @media(max-width:760px){.office-toolbar{align-items:flex-start;flex-direction:column;padding:10px 12px;gap:8px}.office-controls{width:100%;justify-content:flex-start}.office-status{max-width:none;width:100%;font-size:11px}.office-note,.office-error{padding:8px 12px}.office-close-card{padding:20px}.office-close-card .actions{flex-direction:column;align-items:stretch}.office-version-row{align-items:flex-start;flex-direction:column;gap:8px}}
 
 .office-version-message{min-height:0;margin:0 0 8px;font-size:12px}.office-version-message:empty{display:none}.office-version-message[data-state="success"]{color:#577044}.office-version-message[data-state="error"]{color:var(--red)}
+
+.file-time{white-space:nowrap}

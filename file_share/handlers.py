@@ -233,10 +233,19 @@ class FileShareHandlersMixin:
             with transaction() as conn:
                 total = conn.execute('SELECT count(*) FROM share_files f WHERE ' + where, values).fetchone()[0]
                 rows = conn.execute('SELECT f.* FROM share_files f WHERE ' + where + ' ORDER BY f.created_at ' + order + ' LIMIT ? OFFSET ?', (*values,limit,offset)).fetchall()
+                file_ids = [row['id'] for row in rows]
+                last_edits = {}
+                if file_ids:
+                    placeholders = ','.join('?' for _ in file_ids)
+                    last_edits = {row['file_id']: row['last_edited_at'] for row in conn.execute(
+                        'SELECT file_id, MAX(created_at) AS last_edited_at FROM share_office_versions '
+                        'WHERE source_session_id IS NOT NULL AND file_id IN (' + placeholders + ') GROUP BY file_id',
+                        file_ids)}
                 result = []
                 for row in rows:
                     item = public_file(row)
-                    item.update(status=row['status'], sha256=row['sha256'])
+                    item.update(status=row['status'], sha256=row['sha256'],
+                                last_edited_at=last_edits.get(row['id']))
                     item['share_count'] = conn.execute('SELECT count(*) FROM share_files_relation WHERE file_id=?',(row['id'],)).fetchone()[0]
                     item['active_share_count'] = conn.execute("SELECT count(*) FROM share_files_relation r JOIN shares s ON s.id=r.share_id WHERE r.file_id=? AND s.status='ACTIVE' AND (s.expires_at IS NULL OR s.expires_at>?) AND (s.max_views IS NULL OR s.view_count<s.max_views) AND (s.max_downloads IS NULL OR s.download_count<s.max_downloads)",(row['id'],timestamp())).fetchone()[0]
                     item['view_count'] = conn.execute("SELECT count(*) FROM share_access_logs l WHERE l.success=1 AND l.action='VIEW_SHARE' AND EXISTS(SELECT 1 FROM share_files_relation r WHERE r.share_id=l.share_id AND r.file_id=?)",(row['id'],)).fetchone()[0]
