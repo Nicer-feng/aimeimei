@@ -3861,7 +3861,7 @@
 	      state.newConversationPromise = (async () => {
 	        stopCurrentTts();
 	        closeSideDiscussion();
-	        closeReferenceSources();
+	        closeReferenceSources({ immediate: true });
 	        state.sideDiscussions = [];
 	        state.activeSideDiscussion = null;
 	        state.sideDiscussionMessages = [];
@@ -3897,7 +3897,7 @@
     }
 
 	    async function selectConversation(id, options = {}) {
-	      closeReferenceSources();
+	      closeReferenceSources({ immediate: true });
 	      if (state.currentConversation?.id !== id) {
         if (state.documentPollTimer) clearTimeout(state.documentPollTimer);
         state.documentPollTimer = 0;
@@ -4118,7 +4118,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.4" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.5" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -5778,7 +5778,7 @@
 	        setStatus("chatStatus", "请扩大浏览器窗口后使用侧边讨论。", "err");
 	        return;
 	      }
-	      if ($("referenceSourcesPanel") && !$("referenceSourcesPanel").hidden) closeReferenceSources();
+	      if ($("referenceSourcesPanel") && !$("referenceSourcesPanel").hidden) closeReferenceSources({ immediate: true });
 	      const res = await api(`/api/side-discussions/${encodeURIComponent(discussionId)}`);
 	      if (!res.ok) {
 	        setStatus("chatStatus", await readError(res, "侧边讨论打开失败。"), "err");
@@ -5936,10 +5936,25 @@
 	      }
 	    }
 
-	    function closeReferenceSources() {
-	      if ($("referenceSourcesPanel")) $("referenceSourcesPanel").hidden = true;
-	      if ($("appView")) $("appView").classList.remove("references-open");
-	      document.body.classList.remove("references-active");
+	    let referencePanelHideTimer = 0;
+	    function closeReferenceSources({ immediate = false } = {}) {
+	      const panel = $("referenceSourcesPanel");
+	      const app = $("appView");
+	      clearTimeout(referencePanelHideTimer);
+	      referencePanelHideTimer = 0;
+	      app?.classList.remove("references-open");
+	      const finish = () => {
+	        if (app?.classList.contains("references-open")) return;
+	        if (panel) panel.hidden = true;
+	        app?.classList.remove("references-transitioning");
+	        document.body.classList.remove("references-active");
+	        referencePanelHideTimer = 0;
+	        syncComposerLayout();
+	        queueConversationMinimap();
+	      };
+	      if (panel) panel.inert = true;
+	      if (immediate || !panel || panel.hidden || window.matchMedia("(prefers-reduced-motion: reduce)").matches) finish();
+	      else referencePanelHideTimer = window.setTimeout(finish, 240);
 	      state.referenceSources = [];
 	      state.referenceMessage = null;
 	      state.referenceHighlightIndex = 0;
@@ -6018,12 +6033,31 @@
 	      state.referenceSources = sources;
 	      state.referenceMessage = message || null;
 	      state.referenceHighlightIndex = Number(options.highlightIndex || 0);
-	      if ($("referenceSourcesPanel")) $("referenceSourcesPanel").hidden = false;
-	      if ($("appView")) $("appView").classList.add("references-open");
+	      const panel = $("referenceSourcesPanel");
+	      const app = $("appView");
+	      clearTimeout(referencePanelHideTimer);
+	      referencePanelHideTimer = 0;
+	      if (panel) {
+	        const wasHidden = panel.hidden;
+	        panel.hidden = false;
+	        panel.inert = false;
+	        if (wasHidden) {
+	          app?.classList.add("references-transitioning");
+	          // Establish the collapsed grid track before expanding it.
+	          void app?.offsetWidth;
+	        }
+	      }
+	      app?.classList.add("references-open");
 	      document.body.classList.add("references-active");
 	      renderReferenceSourcesPanel(state.referenceHighlightIndex);
 	      syncComposerLayout();
 	      queueConversationMinimap();
+	      window.setTimeout(() => {
+	        if (app?.classList.contains("references-open")) {
+	          syncComposerLayout();
+	          queueConversationMinimap();
+	        }
+	      }, 240);
 	    }
 
 	    function quoteLastSideAnswer() {
