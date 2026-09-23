@@ -1507,19 +1507,10 @@
       font-size: 0;
       position: relative;
     }
-    #send::before {
-      content: "↑";
-      font-size: 20px;
-      line-height: 1;
-    }
     #send.is-stop {
       background: var(--red);
       border-color: var(--red);
       box-shadow: 0 8px 20px rgba(194, 65, 61, .18);
-    }
-    #send.is-stop::before {
-      content: "■";
-      font-size: 13px;
     }
     .status { min-height: 18px; color: var(--muted); font-size: 12px; }
     .status.err { color: var(--red); }
@@ -4248,9 +4239,6 @@
         inset 0 1px 0 rgba(255,255,255,.44),
         0 14px 30px var(--accent-shadow);
     }
-    #send::before {
-      font-size: 22px;
-    }
     .composer-tools {
       padding: 0 2px 2px;
       align-items: center;
@@ -6735,9 +6723,6 @@
       height: 44px;
       min-height: 44px;
       border-radius: var(--radius-pill);
-    }
-    #send::before {
-      content: none;
     }
     #send .lucide {
       width: 20px;
