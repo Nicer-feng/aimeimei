@@ -1,4 +1,5 @@
 """Private OSS adapter; credentials stay on the server, legacy config stays valid."""
+import hashlib
 import urllib.request
 from urllib.error import HTTPError
 import xml.etree.ElementTree as ET
@@ -58,6 +59,42 @@ class PrivateOSS:
     def head(self, key):
         with self.request("HEAD", key) as response:
             return dict(response.headers)
+
+    def copy_object(self, source_key, destination_key, source_etag=None):
+        """Copy an object inside this bucket without sending its body through the app."""
+        for key in (source_key, destination_key):
+            if (not isinstance(key, str) or not key or key.startswith("/")
+                    or any(ord(char) < 32 or ord(char) == 127 for char in key)):
+                raise ValueError("OSS 对象路径无效")
+        if source_key == destination_key:
+            raise ValueError("OSS 复制的源和目标不能相同")
+        headers = {
+            "x-oss-copy-source": "/" + self.config["bucket"] + "/" + quote(source_key, safe=""),
+            "x-oss-object-acl": "private",
+            "x-oss-forbid-overwrite": "true",
+        }
+        if source_etag is not None:
+            etag = source_etag.strip().strip('"') if isinstance(source_etag, str) else ""
+            if not etag or any(ord(char) < 32 or ord(char) == 127 for char in etag):
+                raise ValueError("OSS 源对象 ETag 无效")
+            headers["x-oss-copy-source-if-match"] = etag
+        with self.request("PUT", destination_key, headers=headers) as response:
+            result = ET.fromstring(response.read(65536))
+            if result.tag.rsplit("}", 1)[-1] != "CopyObjectResult":
+                raise ValueError("OSS 复制对象失败")
+            return dict(response.headers)
+
+    def sha256(self, key, chunk_size=1024 * 1024):
+        """Return (digest, byte count), reading at most one chunk into memory."""
+        if not isinstance(chunk_size, int) or not 0 < chunk_size <= 8 * 1024 * 1024:
+            raise ValueError("OSS 读取分块大小无效")
+        digest = hashlib.sha256()
+        size = 0
+        with self.request("GET", key) as response:
+            while chunk := response.read(chunk_size):
+                digest.update(chunk)
+                size += len(chunk)
+        return digest.hexdigest(), size
 
     def sample(self, key):
         with self.request("GET", key, headers={"Range": "bytes=0-4095"}) as response:

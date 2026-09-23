@@ -1,6 +1,6 @@
-# 槑槑云 v0.1.8
+# 槑槑云
 
-当前版本为0.3.0。
+当前版本为 0.4.0。
 
 2026-09-14 16:57 已上线：https://feng.asia/admin/share 。真实 OSS 和浏览器闭环通过。
 
@@ -11,8 +11,8 @@
 - 独立页面：`/admin/share`、`/share/{16位随机短码}`。
 - 独立接口：`/api/file-share/admin/*`、`/api/file-share/public/*`。
 - 独立后端：`file_share/`；静态资源：`res/file-share/`。
-- 独立数据表：`share_files`、`shares`、`share_files_relation`、`share_access_logs`、`share_sessions`、`share_settings`、`share_rate_limits`、`share_audit_logs`。
-- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.3.0`。
+- 独立数据表：`share_files`、`shares`、`share_files_relation`、`share_access_logs`、`share_sessions`、`share_settings`、`share_rate_limits`、`share_audit_logs`、`share_office_sessions`、`share_office_versions`。
+- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.4.0`。
 - 不进入 AI槑槑后台菜单；共享已有管理员登录 Session、SQLite 连接以及 OSS 配置。
 - 第一版仍由现有 Python 进程承载，更新后端需要重启该进程，因此暂时不是独立部署单元。后续可以在保持接口和产品目录不变的前提下拆进程。
 - AI 对话分享仍使用 `/ai/share/{43位令牌}`，原 `/share/{43位令牌}` 兼容保留。
@@ -21,7 +21,7 @@
 
 后台含概览、文件、分享、访问记录、回收站和设置。支持多文件选择/拖拽、分片进度、搜索、分类、排序、分页、多文件分享、二维码 PNG、密码重设、有效期/次数限制、暂停/恢复、撤回、回收站恢复与永久删除。设置页可清理未完成上传。
 
-外部分享支持图片缩放/原图、HTML5 视频/音频、PDF 浏览器预览及文本前 1 MB 预览。视频使用 OSS 原生 Range，可拖动进度；5 分钟后再次请求 Range 可能需要关闭并重新打开预览。Office 和压缩包仅提供文件信息及下载。手机浏览器 PDF 内嵌支持不一致，提供“在浏览器中打开 PDF”链接。
+外部分享支持图片缩放/原图、HTML5 视频/音频、PDF 浏览器预览及文本前 1 MB 预览。视频使用 OSS 原生 Range，可拖动进度；5 分钟后再次请求 Range 可能需要关闭并重新打开预览。Office 文件可按原权限只读预览；管理员还可试用 DOCX/XLSX 在线编辑。压缩包仅提供文件信息及下载。手机浏览器 PDF 内嵌支持不一致，提供“在浏览器中打开 PDF”链接。
 
 图片列表目前使用对应类型图标，不自动拉取全尺寸文件作为缩略图；视频使用图标。
 
@@ -137,6 +137,20 @@ python3 file_share/tests/run.py
 - presence 记录最近进入云；从云登录页认证后另记最后云登录。共享登录状态不会伪造新的登录时间，历史未知留空。
 - 上传量按 COMPLETE_UPLOAD 审计和文件大小；下载申请量按成功 DOWNLOAD_FILE 和文件大小估算，不是 OSS 实际计费流量，不含失败分片、重试及预览 Range 字节。
 - 大图标名称两行、小图标一行省略，点击或勾选后展开，取消后恢复。
+
+## IMM 在线编辑（0.4.0）
+
+首轮只给管理员试用 DOCX、XLSX，单文件及编辑结果均限 20 MB。编辑器使用 IMM WebOffice，文档在浏览器和阿里云服务间处理；本机不运行 ONLYOFFICE。服务端先在私有 OSS 中复制独立草稿，编辑器只写草稿。点击“保存版本”后生成不可覆盖的版本对象；点击“发布”才把现有文件及分享链接切到该版本。关闭后再次打开同一文件，可恢复未发布且仍保留在 OSS 的已同步草稿；一旦发布任意版本，下次编辑会从该发布版本开始。草稿到期或丢失时页面会明确提示，尚未同步的按键内容无法恢复。在线编辑会话仅允许一个人，回收站、永久删除和版本发布有相应冲突保护。
+
+阿里云控制台配置：
+
+1. 在与槑槑云当前 OSS Bucket **相同地域**创建 IMM 项目，记下项目名称和地域。项目创建后不能改地域。为项目选服务角色，允许 IMM 读写该 Bucket 下的编辑草稿。默认 `AliyunIMMDefaultRole` 权限较广，正式使用建议建范围更窄的自定义角色。参考[创建项目](https://help.aliyun.com/zh/imm/getting-started/create-a-project-1)及[服务角色授权](https://help.aliyun.com/zh/imm/user-guide/configure-a-service-role-for-a-project)。
+2. 给当前服务端正在使用的 OSS RAM 凭据追加 `imm:GenerateWebofficeToken` 和 `imm:RefreshWebofficeToken` 对该项目的调用权限；原有 OSS 权限仍需支持私有对象的读取、复制、写入、删除和 ACL 查询。不要把 AccessKey 或编辑 token 放进前端配置。
+3. 在现有 OSS Bucket 的跨域规则中保留 `https://feng.asia` 上传所需的规则，并为实际 WebOffice 页面来源加入允许访问规则。北京地域的 WebOffice 页面来源通常是 `https://office-cn-beijing.imm.aliyuncs.com`；请以一次 `GenerateWebofficeToken` 响应的 `WebofficeURL` 提取的 **Origin** 为准，并核对浏览器请求中的 Origin 后添加；需要允许编辑器使用的 GET、PUT、HEAD 与请求头，并暴露 `ETag` 等浏览器要读取的头。不要复制含 token 的完整 URL，也不要覆盖现有规则。参见 [OSS CORS 文档](https://help.aliyun.com/zh/oss/user-guide/configure-cross-origin-resource-sharing)。
+4. 服务进程设置 `IMM_PROJECT_NAME=项目名`、`IMM_REGION=地域标识`（例如 `cn-hangzhou`）、`IMM_OFFICE_ENABLED=1`。后端复用现有 `MEDIA_OSS_*`，未设置时沿用 `CAT_OSS_*`；不新增一组 AccessKey。开关未打开或地域不符时，管理员页面隐藏编辑入口。
+5. 给 Bucket 的 `share/office-drafts/` 前缀单独设置 7 天清理生命周期；未保存为业务版本的草稿超过 7 天无法恢复。业务版本位于 `share/office-versions/`，**不要**给这个前缀设置同样的清理规则。首次真实验收要检查生成凭证、编辑回写、保存版本、发布后的旧分享链接、回收站清理，以及 OSS/IMM 费用。
+
+本实现不调用 MNS，也不启用 IMM 的 `History` 参数；槑槑云版本由独立 OSS 对象和 SQLite 记录实现，无需开启整个 Bucket 的版本控制。AccessToken 最长 30 分钟，浏览器通过服务端刷新；关闭会话后拒绝刷新。服务端只保存 token 哈希，脱敏备份排除会话。编辑草稿没有发布前不会影响现有分享。若浏览器加载失败，先核对项目服务角色、调用方 RAM 权限、地域、OSS CORS 和实际对象 ACL。阿里云接口说明见 [GenerateWebofficeToken](https://help.aliyun.com/zh/imm/developer-reference/api-imm-2020-09-30-generatewebofficetoken) 与 [RefreshWebofficeToken](https://help.aliyun.com/zh/imm/developer-reference/api-imm-2020-09-30-refreshwebofficetoken)。
 
 ## Office 预览（0.3.0）
 

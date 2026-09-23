@@ -44,6 +44,29 @@ CREATE TABLE IF NOT EXISTS share_audit_logs (
  target_id TEXT NOT NULL, ip TEXT NOT NULL, created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS share_office_versions (
+ id TEXT PRIMARY KEY, file_id TEXT NOT NULL REFERENCES share_files(id),
+ version_no INTEGER NOT NULL, object_key TEXT NOT NULL UNIQUE,
+ size INTEGER NOT NULL, sha256 TEXT NOT NULL, etag TEXT,
+ source_session_id TEXT, created_by TEXT NOT NULL,
+ published_at INTEGER, created_at INTEGER NOT NULL,
+ UNIQUE(file_id, version_no)
+);
+CREATE INDEX IF NOT EXISTS sov_file ON share_office_versions(file_id, version_no DESC);
+
+CREATE TABLE IF NOT EXISTS share_office_sessions (
+ id TEXT PRIMARY KEY, file_id TEXT NOT NULL REFERENCES share_files(id),
+ user_id TEXT NOT NULL, draft_key TEXT NOT NULL UNIQUE,
+ source_key TEXT NOT NULL, source_etag TEXT,
+ status TEXT NOT NULL, recoverable INTEGER NOT NULL DEFAULT 1,
+ draft_etag_at_publish TEXT, access_token_hash TEXT, refresh_token_hash TEXT,
+ last_snapshot_etag TEXT, expires_at INTEGER NOT NULL, refresh_expires_at INTEGER NOT NULL,
+ created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sos_one_editor ON share_office_sessions(file_id)
+ WHERE status IN ('PREPARING', 'ACTIVE');
+CREATE INDEX IF NOT EXISTS sos_file_history ON share_office_sessions(file_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS infrastructure_ip_locations (
  ip TEXT PRIMARY KEY, country TEXT NOT NULL DEFAULT '', province TEXT NOT NULL DEFAULT '',
  city TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, expires_at INTEGER NOT NULL

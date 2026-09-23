@@ -11,9 +11,24 @@ import urllib.request
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from infrastructure.storage import PrivateOSS
+from file_share.imm_office import _utc_expiry
+from file_share.office_service import OfficeService, expiry_epoch
+from types import SimpleNamespace
+import os
 from file_share.security import classify
 from ai_platform.backup import create_sanitized_snapshot
 from ai_platform.settings import DATA_DIR, DB_PATH
+
+assert _utc_expiry('2035-08-30T13:13:11.347146982Z') == '2035-08-30T13:13:11.347146Z'
+assert expiry_epoch('2035-08-30T13:13:11.347146982Z') > 0
+dummy=SimpleNamespace(server=SimpleNamespace(secrets={}))
+with patch('file_share.office_service.shared_storage_config',return_value={'configured':True,'region':'cn-hangzhou'}):
+    with patch.dict(os.environ, {'IMM_OFFICE_ENABLED':'0','IMM_PROJECT_NAME':'trial','IMM_REGION':'cn-hangzhou'}):
+        assert OfficeService(dummy,'admin')._settings()['enabled'] is False
+    with patch.dict(os.environ, {'IMM_OFFICE_ENABLED':'1','IMM_PROJECT_NAME':'trial','IMM_REGION':'cn-hangzhou'}):
+        assert OfficeService(dummy,'admin')._settings()['enabled'] is True
+    with patch.dict(os.environ, {'IMM_OFFICE_ENABLED':'1','IMM_PROJECT_NAME':'trial','IMM_REGION':'cn-shanghai'}):
+        assert OfficeService(dummy,'admin')._settings()['enabled'] is False
 
 config=dict(region='cn-hangzhou',bucket='example',endpoint='https://example.oss-cn-hangzhou.aliyuncs.com',access_key_id='test-id',access_key_secret='test-secret',configured=True)
 url=PrivateOSS(config).signed('PUT','share/user/a.bin',{'uploadId':'test-upload','partNumber':1},{'Content-Type':'application/octet-stream','Content-MD5':'abc'})
@@ -30,7 +45,7 @@ assert classify('hello.txt','text/plain',b'<script>alert(1)</script>')==('TEXT',
 snapshot=DATA_DIR/'sanitized-test.db'
 create_sanitized_snapshot(DB_PATH,snapshot)
 with sqlite3.connect(snapshot) as conn:
-    for name in ('shares','share_sessions','share_files_relation','share_access_logs'):
+    for name in ('shares','share_sessions','share_office_sessions','share_files_relation','share_access_logs'):
         assert conn.execute('SELECT count(*) FROM '+name).fetchone()[0]==0
     assert conn.execute('SELECT count(*) FROM share_files WHERE upload_id IS NOT NULL').fetchone()[0]==0
 snapshot.unlink()

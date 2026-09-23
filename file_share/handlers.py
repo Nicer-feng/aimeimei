@@ -20,6 +20,8 @@ from infrastructure.storage import PrivateOSS, StorageSecurityError, shared_stor
 from .database import transaction
 from .platform import platform_report
 from .office_preview import office_preview, PreviewError
+from .office_service import OfficeService, OfficeServiceError
+from .imm_office import IMMWebOfficeError
 from .security import classify, client_info, hash_password, verify_password
 
 ROOT = Path(__file__).resolve().parent
@@ -106,6 +108,10 @@ class FileShareHandlersMixin:
             return self.fs_public(path.removeprefix('/api/file-share/public/'), data)
         except PreviewError as exc:
             return self.error(422, str(exc))
+        except OfficeServiceError as exc:
+            return self.error(exc.status, exc.message)
+        except IMMWebOfficeError as exc:
+            return self.error(502, str(exc))
         except StorageSecurityError as exc:
             return self.error(503, str(exc))
         except ShareError as exc:
@@ -178,6 +184,8 @@ class FileShareHandlersMixin:
         qs = parse_qs(urlparse(self.path).query)
         page = max(1, min(100000, int(qs.get('page', ['1'])[0])))
         offset, limit = (page - 1) * 20, 20
+        if path.startswith('/office/'):
+            return OfficeService(self, user_id).dispatch(path.removeprefix('/office'), data)
         if path == '/version' and method == 'GET':
             return self.json({'version': (ROOT / 'VERSION').read_text().strip(),
                               'build_id': (ROOT / 'BUILD_ID').read_text().strip(),
@@ -273,21 +281,33 @@ class FileShareHandlersMixin:
                                  (filename, timestamp(), file_id, user_id))
                 elif action == 'trash':
                     require(row['status'] == 'READY', '文件状态不可操作', 409)
+                    editing = conn.execute("SELECT 1 FROM share_office_sessions WHERE file_id=? AND "
+                                           "((status='PREPARING' AND expires_at>?) OR "
+                                           "(status='ACTIVE' AND refresh_expires_at>?))",
+                                           (file_id,timestamp(),timestamp())).fetchone()
+                    require(not editing, '该文件正在编辑，请先关闭编辑器', 409)
                     conn.execute("UPDATE share_files SET status='TRASHED',deleted_at=?,updated_at=? WHERE id=?", (timestamp(),timestamp(),file_id))
                 elif action == 'restore':
                     require(row['status'] == 'TRASHED', '文件不在回收站', 409)
                     conn.execute("UPDATE share_files SET status='READY',deleted_at=NULL,updated_at=? WHERE id=?", (timestamp(),file_id))
                 elif action == 'purge':
                     require(row['status'] in {'TRASHED','PURGING'}, '请先将文件移入回收站', 409)
+                    live_token = conn.execute('SELECT 1 FROM share_office_sessions WHERE file_id=? AND access_token_hash IS NOT NULL AND refresh_expires_at>?',
+                                              (file_id,timestamp())).fetchone()
+                    require(not live_token, '编辑凭证仍有效，请在到期后永久删除文件', 409)
+                    keys = {row['object_key']}
+                    keys.update(r[0] for r in conn.execute('SELECT object_key FROM share_office_versions WHERE file_id=?', (file_id,)))
+                    keys.update(r[0] for r in conn.execute('SELECT draft_key FROM share_office_sessions WHERE file_id=?', (file_id,)))
                     # Reserve deletion, then release SQLite while OSS performs I/O.
                     conn.execute("UPDATE share_files SET status='PURGING' WHERE id=?", (file_id,))
                     conn.commit()
-                    try:
-                        self.fs_oss(row).delete(row['object_key'])
-                    except Exception:
-                        conn.execute("UPDATE share_files SET status='TRASHED' WHERE id=? AND status='PURGING'", (file_id,))
-                        conn.commit()
-                        raise
+                    # Keep PURGING after a partial OSS failure. Retrying DELETE is safe;
+                    # restoring a file whose object was already deleted is not.
+                    oss = self.fs_oss(row)
+                    for key in keys:
+                        oss.delete(key)
+                    conn.execute('DELETE FROM share_office_sessions WHERE file_id=?', (file_id,))
+                    conn.execute('DELETE FROM share_office_versions WHERE file_id=?', (file_id,))
                     conn.execute("UPDATE share_files SET status='DELETED',updated_at=? WHERE id=?", (timestamp(),file_id))
                 else:
                     raise ShareError('操作不存在',404)

@@ -1,4 +1,4 @@
-import os, sys, json, threading, hashlib, uuid, re
+import os, sys, json, threading, hashlib, uuid, re, time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse,parse_qs
@@ -37,7 +37,17 @@ class FakeOSS:
   objects[key]=b''.join(parts[(upload_id,n)] for n,_ in items)
  def head(self,key):
   if key not in objects:raise HTTPError('',404,'not found',{},None)
-  return {'Content-Length':str(len(objects[key]))}
+  return {'Content-Length':str(len(objects[key])), 'ETag':'"'+hashlib.md5(objects[key]).hexdigest()+'"'}
+ def copy_object(self,source_key,destination_key,source_etag=None):
+  if source_key not in objects:raise HTTPError('',404,'not found',{},None)
+  etag=hashlib.md5(objects[source_key]).hexdigest()
+  if source_etag and source_etag.strip('"')!=etag:raise HTTPError('',412,'source changed',{},None)
+  if destination_key in objects:raise HTTPError('',409,'already exists',{},None)
+  objects[destination_key]=objects[source_key]
+  return {'ETag':'"'+etag+'"'}
+ def sha256(self,key,chunk_size=1024*1024):
+  body=objects[key]
+  return hashlib.sha256(body).hexdigest(),len(body)
  def sample(self,key):return objects[key][:4096]
  def verify_private(self,key):pass
  def delete(self,key):objects.pop(key,None)
@@ -45,6 +55,18 @@ class FakeOSS:
  def access_url(self,key,filename,mime,download=False):
   return self.signed('GET',key,{'mime':mime,'download':int(download)})
 FileShareHandlersMixin.fs_oss=lambda self,row=None:FakeOSS()
+from file_share.office_service import OfficeService
+from datetime import datetime, timezone, timedelta
+class FakeIMM:
+ def generate(self,object_key,filename,user_id,user_name):
+  return {'url':'https://test.imm.aliyuncs.com/office','access_token':uuid.uuid4().hex,
+          'refresh_token':uuid.uuid4().hex,
+          'access_expires_at':(datetime.now(timezone.utc)+timedelta(minutes=30)).isoformat(),
+          'refresh_expires_at':(datetime.now(timezone.utc)+timedelta(hours=2)).isoformat()}
+ def refresh(self,access_token,refresh_token):
+  return {**self.generate('','',None,None),'url':None}
+OfficeService._settings=lambda self:dict(enabled=True,project='test',region='cn-hangzhou',store={'configured':True,'region':'cn-hangzhou','bucket':'test-private-bucket'},max_bytes=20*1024*1024,formats=['docx','xlsx'])
+OfficeService._client=lambda self,settings:FakeIMM()
 # Optional UI fixture mode uses outputs from the real isolated Linux converter.
 if os.environ.get('SHARE_TEST_PREVIEW_FIXTURES'):
  import file_share.handlers as share_handlers
@@ -62,7 +84,13 @@ class Storage(BaseHTTPRequestHandler):
   self.send_header('Access-Control-Allow-Origin','http://127.0.0.1:18765');self.send_header('Access-Control-Allow-Headers','Content-Type,Content-MD5,Range');self.send_header('Access-Control-Allow-Methods','GET,PUT,HEAD,OPTIONS');self.send_header('Access-Control-Expose-Headers','ETag,Content-Length,Content-Range');self.send_header('Accept-Ranges','bytes')
  def do_OPTIONS(self):self.send_response(204);self.cors();self.end_headers()
  def do_PUT(self):
-  q=parse_qs(urlparse(self.path).query);body=self.rfile.read(int(self.headers['Content-Length']));parts[(q['uploadId'][0],int(q['partNumber'][0]))]=body;self.send_response(200);self.cors();self.send_header('ETag','"'+hashlib.md5(body).hexdigest()+'"');self.send_header('Content-Length','0');self.end_headers()
+  parsed=urlparse(self.path);q=parse_qs(parsed.query)
+  body=self.rfile.read(int(self.headers['Content-Length']))
+  if q.get('testWrite')==['1'] and parsed.path.startswith('/object/share/office-drafts/'):
+   objects[parsed.path.removeprefix('/object/')]=body
+  else:
+   parts[(q['uploadId'][0],int(q['partNumber'][0]))]=body
+  self.send_response(200);self.cors();self.send_header('ETag','"'+hashlib.md5(body).hexdigest()+'"');self.send_header('Content-Length','0');self.end_headers()
  def do_GET(self):
   p=urlparse(self.path);key=p.path.removeprefix('/object/');body=objects.get(key,b'');q=parse_qs(p.query);start,end=0,len(body)-1
   if self.headers.get('Range'):
