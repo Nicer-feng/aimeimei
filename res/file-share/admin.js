@@ -5,6 +5,9 @@
   const sections=[['overview','概览','layout-dashboard','让每一次文件交付，简单而有序。'],['files','文件','files','管理文件，为它们创建安全的分享链接。'],['shares','分享','link','决定谁可以访问，以及何时结束。'],['logs','访问记录','activity','查看每一次访问、预览与下载请求。'],['trash','回收站','trash-2','误删的文件可以恢复，永久删除前会再次确认。'],['settings','设置','settings-2','分享中心的独立偏好设置。']];
   let section='overview',page=1,filters={search:'',type:'',sort:'newest'},currentFiles=[],selected=new Map(),renderId=0,captchaId='',uploading=false;
 
+  let fileView='list',fileRefreshBusy=false,lastFileRefresh=0;
+  try{fileView=localStorage.getItem('cloud-file-view')||'list';}catch{}
+  if(!['list','small','large'].includes(fileView))fileView='list';
   let logRefreshTimer,logRefreshAttempts=0;
   const loadedBuild=document.querySelector('meta[name="file-share-build"]').content;
   let checkingVersion=false,pendingBuild='',snoozedBuild='',snoozedUntil=0;
@@ -114,15 +117,16 @@
   function logTable(logs){if(!logs.length)return empty('暂无访问记录','activity');return `<div class="table-wrap"><table><thead><tr><th>时间</th><th>访问者 IP</th><th>IP 归属地</th><th>浏览器 / 系统</th><th>行为</th><th>文件 / 分享</th><th>结果</th></tr></thead><tbody>${logs.map(l=>`<tr><td>${date(l.created_at)}</td><td>${esc(l.ip)}</td><td>${esc([...new Set([l.country,l.province,l.city].filter(Boolean))].join(' / ')||(l.geolocation_status==='pending'?'查询中…':'—'))}</td><td>${esc(l.browser)} / ${esc(l.os)}<br><small>${esc(l.device)}</small></td><td>${esc(actions[l.action]||l.action)}</td><td>${esc(l.filename||l.title)}</td><td>${l.success?'成功':'<span class="error">未通过</span>'}</td></tr>`).join('')}</tbody></table></div><p class="geo-attribution muted">IP geolocation by <a href="https://www.ip2location.io" target="_blank" rel="noopener noreferrer">IP2Location.io</a></p>`;}
   function sharesTable(rows){if(!rows.length)return empty('还没有分享，先上传文件再创建链接','link');return `<div class="table-wrap"><table><thead><tr><th>分享标题</th><th>状态</th><th>访问</th><th>下载</th><th>有效期</th><th>操作</th></tr></thead><tbody>${rows.map(s=>`<tr><td><strong>${esc(s.title)}</strong>${s.password_required?' '+icon('lock-keyhole'):''}<br><small>${date(s.created_at)}</small></td><td>${badge(s.status)}</td><td>${s.view_count}${s.max_views?' / '+s.max_views:''}</td><td>${s.download_count}${s.max_downloads?' / '+s.max_downloads:''}</td><td>${date(s.expires_at)}</td><td><div class="table-actions"><button data-detail="${s.id}">详情</button><button data-copy="${esc(s.url)}">复制链接</button></div></td></tr>`).join('')}</tbody></table></div>`;}
   async function render(quiet=false){
+    closeFileMenu();
     clearTimeout(logRefreshTimer);
     const requestId=++renderId;const def=sections.find(s=>s[0]===section);$('breadcrumb').textContent=def[1];$('pageTitle').textContent=def[1];$('pageDescription').textContent=def[3];document.querySelectorAll('[data-section]').forEach(b=>b.classList.toggle('active',b.dataset.section===section));if(!quiet)$('content').innerHTML=empty('正在加载…','loader-circle');refreshIcons();
     let html='',pendingLocations=false;
     if(section==='overview'){
       const d=await api(base+'/overview');html=`<div class="stats">${[['文件总数',d.file_count,'files'],['总存储量',size(d.total_size),'hard-drive'],['有效分享',d.active_shares,'link'],['今日访问',d.today_views,'eye'],['今日下载',d.today_downloads,'download']].map(([label,value,image])=>`<div class="stat"><div class="stat-label">${icon(image)}${label}</div><div class="stat-value">${value}</div></div>`).join('')}</div><div class="grid-two"><section class="panel"><div class="panel-header"><h3>最近分享</h3><button data-go="shares" class="quiet">查看全部 ${icon('arrow-up-right')}</button></div>${d.recent_shares.length?d.recent_shares.map(s=>`<div class="list-row"><span class="file-icon">${icon('link')}</span><div class="list-main"><strong>${esc(s.title)}</strong><small>${s.view_count} 次访问 · ${date(s.created_at)}</small></div>${badge(s.status)}<button class="icon-button quiet" data-detail="${s.id}" aria-label="查看分享详情">${icon('chevron-right')}</button></div>`).join(''):empty('上传第一份文件，开始分享','folder-output')}</section><section class="panel"><div class="panel-header"><h3>最近访问</h3><button data-go="logs" class="quiet">查看全部 ${icon('arrow-up-right')}</button></div>${d.recent_logs.length?d.recent_logs.map(l=>`<div class="list-row"><span class="file-icon">${icon(l.action==='DOWNLOAD_FILE'?'download':'eye')}</span><div class="list-main"><strong>${esc(actions[l.action])} · ${esc(l.filename||l.title)}</strong><small>${esc(l.ip)} · ${esc(l.browser)} · ${date(l.created_at)}</small></div>${l.success?'':'<span class="error">失败</span>'}</div>`).join(''):empty('分享后的访问足迹会出现在这里','activity')}</section></div>`;
     }else if(section==='files'||section==='trash'){
-      const params=new URLSearchParams({...filters,page,trash:section==='trash'?'1':'0'});const d=await api(base+'/files?'+params);currentFiles=d.items;
-      html=(section==='files'?`<div id="dropzone" class="dropzone" role="button" tabindex="0">${icon('cloud-upload')} 拖拽文件到这里，或点击选择文件 <small>· 单文件最大 500 MB</small></div>`:'')+`<div class="toolbar"><input id="searchFiles" placeholder="搜索文件名" aria-label="搜索文件名" value="${esc(filters.search)}"><select id="typeFilter" aria-label="文件类型"><option value="">全部类型</option>${['IMAGE','VIDEO','AUDIO','PDF','WORD','EXCEL','PPT','ARCHIVE','TEXT','OTHER'].map(t=>`<option ${filters.type===t?'selected':''}>${t}</option>`).join('')}</select><select id="sortFilter" aria-label="上传时间排序"><option value="newest" ${filters.sort==='newest'?'selected':''}>最新上传</option><option value="oldest" ${filters.sort==='oldest'?'selected':''}>最早上传</option></select><button id="searchButton">搜索</button></div>`;
-      html+=d.items.length?`<div class="table-wrap"><table><thead><tr>${section==='files'?'<th><input type="checkbox" id="selectAll" aria-label="选择本页全部文件"></th>':''}<th>文件名</th><th>大小</th><th>上传时间</th><th>分享</th><th>访问 / 下载</th><th>操作</th></tr></thead><tbody>${d.items.map(f=>`<tr>${section==='files'?`<td><input type="checkbox" data-select="${f.id}" aria-label="选择 ${esc(f.filename)}" ${selected.has(f.id)?'checked':''}></td>`:''}<td><div class="file-cell">${fileIcon(f)}<span class="filename">${esc(f.filename)}<br><small>${f.file_type}</small></span></div></td><td>${size(f.size)}</td><td>${date(f.created_at)}</td><td>${f.active_share_count?'分享中':'未分享'}<br><small>累计 ${f.share_count} 次</small></td><td>${f.view_count} / ${f.download_count}</td><td><div class="table-actions">${section==='trash'?`<button data-file="${f.id}" data-action="restore">恢复</button><button data-file="${f.id}" data-action="purge" class="danger">永久删除</button>`:`<button data-file="${f.id}" data-action="preview">预览</button><button data-single-share="${f.id}">分享</button><button data-file="${f.id}" data-action="rename">重命名</button><button data-file="${f.id}" data-action="trash">回收站</button>`}</div></td></tr>`).join('')}</tbody></table></div>`:empty(section==='trash'?'回收站是空的':'暂无匹配文件','files');html+=pagination(d.total);
+      const params=new URLSearchParams({...filters,page,trash:section==='trash'?'1':'0'});const d=await api(base+'/files?'+params);if(requestId!==renderId)return;currentFiles=d.items;lastFileRefresh=Date.now();d.items.forEach(f=>{if(selected.has(f.id))selected.set(f.id,f);});
+      html=(section==='files'?`<div id="dropzone" class="dropzone" role="button" tabindex="0">${icon('cloud-upload')} 拖拽文件到这里，或点击选择文件 <small>· 单文件最大 500 MB</small></div>`:'')+`<div class="toolbar"><input id="searchFiles" placeholder="搜索文件名" aria-label="搜索文件名" value="${esc(filters.search)}"><select id="typeFilter" aria-label="文件类型"><option value="">全部类型</option>${['IMAGE','VIDEO','AUDIO','PDF','WORD','EXCEL','PPT','ARCHIVE','TEXT','OTHER'].map(t=>`<option ${filters.type===t?'selected':''}>${t}</option>`).join('')}</select><select id="sortFilter" aria-label="上传时间排序"><option value="newest" ${filters.sort==='newest'?'selected':''}>最新上传</option><option value="oldest" ${filters.sort==='oldest'?'selected':''}>最早上传</option></select><button id="searchButton">搜索</button><button id="refreshFiles" aria-label="刷新文件">${icon('refresh-cw')}刷新</button>${section==='files'?`<div class="view-switch" role="group" aria-label="文件展示方式">${[['list','列表','list'],['small','小图标','grid-2x2'],['large','大图标','layout-grid']].map(([key,label,img])=>`<button data-view="${key}" aria-pressed="${fileView===key}" title="${label}">${icon(img)}<span>${label}</span></button>`).join('')}</div>`:''}</div>`;
+      html+=section==='files'&&fileView!=='list'?iconFiles(d.items):d.items.length?`<div class="table-wrap"><table><thead><tr>${section==='files'?'<th><input type="checkbox" id="selectAll" aria-label="选择本页全部文件"></th>':''}<th>文件名</th><th>大小</th><th>上传时间</th><th>分享</th><th>访问 / 下载</th><th>操作</th></tr></thead><tbody>${d.items.map(f=>`<tr>${section==='files'?`<td><input type="checkbox" data-select="${f.id}" aria-label="选择 ${esc(f.filename)}" ${selected.has(f.id)?'checked':''}></td>`:''}<td><div class="file-cell">${fileIcon(f)}<span class="filename">${esc(f.filename)}<br><small>${f.file_type}</small></span></div></td><td>${size(f.size)}</td><td>${date(f.created_at)}</td><td>${f.active_share_count?'分享中':'未分享'}<br><small>累计 ${f.share_count} 次</small></td><td>${f.view_count} / ${f.download_count}</td><td><div class="table-actions">${section==='trash'?`<button data-file="${f.id}" data-action="restore">恢复</button><button data-file="${f.id}" data-action="purge" class="danger">永久删除</button>`:`<button data-file="${f.id}" data-action="preview">预览</button><button data-single-share="${f.id}">分享</button><button data-file="${f.id}" data-action="rename">重命名</button><button data-file="${f.id}" data-action="trash">回收站</button>`}</div></td></tr>`).join('')}</tbody></table></div>`:empty(section==='trash'?'回收站是空的':'暂无匹配文件','files');html+=pagination(d.total);if(section==='files')html='<div id="fileWorkspace">'+html+'</div>';
     }else if(section==='shares'){const d=await api(base+'/shares?page='+page);html=sharesTable(d.items)+pagination(d.total);
     }else if(section==='logs'){const d=await api(base+'/logs?page='+page);pendingLocations=d.items.some(l=>l.geolocation_status==='pending');html='<div class="toolbar"><button id="refreshLogs">'+icon('refresh-cw')+'刷新记录</button></div>'+logTable(d.items)+pagination(d.total);
     }else if(section==='settings'){
@@ -133,7 +137,16 @@
   }
   function bindContent(){
     if($('refreshLogs'))$('refreshLogs').onclick=()=>{logRefreshAttempts=0;render(true).catch(e=>toast(e.message));};
-    if($('dropzone')){const zone=$('dropzone');zone.onclick=()=>$('fileInput').click();zone.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('fileInput').click();}};zone.ondragover=e=>{e.preventDefault();zone.classList.add('drag');};zone.ondragleave=()=>zone.classList.remove('drag');zone.ondrop=e=>{e.preventDefault();zone.classList.remove('drag');uploadFiles([...e.dataTransfer.files]);};}
+    if($('refreshFiles'))$('refreshFiles').onclick=()=>refreshFiles(false);
+    if($('dropzone')){const zone=$('dropzone');zone.onclick=()=>$('fileInput').click();zone.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('fileInput').click();}};}
+    const workspace=$('fileWorkspace');
+    if(workspace){
+      workspace.ondragover=e=>{if([...e.dataTransfer.types].includes('Files')){e.preventDefault();e.dataTransfer.dropEffect='copy';workspace.classList.add('drag');}};
+      workspace.ondragleave=e=>{if(!workspace.contains(e.relatedTarget))workspace.classList.remove('drag');};
+      workspace.ondrop=e=>{e.preventDefault();workspace.classList.remove('drag');closeFileMenu();uploadFiles([...e.dataTransfer.files]).catch(error=>toast(error.message));};
+      workspace.oncontextmenu=e=>{const tile=e.target.closest('[data-tile]');if(tile){e.preventDefault();openFileMenu(tile.dataset.tile,e.clientX,e.clientY,tile);}};
+      workspace.onkeydown=e=>{const tile=e.target.closest('[data-tile]');if(tile&&(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10'))){e.preventDefault();const r=tile.getBoundingClientRect();openFileMenu(tile.dataset.tile,r.left,r.top,tile);}};
+    }
     function search(){filters={search:$('searchFiles').value,type:$('typeFilter').value,sort:$('sortFilter').value};page=1;render().catch(e=>toast(e.message));}
     if($('searchButton')){$('searchButton').onclick=search;$('searchFiles').onkeydown=e=>{if(e.key==='Enter')search();};$('typeFilter').onchange=search;$('sortFilter').onchange=search;}
     if($('selectAll'))$('selectAll').onchange=e=>{currentFiles.forEach(f=>{if(e.target.checked)selected.set(f.id,f);else selected.delete(f.id);});document.querySelectorAll('[data-select]').forEach(box=>box.checked=e.target.checked);};
@@ -141,6 +154,8 @@
   }
   $('content').onchange=e=>{if(e.target.dataset.select){const file=currentFiles.find(f=>f.id===e.target.dataset.select);if(e.target.checked)selected.set(file.id,file);else selected.delete(file.id);}};
   $('content').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{
+    if(b.dataset.view){fileView=b.dataset.view;try{localStorage.setItem('cloud-file-view',fileView);}catch{}return await render(true);}
+    if(b.dataset.menu){const r=b.getBoundingClientRect();return openFileMenu(b.dataset.menu,r.left,r.bottom,b);}
     if(b.hasAttribute('data-version'))return await showVersion();
     if(b.dataset.abort)return confirmAction('清理未完成上传？','会清理该上传任务的 OSS 分片和未登记文件。',async()=>{await api(base+'/uploads/'+b.dataset.abort+'/abort',{});await render();});
     if(b.dataset.go)return await navigate(b.dataset.go);
@@ -154,6 +169,34 @@
       return confirmAction(action==='purge'?'永久删除文件？':action==='trash'?'移入回收站？':'恢复文件？',action==='purge'?'OSS 原文件将永久删除，无法恢复。':action==='trash'?'已有分享将立即无法访问此文件。':'恢复后，仍有效的原分享可以再次访问此文件。',async()=>{await api(base+'/files/'+file.id+'/'+action,{});selected.delete(file.id);await render();toast('操作成功');});
     }
   }catch(error){toast(error.message);}};
+
+  function iconFiles(files){
+    return `<div class="file-grid ${fileView}" aria-label="文件图标区域">${files.length?files.map(f=>`<article class="file-tile" data-tile="${f.id}" tabindex="0" aria-label="${esc(f.filename)}"><input type="checkbox" data-select="${f.id}" aria-label="选择 ${esc(f.filename)}" ${selected.has(f.id)?'checked':''}>${fileIcon(f)}<span class="tile-name" title="${esc(f.filename)}">${esc(f.filename)}</span><button class="tile-menu icon-button quiet" data-menu="${f.id}" aria-label="${esc(f.filename)}的更多操作">${icon('ellipsis')}</button></article>`).join(''):empty('暂无匹配文件，可直接拖入文件上传','cloud-upload')}</div><p class="muted file-hint">右键文件或点击 ··· 查看详情与操作；拖入文件即可上传。</p>`;
+  }
+  let menuAnchor=null;
+  function closeFileMenu(restore=false){$('fileContextMenu')?.remove();if(restore&&menuAnchor?.isConnected)menuAnchor.focus();menuAnchor=null;}
+  function openFileMenu(id,x,y,anchor){
+    closeFileMenu();const f=currentFiles.find(f=>f.id===id);if(!f)return;menuAnchor=anchor;
+    const menu=document.createElement('div');menu.id='fileContextMenu';menu.className='file-context-menu';menu.setAttribute('role','dialog');menu.setAttribute('aria-label','文件详情与操作');
+    menu.innerHTML=`<strong>${esc(f.filename)}</strong><dl><dt>大小</dt><dd>${size(f.size)}</dd><dt>上传时间</dt><dd>${date(f.created_at)}</dd><dt>分享</dt><dd>${f.active_share_count?'分享中':'未分享'} · 累计 ${f.share_count} 次</dd><dt>访问 / 下载</dt><dd>${f.view_count} / ${f.download_count}</dd></dl><div class="context-actions"><button data-file="${f.id}" data-action="preview">${icon('eye')}预览</button><button data-single-share="${f.id}">${icon('link')}创建分享</button><button data-file="${f.id}" data-action="rename">${icon('pencil')}重命名</button><button data-file="${f.id}" data-action="trash" class="danger">${icon('trash-2')}移入回收站</button></div>`;
+    document.body.append(menu);refreshIcons();const r=menu.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(x,innerWidth-r.width-8))+'px';menu.style.top=Math.max(8,Math.min(y,innerHeight-r.height-8))+'px';menu.querySelector('button').focus({preventScroll:true});
+    menu.onclick=e=>{if(e.target.closest('button')){const handler=$('content').onclick;closeFileMenu();handler(e);}};
+    menu.onkeydown=e=>{const buttons=[...menu.querySelectorAll('button')],index=buttons.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Tab'].includes(e.key)){e.preventDefault();buttons[(index+(e.key==='ArrowUp'||e.shiftKey?-1:1)+buttons.length)%buttons.length].focus();}};
+  }
+  document.addEventListener('pointerdown',e=>{if(!e.target.closest('#fileContextMenu'))closeFileMenu();});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeFileMenu(true);});
+  window.addEventListener('resize',()=>closeFileMenu());
+  async function refreshFiles(automatic){
+    if(!['files','trash'].includes(section)||document.hidden||$('app').hidden||fileRefreshBusy||!$('refreshFiles'))return;
+    if(uploading||$('dialog').open||$('fileContextMenu')){if(!automatic)toast('请先完成当前上传或操作');return;}
+    if(automatic&&(Date.now()-lastFileRefresh<5000||document.activeElement?.matches('#searchFiles, #typeFilter, #sortFilter')))return;
+    fileRefreshBusy=true;const button=$('refreshFiles');if(button){button.disabled=true;button.setAttribute('aria-busy','true');}
+    // Preserve filter text that has not yet been submitted, too.
+    filters={search:$('searchFiles').value,type:$('typeFilter').value,sort:$('sortFilter').value};
+    try{await render(true);if(!automatic)toast('文件已刷新');}catch(error){toast(error.message);}finally{fileRefreshBusy=false;if(button?.isConnected){button.disabled=false;button.removeAttribute('aria-busy');}}
+  }
+  window.addEventListener('focus',()=>refreshFiles(true));
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshFiles(true);});
 
   async function showVersion(){
     const d=await api(base+'/version');
