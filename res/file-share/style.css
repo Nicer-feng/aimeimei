@@ -92,3 +92,25 @@ dialog.office-versions{width:min(650px,calc(100vw - 24px));max-height:85dvh;padd
 .office-version-message{min-height:0;margin:0 0 8px;font-size:12px}.office-version-message:empty{display:none}.office-version-message[data-state="success"]{color:#577044}.office-version-message[data-state="error"]{color:var(--red)}
 
 .file-time{white-space:nowrap}
+
+/* Local PDF page organizer. */
+dialog.pdf-page-editor{position:fixed;inset:0;margin:0;width:100vw;height:100dvh;max-width:none;max-height:none;border:0;border-radius:0;padding:0;background:#f7f8f4;overflow:hidden}
+dialog.pdf-page-editor[open]{display:flex;flex-direction:column}
+.pdf-page-editor .office-status{max-width:360px}
+.pdf-page-tools{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 20px;background:#fffefa;border-bottom:1px solid var(--line);flex-shrink:0}
+.pdf-page-tools .actions{gap:5px}
+.pdf-page-tools button{min-height:34px;padding:6px 10px;font-size:12px}
+.pdf-page-body{min-height:0;flex:1;overflow:auto;padding:24px 20px 36px}
+.pdf-page-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;align-content:start;max-width:1420px;margin:auto}
+.pdf-page-card{min-width:0;padding:10px;background:#fffefa;border:2px solid var(--line);border-radius:12px;box-shadow:0 2px 8px #27341d0d;cursor:pointer;outline-offset:2px}
+.pdf-page-card:hover{border-color:#b5c5a4}.pdf-page-card.selected{border-color:var(--accent);background:#f5f8ef}.pdf-page-card.dragging{opacity:.45}
+.pdf-page-thumb{height:190px;display:grid;place-items:center;overflow:hidden;background:#e9ece4;border-radius:7px}
+.pdf-page-thumb canvas{max-width:100%;max-height:100%;object-fit:contain;box-shadow:0 2px 12px #0002}
+.pdf-page-thumb .pdf-thumb-placeholder{font-size:11px;color:#7d8576;padding:15px;text-align:center}
+.pdf-page-card.blank .pdf-page-thumb{background:#fff;border:1px solid #d5d9d0}
+.pdf-page-label{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:10px 2px 8px;font-size:12px}
+.pdf-page-label span{font-size:11px;color:var(--muted);text-align:right}
+.pdf-page-arrows{display:flex;gap:6px}.pdf-page-arrows button{flex:1;min-height:30px;padding:5px 7px;font-size:11px}
+.pdf-page-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 20px;border-top:1px solid var(--line);background:#fffefa;flex-shrink:0;font-size:12px}
+.pdf-page-footer button{min-height:34px;padding:6px 10px;font-size:12px}
+@media(max-width:760px){.pdf-page-tools{padding:8px 12px;gap:7px}.pdf-page-tools .actions{width:100%;justify-content:flex-start}.pdf-page-tools button{flex:1;min-width:0}.pdf-page-body{padding:14px 10px 20px}.pdf-page-grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:8px}.pdf-page-thumb{height:160px}.pdf-page-footer{padding:8px 12px;align-items:flex-start;flex-direction:column}.pdf-page-footer .actions{width:100%}.pdf-page-footer button{flex:1}}

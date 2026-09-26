@@ -62,3 +62,11 @@
 ## 2026-09-23 v0.3.0
 
 构建20260923-112828。部署DOC/DOCX、XLS/XLSX/CSV及大窗口预览；代码/数据库备份后重启服务。备份 `/opt/ai-platform-release-backups/file-share-0.3.0-20260923-112828/`。系统新增libreoffice-writer和bubblewrap，独立 `/opt/cloud-preview-venv` 安装预览依赖。服务账号与NoNewPrivileges下四种格式实际转换、缓存、损坏/超限拒绝、文件系统与网络隔离验证通过，未读取用户现有文档。公网四份资源SHA256、构建号、未登录保护和各产品基础路由通过，AI仍为v2.26.1。
+
+## 2026-09-26 v0.5.0
+
+构建 20260926-093349。新增管理员 PDF 页面整理：调序、删页、旋转、插入空白页、撤销/重做；浏览器用本站托管的 PDF.js 与 pdf-lib 生成文件，经现有私有 OSS 分片直传保存为版本，手动发布后才切换已有分享链接。服务端新增 `share_pdf_uploads` 表和受限 PDF 校验进程，运行环境安装固定的 `pypdf==6.19.0`。试用范围 20 MB、100 页；加密、签名及复杂结构拒绝处理。
+
+部署前 12 个原有代码文件 SHA256 与本地 `main` 基线一致，活跃 Office 编辑会话为 0。代码及 SQLite 一致性快照备份在 `/opt/ai-platform-release-backups/file-share-pdf-v0.5.0-20260926-093349/`，目录仅 root 可读。发布包和依赖哈希核对后安装、替换文件并重启 `ai-platform`；新表创建成功、服务 active，近十分钟服务异常行数为 0。
+
+本地隔离集成测试、Chrome 桌面/手机页面操作及 OSS 模拟上传/发布通过。公网核对管理页、新 PDF.js/pdf-lib 资源及 JS/CSS 内容哈希一致，`/`、`/ai`、`/cat`、`/admin/share`、`/api/health` 正常，PDF 管理接口对匿名请求返回 401。生产账号的真实 OSS 保存、发布和回滚尚待用户用普通 PDF 在管理页体验确认；不将模拟测试视为真实 OSS 验收。

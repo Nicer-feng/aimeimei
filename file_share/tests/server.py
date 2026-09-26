@@ -48,6 +48,11 @@ class FakeOSS:
  def sha256(self,key,chunk_size=1024*1024):
   body=objects[key]
   return hashlib.sha256(body).hexdigest(),len(body)
+ def download_to(self,key,destination,max_bytes,chunk_size=1024*1024):
+  body=objects[key]
+  if len(body)>max_bytes:raise ValueError("PDF 文件超过 20 MB 限制")
+  Path(destination).write_bytes(body)
+  return hashlib.sha256(body).hexdigest(),len(body)
  def sample(self,key):return objects[key][:4096]
  def verify_private(self,key):pass
  def delete(self,key):objects.pop(key,None)

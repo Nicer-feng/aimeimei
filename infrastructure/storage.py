@@ -96,6 +96,24 @@ class PrivateOSS:
                 size += len(chunk)
         return digest.hexdigest(), size
 
+    def download_to(self, key, destination, max_bytes, chunk_size=1024 * 1024):
+        """Stream a private object to a temporary file and hash it with a hard cap."""
+        if not isinstance(max_bytes, int) or max_bytes <= 0:
+            raise ValueError("OSS 读取上限无效")
+        digest = hashlib.sha256()
+        count = 0
+        with self.request("GET", key) as response, open(destination, "wb") as output:
+            while True:
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                count += len(chunk)
+                if count > max_bytes:
+                    raise ValueError("PDF 文件超过 20 MB 限制")
+                digest.update(chunk)
+                output.write(chunk)
+        return digest.hexdigest(), count
+
     def sample(self, key):
         with self.request("GET", key, headers={"Range": "bytes=0-4095"}) as response:
             return response.read(4096)

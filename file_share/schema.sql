@@ -67,6 +67,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS sos_one_editor ON share_office_sessions(file_i
  WHERE status IN ('PREPARING', 'ACTIVE');
 CREATE INDEX IF NOT EXISTS sos_file_history ON share_office_sessions(file_id, created_at DESC);
 
+-- Short-lived browser-to-OSS PDF uploads. Completed PDFs use the common
+-- immutable version table, while unfinished multipart uploads stay separate.
+CREATE TABLE IF NOT EXISTS share_pdf_uploads (
+ id TEXT PRIMARY KEY, file_id TEXT NOT NULL REFERENCES share_files(id),
+ user_id TEXT NOT NULL, object_key TEXT NOT NULL UNIQUE, upload_id TEXT,
+ size INTEGER NOT NULL, sha256 TEXT NOT NULL, base_revision TEXT NOT NULL,
+ source_key TEXT NOT NULL, status TEXT NOT NULL, version_id TEXT,
+ expires_at INTEGER NOT NULL, lease_until INTEGER NOT NULL DEFAULT 0,
+ created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS spu_one_active ON share_pdf_uploads(file_id)
+ WHERE status IN ('PREPARING', 'UPLOADING', 'COMPLETING');
+CREATE INDEX IF NOT EXISTS spu_expiry ON share_pdf_uploads(status,expires_at);
+
 CREATE TABLE IF NOT EXISTS infrastructure_ip_locations (
  ip TEXT PRIMARY KEY, country TEXT NOT NULL DEFAULT '', province TEXT NOT NULL DEFAULT '',
  city TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, expires_at INTEGER NOT NULL

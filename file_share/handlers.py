@@ -21,6 +21,7 @@ from .database import transaction
 from .platform import platform_report
 from .office_preview import office_preview, PreviewError
 from .office_service import OfficeService, OfficeServiceError
+from .pdf_service import PdfService, PdfServiceError
 from .imm_office import IMMWebOfficeError
 from .security import classify, client_info, hash_password, verify_password
 
@@ -110,6 +111,8 @@ class FileShareHandlersMixin:
             return self.error(422, str(exc))
         except OfficeServiceError as exc:
             return self.error(exc.status, exc.message)
+        except PdfServiceError as exc:
+            return self.error(exc.status, exc.message)
         except IMMWebOfficeError as exc:
             return self.error(502, str(exc))
         except StorageSecurityError as exc:
@@ -186,6 +189,8 @@ class FileShareHandlersMixin:
         offset, limit = (page - 1) * 20, 20
         if path.startswith('/office/'):
             return OfficeService(self, user_id).dispatch(path.removeprefix('/office'), data)
+        if path.startswith('/pdf/'):
+            return PdfService(self, user_id).dispatch(path.removeprefix('/pdf'), data)
         if path == '/version' and method == 'GET':
             return self.json({'version': (ROOT / 'VERSION').read_text().strip(),
                               'build_id': (ROOT / 'BUILD_ID').read_text().strip(),
@@ -295,6 +300,10 @@ class FileShareHandlersMixin:
                                            "(status='ACTIVE' AND refresh_expires_at>?))",
                                            (file_id,timestamp(),timestamp())).fetchone()
                     require(not editing, '该文件正在编辑，请先关闭编辑器', 409)
+                    pdf_upload = conn.execute("SELECT 1 FROM share_pdf_uploads WHERE file_id=? "
+                                              "AND status IN ('PREPARING','UPLOADING','COMPLETING') AND expires_at>?",
+                                              (file_id,timestamp())).fetchone()
+                    require(not pdf_upload, '该 PDF 正在保存，请先完成或取消上传', 409)
                     conn.execute("UPDATE share_files SET status='TRASHED',deleted_at=?,updated_at=? WHERE id=?", (timestamp(),timestamp(),file_id))
                 elif action == 'restore':
                     require(row['status'] == 'TRASHED', '文件不在回收站', 409)
@@ -307,14 +316,24 @@ class FileShareHandlersMixin:
                     keys = {row['object_key']}
                     keys.update(r[0] for r in conn.execute('SELECT object_key FROM share_office_versions WHERE file_id=?', (file_id,)))
                     keys.update(r[0] for r in conn.execute('SELECT draft_key FROM share_office_sessions WHERE file_id=?', (file_id,)))
+                    pdf_uploads = [dict(r) for r in conn.execute('SELECT object_key,upload_id FROM share_pdf_uploads WHERE file_id=?', (file_id,))]
+                    keys.update(r['object_key'] for r in pdf_uploads)
                     # Reserve deletion, then release SQLite while OSS performs I/O.
                     conn.execute("UPDATE share_files SET status='PURGING' WHERE id=?", (file_id,))
                     conn.commit()
                     # Keep PURGING after a partial OSS failure. Retrying DELETE is safe;
                     # restoring a file whose object was already deleted is not.
                     oss = self.fs_oss(row)
+                    for pending_pdf in pdf_uploads:
+                        if pending_pdf['upload_id']:
+                            try:
+                                oss.abort(pending_pdf['object_key'], pending_pdf['upload_id'])
+                            except HTTPError as exc:
+                                if exc.code != 404:
+                                    raise
                     for key in keys:
                         oss.delete(key)
+                    conn.execute('DELETE FROM share_pdf_uploads WHERE file_id=?', (file_id,))
                     conn.execute('DELETE FROM share_office_sessions WHERE file_id=?', (file_id,))
                     conn.execute('DELETE FROM share_office_versions WHERE file_id=?', (file_id,))
                     conn.execute("UPDATE share_files SET status='DELETED',updated_at=? WHERE id=?", (timestamp(),file_id))

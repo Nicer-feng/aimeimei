@@ -2,3 +2,4 @@ argon2-cffi==25.1.0
 oss2==2.19.1
 alibabacloud_imm20200930==4.6.1
 certifi==2026.7.22
+pypdf==6.19.0

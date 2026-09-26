@@ -1,6 +1,6 @@
 # 槑槑云
 
-当前版本为 0.4.0。
+当前版本为 0.5.0。
 
 2026-09-14 16:57 已上线：https://feng.asia/admin/share 。真实 OSS 和浏览器闭环通过。
 
@@ -11,8 +11,8 @@
 - 独立页面：`/admin/share`、`/share/{16位随机短码}`。
 - 独立接口：`/api/file-share/admin/*`、`/api/file-share/public/*`。
 - 独立后端：`file_share/`；静态资源：`res/file-share/`。
-- 独立数据表：`share_files`、`shares`、`share_files_relation`、`share_access_logs`、`share_sessions`、`share_settings`、`share_rate_limits`、`share_audit_logs`、`share_office_sessions`、`share_office_versions`。
-- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.4.0`。
+- 独立数据表：`share_files`、`shares`、`share_files_relation`、`share_access_logs`、`share_sessions`、`share_settings`、`share_rate_limits`、`share_audit_logs`、`share_office_sessions`、`share_office_versions`、`share_pdf_uploads`。
+- 独立版本和更新记录：本目录 `VERSION`、`CHANGELOG.md`，Git 标签建议 `file-share/v0.5.0`。
 - 不进入 AI槑槑后台菜单；共享已有管理员登录 Session、SQLite 连接以及 OSS 配置。
 - 第一版仍由现有 Python 进程承载，更新后端需要重启该进程，因此暂时不是独立部署单元。后续可以在保持接口和产品目录不变的前提下拆进程。
 - AI 对话分享仍使用 `/ai/share/{43位令牌}`，原 `/share/{43位令牌}` 兼容保留。
@@ -21,7 +21,7 @@
 
 后台含概览、文件、分享、访问记录、回收站和设置。支持多文件选择/拖拽、分片进度、搜索、分类、排序、分页、多文件分享、二维码 PNG、密码重设、有效期/次数限制、暂停/恢复、撤回、回收站恢复与永久删除。设置页可清理未完成上传。
 
-外部分享支持图片缩放/原图、HTML5 视频/音频、PDF 浏览器预览及文本前 1 MB 预览。视频使用 OSS 原生 Range，可拖动进度；5 分钟后再次请求 Range 可能需要关闭并重新打开预览。Office 文件可按原权限只读预览；管理员还可试用 DOCX/XLSX 在线编辑。压缩包仅提供文件信息及下载。手机浏览器 PDF 内嵌支持不一致，提供“在浏览器中打开 PDF”链接。
+外部分享支持图片缩放/原图、HTML5 视频/音频、PDF 浏览器预览及文本前 1 MB 预览。视频使用 OSS 原生 Range，可拖动进度；5 分钟后再次请求 Range 可能需要关闭并重新打开预览。Office 文件可按原权限只读预览；管理员还可试用 DOCX/XLSX 在线编辑和 PDF 页面整理。压缩包仅提供文件信息及下载。手机浏览器 PDF 内嵌支持不一致，提供“在浏览器中打开 PDF”链接。
 
 图片列表目前使用对应类型图标，不自动拉取全尺寸文件作为缩略图；视频使用图标。
 
@@ -151,6 +151,16 @@ python3 file_share/tests/run.py
 5. 给 Bucket 的 `share/office-drafts/` 前缀单独设置 7 天清理生命周期；未保存为业务版本的草稿超过 7 天无法恢复。业务版本位于 `share/office-versions/`，**不要**给这个前缀设置同样的清理规则。首次真实验收要检查生成凭证、编辑回写、保存版本、发布后的旧分享链接、回收站清理，以及 OSS/IMM 费用。
 
 本实现不调用 MNS，也不启用 IMM 的 `History` 参数；槑槑云版本由独立 OSS 对象和 SQLite 记录实现，无需开启整个 Bucket 的版本控制。AccessToken 最长 30 分钟，浏览器通过服务端刷新；关闭会话后拒绝刷新。服务端只保存 token 哈希，脱敏备份排除会话。编辑草稿没有发布前不会影响现有分享。若浏览器加载失败，先核对项目服务角色、调用方 RAM 权限、地域、OSS CORS 和实际对象 ACL。阿里云接口说明见 [GenerateWebofficeToken](https://help.aliyun.com/zh/imm/developer-reference/api-imm-2020-09-30-generatewebofficetoken) 与 [RefreshWebofficeToken](https://help.aliyun.com/zh/imm/developer-reference/api-imm-2020-09-30-refreshwebofficetoken)。
+
+## PDF 页面整理（0.5.0）
+
+管理员可对 20 MB、100 页以内的普通 PDF 调整页面顺序、删除页面、按 90° 旋转以及插入空白页。浏览器使用本站托管的 PDF.js 绘制缩略图，并用 pdf-lib 生成结果；文件从私有 OSS 读取，结果通过短期签名地址分片直传私有 OSS，不经过 IMM，也不在服务器运行整套 PDF 编辑器。
+
+首次打开时记录原文件基线；点击“保存版本”后登记独立对象，原文件与已有分享仍指向当前发布版本。用户显式发布后，后续从分享链接申请的预览和下载地址才切到新版本。已经签发的短期旧地址在到期前仍可能读取旧版本。再次打开编辑器会从当前已发布版本开始，试用版暂不续编尚未发布的版本。文件列表的“最近保存版本”统计成功保存的 PDF 版本，不把首次打开计为编辑。
+
+服务端对来源与结果复核所有者、文件状态、当前发布版本和 OSS 对象信息，并在有限时间与内存的独立进程中校验 PDF 结构、页数及风险特征。加密、已签名以及含表单、书签或复杂导航结构的 PDF 暂不开放页面整理，以免重写后损坏这些信息。临时分片上传、回收站与永久删除均有清理和冲突处理；脱敏快照不保留临时上传会话。OSS 生命周期只可设置“中止未完成的分片上传”，不可自动删除 `share/pdf-versions/` 下已完成的版本对象。
+
+前端从 OSS 读取私有 PDF 需要 Bucket 的 CORS 允许 `https://feng.asia` 发起 GET；分片上传沿用 PUT 和暴露 ETag 的现有规则。无须新建阿里云产品或配置 IMM PDF 编辑权限。
 
 ## Office 预览（0.3.0）
 

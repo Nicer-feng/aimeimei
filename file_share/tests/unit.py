@@ -45,7 +45,7 @@ assert classify('hello.txt','text/plain',b'<script>alert(1)</script>')==('TEXT',
 snapshot=DATA_DIR/'sanitized-test.db'
 create_sanitized_snapshot(DB_PATH,snapshot)
 with sqlite3.connect(snapshot) as conn:
-    for name in ('shares','share_sessions','share_office_sessions','share_files_relation','share_access_logs'):
+    for name in ('shares','share_sessions','share_office_sessions','share_pdf_uploads','share_files_relation','share_access_logs'):
         assert conn.execute('SELECT count(*) FROM '+name).fetchone()[0]==0
     assert conn.execute('SELECT count(*) FROM share_files WHERE upload_id IS NOT NULL').fetchone()[0]==0
 snapshot.unlink()

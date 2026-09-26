@@ -80,7 +80,7 @@ def create_sanitized_snapshot(source_path, snapshot_path):
         _execute_if_column(destination, "message_tts", "error_message", "UPDATE message_tts SET error_message='' ")
 
         for table_name in ("sessions", "cat_sessions", "conversation_shares", "login_captchas",
-                           "sms_login_challenges", "share_sessions", "share_office_sessions", "share_files_relation", "share_access_logs",
+                           "sms_login_challenges", "share_sessions", "share_office_sessions", "share_pdf_uploads", "share_files_relation", "share_access_logs",
                            "shares", "share_rate_limits", "infrastructure_ip_locations"):
             if _table_exists(destination, table_name):
                 destination.execute('DELETE FROM "{}"'.format(table_name))
