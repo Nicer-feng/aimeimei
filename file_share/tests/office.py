@@ -1,5 +1,6 @@
 """Isolated HTTP workflow: IMM drafts, private versions, and explicit publication."""
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import http.cookiejar
 import json
@@ -115,8 +116,11 @@ assert req(admin, f'{route}/sessions/{session_id}/refresh',
 write_url = 'http://127.0.0.1:18766/object/' + urllib.parse.quote(draft_key) + '?testWrite=1'
 with admin.open(urllib.request.Request(write_url, data=updated, method='PUT')) as response:
     assert response.status == 200
-status, saved = req(admin, f'{route}/sessions/{session_id}/snapshot', {})
-assert status == 200, (status, saved)
+with ThreadPoolExecutor(max_workers=4) as pool:
+    saves = list(pool.map(lambda _: req(admin, f'{route}/sessions/{session_id}/snapshot', {}), range(4)))
+assert all(status == 200 for status, _ in saves), saves
+assert len({result['version']['id'] for _, result in saves}) == 1, saves
+status, saved = saves[0]
 assert saved['version']['number'] == 2 and not saved['version']['published']
 saved_at = scalar('SELECT created_at FROM share_office_versions WHERE id=?', (saved['version']['id'],))
 assert req(admin, '/api/file-share/admin/files')[1]['items'][0]['last_edited_at'] == saved_at

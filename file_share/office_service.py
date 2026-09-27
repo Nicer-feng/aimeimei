@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import threading
 import time
 import uuid
 from urllib.error import HTTPError
@@ -14,6 +15,7 @@ from .database import read_connection, transaction
 
 MAX_EDIT_BYTES = 20 * 1024 * 1024
 EDIT_FORMATS = ('docx', 'xlsx')
+SNAPSHOT_LOCKS = [threading.Lock() for _ in range(64)]
 
 
 class OfficeServiceError(Exception):
@@ -259,6 +261,13 @@ class OfficeService:
         return token
 
     def snapshot(self, session_id):
+        # Serialize retries before reading last_snapshot_etag with a process-local
+        # striped guard; OSS reads must never reserve SQLite's writer lock.
+        lock = SNAPSHOT_LOCKS[int(hashlib.sha256(session_id.encode()).hexdigest(), 16) % len(SNAPSHOT_LOCKS)]
+        with lock:
+            return self._snapshot_locked(session_id)
+
+    def _snapshot_locked(self, session_id):
         self._enabled()
         session, file = self._session(session_id)
         oss = self.handler.fs_oss(file)
