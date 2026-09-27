@@ -169,6 +169,7 @@ def init_db(secrets_data=None):
               role TEXT NOT NULL,
               content TEXT NOT NULL,
               reasoning_content TEXT NOT NULL DEFAULT '',
+              generation_status TEXT NOT NULL DEFAULT 'completed',
               input_tokens INTEGER NOT NULL DEFAULT 0,
               output_tokens INTEGER NOT NULL DEFAULT 0,
               total_tokens INTEGER NOT NULL DEFAULT 0,
@@ -611,6 +612,9 @@ def init_db(secrets_data=None):
             conn.execute("ALTER TABLE messages ADD COLUMN actual_model TEXT NOT NULL DEFAULT ''")
         if "generation_status" not in message_columns:
             conn.execute("ALTER TABLE messages ADD COLUMN generation_status TEXT NOT NULL DEFAULT 'completed'")
+        side_message_columns = table_columns(conn, "side_discussion_messages")
+        if "generation_status" not in side_message_columns:
+            conn.execute("ALTER TABLE side_discussion_messages ADD COLUMN generation_status TEXT NOT NULL DEFAULT 'completed'")
         favorite_columns = table_columns(conn, "favorite_messages")
         if "user_id" not in favorite_columns:
             conn.execute(

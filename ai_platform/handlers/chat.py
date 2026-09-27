@@ -35,6 +35,19 @@ def sse_payloads(response):
             break
 
 
+def upstream_error_detail(error):
+    """An unreadable error body must not bypass failed-message persistence."""
+    try:
+        return error.read(65536).decode(errors="replace")
+    except Exception:
+        return ""
+    finally:
+        try:
+            error.close()
+        except OSError:
+            pass
+
+
 CONTEXT_RECENT_MESSAGE_LIMIT = 18
 CONTEXT_COMPACT_TRIGGER_MESSAGE_COUNT = 24
 CONTEXT_COMPACT_TRIGGER_CHARACTERS = 28000
@@ -209,8 +222,9 @@ class ChatHandlersMixin:
                    COUNT(dm.id) AS message_count
             FROM side_discussions d
             JOIN models m ON m.id=d.model_id
+            JOIN conversations c ON c.id=d.session_id AND c.user_id=d.user_id
             LEFT JOIN side_discussion_messages dm ON dm.discussion_id=d.id
-            WHERE d.id=? AND d.user_id=?
+            WHERE d.id=? AND d.user_id=? AND c.archived=0
             GROUP BY d.id
             """,
             (discussion_id, user_id),
@@ -332,6 +346,62 @@ class ChatHandlersMixin:
             }
         )
 
+    def chat_upstream_error(self, message, detail, saved_event):
+        payload = {"error": message}
+        if detail:
+            payload["detail"] = detail
+        if saved_event:
+            for key in ("message_id", "generation_status", "conversation_id", "discussion_id"):
+                if key in saved_event:
+                    payload[key] = saved_event[key]
+        return self.json(payload, HTTPStatus.BAD_GATEWAY)
+
+    def save_failed_chat_message(self, conversation):
+        # No response usage was received: persist a failure marker, never invent
+        # provider token consumption or a billable cost for the failed attempt.
+        uid, cid, ts = conversation["user_id"], conversation["id"], now()
+        with db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute("SELECT 1 FROM conversations WHERE id=? AND user_id=? AND archived=0", (cid, uid)).fetchone():
+                return None
+            cursor = conn.execute("""INSERT INTO messages
+                (user_id,conversation_id,role,content,generation_status,actual_model,created_at)
+                VALUES (?,?,'assistant','','failed',?,?)""", (uid, cid, conversation["model"], ts))
+            conn.execute("UPDATE conversations SET updated_at=? WHERE id=? AND user_id=?", (ts, cid, uid))
+        return {"message_id": cursor.lastrowid, "conversation_id": cid, "generation_status": "failed"}
+
+    def save_side_discussion_reply(self, discussion, content, reasoning, usage, generation_status):
+        prompt_tokens, completion_tokens, total_tokens = parse_usage_tokens(usage)
+        estimated_cost = estimate_request_cost(
+            prompt_tokens, completion_tokens,
+            parse_price(discussion["input_price_per_million"]),
+            parse_price(discussion["output_price_per_million"]),
+            bool(discussion["cost_enabled"]),
+        )
+        uid, did, ts = discussion["user_id"], discussion["id"], now()
+        with db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            active = conn.execute("""SELECT 1 FROM side_discussions d
+                JOIN conversations c ON c.id=d.session_id AND c.user_id=d.user_id
+                WHERE d.id=? AND d.user_id=? AND c.archived=0""", (did, uid)).fetchone()
+            if not active:
+                return None
+            cursor = conn.execute("""INSERT INTO side_discussion_messages(
+                discussion_id,role,content,reasoning_content,generation_status,
+                input_tokens,output_tokens,total_tokens,estimated_cost,actual_model,created_at)
+                VALUES (?,'assistant',?,?,?,?,?,?,?,?,?)""",
+                (did, content, reasoning, generation_status, prompt_tokens, completion_tokens,
+                 total_tokens, estimated_cost, discussion["model"], ts))
+            conn.execute("UPDATE side_discussions SET updated_at=? WHERE id=? AND user_id=?", (ts, did, uid))
+            # Failures without provider usage remain unknown, not invented zero
+            # cost calls in the daily usage rollup.
+            if isinstance(usage, dict) or generation_status == "completed":
+                add_daily_usage(conn, uid, ts, prompt_tokens, completion_tokens, total_tokens, estimated_cost)
+        return {"type": "message_saved", "discussion_id": did, "message_id": cursor.lastrowid,
+                "generation_status": generation_status,
+                "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
+                          "total_tokens": total_tokens, "estimated_cost": estimated_cost}}
+
     def handle_side_discussion_send(self):
         if not feature_enabled(self.server.secrets, "side_discussion"):
             return self.side_discussion_disabled_error()
@@ -355,7 +425,7 @@ class ChatHandlersMixin:
                 FROM side_discussions d
                 JOIN conversations c ON c.id=d.session_id AND c.user_id=d.user_id
                 JOIN models m ON m.id=d.model_id
-                WHERE d.id=? AND d.user_id=?
+                WHERE d.id=? AND d.user_id=? AND c.archived=0
                 """,
                 (discussion_id, user_id),
             ).fetchone()
@@ -383,7 +453,7 @@ class ChatHandlersMixin:
                 FROM (
                   SELECT id, role, content
                   FROM side_discussion_messages
-                  WHERE discussion_id=?
+                  WHERE discussion_id=? AND content!=''
                   ORDER BY id DESC
                   LIMIT 60
                 ) AS recent_messages
@@ -435,170 +505,108 @@ class ChatHandlersMixin:
             )
             return urllib.request.urlopen(request, timeout=120)
 
+        def upstream_failure(message, detail):
+            saved = self.save_side_discussion_reply(discussion, "", "", None, "failed")
+            return self.chat_upstream_error(message, detail, saved)
+
         try:
             response = open_upstream(make_payload(True))
         except urllib.error.HTTPError as exc:
-            detail = exc.read(65536).decode(errors="replace")
+            detail = upstream_error_detail(exc)
             if exc.code == 400 and usage_option_rejected(detail):
                 try:
                     response = open_upstream(make_payload(False))
                 except urllib.error.HTTPError as retry:
-                    retry_detail = retry.read(65536).decode(errors="replace")
-                    return self.error(
-                        HTTPStatus.BAD_GATEWAY,
+                    retry_detail = upstream_error_detail(retry)
+                    return upstream_failure(
                         f"侧边讨论模型请求失败（{retry.code}）",
                         retry_detail,
                     )
                 except Exception as retry:
-                    return self.error(HTTPStatus.BAD_GATEWAY, "侧边讨论模型请求失败", str(retry))
+                    return upstream_failure("侧边讨论模型请求失败", str(retry))
             else:
-                return self.error(
-                    HTTPStatus.BAD_GATEWAY,
+                return upstream_failure(
                     f"侧边讨论模型请求失败（{exc.code}）",
                     detail,
                 )
         except Exception as exc:
-            return self.error(HTTPStatus.BAD_GATEWAY, "侧边讨论模型请求失败", str(exc))
+            return upstream_failure("侧边讨论模型请求失败", str(exc))
 
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Accel-Buffering", "no")
-        self.end_headers()
-
-        assistant_parts = []
-        reasoning_parts = []
+        assistant_parts, reasoning_parts = [], []
         usage_data = None
-        buffer = ""
-        decoder = sse_text_decoder()
+        completed, client_connected, stream_failed = False, True, False
+
+        def emit(event):
+            nonlocal client_connected
+            if not client_connected:
+                return False
+            try:
+                self.wfile.write(("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode())
+                self.wfile.flush()
+                return True
+            except OSError:
+                client_connected = False
+                return False
+
         try:
-            while True:
-                chunk = response.read(8192)
-                if not chunk:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+        except OSError:
+            client_connected = False
+        try:
+            for data_text in sse_payloads(response) if client_connected else ():
+                if data_text.strip() == "[DONE]":
                     break
                 try:
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-                except Exception:
-                    pass
-                buffer += decoder.decode(chunk)
-                lines = buffer.splitlines(keepends=True)
-                if lines and not lines[-1].endswith(("\n", "\r")):
-                    buffer = lines.pop()
-                else:
-                    buffer = ""
-                for line in lines:
-                    text = line.strip()
-                    if not text.startswith("data:"):
-                        continue
-                    data_text = text[5:].strip()
-                    if not data_text or data_text == "[DONE]":
-                        continue
-                    try:
-                        event = json.loads(data_text)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(event.get("usage"), dict):
-                        usage_data = event["usage"]
-                    choice = (event.get("choices") or [{}])[0]
-                    if choice.get("finish_reason") is not None:
-                        writing_completion = choice["finish_reason"] == "stop"
-                    if isinstance(choice.get("usage"), dict):
-                        usage_data = choice["usage"]
-                    delta = choice.get("delta") or {}
-                    message = choice.get("message") or {}
-                    piece = delta.get("content") or message.get("content") or ""
-                    reasoning_piece = (
-                        delta.get("reasoning_content")
-                        or message.get("reasoning_content")
-                        or delta.get("reasoning")
-                        or message.get("reasoning")
-                        or ""
-                    )
-                    if piece:
-                        assistant_parts.append(str(piece))
-                    if reasoning_piece:
-                        reasoning_parts.append(str(reasoning_piece))
+                    event = json.loads(data_text)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if isinstance(event.get("usage"), dict):
+                    usage_data = event["usage"]
+                if event.get("error"):
+                    stream_failed = True
+                    break
+                choice = (event.get("choices") or [{}])[0]
+                if choice.get("finish_reason") is not None:
+                    completed = choice["finish_reason"] == "stop"
+                if isinstance(choice.get("usage"), dict):
+                    usage_data = choice["usage"]
+                delta, message = choice.get("delta") or {}, choice.get("message") or {}
+                piece = delta.get("content") or message.get("content") or ""
+                reasoning = (delta.get("reasoning_content") or message.get("reasoning_content")
+                             or delta.get("reasoning") or message.get("reasoning")
+                             or delta.get("thinking") or message.get("thinking") or "")
+                if piece:
+                    assistant_parts.append(str(piece))
+                if reasoning:
+                    reasoning_parts.append(str(reasoning))
+                # Buffer before attempting client delivery; disconnect stops
+                # future reads but must not lose already received text/usage.
+                if not emit(event):
+                    break
+        except Exception as exc:
+            stream_failed = True
+            self.log_message("side discussion stream failed (%s)", type(exc).__name__)
         finally:
-            response.close()
-
-        if search_results:
-            with db() as source_conn:
-                search_results = enrich_search_result_snippets(
-                    search_results,
-                    build_search_query(content),
-                    source_conn,
-                )
-
-        assistant_text = "".join(assistant_parts).strip()
-        reasoning_text = "".join(reasoning_parts).strip()
-        assistant_text, think_reasoning = split_think_blocks(assistant_text)
-        if think_reasoning:
-            reasoning_text = (reasoning_text + "\n\n" + think_reasoning).strip()
-        if not assistant_text:
-            return
-        prompt_tokens, completion_tokens, total_tokens = parse_usage_tokens(usage_data)
-        input_price = parse_price(discussion["input_price_per_million"])
-        output_price = parse_price(discussion["output_price_per_million"])
-        estimated_cost = estimate_request_cost(
-            prompt_tokens,
-            completion_tokens,
-            input_price,
-            output_price,
-            bool(discussion["cost_enabled"]),
-        )
-        created_at = now()
-        with db() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO side_discussion_messages(
-                  discussion_id, role, content, reasoning_content,
-                  input_tokens, output_tokens, total_tokens,
-                  estimated_cost, actual_model, created_at
-                )
-                VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    discussion_id,
-                    assistant_text,
-                    reasoning_text,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                    estimated_cost,
-                    discussion["model"],
-                    created_at,
-                ),
-            )
-            conn.execute(
-                "UPDATE side_discussions SET updated_at=? WHERE id=? AND user_id=?",
-                (created_at, discussion_id, user_id),
-            )
-            add_daily_usage(
-                conn,
-                user_id,
-                created_at,
-                prompt_tokens,
-                completion_tokens,
-                total_tokens,
-                estimated_cost,
-            )
-        event = {
-            "type": "message_saved",
-            "discussion_id": discussion_id,
-            "message_id": cursor.lastrowid,
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-                "estimated_cost": estimated_cost,
-            },
-        }
-        try:
-            self.wfile.write(("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode())
-            self.wfile.flush()
-        except Exception:
-            pass
+            try:
+                response.close()
+            except OSError:
+                pass
+        generation_status = ("failed" if stream_failed else
+                             "completed" if completed and client_connected else "interrupted")
+        assistant_text, think_reasoning = split_think_blocks("".join(assistant_parts).strip())
+        reasoning_text = "\n\n".join(part for part in ("".join(reasoning_parts).strip(), think_reasoning) if part)
+        saved = self.save_side_discussion_reply(discussion, assistant_text, reasoning_text, usage_data, generation_status)
+        if saved:
+            emit(saved)
+            if generation_status != "completed":
+                emit({"type": "message.failed", "status": generation_status, "discussion_id": discussion_id,
+                      "message_id": saved["message_id"], "message": "生成未完成，已保存收到的内容，可继续追问。"})
 
     def handle_side_discussion_conversation(self):
         if not feature_enabled(self.server.secrets, "side_discussion"):
@@ -651,9 +659,9 @@ class ChatHandlersMixin:
                     """
                     INSERT INTO messages(
                       user_id, conversation_id, role, content, reasoning_content,
-                      actual_model, created_at
+                      actual_model, created_at, generation_status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user_id,
@@ -663,6 +671,7 @@ class ChatHandlersMixin:
                         message["reasoning_content"],
                         message["actual_model"],
                         message["created_at"],
+                        message["generation_status"],
                     ),
                 )
             row = conn.execute(
@@ -1112,7 +1121,7 @@ class ChatHandlersMixin:
                     search_results = perform_web_search(content, search_config)
                     search_results = enrich_search_result_snippets(search_results, build_search_query(content), conn)
                 except urllib.error.HTTPError as exc:
-                    detail = exc.read(65536).decode(errors="replace")
+                    detail = upstream_error_detail(exc)
                     return self.error(
                         HTTPStatus.BAD_GATEWAY,
                         f"search upstream status {exc.code}",
@@ -1312,7 +1321,7 @@ class ChatHandlersMixin:
             try:
                 return open_upstream(payload)
             except urllib.error.HTTPError as exc:
-                detail = exc.read(65536).decode(errors="replace")
+                detail = upstream_error_detail(exc)
                 if exc.code == 400 and usage_option_rejected(detail):
                     payload = make_payload(results, include_usage=False)
                     return open_upstream(payload)
@@ -1344,6 +1353,10 @@ class ChatHandlersMixin:
                 return "upstream content rejected"
             return f"upstream status {code}"
 
+        def upstream_failure(message, detail):
+            saved = self.save_failed_chat_message(convo)
+            return self.chat_upstream_error(message, detail, saved)
+
         try:
             response = (
                 open_upstream(payload, native_search=True)
@@ -1351,7 +1364,7 @@ class ChatHandlersMixin:
                 else open_upstream_with_usage_fallback(search_results)
             )
         except urllib.error.HTTPError as exc:
-            detail = exc.read(65536).decode(errors="replace")
+            detail = upstream_error_detail(exc)
             if use_native_search and native_extractor_enabled and web_extractor_option_rejected(detail):
                 native_extractor_enabled = False
                 try:
@@ -1360,13 +1373,11 @@ class ChatHandlersMixin:
                         native_search=True,
                     )
                 except urllib.error.HTTPError as retry_exc:
-                    retry_detail = retry_exc.read(65536).decode(errors="replace")
+                    retry_detail = upstream_error_detail(retry_exc)
                     message = upstream_error_message(retry_exc.code, retry_detail)
-                    return self.error(HTTPStatus.BAD_GATEWAY, message, retry_detail)
+                    return upstream_failure(message, retry_detail)
                 except Exception as retry_exc:
-                    return self.error(
-                        HTTPStatus.BAD_GATEWAY, "upstream request failed", str(retry_exc)
-                    )
+                    return upstream_failure("upstream request failed", str(retry_exc))
             elif not use_native_search and search_results and exc.code == 400 and "data_inspection_failed" in detail:
                 search_results = []
                 payload = make_payload(search_results)
@@ -1374,18 +1385,16 @@ class ChatHandlersMixin:
                 try:
                     response = open_upstream_with_usage_fallback(search_results)
                 except urllib.error.HTTPError as retry_exc:
-                    retry_detail = retry_exc.read(65536).decode(errors="replace")
+                    retry_detail = upstream_error_detail(retry_exc)
                     message = upstream_error_message(retry_exc.code, retry_detail)
-                    return self.error(HTTPStatus.BAD_GATEWAY, message, retry_detail)
+                    return upstream_failure(message, retry_detail)
                 except Exception as retry_exc:
-                    return self.error(
-                        HTTPStatus.BAD_GATEWAY, "upstream request failed", str(retry_exc)
-                    )
+                    return upstream_failure("upstream request failed", str(retry_exc))
             else:
                 message = upstream_error_message(exc.code, detail)
-                return self.error(HTTPStatus.BAD_GATEWAY, message, detail)
+                return upstream_failure(message, detail)
         except Exception as exc:
-            return self.error(HTTPStatus.BAD_GATEWAY, "upstream request failed", str(exc))
+            return upstream_failure("upstream request failed", str(exc))
 
         assistant_parts = []
         reasoning_parts = []

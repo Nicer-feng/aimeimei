@@ -13,7 +13,7 @@ const functions = [
   'readChatEvents', 'generationStatusLabel', 'generationEmptyText', 'resetStreamState',
   'resolveStreamDrain', 'drainAssistantQueue', 'enqueueAssistantText', 'scheduleStreamTick',
   'streamTick', 'streamChunkSize', 'setSendingUI', 'logout', 'closeSideDiscussion',
-  'openSideDiscussion', 'sendSideDiscussionMessage', 'parseSideDiscussionSSE'
+  'openSideDiscussion', 'sendSideDiscussionMessage', 'readChatFailure', 'createSideDiscussionFromSelection'
 ];
 function extract(name) {
   const match = new RegExp('(?:async )?function ' + name + '\\(').exec(source);
@@ -62,7 +62,7 @@ function harness() {
     'ensureAssistantActivityClock', 'renderSearchToggle', 'updateScrollLatestButton', 'updateChatUsage',
     'closeProfilePopover', 'closeProfiles', 'showLogin', 'sortConversations', 'syncComposerLayout',
     'queueConversationMinimap', 'applySideDiscussionWidth', 'renderSideDiscussionHeader',
-    'renderSideDiscussionMessages', 'updateSideDiscussionStream']) context[name] = () => {};
+    'renderSideDiscussionMessages', 'updateSideDiscussionStream', 'hideSelectionToolbar']) context[name] = () => {};
   context.applyCurrentUser = user => { state.user = user; };
   context.friendlyError = value => value?.message || String(value);
   context.readError = async () => '请求失败';
@@ -273,6 +273,98 @@ test('opening another side discussion cancels the old controller and resets the 
   assert.equal(h.state.sideDiscussionSending, true);
   assert.equal(h.state.sideDiscussionMessages.at(-1).content, '');
   h.context.closeSideDiscussion(); await newSend;
+});
+test('side discussion keeps partial text and a failed saved marker', async h => {
+  const stream = streaming(h);
+  h.state.activeSideDiscussion = { id: 'S1', session_id: 'A' };
+  h.context.$('sideDiscussionPrompt').value = '提问';
+  const send = h.context.sendSideDiscussionMessage(); await tick();
+  stream.event({ choices: [{ delta: { content: '已收到的侧边回复' } }] });
+  stream.event({ type: 'message_saved', message_id: 21, generation_status: 'failed' });
+  stream.event({ type: 'message.failed', message_id: 21, status: 'failed', message: '生成失败' });
+  stream.end(); await send;
+  assert.equal(h.state.sideDiscussionMessages[1].content, '已收到的侧边回复');
+  assert.equal(h.state.sideDiscussionMessages[1].generation_status, 'failed');
+  assert.equal(h.state.sideDiscussionMessages[1].id, 21);
+  assert.equal(h.state.sideDiscussionSending, false);
+});
+test('empty side EOF remains visible as interrupted instead of disappearing', async h => {
+  const stream = streaming(h);
+  h.state.activeSideDiscussion = { id: 'S1', session_id: 'A' };
+  h.context.$('sideDiscussionPrompt').value = '提问';
+  const send = h.context.sendSideDiscussionMessage(); await tick(); stream.end(); await send;
+  assert.equal(h.state.sideDiscussionMessages.length, 2);
+  assert.equal(h.state.sideDiscussionMessages[1].generation_status, 'interrupted');
+  assert.match(h.context.generationEmptyText(h.state.sideDiscussionMessages[1]), /尚未收到正文/);
+});
+test('stopping a side discussion preserves its received text and interrupted state', async h => {
+  const stream = streaming(h);
+  h.state.activeSideDiscussion = { id: 'S1', session_id: 'A' };
+  h.context.$('sideDiscussionPrompt').value = '提问';
+  const send = h.context.sendSideDiscussionMessage(); await tick();
+  stream.event({ choices: [{ delta: { content: '停止前正文' } }] }); await tick();
+  await h.context.sendSideDiscussionMessage(); await send;
+  assert.equal(h.state.sideDiscussionMessages[1].content, '停止前正文');
+  assert.equal(h.state.sideDiscussionMessages[1].generation_status, 'interrupted');
+  assert.equal(h.context.$('sideDiscussionSend').title, '发送');
+});
+test('confirmed side completion survives a later transport failure', async h => {
+  const stream = streaming(h);
+  h.state.activeSideDiscussion = { id: 'S1', session_id: 'A' };
+  h.context.$('sideDiscussionPrompt').value = '提问';
+  const send = h.context.sendSideDiscussionMessage(); await tick();
+  stream.event({ choices: [{ delta: { content: '完整侧边回复' } }] });
+  stream.event({ type: 'message_saved', message_id: 22, generation_status: 'completed' });
+  await tick(); stream.error(new TypeError('Connection closed')); await send;
+  assert.equal(h.state.sideDiscussionMessages[1].generation_status, 'completed');
+  assert.equal(h.state.sideDiscussionMessages[1].thinking, false);
+});
+test('main and side connection errors retain the persisted failed message id', async h => {
+  const base = h.context.api;
+  h.context.api = async (url, options) => url.endsWith('/messages') && options?.method === 'POST'
+    ? { ok: false, json: async () => ({ error: 'upstream request failed', message_id: 23, generation_status: 'failed' }) }
+    : base(url, options);
+  await h.context.sendMessage();
+  assert.equal(h.state.messages[1].id, 23);
+  assert.equal(h.state.messages[1].generation_status, 'failed');
+  h.state.activeSideDiscussion = { id: 'S1', session_id: 'A' };
+  h.context.$('sideDiscussionPrompt').value = '提问';
+  await h.context.sendSideDiscussionMessage();
+  assert.equal(h.state.sideDiscussionMessages[1].id, 23);
+  assert.equal(h.state.sideDiscussionMessages[1].generation_status, 'failed');
+});
+test('late side-panel opens cannot replace a newer selection or reopen a closed panel', async h => {
+  const pending = new Map();
+  h.context.api = url => { const item = deferred(); pending.set(url, item); return item.promise; };
+  const a = h.context.openSideDiscussion('S1'), b = h.context.openSideDiscussion('S2');
+  pending.get('/api/side-discussions/S2').resolve(response({ discussion: { id: 'S2', session_id: 'A' }, messages: [] }));
+  await b;
+  pending.get('/api/side-discussions/S1').resolve(response({ discussion: { id: 'S1', session_id: 'A' }, messages: [] }));
+  await a;
+  assert.equal(h.state.activeSideDiscussion.id, 'S2');
+  const c = h.context.openSideDiscussion('S3');
+  h.context.closeSideDiscussion();
+  pending.get('/api/side-discussions/S3').resolve(response({ discussion: { id: 'S3', session_id: 'A' }, messages: [] }));
+  await c;
+  assert.equal(h.context.$('sideDiscussionPanel').hidden, true);
+  assert.equal(h.state.activeSideDiscussion.id, 'S2');
+});
+test('creating a discussion from selected text opens it and ignores a stale creation', async h => {
+  h.state.activeTextSelection = { session_id: 'A', message_id: 1, selected_text: '引用' };
+  const discussion = { id: 'S1', session_id: 'A' };
+  h.context.api = async () => response({ discussion, messages: [] });
+  await h.context.createSideDiscussionFromSelection();
+  assert.equal(h.state.activeSideDiscussion.id, 'S1');
+  assert.equal(h.context.$('sideDiscussionPanel').hidden, false);
+  const pending = deferred();
+  h.context.api = () => pending.promise;
+  const creating = h.context.createSideDiscussionFromSelection();
+  h.context.beginConversationTransition(); h.state.currentConversation = { id: 'B' };
+  h.state.sideDiscussions = [{ id: 'B-side' }];
+  pending.resolve(response({ discussion: { id: 'S2', session_id: 'A' } }));
+  await creating;
+  assert.equal(h.state.sideDiscussions[0].id, 'B-side');
+  assert.equal(h.context.$('sideDiscussionPanel').hidden, true);
 });
 test('stream parser handles split UTF-8 and a final event without newline', async h => {
   const bytes = new TextEncoder().encode('data: {"text":"中文🙂"}\n\ndata: {"type":"message_saved","message_id":1}');

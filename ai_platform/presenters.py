@@ -107,6 +107,7 @@ def side_discussion_message_public(row):
         "role": row["role"],
         "content": row["content"],
         "reasoning_content": row["reasoning_content"],
+        "generation_status": row["generation_status"] if "generation_status" in row.keys() else "completed",
         "created_at": row["created_at"],
         "usage": {
             "prompt_tokens": int(row["input_tokens"] or 0),

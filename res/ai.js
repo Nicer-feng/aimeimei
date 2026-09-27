@@ -79,6 +79,7 @@
 	      sideDiscussionWidth: 440,
 	      sideDiscussionResize: null,
 	      sideDiscussionSeq: 0,
+          sideDiscussionOpenSeq: 0,
 	      globalSearchResults: [],
 	      globalSearchQuery: "",
 	      globalSearchSelected: 0,
@@ -4222,7 +4223,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.6" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.7" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -5818,7 +5819,7 @@
 	      if (message.thinking && !message.content) {
 	        content.innerHTML = '<span class="thinking-dots"><span></span><span></span><span></span></span> 槑槑正在整理思路...';
 	      } else {
-	        content.innerHTML = renderMarkdown(message.content || "");
+	        content.innerHTML = renderMarkdown(message.content || generationEmptyText(message));
 	        enhanceMarkdown(content, { mermaid: true, icons: true });
 	      }
 	      const time = document.createElement("div");
@@ -5860,7 +5861,7 @@
 	      if (message.thinking && !message.content) {
 	        content.innerHTML = '<span class="thinking-dots"><span></span><span></span><span></span></span> 槑槑正在整理思路...';
 	      } else {
-	        renderStreamingMarkdown(content, message, message.content || "", { final: Boolean(options.final) });
+	        renderStreamingMarkdown(content, message, message.content || generationEmptyText(message), { final: Boolean(options.final) });
 	        if (options.final) enhanceMarkdown(content, { mermaid: true, icons: true });
 	      }
 	      if (time) {
@@ -5879,38 +5880,44 @@
 	      $("sideDiscussionSourceText").textContent = discussion.selected_text || "";
 	    }
 
-	    async function openSideDiscussion(discussionId) {
-	      if (!sideDiscussionEnabled()) {
-	        setStatus("chatStatus", "侧边讨论已由管理员关闭。", "err");
-	        return;
-	      }
-	      if (!sideDiscussionAvailable()) {
-	        setStatus("chatStatus", "请扩大浏览器窗口后使用侧边讨论。", "err");
-	        return;
-	      }
-	      if ($("referenceSourcesPanel") && !$("referenceSourcesPanel").hidden) closeReferenceSources({ immediate: true });
-	      const res = await api(`/api/side-discussions/${encodeURIComponent(discussionId)}`);
-	      if (!res.ok) {
-	        setStatus("chatStatus", await readError(res, "侧边讨论打开失败。"), "err");
-	        return;
-	      }
-	      const data = await res.json();
-	      if (data.discussion?.session_id !== state.currentConversation?.id) return;
-          closeSideDiscussion();
-	      state.activeSideDiscussion = data.discussion;
-	      state.sideDiscussionMessages = data.messages || [];
-	      applySideDiscussionWidth(getUserStorage("sideDiscussionWidth", state.sideDiscussionWidth), { save: false });
-	      $("sideDiscussionPanel").hidden = false;
-	      $("appView").classList.add("side-discussion-open");
-	      document.body.classList.add("side-discussion-active");
-	      renderSideDiscussionHeader();
-	      renderSideDiscussionMessages();
-	      updateSideDiscussionEntry();
-	      syncComposerLayout();
-	      queueConversationMinimap();
-	    }
+    async function openSideDiscussion(discussionId) {
+      if (!sideDiscussionEnabled()) {
+        setStatus("chatStatus", "侧边讨论已由管理员关闭。", "err");
+        return;
+      }
+      if (!sideDiscussionAvailable()) {
+        setStatus("chatStatus", "请扩大浏览器窗口后使用侧边讨论。", "err");
+        return;
+      }
+      const context = conversationContext();
+      const requestId = state.sideDiscussionOpenSeq = (state.sideDiscussionOpenSeq || 0) + 1;
+      const current = () => isCurrentConversation(context) && state.sideDiscussionOpenSeq === requestId;
+      try {
+        const res = await api(`/api/side-discussions/${encodeURIComponent(discussionId)}`);
+        if (!current()) return;
+        if (!res.ok) throw new Error(await readError(res, "侧边讨论打开失败。"));
+        const data = await res.json();
+        if (!current() || data.discussion?.session_id !== context.id) return;
+        if ($("referenceSourcesPanel") && !$("referenceSourcesPanel").hidden) closeReferenceSources({ immediate: true });
+        closeSideDiscussion();
+        state.activeSideDiscussion = data.discussion;
+        state.sideDiscussionMessages = data.messages || [];
+        applySideDiscussionWidth(getUserStorage("sideDiscussionWidth", state.sideDiscussionWidth), { save: false });
+        $("sideDiscussionPanel").hidden = false;
+        $("appView").classList.add("side-discussion-open");
+        document.body.classList.add("side-discussion-active");
+        renderSideDiscussionHeader();
+        renderSideDiscussionMessages();
+        updateSideDiscussionEntry();
+        syncComposerLayout();
+        queueConversationMinimap();
+      } catch (error) {
+        if (current()) setStatus("chatStatus", friendlyError(error, "侧边讨论打开失败。"), "err");
+      }
+    }
 
 	    function closeSideDiscussion() {
+          state.sideDiscussionOpenSeq = (state.sideDiscussionOpenSeq || 0) + 1;
 	      if (state.sideDiscussionSending && state.sideDiscussionAbortController) {
 	        state.sideDiscussionAbortController.abort();
 	      }
@@ -5930,6 +5937,7 @@
 	    async function createSideDiscussionFromSelection() {
 	      const context = state.activeTextSelection;
 	      if (!context) return;
+          const conversation = conversationContext(context.session_id);
 	      if (!sideDiscussionAvailable()) {
 	        setStatus("chatStatus", "请扩大浏览器窗口后使用侧边讨论。", "err");
 	        return;
@@ -5946,119 +5954,107 @@
 	          selected_text: context.selected_text
 	        })
 	      });
+          if (!isCurrentConversation(conversation)) return;
 	      if (!res.ok) {
 	        setStatus("chatStatus", await readError(res, "创建侧边讨论失败。"), "err");
 	        return;
 	      }
 	      const data = await res.json();
+          if (!isCurrentConversation(conversation)) return;
 	      state.sideDiscussions = [data.discussion, ...state.sideDiscussions.filter((item) => item.id !== data.discussion.id)];
 	      hideSelectionToolbar({ clearSelection: true });
 	      updateSideDiscussionEntry();
 	      await openSideDiscussion(data.discussion.id);
+          if (!isCurrentConversation(conversation)) return;
 	      $("sideDiscussionPrompt").focus();
 	    }
 
-	    function parseSideDiscussionSSE(buffer, onEvent) {
-	      const blocks = buffer.split(/\r?\n\r?\n/);
-	      const rest = blocks.pop() || "";
-	      for (const block of blocks) {
-	        const line = block.split(/\r?\n/).find((item) => item.startsWith("data:"));
-	        if (!line) continue;
-	        const raw = line.slice(5).trim();
-	        if (!raw || raw === "[DONE]") continue;
-	        try { onEvent(JSON.parse(raw)); } catch {}
-	      }
-	      return rest;
-	    }
-
-	    async function sendSideDiscussionMessage() {
-	      if (!state.activeSideDiscussion) return;
-	      if (state.sideDiscussionSending) {
-	        state.sideDiscussionAbortController?.abort();
-	        return;
-	      }
-	      const prompt = $("sideDiscussionPrompt");
-	      const content = prompt.value.trim();
-	      if (!content) return;
-	      prompt.value = "";
-	      prompt.style.height = "";
-	      const userMessage = { role: "user", content, created_at: Math.floor(Date.now() / 1000), usage: {} };
-	      const assistant = { role: "assistant", content: "", created_at: Math.floor(Date.now() / 1000), usage: {}, thinking: true };
-	      state.sideDiscussionMessages.push(userMessage, assistant);
-	      renderSideDiscussionMessages();
-	      state.sideDiscussionSending = true;
-          const context = conversationContext();
-          const discussion = state.activeSideDiscussion;
-          const controller = new AbortController();
-	      state.sideDiscussionAbortController = controller;
-          const current = () => isCurrentConversation(context) && state.activeSideDiscussion === discussion && state.sideDiscussionAbortController === controller;
-	      $("sideDiscussionSend").innerHTML = iconMarkup("square", "■");
-	      $("sideDiscussionSend").title = "停止生成";
-	      $("sideDiscussionStatus").textContent = "槑槑正在整理思路...";
-	      queueLucideRefresh();
-	      let buffer = "";
-	      try {
-	        const res = await api(`/api/side-discussions/${encodeURIComponent(state.activeSideDiscussion.id)}/messages`, {
-	          method: "POST",
-	          body: JSON.stringify({ content }),
-	          signal: controller.signal
-	        });
-            if (!current()) return;
-	        if (!res.ok) throw new Error(await readError(res, "侧边讨论发送失败。"));
-	        const reader = res.body.getReader();
-	        const decoder = new TextDecoder();
-	        while (true) {
-	          const { value, done } = await reader.read();
-              if (!current()) return;
-	          if (done) break;
-	          buffer += decoder.decode(value, { stream: true });
-	          buffer = parseSideDiscussionSSE(buffer, (event) => {
-	            if (event.type === "message_saved") {
-	              assistant.id = event.message_id;
-	              assistant.usage = event.usage || {};
-	              return;
-	            }
-	            const choice = (event.choices || [{}])[0];
-	            const delta = choice.delta || choice.message || {};
-	            const piece = delta.content || "";
-	            if (piece) {
-	              assistant.content += piece;
-	              assistant.thinking = false;
-	              updateSideDiscussionStream(assistant);
-	            }
-	          });
-	        }
-	        assistant.thinking = false;
-	        updateSideDiscussionStream(assistant, { final: true });
-	        state.activeSideDiscussion.updated_at = Math.floor(Date.now() / 1000);
-	        state.activeSideDiscussion.message_count = state.sideDiscussionMessages.length;
-	        state.sideDiscussions = [
-	          state.activeSideDiscussion,
-	          ...state.sideDiscussions.filter((item) => item.id !== state.activeSideDiscussion.id)
-	        ];
-	        updateSideDiscussionEntry();
-	        $("sideDiscussionStatus").textContent = "";
-	      } catch (err) {
-            if (!current()) return;
-	        assistant.thinking = false;
-	        if (err?.name === "AbortError") {
-	          if (!assistant.content) state.sideDiscussionMessages = state.sideDiscussionMessages.filter((item) => item !== assistant);
-	          $("sideDiscussionStatus").textContent = "已停止生成";
-	        } else {
-	          if (!assistant.content) state.sideDiscussionMessages = state.sideDiscussionMessages.filter((item) => item !== assistant);
-	          $("sideDiscussionStatus").textContent = friendlyError(err, "侧边讨论发送失败。");
-	        }
-	        renderSideDiscussionMessages();
-	      } finally {
-            // A replaced view may invalidate rendering while this controller still owns the send state.
-            if (state.sideDiscussionAbortController !== controller) return;
-	        state.sideDiscussionSending = false;
-	        state.sideDiscussionAbortController = null;
-	        $("sideDiscussionSend").innerHTML = iconMarkup("arrow-up", "↑");
-	        $("sideDiscussionSend").title = "发送";
-	        queueLucideRefresh();
-	      }
-	    }
+    async function sendSideDiscussionMessage() {
+      if (!state.activeSideDiscussion) return;
+      if (state.sideDiscussionSending) {
+        state.sideDiscussionAbortController?.abort();
+        return;
+      }
+      const prompt = $("sideDiscussionPrompt");
+      const content = prompt.value.trim();
+      if (!content) return;
+      prompt.value = "";
+      prompt.style.height = "";
+      const userMessage = { role: "user", content, created_at: Math.floor(Date.now() / 1000), usage: {} };
+      const assistant = { role: "assistant", content: "", created_at: Math.floor(Date.now() / 1000), usage: {}, thinking: true };
+      state.sideDiscussionMessages.push(userMessage, assistant);
+      renderSideDiscussionMessages();
+      state.sideDiscussionSending = true;
+      const context = conversationContext();
+      const discussion = state.activeSideDiscussion;
+      const controller = new AbortController();
+      state.sideDiscussionAbortController = controller;
+      const current = () => isCurrentConversation(context) && state.activeSideDiscussion === discussion && state.sideDiscussionAbortController === controller;
+      $("sideDiscussionSend").innerHTML = iconMarkup("square", "■");
+      $("sideDiscussionSend").title = "停止生成";
+      $("sideDiscussionStatus").textContent = "槑槑正在整理思路...";
+      queueLucideRefresh();
+      let saved = false;
+      try {
+        const res = await api(`/api/side-discussions/${encodeURIComponent(discussion.id)}/messages`, {
+          method: "POST", body: JSON.stringify({ content }), signal: controller.signal
+        });
+        if (!current()) return;
+        if (!res.ok) throw await readChatFailure(res, "侧边讨论发送失败。");
+        await readChatEvents(res, event => {
+          if (event.type === "message.failed") {
+            if (event.message_id) assistant.id = event.message_id;
+            const error = new Error(event.message || "回答生成中断，请重试。");
+            error.generationStatus = event.status === "failed" ? "failed" : "interrupted";
+            throw error;
+          }
+          if (event.type === "message_saved" && event.message_id) {
+            saved = true;
+            assistant.id = event.message_id;
+            assistant.usage = event.usage || {};
+            assistant.generation_status = event.generation_status || "completed";
+            return;
+          }
+          const choice = (event.choices || [{}])[0];
+          const delta = choice.delta || choice.message || {};
+          if (delta.content) {
+            assistant.content += delta.content;
+            assistant.thinking = false;
+            updateSideDiscussionStream(assistant);
+          }
+        }, current);
+        if (!current()) return;
+        if (!saved) {
+          const error = new Error("连接已中断，未收到回答保存确认；已收到的内容仍保留。");
+          error.generationStatus = "interrupted";
+          throw error;
+        }
+        $("sideDiscussionStatus").textContent = generationStatusLabel(assistant);
+      } catch (error) {
+        if (!current()) return;
+        const completed = saved && assistant.generation_status === "completed" && error.streamReadFailure;
+        if (!completed) {
+          if (error.messageId) assistant.id = error.messageId;
+          assistant.generation_status = error?.name === "AbortError" ? "interrupted" : (error.generationStatus || "failed");
+        }
+        $("sideDiscussionStatus").textContent = completed ? "" : error?.name === "AbortError" ? "已停止生成，已收到的内容已保留" : friendlyError(error, "侧边讨论发送失败。");
+      } finally {
+        if (state.sideDiscussionAbortController !== controller) return;
+        if (current()) {
+          assistant.thinking = false;
+          updateSideDiscussionStream(assistant, { final: true });
+          discussion.updated_at = Math.floor(Date.now() / 1000);
+          discussion.message_count = state.sideDiscussionMessages.length;
+          state.sideDiscussions = [discussion, ...state.sideDiscussions.filter(item => item.id !== discussion.id)];
+          updateSideDiscussionEntry();
+        }
+        state.sideDiscussionSending = false;
+        state.sideDiscussionAbortController = null;
+        $("sideDiscussionSend").innerHTML = iconMarkup("arrow-up", "↑");
+        $("sideDiscussionSend").title = "发送";
+        queueLucideRefresh();
+      }
+    }
 
 	    let referencePanelHideTimer = 0;
 	    function closeReferenceSources({ immediate = false } = {}) {
@@ -8057,6 +8053,15 @@
       return status ? status + "，尚未收到正文，可以重新生成。" : "";
     }
 
+    async function readChatFailure(response, fallback) {
+      let data;
+      try { data = await response.json(); } catch { return new Error(fallback); }
+      const error = new Error(friendlyError(data.error || data.detail, fallback));
+      if (data.message_id) error.messageId = data.message_id;
+      if (["failed", "interrupted"].includes(data.generation_status)) error.generationStatus = data.generation_status;
+      return error;
+    }
+
     async function readChatEvents(response, onEvent, current) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -8236,7 +8241,7 @@
 	          signal: generation.controller.signal
 	        });
         if (!isCurrentGeneration(generation)) return;
-        if (!res.ok) throw new Error(await readError(res, "发送失败，稍后再试一下。"));
+        if (!res.ok) throw await readChatFailure(res, "发送失败，稍后再试一下。");
         await readChatEvents(res, event => {
           if (!isCurrentGeneration(generation)) return;
           if (event.type === "message.failed") {
@@ -8316,6 +8321,7 @@
             assistant.thinking = false;
             const stopped = state.userStopped || err?.name === "AbortError";
             const alreadyCompleted = generation.saved && assistant.generation_status === "completed" && err.streamReadFailure;
+            if (err.messageId) assistant.id = err.messageId;
             if (!alreadyCompleted) assistant.generation_status = stopped ? "interrupted" : (err.generationStatus || "failed");
             await drainAssistantQueue();
             if (!isCurrentGeneration(generation)) return;
