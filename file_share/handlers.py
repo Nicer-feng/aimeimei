@@ -74,7 +74,9 @@ def public_share(row):
 class FileShareHandlersMixin:
     def file_share_page(self, admin=False):
         page = (ROOT / ('admin.html' if admin else 'public.html')).read_text()
-        return self.html(page.replace('__FILE_SHARE_BUILD__', html.escape((ROOT / 'BUILD_ID').read_text().strip(), quote=True)))
+        page = page.replace('__FILE_SHARE_BUILD__', html.escape((ROOT / 'BUILD_ID').read_text().strip(), quote=True))
+        page = page.replace('__FILE_SHARE_VERSION__', html.escape((ROOT / 'VERSION').read_text().strip(), quote=True))
+        return self.html(page)
 
     def fs_body(self):
         require(self.headers.get('X-Share-Request') == '1', '请求来源无效', 403)
