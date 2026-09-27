@@ -58,7 +58,7 @@
   <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.26.7">
+  <link rel="stylesheet" href="/res/ai.css?v=2.26.8">
 
   <link rel="stylesheet" href="/res/markdown.css">
 </head>
@@ -69,7 +69,7 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.26.7</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.26.8</button>
       </div>
       <div class="login-mode-tabs" role="tablist" aria-label="登录方式">
         <button class="login-mode-tab active" id="loginPasswordMode" type="button" role="tab" aria-selected="true"><i data-lucide="key-round" aria-hidden="true"></i><span>密码登录</span></button>
@@ -103,7 +103,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.26.7</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.26.8</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -116,7 +116,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.26.7</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.26.8</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -174,7 +174,7 @@
 	          </a>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.26.7</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.26.8</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -235,6 +235,12 @@
 			            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我精简下面这段内容，保留重点，表达更利落：">精简</button>
 		            <button class="prompt-chip ui-badge inline-flex items-center" id="openPrompts" type="button">更多</button>
 	          </div>
+          <button class="full-composer-trigger ui-icon-btn" id="openFullComposer" type="button" title="全屏编辑" aria-label="全屏编辑"><i data-lucide="expand" aria-hidden="true"></i></button>
+          <div class="full-composer-suggestion" id="fullComposerSuggestion" role="status" hidden>
+            <span>检测到长文本，建议进入全屏编辑。</span>
+            <button type="button" id="acceptFullComposerSuggestion">进入</button>
+            <button type="button" id="dismissFullComposerSuggestion">忽略</button>
+          </div>
 	          <div class="composer-quote-list" id="composerQuoteList" hidden></div>
 	          <div class="attachment-preview-row" id="attachmentPreviewRow" hidden></div>
           <div class="document-preview-row" id="documentPreviewRow" hidden></div>
@@ -1040,7 +1046,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.26.7</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.26.8</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -1074,6 +1080,26 @@
 	    </div>
 	  </section>
 
+  <section class="full-composer" id="fullComposer" role="dialog" aria-modal="true" aria-labelledby="fullComposerTitle" hidden>
+    <div class="full-composer-shell">
+      <header class="full-composer-header">
+        <h2 id="fullComposerTitle">全屏编辑</h2>
+        <div class="full-composer-meta">
+          <span id="fullComposerCharCount">0 字</span>
+          <span id="fullComposerTokenCount">约 0 Token</span>
+          <span class="full-composer-format">Markdown</span>
+        </div>
+      </header>
+      <div class="full-composer-quotes composer-quote-list" id="fullComposerQuotes" hidden></div>
+      <label class="full-composer-editor-label" for="fullComposerPrompt">草稿</label>
+      <textarea id="fullComposerPrompt" class="full-composer-textarea" spellcheck="true" placeholder="在这里整理你的想法..."></textarea>
+      <footer class="full-composer-footer">
+        <span>内容会保留在当前对话草稿中</span>
+        <button class="ui-btn ui-btn-secondary" id="closeFullComposer" type="button"><i data-lucide="minimize" aria-hidden="true"></i><span>收起编辑器</span></button>
+      </footer>
+    </div>
+  </section>
+
   <dialog id="writingDialog" class="writing-dialog" aria-labelledby="writingDialogTitle">
     <header><strong id="writingDialogTitle">本单要求与稿件</strong><button type="button" id="closeWritingWorkspace" aria-label="关闭本单要求">关闭</button></header>
     <p class="writing-notice" id="writingNotice" role="status"></p>
@@ -1087,7 +1113,7 @@
       <p id="writingDraftState" class="writing-help"></p><button type="button" id="saveWritingDraft">保存稿件与定稿状态</button>
     </details>
   </dialog>
-	  <script src="/res/ai.js?v=2.26.7"></script>
+	  <script src="/res/ai.js?v=2.26.8"></script>
 
 </body>
 </html>

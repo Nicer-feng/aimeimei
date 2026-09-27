@@ -351,41 +351,46 @@
 	    }
 
 	    function renderComposerQuotes() {
-	      const box = $("composerQuoteList");
-	      if (!box) return;
-	      box.replaceChildren();
-	      box.hidden = !state.pendingQuotes.length;
-	      state.pendingQuotes.forEach((quote, index) => {
-	        const card = document.createElement("article");
-	        card.className = "composer-quote-card";
-	        const copy = document.createElement("div");
-	        copy.className = "composer-quote-copy";
-	        const meta = document.createElement("div");
-	        meta.className = "composer-quote-meta";
-	        meta.textContent = `${quoteRoleLabel(quote.role)} · ${formatMessageTime(quote.created_at)}`;
-	        const text = document.createElement("div");
-	        text.className = "composer-quote-text";
-	        text.textContent = quote.selected_text;
-	        copy.append(meta, text);
-	        const actions = document.createElement("div");
-	        actions.className = "composer-quote-actions";
-	        const view = createIconOnlyButton("locate-fixed", "查看原文", { className: "ui-icon-btn", fallback: "↗" });
-	        view.addEventListener("click", () => viewPendingQuote(index));
-	        const remove = createIconOnlyButton("x", "移除引用", { className: "ui-icon-btn", fallback: "×" });
-	        remove.addEventListener("click", () => removePendingQuote(index));
-	        actions.append(view, remove);
-	        card.append(copy, actions);
-	        box.appendChild(card);
-	      });
-	      if (state.pendingQuotes.length) {
-	        const limit = document.createElement("div");
-	        limit.className = "composer-quote-limit";
-	        limit.textContent = `${state.pendingQuotes.length}/3 段引用`;
-	        box.appendChild(limit);
-	      }
-	      queueLucideRefresh();
-	      syncComposerLayout();
-	    }
+          for (const id of ["composerQuoteList", "fullComposerQuotes"]) {
+            const box = $(id);
+            if (!box) continue;
+            box.replaceChildren();
+            box.hidden = !state.pendingQuotes.length;
+            state.pendingQuotes.forEach((quote, index) => {
+              const card = document.createElement("article");
+              card.className = "composer-quote-card";
+              const copy = document.createElement("div");
+              copy.className = "composer-quote-copy";
+              const meta = document.createElement("div");
+              meta.className = "composer-quote-meta";
+              meta.textContent = `${quoteRoleLabel(quote.role)} · ${formatMessageTime(quote.created_at)}`;
+              const excerpt = document.createElement("div");
+              excerpt.className = "composer-quote-text";
+              excerpt.textContent = quote.selected_text;
+              copy.append(meta, excerpt);
+              const actions = document.createElement("div");
+              actions.className = "composer-quote-actions";
+              const view = createIconOnlyButton("locate-fixed", "查看原文", { className: "ui-icon-btn", fallback: "↗" });
+              view.addEventListener("click", () => {
+                if (id === "fullComposerQuotes") closeFullComposer();
+                viewPendingQuote(index);
+              });
+              const remove = createIconOnlyButton("x", "移除引用", { className: "ui-icon-btn", fallback: "×" });
+              remove.addEventListener("click", () => removePendingQuote(index));
+              actions.append(view, remove);
+              card.append(copy, actions);
+              box.appendChild(card);
+            });
+            if (state.pendingQuotes.length) {
+              const limit = document.createElement("div");
+              limit.className = "composer-quote-limit";
+              limit.textContent = `${state.pendingQuotes.length}/3 段引用`;
+              box.appendChild(limit);
+            }
+          }
+          queueLucideRefresh();
+          syncComposerLayout();
+        }
 
 	    function buildQuotedMessage(question, quotes = state.pendingQuotes) {
 	      const cleanQuestion = String(question || "").trim() || "请基于以上引用内容进行分析。";
@@ -401,6 +406,65 @@
 	      autosizePrompt();
 	      saveCurrentDraft();
 	    }
+
+        let fullComposerHideTimer = 0;
+        let fullComposerDraftTimer = 0;
+        function supportsFullComposer() {
+          return window.matchMedia("(min-width: 1024px) and (hover: hover) and (pointer: fine)").matches;
+        }
+        function fullComposerIsOpen() {
+          return !$('fullComposer').hidden && document.body.classList.contains('full-composer-open');
+        }
+        function updateFullComposerStats() {
+          const value = $('fullComposerPrompt').value;
+          $('fullComposerCharCount').textContent = `${Array.from(value).length.toLocaleString()} 字`;
+          $('fullComposerTokenCount').textContent = `约 ${estimateClientTokens(value).toLocaleString()} Token`;
+        }
+        function dismissFullComposerSuggestion() {
+          $('fullComposerSuggestion').hidden = true;
+        }
+        function openFullComposer() {
+          if (!supportsFullComposer() || !state.authed) return;
+          clearTimeout(fullComposerHideTimer);
+          dismissFullComposerSuggestion();
+          const overlay = $('fullComposer');
+          overlay.hidden = false;
+          $('fullComposerPrompt').value = $('prompt').value;
+          updateFullComposerStats();
+          document.body.classList.add('full-composer-open');
+          $('appView').inert = true;
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (!overlay.hidden) overlay.classList.add('is-open');
+          }));
+          $('fullComposerPrompt').focus({ preventScroll: true });
+        }
+        function closeFullComposer({ focusPrompt = true, immediate = false } = {}) {
+          const overlay = $('fullComposer');
+          if (overlay.hidden) return;
+          $('prompt').value = $('fullComposerPrompt').value;
+          clearTimeout(fullComposerDraftTimer);
+          saveCurrentDraft();
+          overlay.classList.remove('is-open');
+          $('appView').inert = false;
+          document.body.classList.remove('full-composer-open');
+          autosizePrompt();
+          if (focusPrompt) $('prompt').focus({ preventScroll: true });
+          clearTimeout(fullComposerHideTimer);
+          if (immediate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) overlay.hidden = true;
+          else fullComposerHideTimer = setTimeout(() => { overlay.hidden = true; }, 200);
+        }
+        function handleFullComposerInput() {
+          $('prompt').value = $('fullComposerPrompt').value;
+          clearTimeout(fullComposerDraftTimer);
+          fullComposerDraftTimer = setTimeout(saveCurrentDraft, 250);
+          updateFullComposerStats();
+        }
+        function handleLongPromptPaste(event) {
+          if (!supportsFullComposer() || fullComposerIsOpen()) return;
+          const pasted = event.clipboardData?.getData('text/plain') || '';
+          if (Array.from(pasted).length <= 1500) return;
+          $('fullComposerSuggestion').hidden = false;
+        }
 
 	    function applyCurrentUser(user) {
           if (state.user?.id !== user?.id) resetTokenStats();
@@ -4223,7 +4287,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.7" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.8" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -10168,6 +10232,22 @@
 	    document.addEventListener("pointerdown", handleMinimapOutsidePointer);
     $("scrollLatest").addEventListener("click", () => scrollToLatest("smooth"));
 	    $("prompt").addEventListener("input", handlePromptInput);
+        $("prompt").addEventListener("paste", handleLongPromptPaste);
+        $("openFullComposer").addEventListener("click", openFullComposer);
+        $("closeFullComposer").addEventListener("click", () => closeFullComposer());
+        $("acceptFullComposerSuggestion").addEventListener("click", openFullComposer);
+        $("dismissFullComposerSuggestion").addEventListener("click", dismissFullComposerSuggestion);
+        $("fullComposerPrompt").addEventListener("input", handleFullComposerInput);
+        $("fullComposerPrompt").addEventListener("keydown", (event) => {
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            closeFullComposer();
+          }
+        });
+        window.addEventListener('resize', () => {
+          if (fullComposerIsOpen() && !supportsFullComposer()) closeFullComposer({ focusPrompt: false, immediate: true });
+          if (!supportsFullComposer()) dismissFullComposerSuggestion();
+        }, { passive: true });
 	    $("prompt").addEventListener("focus", handlePromptFocus);
 	    $("refreshForUpdate").addEventListener("click", refreshForVersionUpdate);
 	    $("snoozeVersionUpdate").addEventListener("click", snoozeVersionUpdate);
@@ -10208,6 +10288,20 @@
 	    document.addEventListener("click", handleInterfaceOutsideClick);
 	    document.addEventListener("keydown", (event) => {
 	      const key = String(event.key || "").toLowerCase();
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && event.shiftKey && !event.isComposing && !fullComposerIsOpen()) {
+            const focused = document.activeElement;
+            const chatFocused = focused === $("prompt") || focused === document.body || focused?.closest?.("#messages");
+            if (supportsFullComposer() && state.authed && chatFocused && !document.querySelector("dialog[open]")) {
+              event.preventDefault();
+              openFullComposer();
+            }
+            return;
+          }
+          if (event.key === "Escape" && fullComposerIsOpen()) {
+            event.preventDefault();
+            closeFullComposer();
+            return;
+          }
 	      if ((event.metaKey || event.ctrlKey) && key === "k") {
 	        event.preventDefault();
 	        openGlobalSearch();
