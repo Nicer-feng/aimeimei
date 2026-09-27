@@ -21,6 +21,12 @@
       ocrUploading: false,
 	      conversations: [],
 	      currentConversation: null,
+          conversationEpoch: 0,
+          conversationLoading: false,
+          conversationController: null,
+          conversationListSeq: 0,
+          sendAttempt: null,
+          activeGeneration: null,
 	      conversationStats: null,
 	      messages: [],
 	      attachments: [],
@@ -1178,8 +1184,11 @@
     }
 
     async function api(path, options = {}) {
+      const user = state.user;
       const res = await request(path, options);
 	      if (res.status === 401) {
+            if (state.user !== user || options.signal?.aborted) throw new DOMException("请求已失效", "AbortError");
+            beginConversationTransition();
 	        state.authed = false;
 	        applyCurrentUser(null);
 	        showLogin();
@@ -1735,6 +1744,8 @@
     async function logout() {
 	  saveCurrentDraft();
 	  stopCurrentTts();
+      beginConversationTransition();
+      closeSideDiscussion();
       await request("/api/logout", { method: "POST" });
 	      state.authed = false;
 	      applyCurrentUser(null);
@@ -1745,6 +1756,8 @@
 	      state.profileDisabledByConversation = {};
       state.messages = [];
       clearAttachments();
+      state.documentAttachments = [];
+      state.persistentDocuments = [];
 	      closeProfilePopover();
 	      closeProfiles();
       showLogin();
@@ -2121,6 +2134,7 @@
 
     async function updateCurrentConversationModel(modelId) {
       if (!state.currentConversation) return false;
+      const context = conversationContext();
       const model = state.models.find((item) => item.id === modelId);
       if (!model) return false;
       const res = await api(`/api/conversations/${state.currentConversation.id}`, {
@@ -2128,10 +2142,12 @@
         body: JSON.stringify({ model_id: modelId, reasoning_mode: reasoningModeForCurrentModel() })
       });
       if (!res.ok) {
-        setStatus("chatStatus", await readError(res, "切换模型失败，稍后再试一下。"), "err");
+        const error = await readError(res, "切换模型失败，稍后再试一下。");
+        if (isCurrentConversation(context)) setStatus("chatStatus", error, "err");
         return false;
       }
       const data = await res.json();
+      if (!isCurrentConversation(context)) return false;
       state.currentConversation = data.conversation || {
         ...state.currentConversation,
         model_id: model.id,
@@ -2145,7 +2161,8 @@
       upsertConversation(state.currentConversation);
       $("modelSelect").value = state.currentConversation.model_id;
       updateChatHeader();
-      await loadConversationStats(state.currentConversation.id);
+      await loadConversationStats(context.id);
+      if (!isCurrentConversation(context)) return false;
       updateVisionUI();
       renderSearchToggle();
       return true;
@@ -3600,10 +3617,14 @@
 	    }
 
     async function loadConversations() {
+      const context = conversationContext();
+      const sequence = ++state.conversationListSeq;
+      const current = () => context.epoch === state.conversationEpoch && context.user === state.user && sequence === state.conversationListSeq;
       renderConversationLoading();
       try {
         const res = await api("/api/conversations");
         const data = await res.json();
+        if (!current()) return;
         state.conversations = data.conversations || [];
         sortConversations();
         renderConversations();
@@ -3616,6 +3637,7 @@
           restoreCurrentDraft();
         }
       } catch (err) {
+        if (!current()) return;
         renderConversationError(friendlyError(err, "对话列表暂时加载失败。"));
         if (!state.messages.length) renderEmpty();
       }
@@ -3842,6 +3864,59 @@
 	      setStatus("chatStatus", conv.pinned ? "已取消置顶" : "已置顶", "ok");
 	    }
 
+    function conversationContext(id = state.currentConversation?.id) {
+      return { id, epoch: state.conversationEpoch, user: state.user };
+    }
+
+    function isCurrentConversation(context) {
+      return context.epoch === state.conversationEpoch && context.user === state.user &&
+        context.id === state.currentConversation?.id;
+    }
+
+    function beginConversationTransition(options = {}) {
+      state.conversationEpoch++;
+      closeSideDiscussion();
+      state.conversationController?.abort();
+      state.conversationController = new AbortController();
+      state.conversationLoading = false;
+      if (state.sendAttempt !== options.sendAttempt) state.sendAttempt = null;
+      state.newConversationPromise = null;
+      state.newConversationModelId = "";
+      if ($("newChat")) $("newChat").disabled = false;
+      const generation = state.activeGeneration;
+      state.activeGeneration = null;
+      if (generation) {
+        generation.controller.abort();
+        const message = generation.message;
+        if (message) {
+          if (state.streamMessage === message) message.content += state.streamQueue;
+          message.thinking = false;
+          message._upstreamActive = false;
+          message.generation_status = "interrupted";
+          if (message._reasoningUiTimer) clearTimeout(message._reasoningUiTimer);
+          message._reasoningUiTimer = 0;
+        }
+      }
+      state.abortController = null;
+      state.userStopped = false;
+      stopReasoningClock();
+      resetStreamState();
+      if (state.sending) setSendingUI(false);
+      if (state.documentPollTimer) clearTimeout(state.documentPollTimer);
+      state.documentPollTimer = 0;
+      state.uploadingDocuments = false;
+      closeConversationFiles();
+      if (state.messageScrollFrame) cancelAnimationFrame(state.messageScrollFrame);
+      state.messageScrollFrame = 0;
+      state.pendingMessageScroll = null;
+      setStatus("chatStatus", "");
+      return state.conversationEpoch;
+    }
+
+    function isCurrentGeneration(generation) {
+      return state.activeGeneration === generation && isCurrentConversation(generation.context);
+    }
+
     async function newConversation(modelId = $("modelSelect").value, options = {}) {
       if (!modelId && state.models[0]) modelId = state.models[0].id;
       if (!modelId) {
@@ -3852,13 +3927,17 @@
         if (!state.newConversationModelId || state.newConversationModelId === modelId) {
           return state.newConversationPromise;
         }
+        const context = conversationContext();
         await state.newConversationPromise.catch(() => null);
+        if (!isCurrentConversation(context)) return null;
       }
       saveCurrentDraft();
+      const epoch = beginConversationTransition({ sendAttempt: options.sendAttempt });
+      const controller = state.conversationController;
 	      const button = $("newChat");
 	      if (button) button.disabled = true;
 	      state.newConversationModelId = modelId;
-	      state.newConversationPromise = (async () => {
+	      const pending = (async () => {
 	        stopCurrentTts();
 	        closeSideDiscussion();
 	        closeReferenceSources({ immediate: true });
@@ -3866,9 +3945,10 @@
 	        state.activeSideDiscussion = null;
 	        state.sideDiscussionMessages = [];
 	        updateSideDiscussionEntry();
-	        const res = await api("/api/conversations", { method: "POST", body: JSON.stringify({ model_id: modelId, writing_mode: getUserStorage("writingMode", "0") === "1" }) });
+	        const res = await api("/api/conversations", { method: "POST", signal: controller.signal, body: JSON.stringify({ model_id: modelId, writing_mode: getUserStorage("writingMode", "0") === "1" }) });
         if (!res.ok) throw new Error(await readError(res, "新建对话失败，稍后再试一下。"));
         const data = await res.json();
+        if (epoch !== state.conversationEpoch) return null;
         state.currentConversation = data.conversation;
 	      setUserStorage("lastConversationId", state.currentConversation.id);
         state.conversationStats = null;
@@ -3880,6 +3960,7 @@
           renderConversationFilesButton();
         }
         await loadConversations();
+        if (epoch !== state.conversationEpoch) return null;
         updateChatHeader();
         renderProfileStatus();
         renderProfilePopover();
@@ -3887,16 +3968,26 @@
         restoreCurrentDraft();
         return state.currentConversation;
       })();
+      state.newConversationPromise = pending;
       try {
-        return await state.newConversationPromise;
+        return await pending;
+      } catch (error) {
+        if (epoch !== state.conversationEpoch || error?.name === "AbortError") return null;
+        throw error;
       } finally {
-        state.newConversationPromise = null;
-        state.newConversationModelId = "";
-        if (button) button.disabled = false;
+        if (state.newConversationPromise === pending) {
+          state.newConversationPromise = null;
+          state.newConversationModelId = "";
+          if (button) button.disabled = false;
+        }
       }
     }
 
 	    async function selectConversation(id, options = {}) {
+          const conv = state.conversations.find((item) => item.id === id);
+          if (!conv || (state.currentConversation?.id === id && state.sending)) return;
+          beginConversationTransition();
+          const controller = state.conversationController;
 	      closeReferenceSources({ immediate: true });
 	      if (state.currentConversation?.id !== id) {
         if (state.documentPollTimer) clearTimeout(state.documentPollTimer);
@@ -3913,9 +4004,13 @@
 	        updateSideDiscussionEntry();
 	      }
 	      state.editingConversationId = null;
-	      const conv = state.conversations.find((item) => item.id === id);
-	      if (!conv) return;
       state.currentConversation = conv;
+      const context = conversationContext(id);
+      state.conversationLoading = true;
+      state.messages = [];
+      state.conversationStats = null;
+      $("messages").textContent = "正在加载对话…";
+      hideConversationMinimap();
 	      setUserStorage("lastConversationId", conv.id);
       $("modelSelect").value = conv.model_id;
       updateChatHeader();
@@ -3923,20 +4018,29 @@
       renderProfilePopover();
       renderConversations();
       try {
-        const res = await api(`/api/conversations/${id}/messages`);
+        const res = await api(`/api/conversations/${id}/messages`, { signal: controller.signal });
         if (!res.ok) throw new Error(await readError(res, "消息暂时加载失败。"));
         const data = await res.json();
+        if (!isCurrentConversation(context)) return;
         state.messages = data.messages || [];
 	      restoreCurrentDraft();
         const targetMessageId = Number(options.messageId || 0);
         renderMessages({ forceScroll: !targetMessageId });
 	        await Promise.all([loadConversationStats(id), loadSideDiscussions(id), loadConversationDocuments(id)]);
+        if (!isCurrentConversation(context)) return;
         closeSidebar();
         if (targetMessageId) {
-          requestAnimationFrame(() => scrollToMessageId(targetMessageId));
+          requestAnimationFrame(() => { if (isCurrentConversation(context)) scrollToMessageId(targetMessageId); });
         }
       } catch (err) {
+        if (!isCurrentConversation(context) || err?.name === "AbortError") return;
+        $("messages").textContent = "消息加载失败，请重新选择当前对话重试。";
         setStatus("chatStatus", friendlyError(err, "消息暂时加载失败。"), "err");
+      } finally {
+        if (isCurrentConversation(context)) {
+          state.conversationLoading = false;
+          pollDocumentAttachments();
+        }
       }
     }
 
@@ -4118,7 +4222,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.5" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.6" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -5138,7 +5242,9 @@
 	    }
 
 	    async function loadConversationStats(id = state.currentConversation?.id) {
-	      if (!id) {
+	      const context = conversationContext(id);
+          if (!isCurrentConversation(context)) return;
+          if (!id) {
 	        state.conversationStats = null;
 	        updateChatUsage();
 	        return;
@@ -5147,10 +5253,11 @@
 	        const res = await api(`/api/conversations/${id}/stats`);
 	        if (!res.ok) throw new Error(await readError(res, "统计暂时加载失败。"));
 	        const data = await res.json();
-	        if (state.currentConversation?.id !== id) return;
+	        if (!isCurrentConversation(context)) return;
 	        state.conversationStats = data.stats || null;
 	      } catch {
-	        if (state.currentConversation?.id === id) state.conversationStats = null;
+	        if (!isCurrentConversation(context)) return;
+            state.conversationStats = null;
 	      }
 	      updateChatUsage();
 	    }
@@ -5660,7 +5767,9 @@
 	    }
 
 	    async function loadSideDiscussions(sessionId = state.currentConversation?.id || "") {
-	      if (!sessionId || !sideDiscussionEnabled()) {
+	      const context = conversationContext(sessionId);
+          if (!isCurrentConversation(context)) return [];
+          if (!sessionId || !sideDiscussionEnabled()) {
 	        state.sideDiscussions = [];
 	        updateSideDiscussionEntry();
 	        return [];
@@ -5669,9 +5778,10 @@
 	        const res = await api(`/api/side-discussions?session_id=${encodeURIComponent(sessionId)}`);
 	        if (!res.ok) throw new Error(await readError(res, "侧边讨论加载失败。"));
 	        const data = await res.json();
-	        if (state.currentConversation?.id !== sessionId) return [];
+	        if (!isCurrentConversation(context)) return [];
 	        state.sideDiscussions = data.discussions || [];
 	      } catch (err) {
+            if (!isCurrentConversation(context)) return [];
 	        state.sideDiscussions = [];
 	        console.warn("side discussion list failed", err);
 	      }
@@ -5714,7 +5824,7 @@
 	      const time = document.createElement("div");
 	      time.className = "side-message-time";
 	      const tokens = Number(message.usage?.total_tokens || 0);
-	      time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
+	      time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "") + (generationStatusLabel(message) ? " · " + generationStatusLabel(message) : "");
 	      wrap.append(role, content, time);
 	      return wrap;
 	    }
@@ -5755,7 +5865,7 @@
 	      }
 	      if (time) {
 	        const tokens = Number(message.usage?.total_tokens || 0);
-	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
+	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "") + (generationStatusLabel(message) ? " · " + generationStatusLabel(message) : "");
 	      }
 	      sideDiscussionScrollBottom();
 	    }
@@ -5786,6 +5896,7 @@
 	      }
 	      const data = await res.json();
 	      if (data.discussion?.session_id !== state.currentConversation?.id) return;
+          closeSideDiscussion();
 	      state.activeSideDiscussion = data.discussion;
 	      state.sideDiscussionMessages = data.messages || [];
 	      applySideDiscussionWidth(getUserStorage("sideDiscussionWidth", state.sideDiscussionWidth), { save: false });
@@ -5805,6 +5916,10 @@
 	      }
 	      state.sideDiscussionSending = false;
 	      state.sideDiscussionAbortController = null;
+          $("sideDiscussionSend").innerHTML = iconMarkup("arrow-up", "↑");
+          $("sideDiscussionSend").title = "发送";
+          $("sideDiscussionStatus").textContent = "";
+          queueLucideRefresh();
 	      $("sideDiscussionPanel").hidden = true;
 	      $("appView").classList.remove("side-discussion-open");
 	      document.body.classList.remove("side-discussion-active");
@@ -5872,7 +5987,11 @@
 	      state.sideDiscussionMessages.push(userMessage, assistant);
 	      renderSideDiscussionMessages();
 	      state.sideDiscussionSending = true;
-	      state.sideDiscussionAbortController = new AbortController();
+          const context = conversationContext();
+          const discussion = state.activeSideDiscussion;
+          const controller = new AbortController();
+	      state.sideDiscussionAbortController = controller;
+          const current = () => isCurrentConversation(context) && state.activeSideDiscussion === discussion && state.sideDiscussionAbortController === controller;
 	      $("sideDiscussionSend").innerHTML = iconMarkup("square", "■");
 	      $("sideDiscussionSend").title = "停止生成";
 	      $("sideDiscussionStatus").textContent = "槑槑正在整理思路...";
@@ -5882,13 +6001,15 @@
 	        const res = await api(`/api/side-discussions/${encodeURIComponent(state.activeSideDiscussion.id)}/messages`, {
 	          method: "POST",
 	          body: JSON.stringify({ content }),
-	          signal: state.sideDiscussionAbortController.signal
+	          signal: controller.signal
 	        });
+            if (!current()) return;
 	        if (!res.ok) throw new Error(await readError(res, "侧边讨论发送失败。"));
 	        const reader = res.body.getReader();
 	        const decoder = new TextDecoder();
 	        while (true) {
 	          const { value, done } = await reader.read();
+              if (!current()) return;
 	          if (done) break;
 	          buffer += decoder.decode(value, { stream: true });
 	          buffer = parseSideDiscussionSSE(buffer, (event) => {
@@ -5918,6 +6039,7 @@
 	        updateSideDiscussionEntry();
 	        $("sideDiscussionStatus").textContent = "";
 	      } catch (err) {
+            if (!current()) return;
 	        assistant.thinking = false;
 	        if (err?.name === "AbortError") {
 	          if (!assistant.content) state.sideDiscussionMessages = state.sideDiscussionMessages.filter((item) => item !== assistant);
@@ -5928,6 +6050,8 @@
 	        }
 	        renderSideDiscussionMessages();
 	      } finally {
+            // A replaced view may invalidate rendering while this controller still owns the send state.
+            if (state.sideDiscussionAbortController !== controller) return;
 	        state.sideDiscussionSending = false;
 	        state.sideDiscussionAbortController = null;
 	        $("sideDiscussionSend").innerHTML = iconMarkup("arrow-up", "↑");
@@ -6474,7 +6598,7 @@
 	      renderSourcesPanel(sourcesPanel, message.role === "assistant" ? message.sources : [], message);
 	      if (time) {
 	        const tokens = message.role === "assistant" ? messageTotalTokens(message) : 0;
-	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
+	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "") + (generationStatusLabel(message) ? " · " + generationStatusLabel(message) : "");
 	      }
 
 	      const displayContent = displayMessageContent(message);
@@ -6500,7 +6624,7 @@
 	      wrap.dataset.liveState = "static";
 	      text.hidden = false;
 	      text.className = "message-content markdown";
-	      text.innerHTML = renderMessageMarkdown(message, displayContent || "");
+	      text.innerHTML = renderMessageMarkdown(message, displayContent || generationEmptyText(message));
 	      enhanceMarkdown(text, { mermaid: !message.thinking });
 	      copy.hidden = !displayContent || message.role === "assistant";
 	      const canShowAssistantActions = message.role === "assistant" && Boolean(displayContent);
@@ -6743,7 +6867,7 @@
 	      if (options.sources) renderSourcesPanel(sourcesPanel, message.sources || [], message);
 	      if (options.usage || options.final) {
 	        const tokens = messageTotalTokens(message);
-	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "");
+	        time.textContent = formatMessageTime(message.created_at) + (tokens ? " · " + formatTokens(tokens) : "") + (generationStatusLabel(message) ? " · " + generationStatusLabel(message) : "");
 	      }
 
 	      if (message.thinking && !displayContent) {
@@ -6775,7 +6899,7 @@
 	      }
 	      wrap.dataset.liveState = "streaming";
 	      text.className = "message-content markdown";
-	      renderStreamingMarkdown(text, message, displayContent, options);
+	      renderStreamingMarkdown(text, message, displayContent || generationEmptyText(message), options);
       const showActivity = Boolean(message._streamPaused && message._upstreamActive && displayContent);
       if (activity) {
         activity.hidden = !showActivity;
@@ -6829,6 +6953,7 @@
 	    }
 
 	    function updateStreamingMessage(message, options = {}) {
+          if (message._conversationEpoch !== undefined && message._conversationEpoch !== state.conversationEpoch) return;
 	      const box = $("messages");
 	      let wrap = box.querySelector(`[data-message-key="${messageKey(message)}"]`);
 	      if (options.reasoning && wrap) {
@@ -7213,26 +7338,34 @@
     }
 
     async function loadConversationDocuments(id = state.currentConversation?.id) {
+      const context = conversationContext(id);
+      if (!isCurrentConversation(context)) return;
       if (!id) { state.persistentDocuments = []; renderConversationFilesButton(); return; }
       try {
         const res = await api("/api/conversations/" + encodeURIComponent(id) + "/documents");
         if (!res.ok) throw new Error(await readError(res, "材料暂时加载失败。"));
-        state.persistentDocuments = (await res.json()).documents || [];
+        const data = await res.json();
+        if (!isCurrentConversation(context)) return;
+        state.persistentDocuments = data.documents || [];
       } catch {
+        if (!isCurrentConversation(context)) return;
         state.persistentDocuments = [];
       }
       renderConversationFilesButton();
     }
 
     async function syncConversationDocuments() {
-      const id = state.currentConversation?.id;
+      const context = conversationContext();
+      const id = context.id;
       if (!id) return;
       const readyIds = state.persistentDocuments.filter((item) => item.status === "completed" && item.id).map((item) => item.id);
       const res = await api("/api/conversations/" + encodeURIComponent(id) + "/documents", {
         method: "POST", body: JSON.stringify({ document_ids: readyIds })
       });
       if (!res.ok) throw new Error(await readError(res, "持续参考材料更新失败。"));
-      state.persistentDocuments = (await res.json()).documents || [];
+      const data = await res.json();
+      if (!isCurrentConversation(context)) return;
+      state.persistentDocuments = data.documents || [];
       renderConversationFilesButton();
     }
 
@@ -7287,6 +7420,7 @@
 
     async function openConversationFiles() {
       if (!state.currentConversation) return setStatus("chatStatus", "先打开一个对话，再管理持续参考材料。", "err");
+      const context = conversationContext();
       const dialog = document.getElementById("conversationFilesDialog");
       if (!dialog) return;
       document.getElementById("conversationFilesStatus").textContent = "正在读取文件...";
@@ -7296,6 +7430,7 @@
         const res = await api("/api/documents");
         if (!res.ok) throw new Error(await readError(res, "文件暂时加载失败。"));
         const allFiles = (await res.json()).documents || [];
+        if (!isCurrentConversation(context)) return;
         const currentFileIds = new Set([
           ...state.persistentDocuments.map((item) => item.id),
           ...state.documentAttachments.map((item) => item.id),
@@ -7306,6 +7441,7 @@
         document.getElementById("conversationFilesStatus").textContent = "";
         renderConversationFiles();
       } catch (err) {
+        if (!isCurrentConversation(context)) return;
         document.getElementById("conversationFilesStatus").textContent = friendlyError(err, "文件暂时加载失败。");
       }
     }
@@ -7317,15 +7453,18 @@
     }
 
     async function saveConversationFiles() {
+      const context = conversationContext();
       const selected = state.conversationFiles.filter((item) => state.conversationFileSelection.has(item.id) && item.status === "completed");
       if (selected.length > 5) return document.getElementById("conversationFilesStatus").textContent = "最多持续参考 5 份材料。";
       state.persistentDocuments = selected;
       try {
         await syncConversationDocuments();
+        if (!isCurrentConversation(context)) return;
         document.getElementById("conversationFilesStatus").textContent = "已保存，后续提问会参考这些材料。";
         renderConversationFiles();
         setStatus("chatStatus", "持续参考材料已更新", "ok");
       } catch (err) {
+        if (!isCurrentConversation(context)) return;
         document.getElementById("conversationFilesStatus").textContent = friendlyError(err, "保存持续参考材料失败。");
       }
     }
@@ -7348,22 +7487,50 @@
 
     function pollDocumentAttachments() {
       if (state.documentPollTimer) clearTimeout(state.documentPollTimer);
+      const context = conversationContext();
       const pending = state.documentAttachments.filter((item) => ["submitted", "processing", "uploaded"].includes(item.status));
       if (!pending.length) return;
       state.documentPollTimer = setTimeout(async () => {
-        try { for (const item of pending) { const res = await api(`/api/documents/${encodeURIComponent(item.id)}/refresh`, { method: "POST" }); if (res.ok) Object.assign(item, (await res.json()).document || {}); } renderDocumentPreviews(); }
-        finally { pollDocumentAttachments(); }
+        try {
+          for (const item of pending) {
+            if (!isCurrentConversation(context)) return;
+            const res = await api(`/api/documents/${encodeURIComponent(item.id)}/refresh`, { method: "POST" });
+            if (res.ok) {
+              const data = await res.json();
+              if (!isCurrentConversation(context)) return;
+              Object.assign(item, data.document || {});
+            }
+          }
+          if (isCurrentConversation(context)) renderDocumentPreviews();
+        } catch (error) {
+          if (isCurrentConversation(context)) setStatus("chatStatus", friendlyError(error, "材料状态刷新失败，稍后将自动重试。"), "err");
+        } finally {
+          if (isCurrentConversation(context)) pollDocumentAttachments();
+        }
       }, 4000);
     }
 
     async function handleDocumentFiles(fileList) {
       const input = $("documentInput"), files = Array.from(fileList || []); if (input) input.value = "";
-      if (!files.length) return;
+      if (!files.length || state.uploadingDocuments) return;
       if (state.documentAttachments.length + files.length > 5) return setStatus("chatStatus", "单次最多添加 5 份材料。", "err");
-      state.uploadingDocuments = true; setStatus("chatStatus", "正在上传并提交材料解析...", "");
-      try { for (const file of files) { state.documentAttachments.push(await uploadDocumentFile(file)); renderDocumentPreviews(); } setStatus("chatStatus", "材料已提交解析，完成后即可对话。", "ok"); pollDocumentAttachments(); }
-      catch (err) { setStatus("chatStatus", friendlyError(err, "材料上传失败。"), "err"); }
-      finally { state.uploadingDocuments = false; }
+      const context = conversationContext();
+      state.uploadingDocuments = true;
+      setStatus("chatStatus", "正在上传并提交材料解析...", "");
+      try {
+        for (const file of files) {
+          const uploaded = await uploadDocumentFile(file);
+          if (!isCurrentConversation(context)) return;
+          state.documentAttachments.push(uploaded);
+          renderDocumentPreviews();
+        }
+        setStatus("chatStatus", "材料已提交解析，完成后即可对话。", "ok");
+        pollDocumentAttachments();
+      } catch (err) {
+        if (isCurrentConversation(context)) setStatus("chatStatus", friendlyError(err, "材料上传失败。"), "err");
+      } finally {
+        if (isCurrentConversation(context)) state.uploadingDocuments = false;
+      }
     }
 
     const composerVisionImagePattern = /\.(?:jpe?g|png|webp)$/i;
@@ -7701,6 +7868,7 @@
     }
 
 	    function resetStreamState() {
+      resolveStreamDrain();
       stopAssistantActivityClock();
 	      if (state.streamTimer) clearTimeout(state.streamTimer);
 	      state.streamMessage = null;
@@ -7879,6 +8047,57 @@
       return new Promise((resolve) => { state.streamResolve = resolve; });
     }
 
+    function generationStatusLabel(message) {
+      if (message.role !== "assistant") return "";
+      return ({ interrupted: "回答已中断", failed: "生成失败" })[message.generation_status] || "";
+    }
+
+    function generationEmptyText(message) {
+      const status = generationStatusLabel(message);
+      return status ? status + "，尚未收到正文，可以重新生成。" : "";
+    }
+
+    async function readChatEvents(response, onEvent, current) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const consume = line => {
+        if (!line.startsWith("data:")) return;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") return;
+        let event;
+        try { event = JSON.parse(payload); }
+        catch { throw new Error("回答数据格式异常，请重试。"); }
+        onEvent(event);
+      };
+      try {
+        while (current()) {
+          let next;
+          try { next = await reader.read(); }
+          catch (error) { error.streamReadFailure = true; throw error; }
+          const { value, done } = next;
+          if (!current()) return;
+          buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!current()) return;
+            consume(line);
+          }
+          if (done) {
+            if (buffer) consume(buffer);
+            return;
+          }
+        }
+      } catch (error) {
+        if (!error.generationStatus) error.generationStatus = "interrupted";
+        throw error;
+      } finally {
+        try { await reader.cancel(); } catch {}
+        reader.releaseLock();
+      }
+    }
+
 	    async function sendMessage(contentOverride = "", options = {}) {
 	      const hasOverride = typeof contentOverride === "string" && contentOverride.trim();
 	      const rawContent = (hasOverride ? contentOverride : $("prompt").value).trim();
@@ -7891,7 +8110,8 @@
       const readyDocuments = hasOverride ? [] : state.documentAttachments.filter((item) => item.status === "completed" && item.id);
       const failedDocuments = hasOverride ? [] : state.documentAttachments.filter((item) => item.status === "failed");
       const processingDocuments = hasOverride ? [] : state.documentAttachments.filter((item) => ["submitted", "processing", "uploaded"].includes(item.status));
-	      if (state.sending) return;
+	      if (state.sending || state.sendAttempt) return;
+      if (state.conversationLoading) return setStatus("chatStatus", "对话还在加载，请稍后发送。", "");
       if (!content && !readyAttachments.length && !readyDocuments.length) {
         if (state.uploadingImages || uploadingAttachments.length) setStatus("chatStatus", "图片还在上传，稍等一下再发送。", "err");
         else if (state.uploadingDocuments || processingDocuments.length) setStatus("chatStatus", "材料还在解析，完成后即可对话。", "err");
@@ -7917,27 +8137,35 @@
 	      }
 	      let selectedModelId = $("modelSelect").value;
 	      if (!selectedModelId) return setStatus("chatStatus", "先选择模型", "err");
+      const attempt = {};
+      state.sendAttempt = attempt;
+      const preparing = () => state.sendAttempt === attempt;
+      try {
 	      if (state.newConversationPromise) {
 	        setStatus("chatStatus", "正在准备新对话...", "");
 	        try {
 	          await state.newConversationPromise;
+              if (!preparing()) return;
 	          selectedModelId = $("modelSelect").value || selectedModelId;
 	        } catch (err) {
-	          setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err");
+	          if (!preparing()) return;
+              setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err");
 	          return;
 	        }
 	      }
 
 	      if (!state.currentConversation) {
 	        try {
-	          await newConversation(selectedModelId, { preserveDocuments: readyDocuments.length > 0 });
+	          const created = await newConversation(selectedModelId, { preserveDocuments: readyDocuments.length > 0, sendAttempt: attempt });
+              if (!created || !preparing()) return;
 	        } catch (err) {
-	          setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err");
+	          if (!preparing()) return;
+              setStatus("chatStatus", friendlyError(err, "新建对话失败，稍后再试一下。"), "err");
 	          return;
 	        }
 	      } else if (state.currentConversation.model_id !== selectedModelId) {
 	        const switched = await updateCurrentConversationModel(selectedModelId);
-	        if (!switched) return;
+	        if (!switched || !preparing()) return;
 	      }
 	      if (!state.currentConversation) return;
 	      if (readyAttachments.length && !state.currentConversation.supports_vision) {
@@ -7948,7 +8176,9 @@
 	      setStatus("chatStatus", "");
 	      resetStreamState();
 	      state.userStopped = false;
-	      state.abortController = new AbortController();
+          const generation = { context: conversationContext(), controller: new AbortController(), message: null, saved: false };
+          state.activeGeneration = generation;
+	      state.abortController = generation.controller;
 	      const mode = state.searchConfig?.mode || "auto";
 	      const useWebSearch = $("webSearchToggle").checked && !$("webSearchToggle").disabled;
 	      setSendingUI(true);
@@ -7983,6 +8213,8 @@
         created_at: sentAt, _thinkingStartedAt: Date.now(), _activityStartedAt: Date.now(), _upstreamActive: true,
         _activityStatus: useWebSearch ? "槑槑正在上网查资料中..." : "槑槑正在思考与整理中..."
       };
+          generation.message = assistant;
+          assistant._conversationEpoch = generation.context.epoch;
 	      state.messages.push(assistant);
 	      state.followOutput = true;
 	      state.hasNewWhilePaused = false;
@@ -7996,119 +8228,107 @@
 	      setStatus("chatStatus", searchStatusText, "");
 
 	      try {
-	        const useProfile = !profileDisabledForConversation(state.currentConversation.id);
-	        const res = await api(`/api/conversations/${state.currentConversation.id}/messages`, {
+	        const conversationId = generation.context.id;
+            const useProfile = !profileDisabledForConversation(conversationId);
+	        const res = await api(`/api/conversations/${conversationId}/messages`, {
 	          method: "POST",
 	          body: JSON.stringify({ content: userContent, web_search: useWebSearch, use_profile: useProfile, image_ids: readyAttachments.map((item) => item.id), document_ids: readyDocuments.map((item) => item.id) }),
-	          signal: state.abortController.signal
+	          signal: generation.controller.signal
 	        });
+        if (!isCurrentGeneration(generation)) return;
         if (!res.ok) throw new Error(await readError(res, "发送失败，稍后再试一下。"));
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split(/\r?\n/);
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            const payload = line.slice(5).trim();
-            if (!payload || payload === "[DONE]") continue;
-            try {
-              const event = JSON.parse(payload);
-	              if (event.type === "search_status") {
-                assistant.sources = event.sources || [];
-                if (event.count) {
-                  assistant._activityStatus = "槑槑已找到 " + event.count + " 个来源，正在整理资料...";
-                  setStatus("chatStatus", "找到 " + event.count + " 个来源，正在生成...", "ok");
-                }
-                updateStreamingMessage(assistant, { sources: true, activity: true });
-	                continue;
-	              }
-	              if (event.usage) {
-	                assistant.usage = event.usage;
-	                updateStreamingMessage(assistant, { usage: true });
-	              }
-	              if (event.type === "message_saved" && event.message_id) {
-	                assistant.id = event.message_id;
-                assistant.writing_check = event.writing_check || null;
-	                assistant.favorite_id = null;
-	                assistant.usage = event.usage || assistant.usage || null;
-	                if (Array.isArray(event.sources)) assistant.sources = event.sources;
-	                updateStreamingMessage(assistant, { saved: true, usage: true, sources: true });
-	                continue;
-	              }
-	              const choice = event.choices?.[0] || {};
-	              const piece = choice.delta?.content || choice.message?.content || "";
-	              const responseReasoningValue = event.delta || event.text || event.content || "";
-	              const responseEventReasoning = /reasoning|thinking/i.test(String(event.type || ""))
-	                ? (typeof responseReasoningValue === "string" ? responseReasoningValue : (responseReasoningValue?.text || ""))
-	                : "";
-	              const reasoningPiece =
-	                choice.delta?.reasoning_content ||
-	                choice.message?.reasoning_content ||
-	                choice.delta?.reasoning ||
-	                choice.message?.reasoning ||
-	                choice.delta?.thinking ||
-	                choice.message?.thinking ||
-	                event.reasoning_content ||
-	                event.reasoning ||
-	                event.thinking ||
-	                responseEventReasoning ||
-	                "";
-	              if (reasoningPiece) {
-                if (!assistant._reasoningStartedAt) assistant._reasoningStartedAt = Date.now();
-                assistant._activityStatus = "槑槑正在梳理思路...";
-                assistant.reasoning_content = (assistant.reasoning_content || "") + reasoningPiece;
-                updateStreamingMessage(assistant, { reasoning: true, activity: true });
-	              }
-	              if (piece) {
-	                enqueueAssistantText(assistant, piece);
-	              }
-	            } catch {}
-	          }
-	        }
+        await readChatEvents(res, event => {
+          if (!isCurrentGeneration(generation)) return;
+          if (event.type === "message.failed") {
+            if (event.message_id) assistant.id = event.message_id;
+            const error = new Error(event.message || "回答生成中断，请重试。");
+            error.generationStatus = event.status === "failed" ? "failed" : "interrupted";
+            throw error;
+          }
+          if (event.type === "search_status") {
+            assistant.sources = event.sources || [];
+            if (event.count) {
+              assistant._activityStatus = "槑槑已找到 " + event.count + " 个来源，正在整理资料...";
+              setStatus("chatStatus", "找到 " + event.count + " 个来源，正在生成...", "ok");
+            }
+            updateStreamingMessage(assistant, { sources: true, activity: true });
+            return;
+          }
+          if (event.usage) {
+            assistant.usage = event.usage;
+            updateStreamingMessage(assistant, { usage: true });
+          }
+          if (event.type === "message_saved" && event.message_id) {
+            generation.saved = true;
+            assistant.id = event.message_id;
+            assistant.generation_status = event.generation_status || "completed";
+            assistant.writing_check = event.writing_check || null;
+            assistant.favorite_id = null;
+            assistant.usage = event.usage || assistant.usage || null;
+            if (Array.isArray(event.sources)) assistant.sources = event.sources;
+            updateStreamingMessage(assistant, { saved: true, usage: true, sources: true });
+            return;
+          }
+          const choice = event.choices?.[0] || {};
+          const piece = choice.delta?.content || choice.message?.content || "";
+          const responseReasoningValue = event.delta || event.text || event.content || "";
+          const responseEventReasoning = /reasoning|thinking/i.test(String(event.type || ""))
+            ? (typeof responseReasoningValue === "string" ? responseReasoningValue : (responseReasoningValue?.text || ""))
+            : "";
+          const reasoningPiece = choice.delta?.reasoning_content || choice.message?.reasoning_content ||
+            choice.delta?.reasoning || choice.message?.reasoning || choice.delta?.thinking || choice.message?.thinking ||
+            event.reasoning_content || event.reasoning || event.thinking || responseEventReasoning || "";
+          if (reasoningPiece) {
+            if (!assistant._reasoningStartedAt) assistant._reasoningStartedAt = Date.now();
+            assistant._activityStatus = "槑槑正在梳理思路...";
+            assistant.reasoning_content = (assistant.reasoning_content || "") + reasoningPiece;
+            updateStreamingMessage(assistant, { reasoning: true, activity: true });
+          }
+          if (piece) enqueueAssistantText(assistant, piece);
+        }, () => isCurrentGeneration(generation));
+        if (!isCurrentGeneration(generation)) return;
+        if (!generation.saved) {
+          const error = new Error("连接已中断，未收到回答保存确认；已收到的内容仍保留在下方。");
+          error.generationStatus = "interrupted";
+          throw error;
+        }
 	        completeReasoning(assistant);
 	        assistant._upstreamActive = false;
 	        assistant._streamPaused = false;
 	        assistant.thinking = false;
 	        await drainAssistantQueue();
-	        if (!assistant.content) {
+            if (!isCurrentGeneration(generation)) return;
+	        if (!assistant.content && !generationStatusLabel(assistant)) {
 	          assistant.content = "没有收到可显示的内容。";
 	        }
 	        updateStreamingMessage(assistant, { final: true, usage: true, sources: true });
 	        await loadConversations();
-	        await loadConversationStats(state.currentConversation?.id);
-	        setStatus("chatStatus", "");
+            if (!isCurrentGeneration(generation)) return;
+	        await loadConversationStats(generation.context.id);
+            if (!isCurrentGeneration(generation)) return;
+            const status = generationStatusLabel(assistant);
+	        setStatus("chatStatus", status, status ? "err" : "");
 	      } catch (err) {
-	        completeReasoning(assistant);
-	        assistant._upstreamActive = false;
-	        assistant._streamPaused = false;
-	        assistant.thinking = false;
-	        if (state.userStopped || err?.name === "AbortError") {
-	          if (assistant.content) {
-	            enqueueAssistantText(assistant, "\n\n（已停止生成）");
-	            await drainAssistantQueue();
-	          } else {
-	            assistant.content = "已停止生成。";
-	          }
-	          updateStreamingMessage(assistant, { final: true });
-	          setStatus("chatStatus", "已停止生成", "");
-	        } else {
-	          const message = friendlyError(err, "发送失败，稍后再试一下。");
-	          enqueueAssistantText(assistant, "\n" + message);
-	          await drainAssistantQueue();
-	          updateStreamingMessage(assistant, { final: true });
-	          setStatus("chatStatus", message, "err");
-	        }
+            if (!isCurrentGeneration(generation)) return;
+            completeReasoning(assistant);
+            assistant._upstreamActive = false;
+            assistant._streamPaused = false;
+            assistant.thinking = false;
+            const stopped = state.userStopped || err?.name === "AbortError";
+            const alreadyCompleted = generation.saved && assistant.generation_status === "completed" && err.streamReadFailure;
+            if (!alreadyCompleted) assistant.generation_status = stopped ? "interrupted" : (err.generationStatus || "failed");
+            await drainAssistantQueue();
+            if (!isCurrentGeneration(generation)) return;
+            updateStreamingMessage(assistant, { final: true });
+            setStatus("chatStatus", alreadyCompleted ? "" : stopped ? "已停止生成，已收到的内容已保留" : friendlyError(err, "发送失败，稍后再试一下。"), alreadyCompleted || stopped ? "" : "err");
 	      } finally {
+            if (!isCurrentGeneration(generation)) return;
 	        if (assistant.thinking) {
 	          completeReasoning(assistant);
 	          assistant.thinking = false;
 	          updateStreamingMessage(assistant, { final: true });
 	        }
+            state.activeGeneration = null;
 	        state.abortController = null;
 	        state.userStopped = false;
 	        setSendingUI(false);
@@ -8116,6 +8336,9 @@
 	        updateScrollLatestButton();
 	        $("prompt").focus();
 	      }
+      } finally {
+        if (state.sendAttempt === attempt) state.sendAttempt = null;
+      }
 	    }
 
 	    async function deleteCurrentConversation() {
@@ -8140,6 +8363,7 @@
 	      }
 	      state.editingConversationId = null;
 	      if (state.currentConversation?.id === id) {
+            beginConversationTransition();
 	        state.currentConversation = null;
 	        state.messages = [];
 	      }

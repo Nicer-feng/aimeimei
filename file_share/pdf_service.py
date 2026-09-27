@@ -14,7 +14,7 @@ from urllib.error import HTTPError
 
 from infrastructure.storage import StorageSecurityError
 
-from .database import transaction
+from .database import read_connection, transaction
 from .office_service import object_metadata
 
 MAX_PDF_BYTES = 20 * 1024 * 1024
@@ -124,7 +124,7 @@ class PdfService:
         return pages
 
     def _cleanup_one(self, upload):
-        with transaction() as conn:
+        with read_connection() as conn:
             file = self.handler.fs_owned_file(conn, upload['file_id'], self.user_id)
         oss = self.handler.fs_oss(file)
         if upload['upload_id']:
@@ -208,7 +208,7 @@ class PdfService:
             file = dict(file)
         oss = self.handler.fs_oss(file)
         self._inspect(oss, file['object_key'], file['size'], file['sha256'])
-        with transaction() as conn:
+        with read_connection() as conn:
             current = self._file(conn, file_id)
             ensure(self._revision(conn, current) == revision,
                    'PDF 版本已变化，请重新打开', 409)
@@ -269,7 +269,7 @@ class PdfService:
         return dict(id=upload_id, part_size=PART_SIZE, part_count=math.ceil(size / PART_SIZE))
 
     def part(self, upload_id, data):
-        with transaction() as conn:
+        with read_connection() as conn:
             upload = self._upload(conn, upload_id)
             ensure(upload['status'] == 'UPLOADING' and upload['expires_at'] > now(),
                    'PDF 上传任务已失效', 409)
@@ -383,7 +383,7 @@ class PdfService:
         return {'ok': True}
 
     def versions(self, file_id):
-        with transaction() as conn:
+        with read_connection() as conn:
             file = self._file(conn, file_id)
             rows = conn.execute('SELECT * FROM share_office_versions WHERE file_id=? '
                                 'ORDER BY version_no DESC LIMIT 100', (file_id,)).fetchall()
@@ -393,7 +393,7 @@ class PdfService:
         version_id = data.get('version_id')
         ensure(isinstance(version_id, str) and re.fullmatch(r'[0-9a-f]{32}', version_id),
                '版本参数不正确')
-        with transaction() as conn:
+        with read_connection() as conn:
             file = self._file(conn, file_id)
             version = conn.execute('SELECT * FROM share_office_versions WHERE id=? AND file_id=?',
                                    (version_id, file_id)).fetchone()

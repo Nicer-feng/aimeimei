@@ -2,12 +2,13 @@
 window.CloudOffice=(()=>{
   const sdkUrl='https://g.alicdn.com/IMM/office-js/1.1.19/aliyun-web-office-sdk.min.js';
   const $=id=>document.getElementById(id);
-  let deps=null,config={enabled:false,maxBytes:0,formats:new Set()};
+  let deps=null,canEditOffice=false,config={enabled:false,maxBytes:0,formats:new Set()};
   let sdkPromise=null,starting=false,busy=false,session=null,tokenInfo=null,instance=null,file=null,opener=null;
   let refreshPromise=null,pendingCloseVersionSaved=false,recoveredDraft=false,recoveryLost=false;
   let versionsFile=null,versionItems=[];
 
   function configure(options){deps=options;bind();}
+  function setCapabilities(data){canEditOffice=data?.edit_office===true;}
   function setConfig(data){
     config={
       enabled:data?.enabled===true,
@@ -16,7 +17,7 @@ window.CloudOffice=(()=>{
     };
   }
   function canEdit(candidate){
-    if(!config.enabled||!candidate||candidate.status!=='READY'||!Number.isFinite(Number(candidate.size))||Number(candidate.size)<=0||Number(candidate.size)>config.maxBytes)return false;
+    if(!canEditOffice||!config.enabled||!candidate||candidate.status!=='READY'||!Number.isFinite(Number(candidate.size))||Number(candidate.size)<=0||Number(candidate.size)>config.maxBytes)return false;
     const name=String(candidate.filename||''),dot=name.lastIndexOf('.');
     return dot>0&&config.formats.has(name.slice(dot+1).toLowerCase());
   }
@@ -276,5 +277,5 @@ window.CloudOffice=(()=>{
     };
     window.addEventListener('beforeunload',event=>{if(isOpen()){event.preventDefault();event.returnValue='';}});
   }
-  return {configure,setConfig,canEdit,isOpen,hint,open,showVersions};
+  return {configure,setCapabilities,setConfig,canEdit,isOpen,hint,open,showVersions};
 })();

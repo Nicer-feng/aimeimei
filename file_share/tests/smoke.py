@@ -10,6 +10,7 @@ def login(c,username='admin'):
  _,d=req(c,'/api/captcha');answer=''.join(re.findall(r'<text[^>]*>(.*?)</text>',d['image_svg']))
  status,d=req(c,'/api/login',{'username':username,'password':'test-password','captcha_id':d['captcha_id'],'captcha':answer});assert status==200,(status,d)
 a=client();login(a);other=client();login(other,'other-admin');member=client();login(member,'member');anon=client()
+assert req(a,'/api/file-share/admin/presence',{})[1]['capabilities']=={'edit_pdf':True,'edit_office':True}
 assert req(anon,'/api/file-share/admin/files')[0]==401
 assert req(member,'/api/file-share/admin/files')[0]==401
 payload=b'\x89PNG\r\n\x1a\n'+b'hello test'
@@ -23,6 +24,19 @@ status,d=req(a,'/api/file-share/admin/shares',{'title':'Test share','file_ids':[
 sid,code=d['id'],d['share_code'];base=f'/api/file-share/public/{code}'
 assert len(code)==16
 assert req(anon,base)[1]=={'password_required':True}
+# Every workspace GET stays available while another product reserves the writer.
+import os, sqlite3
+from pathlib import Path
+from contextlib import closing
+with closing(sqlite3.connect(Path(os.environ['AI_PLATFORM_DATA'])/'ai-platform.db')) as writer:
+ writer.execute('BEGIN IMMEDIATE')
+ for endpoint in ['/files','/overview','/logs','/uploads','/settings','/shares',f'/shares/{sid}','/platform/report',f'/office/files/{fid}/versions']:
+  status,result=req(a,'/api/file-share/admin'+endpoint)
+  assert status==200,(endpoint,status,result)
+ assert req(anon,base)==(200,{'password_required':True})
+ assert writer.execute('SELECT count(*) FROM share_settings').fetchone()[0]==0
+ writer.rollback()
+print('PASS: workspace and public GETs do not reserve a writer; settings defaults do not write')
 assert req(anon,base+'/open',{})[0]==401
 assert req(anon,base+'/password',{'password':'bad!'})[0]==403
 status,d=req(anon,base+'/password',{'password':'abcd'});assert status==200,(status,d)
@@ -136,7 +150,11 @@ assert req(member,'/api/file-share/admin/files')[0]==200
 assert req(member,platform+'/report')[0]==403
 assert req(member,platform+'/access',{'user_id':'member','enabled':True})[0]==403
 assert req(member,f'/api/file-share/admin/files/{fid}/preview',{})[0]==404
-assert req(member,'/api/file-share/admin/presence',{'login':True})[1]['platform_admin'] is False
+status,presence=req(member,'/api/file-share/admin/presence',{'login':True})
+assert status==200 and presence['platform_admin'] is False
+assert presence['capabilities']=={'edit_pdf':False,'edit_office':False}
+assert req(member,'/api/file-share/admin/office/config')[0]==403
+assert req(member,f'/api/file-share/admin/pdf/files/{fid}/versions')[0]==403
 _,report=req(a,platform+'/report?days=7')
 u=next(u for u in report['users'] if u['id']=='member')
 assert u['last_login_at'] and u['last_visit_at'] and u['cloud_enabled']

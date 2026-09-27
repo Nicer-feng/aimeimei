@@ -17,7 +17,7 @@ import uuid
 
 from infrastructure.ip_geolocation import enrich_logs
 from infrastructure.storage import PrivateOSS, StorageSecurityError, shared_storage_config
-from .database import transaction
+from .database import read_connection, transaction
 from .platform import platform_report
 from .office_preview import office_preview, PreviewError
 from .office_service import OfficeService, OfficeServiceError
@@ -94,7 +94,7 @@ class FileShareHandlersMixin:
             if path.startswith('/api/file-share/admin'):
                 user = self.current_user()
                 require(user, '请先登录', 401)
-                with transaction() as conn:
+                with read_connection() as conn:
                     member = conn.execute('SELECT enabled FROM share_members WHERE user_id=?', (user['id'],)).fetchone()
                 require(user['role'] == 'admin' or (member and member['enabled']), '该账号尚未开通槑槑云权限', 401)
                 if path.startswith('/api/file-share/admin/platform'):
@@ -104,7 +104,9 @@ class FileShareHandlersMixin:
                     with transaction() as conn:
                         conn.execute('INSERT OR IGNORE INTO share_members(user_id) VALUES(?)', (user['id'],))
                         conn.execute('UPDATE share_members SET last_visit_at=?,last_login_at=CASE WHEN ? THEN ? ELSE last_login_at END WHERE user_id=?', (timestamp(),data.get('login') is True,timestamp(),user['id']))
-                    return self.json({'platform_admin':user['role'] == 'admin'})
+                    admin = user['role'] == 'admin'
+                    return self.json({'platform_admin':admin,
+                                      'capabilities':{'edit_pdf':admin, 'edit_office':admin}})
                 return self.fs_admin(path.removeprefix('/api/file-share/admin'), data, user['id'])
             return self.fs_public(path.removeprefix('/api/file-share/public/'), data)
         except PreviewError as exc:
@@ -135,7 +137,7 @@ class FileShareHandlersMixin:
             days = int(qs.get('days', ['7'])[0])
             require(days in (7,30,90), '请选择 7、30 或 90 天')
             page = max(1,min(100000,int(qs.get('page',['1'])[0])))
-            with transaction() as conn:
+            with read_connection() as conn:
                 report = platform_report(conn, days, page, qs.get('search',[''])[0][:80], qs.get('user_id',[''])[0])
             return self.json(report)
         if path == '/access' and self.command == 'POST':
@@ -196,20 +198,24 @@ class FileShareHandlersMixin:
                               'build_id': (ROOT / 'BUILD_ID').read_text().strip(),
                               'changelog': (ROOT / 'CHANGELOG.md').read_text()})
         if path == '/settings':
-            with transaction() as conn:
-                conn.execute('INSERT OR IGNORE INTO share_settings(user_id,max_upload_bytes) VALUES(?,?)', (user_id,MAX_UPLOAD_BYTES))
-                if method == 'POST':
+            if method == 'POST':
+                with transaction() as conn:
                     maximum = int(data.get('max_upload_bytes', MAX_UPLOAD_BYTES))
                     require(1 <= maximum <= MAX_UPLOAD_BYTES, '单文件最大上传容量为 500 MB')
+                    conn.execute('INSERT OR IGNORE INTO share_settings(user_id,max_upload_bytes) VALUES(?,?)', (user_id,MAX_UPLOAD_BYTES))
                     conn.execute('UPDATE share_settings SET display_name=?,max_upload_bytes=? WHERE user_id=?', (str(data.get('display_name', ''))[:80], maximum, user_id))
                     self.fs_audit(conn, user_id, 'UPDATE_SETTINGS', user_id)
-                row = dict(conn.execute('SELECT * FROM share_settings WHERE user_id=?', (user_id,)).fetchone())
+                    row = dict(conn.execute('SELECT * FROM share_settings WHERE user_id=?', (user_id,)).fetchone())
+            else:
+                with read_connection() as conn:
+                    saved = conn.execute('SELECT * FROM share_settings WHERE user_id=?', (user_id,)).fetchone()
+                    row = dict(saved) if saved else dict(user_id=user_id,display_name='',max_upload_bytes=MAX_UPLOAD_BYTES)
             row['max_upload_bytes'] = min(row['max_upload_bytes'], MAX_UPLOAD_BYTES)
             config = shared_storage_config(self.server.secrets)
             row.update(oss_configured=config['configured'], bucket=config['bucket'], signed_url_seconds=300, version=(ROOT / 'VERSION').read_text().strip())
             return self.json(row)
         if path == '/overview' and method == 'GET':
-            with transaction() as conn:
+            with read_connection() as conn:
                 totals = dict(conn.execute("SELECT count(*) file_count,coalesce(sum(size),0) total_size FROM share_files WHERE user_id=? AND status='READY'", (user_id,)).fetchone())
                 totals['active_shares'] = conn.execute("SELECT count(*) FROM shares WHERE user_id=? AND status='ACTIVE' AND (expires_at IS NULL OR expires_at>?) AND (max_views IS NULL OR view_count<max_views) AND (max_downloads IS NULL OR download_count<max_downloads)", (user_id,timestamp())).fetchone()[0]
                 midnight = int(time.mktime(time.localtime()[:3] + (0,0,0,0,0,-1)))
@@ -218,7 +224,7 @@ class FileShareHandlersMixin:
                 totals['recent_logs'] = self.fs_logs(conn, user_id, 0, 6)[0]
             return self.json(totals)
         if path == '/logs' and method == 'GET':
-            with transaction() as conn:
+            with read_connection() as conn:
                 rows, total = self.fs_logs(conn, user_id, offset, limit, qs.get('share_id', [''])[0])
             return self.json(dict(items=rows,total=total,page=page))
         if path == '/files' and method == 'GET':
@@ -235,7 +241,7 @@ class FileShareHandlersMixin:
                 where += ' AND f.file_type=?'
                 values.append(kind)
             order = 'ASC' if qs.get('sort',[''])[0] == 'oldest' else 'DESC'
-            with transaction() as conn:
+            with read_connection() as conn:
                 total = conn.execute('SELECT count(*) FROM share_files f WHERE ' + where, values).fetchone()[0]
                 rows = conn.execute('SELECT f.* FROM share_files f WHERE ' + where + ' ORDER BY f.created_at ' + order + ' LIMIT ? OFFSET ?', (*values,limit,offset)).fetchall()
                 file_ids = [row['id'] for row in rows]
@@ -258,7 +264,7 @@ class FileShareHandlersMixin:
                     result.append(item)
             return self.json(dict(items=result,total=total,page=page))
         if path == '/uploads' and method == 'GET':
-            with transaction() as conn:
+            with read_connection() as conn:
                 rows = conn.execute("SELECT id,filename,size,created_at FROM share_files WHERE user_id=? AND status='UPLOADING' ORDER BY created_at DESC LIMIT 30", (user_id,)).fetchall()
             return self.json({'items':[dict(r) for r in rows]})
         if path == '/uploads' and method == 'POST':
@@ -343,7 +349,7 @@ class FileShareHandlersMixin:
             return self.json({'ok':True})
         if path == '/shares':
             if method == 'GET':
-                with transaction() as conn:
+                with read_connection() as conn:
                     rows = [public_share(r) for r in conn.execute('SELECT * FROM shares WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?', (user_id,limit,offset))]
                     total = conn.execute('SELECT count(*) FROM shares WHERE user_id=?',(user_id,)).fetchone()[0]
                 return self.json(dict(items=rows,total=total,page=page))
@@ -364,7 +370,7 @@ class FileShareHandlersMixin:
                 return self.json(result,201)
         if len(parts) in (2,3) and parts[0] == 'shares':
             share_id = parts[1]
-            with transaction() as conn:
+            with (read_connection() if method == 'GET' else transaction()) as conn:
                 row = conn.execute('SELECT * FROM shares WHERE id=? AND user_id=?',(share_id,user_id)).fetchone()
                 require(row, '分享不存在',404)
                 if method == 'GET' and len(parts) == 2:
@@ -466,7 +472,7 @@ class FileShareHandlersMixin:
             return self.fs_upload_action_locked(file_id, action, data, user_id)
 
     def fs_upload_action_locked(self, file_id, action, data, user_id):
-        with transaction() as conn:
+        with (read_connection() if action == 'part' else transaction()) as conn:
             row = self.fs_owned_file(conn,file_id,user_id)
             if action == 'complete' and row['status'] == 'READY':
                 return self.json(public_file(row))
@@ -527,7 +533,7 @@ class FileShareHandlersMixin:
         code = parts[0]
         require(re.fullmatch('[A-Za-z0-9_-]{16}',code),INVALID,404)
         action = parts[1] if len(parts)>1 else ''
-        with transaction() as conn:
+        with (read_connection() if self.command == 'GET' else transaction()) as conn:
             row = conn.execute('SELECT * FROM shares WHERE share_code=?',(code,)).fetchone()
             require(row,INVALID,404)
             if not available(row):

@@ -92,33 +92,48 @@ class DocumentHandlersMixin:
             row = conn.execute("SELECT * FROM document_files WHERE id=? AND user_id=?", (document_id,user_id)).fetchone()
         return self.json({"document": document_file_public(row)}, HTTPStatus.CREATED)
 
-    def refresh_document(self, conn, row):
-        if not row or row["status"] in ("completed", "failed") or not row["parser_task_id"]:
+    def refresh_document(self, row, retry_failed=False):
+        if not row or row["status"] == "completed" or not row["parser_task_id"]:
+            return row
+        if row["status"] == "failed" and not retry_failed:
             return row
         service = docmind_config(self.server.secrets)
+        status, error_message, chunks = "processing", "", None
         if not docmind_configured(service):
-            conn.execute("UPDATE document_files SET status='failed', error_message=?, updated_at=? WHERE id=?", ("阿里云文档解析还没有配置好", now(), row["id"]))
-            return conn.execute("SELECT * FROM document_files WHERE id=?", (row["id"],)).fetchone()
-        try:
-            status_response = query_doc_parser_status(service, row["parser_task_id"])
-            status = response_status(status_response)
-            if status in ("success", "completed", "complete"):
-                result = get_doc_parser_result(service, row["parser_task_id"], 0, 3000)
-                chunks = document_chunks(result)
-                if not chunks:
-                    raise RuntimeError("没有提取到可用于对话的文本")
+            error_message = "阿里云文档解析还没有配置好，配置恢复后可刷新重试"
+        else:
+            try:
+                status_response = query_doc_parser_status(service, row["parser_task_id"])
+                provider_status = response_status(status_response)
+                if provider_status in ("success", "completed", "complete"):
+                    result = get_doc_parser_result(service, row["parser_task_id"], 0, 3000)
+                    chunks = document_chunks(result)
+                    if chunks:
+                        status = "completed"
+                    else:
+                        status, error_message = "failed", "没有提取到可用于对话的文本"
+                elif provider_status in ("fail", "failed", "error"):
+                    status = "failed"
+                    error_message = safe_docmind_error(response_error(status_response) or "文档解析失败")
+            except Exception:
+                # A query/download failure does not mean the provider job failed.
+                error_message = "文档解析结果暂时无法获取，将继续查询，也可稍后刷新重试"
+
+        # Finish external calls before locking, then reject stale snapshots.
+        with db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute("SELECT * FROM document_files WHERE id=? AND user_id=?", (row["id"], row["user_id"])).fetchone()
+            if not current or dict(current) != dict(row):
+                return current
+            if status == "completed":
                 conn.execute("DELETE FROM document_chunks WHERE document_id=? AND user_id=?", (row["id"], row["user_id"]))
                 conn.executemany("""INSERT INTO document_chunks
                     (document_id,user_id,ordinal,title,content,page_number,created_at)
                     VALUES (?,?,?,?,?,?,?)""", [(row["id"],row["user_id"],index,item["title"],item["content"],item["page"],now()) for index,item in enumerate(chunks)])
-                conn.execute("""UPDATE document_files SET status='completed', parsed_text=?, page_count=?, chunk_count=?, error_message='', updated_at=? WHERE id=?""", ("\n\n".join(item["content"] for item in chunks)[:2_000_000], 0, len(chunks), now(), row["id"]))
-            elif status in ("fail", "failed", "error"):
-                conn.execute("UPDATE document_files SET status='failed', error_message=?, updated_at=? WHERE id=?", (response_error(status_response) or "文档解析失败", now(), row["id"]))
+                conn.execute("""UPDATE document_files SET status='completed', parsed_text=?, page_count=?, chunk_count=?, error_message='', updated_at=? WHERE id=? AND user_id=?""", ("\n\n".join(item["content"] for item in chunks)[:2_000_000], 0, len(chunks), now(), row["id"], row["user_id"]))
             else:
-                conn.execute("UPDATE document_files SET status='processing', updated_at=? WHERE id=?", (now(), row["id"]))
-        except Exception:
-            conn.execute("UPDATE document_files SET status='failed', error_message=?, updated_at=? WHERE id=?", ("文档解析失败，请稍后重试", now(), row["id"]))
-        return conn.execute("SELECT * FROM document_files WHERE id=?", (row["id"],)).fetchone()
+                conn.execute("UPDATE document_files SET status=?, error_message=?, updated_at=? WHERE id=? AND user_id=?", (status, error_message, now(), row["id"], row["user_id"]))
+            return conn.execute("SELECT * FROM document_files WHERE id=? AND user_id=?", (row["id"], row["user_id"])).fetchone()
 
     def handle_document_item(self):
         user_id = self.current_user()["id"]
@@ -133,8 +148,10 @@ class DocumentHandlersMixin:
                 conn.execute("DELETE FROM document_chunks WHERE document_id=? AND user_id=?", (document_id,user_id))
                 conn.execute("DELETE FROM document_files WHERE id=? AND user_id=?", (document_id,user_id))
                 return self.json({"ok": True})
-            if self.command == "POST" and urlparse(self.path).path.endswith("/refresh"):
-                row = self.refresh_document(conn, row)
+        if self.command == "POST" and urlparse(self.path).path.endswith("/refresh"):
+            row = self.refresh_document(row, retry_failed=True)
+            if not row:
+                return self.error(HTTPStatus.NOT_FOUND, "document not found")
         return self.json({"document": document_file_public(row)})
 
     def handle_conversation_documents(self):

@@ -44,12 +44,15 @@
 
   async function captcha(){const data=await api('/api/captcha');captchaId=data.captcha_id;$('captchaImage').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(data.image_svg);}
   async function authenticated(login=false){
+    office.setCapabilities(null);pdf.setCapabilities(null);
+    office.setConfig({enabled:false});
     const me=await api('/api/me');
     let access=null,accessError='';
     if(me.authenticated){try{access=await api(base+'/presence',{login});}catch(error){if(error.status!==401)throw error;accessError=error.message;}}
     if(!access){$('login').hidden=false;$('app').hidden=true;await Promise.all([captcha(),loadSmsConfig()]);$('loginError').textContent=accessError;refreshIcons();return false;}
     platformAdmin=access.platform_admin;
-    try{office.setConfig(await api(base+'/office/config'));}catch{office.setConfig({enabled:false});}
+    office.setCapabilities(access.capabilities);pdf.setCapabilities(access.capabilities);
+    if(access.capabilities?.edit_office){try{office.setConfig(await api(base+'/office/config'));}catch{office.setConfig({enabled:false});}}
     $('nav').innerHTML=sections.filter(s=>s[0]!=='platform'||platformAdmin).map(([key,label,image])=>`<button data-section="${key}">${icon(image)}${label}</button>`).join('');
     $('login').hidden=true;$('app').hidden=false;$('account').textContent=me.user.display_name||me.user.username;
     await navigate(location.hash.slice(1)||'overview');checkVersion();return true;

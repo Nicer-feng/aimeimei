@@ -9,7 +9,7 @@ import uuid
 from urllib.error import HTTPError
 
 from infrastructure.storage import shared_storage_config
-from .database import transaction
+from .database import read_connection, transaction
 
 
 MAX_EDIT_BYTES = 20 * 1024 * 1024
@@ -99,7 +99,7 @@ class OfficeService:
         return row, ext
 
     def _session(self, session_id, live=True):
-        with transaction() as conn:
+        with read_connection() as conn:
             session = conn.execute('SELECT * FROM share_office_sessions WHERE id=? AND user_id=?',
                                    (session_id, self.user_id)).fetchone()
             ensure(session, '编辑会话不存在', 404)
@@ -131,7 +131,7 @@ class OfficeService:
         raise OfficeServiceError('接口不存在', 404)
 
     def versions(self, file_id):
-        with transaction() as conn:
+        with read_connection() as conn:
             file = self._owned_file(conn, file_id)
             rows = conn.execute('SELECT id, version_no, object_key, size, created_at FROM share_office_versions '
                                 'WHERE file_id=? ORDER BY version_no DESC LIMIT 100', (file_id,)).fetchall()
@@ -270,7 +270,7 @@ class OfficeService:
             raise
         ensure(0 < size <= MAX_EDIT_BYTES, '编辑后的文件超出 20 MB 试用限制', 413)
         if session['last_snapshot_etag'] == etag:
-            with transaction() as conn:
+            with read_connection() as conn:
                 existing = conn.execute('SELECT id,version_no,object_key,size,created_at FROM share_office_versions '
                                         'WHERE source_session_id=? ORDER BY version_no DESC LIMIT 1',
                                         (session_id,)).fetchone()
@@ -324,7 +324,7 @@ class OfficeService:
         self._admin()
         version_id = data.get('version_id')
         ensure(isinstance(version_id, str) and re.fullmatch(r'[a-f0-9]{32}', version_id), '版本参数不正确')
-        with transaction() as conn:
+        with read_connection() as conn:
             file = self._owned_file(conn, file_id)
             version = conn.execute('SELECT * FROM share_office_versions WHERE id=? AND file_id=?',
                                    (version_id, file_id)).fetchone()

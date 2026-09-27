@@ -11,6 +11,30 @@ def sse_text_decoder():
     return codecs.getincrementaldecoder("utf-8")("replace")
 
 
+def sse_payloads(response):
+    """Decode complete SSE records before forwarding, retaining split UTF-8."""
+    decoder = sse_text_decoder()
+    buffer, data = "", []
+    read = getattr(response, "read1", response.read)
+    while True:
+        chunk = read(8192)
+        buffer += decoder.decode(chunk, final=not chunk)
+        if not chunk and buffer and not buffer.endswith("\n"):
+            buffer += "\n"
+        while "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+            line = line.rstrip("\r")
+            if line.startswith("data:"):
+                data.append(line[5:].lstrip(" "))
+            elif not line and data:
+                yield "\n".join(data)
+                data = []
+        if not chunk:
+            if data:
+                yield "\n".join(data)
+            break
+
+
 CONTEXT_RECENT_MESSAGE_LIMIT = 18
 CONTEXT_COMPACT_TRIGGER_MESSAGE_COUNT = 24
 CONTEXT_COMPACT_TRIGGER_CHARACTERS = 28000
@@ -863,7 +887,7 @@ class ChatHandlersMixin:
                 return self.error(HTTPStatus.NOT_FOUND, "conversation not found")
             messages = conn.execute(
                 """
-                SELECT id, role, content, reasoning_content,
+                SELECT id, role, content, reasoning_content, generation_status,
                        prompt_tokens, completion_tokens, total_tokens,
                        estimated_cost,
                        created_at
@@ -949,6 +973,7 @@ class ChatHandlersMixin:
                         "role": row["role"],
                         "content": row["content"],
                         "reasoning_content": row["reasoning_content"],
+                        "generation_status": row["generation_status"],
                         "created_at": row["created_at"],
                         "usage": message_token_usage(row),
                         "sources": sources_by_message.get(row["id"], []),
@@ -1137,7 +1162,7 @@ class ChatHandlersMixin:
                 FROM (
                   SELECT id, role, content
                   FROM messages
-                  WHERE conversation_id=? AND user_id=? AND role IN ('user','assistant')
+                  WHERE conversation_id=? AND user_id=? AND role IN ('user','assistant') AND content!=''
                   ORDER BY id DESC
                   LIMIT ?
                 ) AS recent_messages
@@ -1362,34 +1387,18 @@ class ChatHandlersMixin:
         except Exception as exc:
             return self.error(HTTPStatus.BAD_GATEWAY, "upstream request failed", str(exc))
 
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Accel-Buffering", "no")
-        self.end_headers()
-
-        if search_results:
-            search_event = {
-                "type": "search_status",
-                "status": "done",
-                "count": len(search_results),
-                "sources": public_sources(search_results),
-            }
-            try:
-                self.wfile.write(
-                    ("data: " + json.dumps(search_event, ensure_ascii=False) + "\n\n").encode()
-                )
-                self.wfile.flush()
-            except Exception:
-                pass
-
         assistant_parts = []
         reasoning_parts = []
         usage_data = None
         writing_completion = False
+        client_connected = True
+        stream_failed = False
         protect_storyboard = bool(writing_run and writing_run[0]["locked_version_id"] and writing_run[1] and writing_run[2]["intent"] == "storyboard")
 
         def emit_client_event(event):
+            nonlocal client_connected
+            if not client_connected:
+                return False
             if protect_storyboard and (event.get("choices") or [{}])[0].get("delta", {}).get("content"):
                 return True
             try:
@@ -1398,163 +1407,175 @@ class ChatHandlersMixin:
                 )
                 self.wfile.flush()
                 return True
-            except Exception:
+            except OSError:
+                client_connected = False
                 return False
 
-        if search_fallback_notice:
-            notice_event = {
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {"content": search_fallback_notice},
-                        "finish_reason": None,
-                    }
-                ]
-            }
-            try:
-                self.wfile.write(
-                    ("data: " + json.dumps(notice_event, ensure_ascii=False) + "\n\n").encode()
-                )
-                self.wfile.flush()
-                assistant_parts.append(search_fallback_notice)
-            except Exception:
-                pass
-        buffer = ""
-        decoder = sse_text_decoder()
         try:
-            while True:
-                chunk = response.read(8192)
-                if not chunk:
-                    break
-                if not use_native_search and not protect_storyboard:
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-                buffer += decoder.decode(chunk)
-                lines = buffer.splitlines(keepends=True)
-                if lines and not lines[-1].endswith(("\n", "\r")):
-                    buffer = lines.pop()
-                else:
-                    buffer = ""
-                for line in lines:
-                    text = line.strip()
-                    if not text.startswith("data:"):
-                        continue
-                    data_text = text[5:].strip()
-                    if not data_text or data_text == "[DONE]":
-                        continue
-                    try:
-                        event = json.loads(data_text)
-                    except json.JSONDecodeError:
-                        continue
-                    if use_native_search:
-                        event_type = str(event.get("type") or "")
-                        if event_type == "response.output_text.delta":
-                            piece = str(event.get("delta") or "")
-                            if piece:
-                                assistant_parts.append(piece)
-                                emit_client_event(
-                                    {
-                                        "choices": [
-                                            {
-                                                "index": 0,
-                                                "delta": {"content": piece},
-                                                "finish_reason": None,
-                                            }
-                                        ]
-                                    }
-                                )
-                        elif event_type in (
-                            "response.reasoning_summary_text.delta",
-                            "response.reasoning_text.delta",
-                        ):
-                            reasoning_piece = str(event.get("delta") or "")
-                            if reasoning_piece:
-                                reasoning_parts.append(reasoning_piece)
-                                emit_client_event(
-                                    {
-                                        "choices": [
-                                            {
-                                                "index": 0,
-                                                "delta": {
-                                                    "reasoning_content": reasoning_piece
-                                                },
-                                                "finish_reason": None,
-                                            }
-                                        ]
-                                    }
-                                )
-                        elif event_type == "response.output_item.done":
-                            output_item = event.get("item") or {}
-                            if output_item.get("type") == "web_extractor_call":
-                                for url, snippet in native_extractor_snippets_from_item(
-                                    output_item,
-                                    build_search_query(content),
-                                ):
-                                    native_extractor_snippets[url.rstrip("/")] = snippet
-                            else:
-                                native_results = native_search_results_from_item(
-                                    output_item, search_config["result_count"]
-                                )
-                                known_urls = {item["url"] for item in search_results}
-                                for item in native_results:
-                                    if item["url"] not in known_urls:
-                                        search_results.append(item)
-                                        known_urls.add(item["url"])
-                                    if len(search_results) >= search_config["result_count"]:
-                                        break
-                                if search_results:
-                                    emit_client_event(
-                                        {
-                                            "type": "search_status",
-                                            "status": "done",
-                                            "count": len(search_results),
-                                            "sources": public_sources(search_results),
-                                        }
-                                    )
-                        elif event_type == "response.completed":
-                            completed = event.get("response") or {}
-                            writing_completion = completed.get("status", "completed") == "completed"
-                            if isinstance(completed.get("usage"), dict):
-                                usage_data = completed.get("usage")
-                        continue
-                    if isinstance(event.get("usage"), dict):
-                        usage_data = event.get("usage")
-                    choice = (event.get("choices") or [{}])[0]
-                    if choice.get("finish_reason") is not None:
-                        writing_completion = choice["finish_reason"] == "stop"
-                    if isinstance(choice.get("usage"), dict):
-                        usage_data = choice.get("usage")
-                    delta = choice.get("delta") or {}
-                    message = choice.get("message") or {}
-                    piece = delta.get("content") or message.get("content") or ""
-                    reasoning_piece = (
-                        delta.get("reasoning_content")
-                        or message.get("reasoning_content")
-                        or delta.get("reasoning")
-                        or message.get("reasoning")
-                        or delta.get("thinking")
-                        or message.get("thinking")
-                        or ""
-                    )
-                    if reasoning_piece:
-                        reasoning_parts.append(str(reasoning_piece))
-                    if piece:
-                        assistant_parts.append(piece)
-        finally:
-            response.close()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+        except OSError:
+            client_connected = False
 
-        if use_native_search and search_results:
+        if search_results:
+            emit_client_event({"type": "search_status", "status": "done",
+                               "count": len(search_results), "sources": public_sources(search_results)})
+        if search_fallback_notice:
+            assistant_parts.append(search_fallback_notice)
+            emit_client_event({"choices": [{"index": 0, "delta": {"content": search_fallback_notice},
+                                            "finish_reason": None}]})
+        try:
+            payloads = sse_payloads(response) if client_connected else ()
+            for data_text in payloads:
+                if data_text.strip() == "[DONE]":
+                    break
+                try:
+                    event = json.loads(data_text)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if event.get("error"):
+                    stream_failed = True
+                    break
+                if use_native_search:
+                    event_type = str(event.get("type") or "")
+                    if event_type == "response.output_text.delta":
+                        piece = str(event.get("delta") or "")
+                        if piece:
+                            assistant_parts.append(piece)
+                            emit_client_event(
+                                {
+                                    "choices": [
+                                        {
+                                            "index": 0,
+                                            "delta": {"content": piece},
+                                            "finish_reason": None,
+                                        }
+                                    ]
+                                }
+                            )
+                    elif event_type in (
+                        "response.reasoning_summary_text.delta",
+                        "response.reasoning_text.delta",
+                    ):
+                        reasoning_piece = str(event.get("delta") or "")
+                        if reasoning_piece:
+                            reasoning_parts.append(reasoning_piece)
+                            emit_client_event(
+                                {
+                                    "choices": [
+                                        {
+                                            "index": 0,
+                                            "delta": {
+                                                "reasoning_content": reasoning_piece
+                                            },
+                                            "finish_reason": None,
+                                        }
+                                    ]
+                                }
+                            )
+                    elif event_type == "response.output_item.done":
+                        output_item = event.get("item") or {}
+                        if output_item.get("type") == "web_extractor_call":
+                            for url, snippet in native_extractor_snippets_from_item(
+                                output_item,
+                                build_search_query(content),
+                            ):
+                                native_extractor_snippets[url.rstrip("/")] = snippet
+                        else:
+                            native_results = native_search_results_from_item(
+                                output_item, search_config["result_count"]
+                            )
+                            known_urls = {item["url"] for item in search_results}
+                            for item in native_results:
+                                if item["url"] not in known_urls:
+                                    search_results.append(item)
+                                    known_urls.add(item["url"])
+                                if len(search_results) >= search_config["result_count"]:
+                                    break
+                            if search_results:
+                                emit_client_event(
+                                    {
+                                        "type": "search_status",
+                                        "status": "done",
+                                        "count": len(search_results),
+                                        "sources": public_sources(search_results),
+                                    }
+                                )
+                    elif event_type in ("response.failed", "response.incomplete", "error"):
+                        completed = event.get("response") or {}
+                        if isinstance(completed.get("usage"), dict):
+                            usage_data = completed["usage"]
+                        stream_failed = event_type != "response.incomplete"
+                        break
+                    elif event_type == "response.completed":
+                        completed = event.get("response") or {}
+                        writing_completion = completed.get("status", "completed") == "completed"
+                        if isinstance(completed.get("usage"), dict):
+                            usage_data = completed.get("usage")
+                        break
+                    if not client_connected:
+                        break
+                    continue
+                if isinstance(event.get("usage"), dict):
+                    usage_data = event.get("usage")
+                choice = (event.get("choices") or [{}])[0]
+                if choice.get("finish_reason") is not None:
+                    writing_completion = choice["finish_reason"] == "stop"
+                if isinstance(choice.get("usage"), dict):
+                    usage_data = choice.get("usage")
+                delta = choice.get("delta") or {}
+                message = choice.get("message") or {}
+                piece = delta.get("content") or message.get("content") or ""
+                reasoning_piece = (
+                    delta.get("reasoning_content")
+                    or message.get("reasoning_content")
+                    or delta.get("reasoning")
+                    or message.get("reasoning")
+                    or delta.get("thinking")
+                    or message.get("thinking")
+                    or ""
+                )
+                if reasoning_piece:
+                    reasoning_parts.append(str(reasoning_piece))
+                if piece:
+                    assistant_parts.append(piece)
+                # Record text/usage before writing: a client disconnect must not
+                # skip persistence of the response already received upstream.
+                if not emit_client_event(event):
+                    break
+        except Exception as exc:
+            stream_failed = True
+            self.log_message("chat stream failed (%s)", type(exc).__name__)
+        finally:
+            try:
+                response.close()
+            except OSError:
+                pass
+        generation_status = ("failed" if stream_failed else
+                             "completed" if writing_completion and client_connected else "interrupted")
+        if generation_status != "completed":
+            writing_completion = False
+
+        if use_native_search and search_results and generation_status == "completed":
             for item in search_results:
                 url_key = str(item.get("url") or "").rstrip("/")
                 extracted = native_extractor_snippets.get(url_key)
                 if extracted:
                     item["snippet"] = extracted
-            with db() as source_conn:
-                search_results = enrich_search_result_snippets(
-                    search_results,
-                    build_search_query(content),
-                    source_conn,
-                )
+            try:
+                with db() as source_conn:
+                    search_results = enrich_search_result_snippets(
+                        search_results,
+                        build_search_query(content),
+                        source_conn,
+                    )
+            except Exception as exc:
+                self.log_message("chat source enrichment failed (%s)", type(exc).__name__)
 
         assistant_text = "".join(assistant_parts).strip()
         reasoning_text = "".join(reasoning_parts).strip()
@@ -1583,17 +1604,22 @@ class ChatHandlersMixin:
             protect_storyboard = False
             emit_client_event({"choices": [{"delta": {"content": assistant_text}}]})
         writing_check = None
-        if assistant_text:
+        if assistant_text or reasoning_text or generation_status != "completed":
             with db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                # A deleted conversation must not be recreated by a finishing request.
+                if not conn.execute("SELECT 1 FROM conversations WHERE id=? AND user_id=? AND archived=0",
+                                    (conversation_id, user_id)).fetchone():
+                    return
                 cursor = conn.execute(
                     """
                     INSERT INTO messages(
                       user_id, conversation_id, role, content, reasoning_content,
                       prompt_tokens, completion_tokens, total_tokens, cached_tokens, cache_creation_tokens,
                       estimated_cost, cost_input_price, cost_output_price, cost_model_id, actual_model,
-                      created_at
+                      created_at, generation_status
                     )
-                    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user_id,
@@ -1611,10 +1637,11 @@ class ChatHandlersMixin:
                         convo["model_id"] if convo["cost_enabled"] else "",
                         convo["model"],
                         message_created_at,
+                        generation_status,
                     ),
                 )
                 message_id = cursor.lastrowid
-                if writing_run:
+                if writing_run and assistant_text:
                     writing_check = self.finish_writing(conn, *writing_run, assistant_text, message_id)
                 for index, item in enumerate(search_results, 1):
                     conn.execute(
@@ -1688,11 +1715,10 @@ class ChatHandlersMixin:
                 },
                 "sources": public_sources(search_results),
                 "writing_check": writing_check,
+                "generation_status": generation_status,
             }
-            try:
-                self.wfile.write(
-                    ("data: " + json.dumps(saved_event, ensure_ascii=False) + "\n\n").encode()
-                )
-                self.wfile.flush()
-            except Exception:
-                pass
+            emit_client_event(saved_event)
+            if generation_status != "completed":
+                emit_client_event({"type": "message.failed", "status": generation_status,
+                                   "message_id": message_id, "conversation_id": conversation_id,
+                                   "message": "生成未完成，已保存收到的内容，可继续追问。"})

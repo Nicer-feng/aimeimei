@@ -5,14 +5,16 @@ window.CloudPdfEditor=(()=>{
   const pdfjsBase=vendor+'pdfjs-6.3.289/';
   const maxBytes=20*1024*1024,maxPages=100;
   let deps,pdfjsPromise,pdfLibPromise,previewTask,previewDoc,sourceBytes,sourceRevision,file;
+  let canEditPdf=false;
   let pages=[],history=[],historyIndex=0,baseline='',selectedKey='',sequence=0,sourcePageCount=0;
   let cards=new Map(),observer,opening=false,busy=false,cancelRequested=false,activeXhr=null,pendingUploadId=null;
   let generatedBlob=null,versionFile=null,versionItems=[];
 
   const endpoint=path=>deps.base+'/pdf/'+path;
   const isOpen=()=>opening||$('pdfPageEditor').open;
+  function setCapabilities(data){canEditPdf=data?.edit_pdf===true;}
   function canEdit(candidate){
-    return !!candidate&&candidate.status==='READY'&&candidate.file_type==='PDF'&&/\.pdf$/i.test(candidate.filename||'')&&
+    return canEditPdf&&!!candidate&&candidate.status==='READY'&&candidate.file_type==='PDF'&&/\.pdf$/i.test(candidate.filename||'')&&
       Number(candidate.size)>0&&Number(candidate.size)<=maxBytes;
   }
   function configure(options){deps=options;bind();}
@@ -354,5 +356,5 @@ window.CloudPdfEditor=(()=>{
     };
     window.addEventListener('beforeunload',event=>{if(isOpen()&&(busy||dirty())){event.preventDefault();event.returnValue='';}});
   }
-  return {configure,canEdit,isOpen,open,showVersions};
+  return {configure,setCapabilities,canEdit,isOpen,open,showVersions};
 })();

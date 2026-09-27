@@ -23,6 +23,7 @@ with tempfile.TemporaryDirectory(prefix='file-share-test-') as data:
                         break
                 except OSError:
                     time.sleep(.1)
+            subprocess.run([sys.executable,str(root/'test_database_reads.py')],env=environment,check=True)
             subprocess.run([sys.executable,str(root/'smoke.py')],env=environment,check=True)
             subprocess.run([sys.executable,str(root/'office.py')],env=environment,check=True)
             subprocess.run([sys.executable,str(root/'pdf.py')],env=environment,check=True)

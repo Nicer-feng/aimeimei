@@ -9,6 +9,19 @@ def init_share_db():
 
 
 @contextmanager
+def read_connection():
+    """Read a consistent snapshot without reserving SQLite's writer lock."""
+    conn = db()
+    try:
+        conn.execute("PRAGMA busy_timeout=15000")
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("BEGIN")
+        yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
 def transaction():
     conn = db()
     try:
