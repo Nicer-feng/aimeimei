@@ -78,6 +78,7 @@ window.CloudPdfEditor=(()=>{
   }
   function renderPages(){
     const grid=$('pdfPageGrid'),nodes=[];
+    const positions=window.CloudMotion?.positions(grid);
     pages.forEach((page,index)=>{
       let card=cards.get(page.key);
       if(!card){
@@ -97,6 +98,7 @@ window.CloudPdfEditor=(()=>{
       nodes.push(card);
     });
     grid.replaceChildren(...nodes);
+    if(positions)window.CloudMotion?.rearrange(grid,positions);
     updateControls();
   }
   async function scheduleThumb(card,page){

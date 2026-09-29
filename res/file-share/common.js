@@ -14,15 +14,15 @@ window.FS = (() => {
   async function api(path,data){const response=await fetch(path,{credentials:'same-origin',cache:'no-store',method:data===undefined?'GET':'POST',headers:data===undefined?{}:{'Content-Type':'application/json','X-Share-Request':'1'},body:data===undefined?undefined:JSON.stringify(data)});let result;try{result=await response.json();}catch{throw new Error('服务器响应异常，请稍后重试');}if(!response.ok){const error=new Error(result.error||'请求失败');error.status=response.status;throw error;}return result;}
   let toastTimer;
   function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,4000);}
-  let previewSerial=0,previewURLs=[];
-  function clearPreview(){previewSerial++;previewURLs.forEach(url=>URL.revokeObjectURL(url));previewURLs=[];$('dialog').classList.remove('document-preview','preview-full');}
-  function dialog(title,html){clearPreview();$('dialogTitle').textContent=title;$('dialogBody').innerHTML=html;if(!$('dialog').open)$('dialog').showModal();refreshIcons();}
+  let previewSerial=0,previewURLs=[],pdfPreviewTask=null,pdfRenderTask=null,pdfResizeObserver=null;
+  function clearPreview(){previewSerial++;pdfResizeObserver?.disconnect();pdfResizeObserver=null;pdfRenderTask?.cancel();pdfRenderTask=null;if(pdfPreviewTask){pdfPreviewTask.destroy().catch(()=>{});pdfPreviewTask=null;}previewURLs.forEach(url=>URL.revokeObjectURL(url));previewURLs=[];$('dialog').classList.remove('document-preview','preview-full');}
+  function dialog(title,html){window.CloudMotion?.captureOrigin();clearPreview();$('dialogTitle').textContent=title;$('dialogBody').innerHTML=html;if(!$('dialog').open)$('dialog').showModal();refreshIcons();window.CloudMotion?.open($('dialog'));}
   function close(){const media=$('dialogBody').querySelectorAll('video,audio');media.forEach(m=>{m.pause();m.removeAttribute('src');m.load();});clearPreview();$('dialog').close();$('dialogBody').replaceChildren();}
   $('dialogClose').onclick=close;$('dialog').addEventListener('cancel',event=>{event.preventDefault();close();});
   async function copy(value){try{await navigator.clipboard.writeText(value);toast('分享链接已复制');}catch{dialog('复制链接',`<p class="muted">请长按或选中下方链接复制</p><input readonly value="${esc(value)}">`);$('dialogBody').querySelector('input').select();}}
   async function preview(file,source,download){
     dialog(file.filename,'<div class="preview-tools" id="previewTools"></div><div class="preview-stage" id="previewStage"><p>正在准备预览，首次转换可能需要几十秒…</p></div><p class="muted preview-note" id="previewNote">仅供预览，原文件保持不变。</p>');
-    $('dialog').classList.add('document-preview');
+    $('dialog').classList.add('document-preview');window.CloudMotion?.open($('dialog'),true);
     const serial=previewSerial,stage=$('previewStage'),tools=$('previewTools');
     const full=document.createElement('button');full.textContent='全屏';full.onclick=()=>{const active=$('dialog').classList.toggle('preview-full');full.textContent=active?'恢复窗口':'全屏';};tools.append(full);
     if(download){const button=document.createElement('button');button.textContent='下载原文件';button.onclick=async()=>{button.disabled=true;try{await download();}catch(error){toast(error.message);}finally{button.disabled=false;}};tools.append(button);}
@@ -53,7 +53,54 @@ window.FS = (() => {
       if(file.file_type==='VIDEO'){const select=document.createElement('select');select.setAttribute('aria-label','播放倍速');for(const speed of [.5,1,1.25,1.5,2]){const option=new Option(speed+'×',speed,false,speed===1);select.add(option);}select.onchange=()=>media.playbackRate=Number(select.value);tools.append(select);}
       media.onerror=()=>toast('当前浏览器无法播放该格式，或链接已过期，请重新预览');
     }else if(file.file_type==='PDF'||info.kind==='pdf'){
-      const frame=document.createElement('iframe');frame.title=file.filename;frame.src=url+'#view=FitH';stage.append(frame);const a=document.createElement('a');a.textContent='在浏览器中打开 PDF';a.href=url;a.target='_blank';a.rel='noopener noreferrer';tools.append(a);
+      const openLink=document.createElement('a');openLink.textContent='在浏览器中打开 PDF';openLink.href=url;openLink.target='_blank';openLink.rel='noopener noreferrer';tools.append(openLink);
+      const fallback=()=>{pdfResizeObserver?.disconnect();pdfResizeObserver=null;stage.classList.remove('pdf-preview-stage');stage.replaceChildren();const frame=document.createElement('iframe');frame.title=file.filename;frame.src=url+'#view=FitH';stage.append(frame);};
+      // Keep large/unsupported documents available in the browser's own viewer.
+      if(file.size>20*1024*1024){fallback();return;}
+      stage.classList.add('pdf-preview-stage');
+      stage.textContent='正在加载文档…';
+      let controls;
+      try{
+        const base='/res/file-share/vendor/pdfjs-6.3.289/';
+        const pdfjs=await import(base+'pdf.min.mjs');if(serial!==previewSerial)return;
+        pdfjs.GlobalWorkerOptions.workerSrc=base+'pdf.worker.min.mjs';
+        const task=pdfjs.getDocument({url,cMapUrl:base+'cmaps/',cMapPacked:true,standardFontDataUrl:base+'standard_fonts/',wasmUrl:base+'wasm/',iccUrl:base+'iccs/',withCredentials:false});
+        pdfPreviewTask=task;const doc=await task.promise;if(serial!==previewSerial)return;
+        controls=document.createElement('div');controls.className='pdf-preview-controls';controls.setAttribute('role','group');controls.setAttribute('aria-label','PDF 翻页与缩放');
+        const button=(label,handler)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=handler;controls.append(b);return b;};
+        let number=1,zoom=1,drawing=0;
+        const previous=button('上一页',()=>{number--;draw();});
+        const count=document.createElement('span');count.setAttribute('aria-live','polite');controls.append(count);
+        const next=button('下一页',()=>{number++;draw();});
+        const smaller=button('缩小',()=>{zoom=Math.max(.5,zoom-.25);draw();});
+        const larger=button('放大',()=>{zoom=Math.min(2,zoom+.25);draw();});
+        tools.append(controls);
+        const canvas=document.createElement('canvas');canvas.setAttribute('role','img');stage.replaceChildren(canvas);
+        async function draw(){
+          const current=++drawing;const pending=pdfRenderTask;
+          if(pending){pending.cancel();try{await pending.promise;}catch{}}
+          if(serial!==previewSerial||current!==drawing)return;
+          previous.disabled=number<=1;next.disabled=number>=doc.numPages;smaller.disabled=zoom<=.5;larger.disabled=zoom>=2;
+          count.textContent=number+' / '+doc.numPages;canvas.setAttribute('aria-label',file.filename+'，第 '+number+' 页');
+          try{
+            const page=await doc.getPage(number);if(serial!==previewSerial||current!==drawing)return;
+            const natural=page.getViewport({scale:1}),fit=Math.min((stage.clientWidth-32)/natural.width,(stage.clientHeight-32)/natural.height);
+            const viewport=page.getViewport({scale:Math.max(.1,fit)*zoom}),ratio=Math.min(devicePixelRatio||1,2);
+            canvas.width=Math.ceil(viewport.width*ratio);canvas.height=Math.ceil(viewport.height*ratio);canvas.style.width=viewport.width+'px';canvas.style.height=viewport.height+'px';
+            const render=page.render({canvasContext:canvas.getContext('2d'),viewport,transform:ratio===1?null:[ratio,0,0,ratio,0,0],background:'#ffffff'});pdfRenderTask=render;await render.promise;
+            if(pdfRenderTask===render)pdfRenderTask=null;
+          }catch(error){if(serial!==previewSerial||current!==drawing||error.name==='RenderingCancelledException')return;controls.remove();fallback();}
+        }
+        await draw();
+        if(serial===previewSerial&&stage.classList.contains('pdf-preview-stage')&&window.ResizeObserver){
+          let width=stage.clientWidth,height=stage.clientHeight;
+          pdfResizeObserver=new ResizeObserver(()=>{
+            if(width===stage.clientWidth&&height===stage.clientHeight)return;
+            width=stage.clientWidth;height=stage.clientHeight;draw();
+          });
+          pdfResizeObserver.observe(stage);
+        }
+      }catch{if(serial!==previewSerial)return;controls?.remove();fallback();}
     }else if(file.file_type==='TEXT'){
       const pre=document.createElement('pre');pre.textContent='正在读取文本…';stage.append(pre);
       try{const response=await fetch(url,{headers:{Range:'bytes=0-1048575'},referrerPolicy:'no-referrer'});if(!response.ok)throw new Error('文本预览失败');const reader=response.body.getReader();let length=0,chunks=[];while(length<1048576){const {done,value}=await reader.read();if(done)break;const chunk=value.subarray(0,1048576-length);chunks.push(chunk);length+=chunk.length;}await reader.cancel();const joined=new Uint8Array(length);let pos=0;for(const chunk of chunks){joined.set(chunk,pos);pos+=chunk.length;}pre.textContent=new TextDecoder().decode(joined)+(file.size>1048576?'\n\n仅预览前 1 MB，请下载查看完整内容。':'');}catch{pre.textContent='文本预览失败，请检查存储跨域设置，或下载查看。';}
