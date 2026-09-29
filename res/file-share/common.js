@@ -16,9 +16,26 @@ window.FS = (() => {
   function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,4000);}
   let previewSerial=0,previewURLs=[],pdfPreviewTask=null,pdfRenderTask=null,pdfResizeObserver=null,textPreviewController=null;
   function clearPreview(){previewSerial++;textPreviewController?.abort();textPreviewController=null;pdfResizeObserver?.disconnect();pdfResizeObserver=null;pdfRenderTask?.cancel();pdfRenderTask=null;if(pdfPreviewTask){pdfPreviewTask.destroy().catch(()=>{});pdfPreviewTask=null;}previewURLs.forEach(url=>URL.revokeObjectURL(url));previewURLs=[];$('dialog').classList.remove('document-preview','preview-full');}
-  function dialog(title,html){window.CloudMotion?.captureOrigin();clearPreview();$('dialogTitle').textContent=title;$('dialogBody').innerHTML=html;if(!$('dialog').open)$('dialog').showModal();refreshIcons();window.CloudMotion?.open($('dialog'));}
+  function dialog(title,html){window.CloudMotion?.captureOrigin();clearPreview();$('dialogTitle').textContent=title;$('dialogBody').innerHTML=html;$('dialogBody').scrollTop=0;if(!$('dialog').open)$('dialog').showModal();refreshIcons();window.CloudMotion?.open($('dialog'));}
   function close(){const media=$('dialogBody').querySelectorAll('video,audio');media.forEach(m=>{m.pause();m.removeAttribute('src');m.load();});clearPreview();$('dialog').close();$('dialogBody').replaceChildren();}
   $('dialogClose').onclick=close;$('dialog').addEventListener('cancel',event=>{event.preventDefault();close();});
+  // Dismiss only the surface where the gesture began; dragging out never closes it.
+  function dismissOutside(surface,content,dismiss){
+    let start=null;
+    const outside=event=>{const r=content.getBoundingClientRect();return event.target===surface&&(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom);};
+    surface.addEventListener('pointerdown',event=>{start=event.button===0&&!event.cloudSelectDismissed&&outside(event)?{x:event.clientX,y:event.clientY}:null;});
+    surface.addEventListener('pointercancel',()=>{start=null;});
+    surface.addEventListener('click',event=>{const began=start;start=null;if(began&&outside(event)&&Math.hypot(event.clientX-began.x,event.clientY-began.y)<8){event.preventDefault();event.stopPropagation();dismiss();}});
+  }
+  document.querySelectorAll('dialog').forEach(panel=>dismissOutside(panel,panel,()=>{
+    // Reuse cancel handlers so previews clean up and editors retain save checks.
+    if(panel.dispatchEvent(new Event('cancel',{cancelable:true})))panel.close();
+  }));
+  for(const [id,cancelId] of [['officeClosePrompt','officeCancelClose'],['pdfPageClosePrompt','pdfPageKeepEditing']]){
+    const prompt=$(id);if(!prompt)continue;
+    const dismiss=()=>$(cancelId).click();dismissOutside(prompt,prompt.querySelector('.office-close-card'),dismiss);
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!prompt.hidden&&prompt.closest('dialog')?.open){event.preventDefault();event.stopPropagation();dismiss();}},true);
+  }
   async function copy(value){try{await navigator.clipboard.writeText(value);toast('分享链接已复制');}catch{dialog('复制链接',`<p class="muted">请长按或选中下方链接复制</p><input readonly value="${esc(value)}">`);$('dialogBody').querySelector('input').select();}}
   async function preview(file,source,download){
     dialog(file.filename,'<div class="preview-tools" id="previewTools"></div><div class="preview-stage" id="previewStage"><p>正在准备预览，首次转换可能需要几十秒…</p></div><p class="muted preview-note" id="previewNote">仅供预览，原文件保持不变。</p>');

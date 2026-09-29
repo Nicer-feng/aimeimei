@@ -312,3 +312,14 @@ body::before { content:""; position:fixed; inset:0; z-index:-1; pointer-events:n
   .cloud-markdown h1 { font-size:1.65em; }.cloud-markdown .cloud-md-code { padding:12px; font-size:12px; }
   .markdown-view-switch { margin-left:0; }.cloud-md-table :is(th,td) { padding:8px 10px; }
 }
+
+/* Top-layer menus escape transformed/blurred dialogs and their scroll clipping. */
+.select-popup[popover] { inset:auto; margin:0; color:var(--text); }
+.select-popup::backdrop { background:transparent; pointer-events:none; }
+/* Keep dismissal within reach while long forms and records scroll independently. */
+#dialog[open],dialog.office-versions[open] { display:flex; flex-direction:column; overflow:hidden; }
+#dialog>.dialog-head,.office-versions>.dialog-head { flex-shrink:0; }
+#dialogBody,#officeVersionsBody,#pdfVersionsBody { min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+#dialogBody { padding:2px; }
+.office-versions>:not(.dialog-head):not(#officeVersionsBody):not(#pdfVersionsBody) { flex-shrink:0; }
+.office-close-card { max-height:calc(100dvh - 40px); overflow:auto; overscroll-behavior:contain; }
