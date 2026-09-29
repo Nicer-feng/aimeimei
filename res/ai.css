@@ -8949,3 +8949,21 @@
   .admin-workspace .admin-control-icon, .admin-workspace .ui-btn,
   .admin-workspace input:focus, .admin-workspace textarea:focus { animation: none !important; transition: none !important; transform: none !important; }
 }
+
+/* Keep interface settings inside the viewport; only the content scrolls. */
+#interfacePopover {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 40;
+}
+#interfacePopover .interface-panel {
+  max-height: var(--interface-max-height, calc(100dvh - 24px));
+  grid-template-rows: auto minmax(0, 1fr);
+}
+#interfacePopover .dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}

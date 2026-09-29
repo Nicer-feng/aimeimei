@@ -841,6 +841,32 @@
 	      updateInterfaceControls(opacity, blur);
 	    }
 
+    function positionInterfaceSettings() {
+      const popover = $("interfacePopover");
+      if (!popover?.classList.contains("show")) return;
+      // Render outside the transformed composer so fixed coordinates use the viewport.
+      if (popover.parentElement !== document.body) document.body.append(popover);
+      const viewport = window.visualViewport;
+      const left = viewport?.offsetLeft || 0;
+      const top = viewport?.offsetTop || 0;
+      const width = viewport?.width || window.innerWidth;
+      const height = viewport?.height || window.innerHeight;
+      const margin = 12;
+      const composer = document.querySelector(".composer").getBoundingClientRect();
+      const trigger = $("openInterfaceSettings").getBoundingClientRect();
+      const above = composer.top - top - margin * 2;
+      // On short screens or with a keyboard open, use the viewport instead of
+      // squeezing the entire settings panel into the gap above the composer.
+      const available = above >= 260 ? Math.min(above, height - margin * 2) : height - margin * 2;
+      const panelWidth = Math.min(390, width - margin * 2);
+      popover.style.width = panelWidth + "px";
+      popover.style.setProperty("--interface-max-height", Math.max(0, available) + "px");
+      popover.style.left = Math.max(left + margin, Math.min(trigger.right - panelWidth, left + width - panelWidth - margin)) + "px";
+      const bottom = above >= 260 ? Math.min(composer.top - margin, top + height - margin) : top + height - margin;
+      popover.style.top = "auto";
+      popover.style.bottom = (window.innerHeight - bottom) + "px";
+    }
+
 	    function openInterfaceSettings() {
 	      $("interfacePopover").classList.add("show");
 	      $("openInterfaceSettings").classList.add("active");
@@ -849,6 +875,8 @@
 	      setStatus("interfaceStatus", "");
 	      updateInterfaceControls(Number(state.composerOpacity), Number(state.composerBlur));
 	      updatePetSettingControls();
+      positionInterfaceSettings();
+      $("interfacePopover").querySelector(".dialog-body").scrollTop = 0;
 	    }
 
 	    function closeInterfaceSettings() {
@@ -1560,6 +1588,7 @@
         const root = document.documentElement;
         root.style.setProperty("--composer-safe-space", safeSpace + "px");
         root.style.setProperty("--composer-float-offset", floatOffset + "px");
+        positionInterfaceSettings();
 	    schedulePetPositionCorrection();
         if (keepAtBottom) {
           requestAnimationFrame(() => {
@@ -4287,7 +4316,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.9" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.10" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -10740,3 +10769,6 @@
   window.visualViewport?.addEventListener("resize", position, { passive: true });
   document.addEventListener("scroll", event => { if (!popup.contains(event.target)) position(); }, true);
 })();
+
+window.visualViewport?.addEventListener("resize", positionInterfaceSettings, { passive: true });
+window.visualViewport?.addEventListener("scroll", positionInterfaceSettings, { passive: true });
