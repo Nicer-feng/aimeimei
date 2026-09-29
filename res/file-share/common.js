@@ -14,8 +14,8 @@ window.FS = (() => {
   async function api(path,data){const response=await fetch(path,{credentials:'same-origin',cache:'no-store',method:data===undefined?'GET':'POST',headers:data===undefined?{}:{'Content-Type':'application/json','X-Share-Request':'1'},body:data===undefined?undefined:JSON.stringify(data)});let result;try{result=await response.json();}catch{throw new Error('服务器响应异常，请稍后重试');}if(!response.ok){const error=new Error(result.error||'请求失败');error.status=response.status;throw error;}return result;}
   let toastTimer;
   function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,4000);}
-  let previewSerial=0,previewURLs=[],pdfPreviewTask=null,pdfRenderTask=null,pdfResizeObserver=null;
-  function clearPreview(){previewSerial++;pdfResizeObserver?.disconnect();pdfResizeObserver=null;pdfRenderTask?.cancel();pdfRenderTask=null;if(pdfPreviewTask){pdfPreviewTask.destroy().catch(()=>{});pdfPreviewTask=null;}previewURLs.forEach(url=>URL.revokeObjectURL(url));previewURLs=[];$('dialog').classList.remove('document-preview','preview-full');}
+  let previewSerial=0,previewURLs=[],pdfPreviewTask=null,pdfRenderTask=null,pdfResizeObserver=null,textPreviewController=null;
+  function clearPreview(){previewSerial++;textPreviewController?.abort();textPreviewController=null;pdfResizeObserver?.disconnect();pdfResizeObserver=null;pdfRenderTask?.cancel();pdfRenderTask=null;if(pdfPreviewTask){pdfPreviewTask.destroy().catch(()=>{});pdfPreviewTask=null;}previewURLs.forEach(url=>URL.revokeObjectURL(url));previewURLs=[];$('dialog').classList.remove('document-preview','preview-full');}
   function dialog(title,html){window.CloudMotion?.captureOrigin();clearPreview();$('dialogTitle').textContent=title;$('dialogBody').innerHTML=html;if(!$('dialog').open)$('dialog').showModal();refreshIcons();window.CloudMotion?.open($('dialog'));}
   function close(){const media=$('dialogBody').querySelectorAll('video,audio');media.forEach(m=>{m.pause();m.removeAttribute('src');m.load();});clearPreview();$('dialog').close();$('dialogBody').replaceChildren();}
   $('dialogClose').onclick=close;$('dialog').addEventListener('cancel',event=>{event.preventDefault();close();});
@@ -102,8 +102,39 @@ window.FS = (() => {
         }
       }catch{if(serial!==previewSerial)return;controls?.remove();fallback();}
     }else if(file.file_type==='TEXT'){
-      const pre=document.createElement('pre');pre.textContent='正在读取文本…';stage.append(pre);
-      try{const response=await fetch(url,{headers:{Range:'bytes=0-1048575'},referrerPolicy:'no-referrer'});if(!response.ok)throw new Error('文本预览失败');const reader=response.body.getReader();let length=0,chunks=[];while(length<1048576){const {done,value}=await reader.read();if(done)break;const chunk=value.subarray(0,1048576-length);chunks.push(chunk);length+=chunk.length;}await reader.cancel();const joined=new Uint8Array(length);let pos=0;for(const chunk of chunks){joined.set(chunk,pos);pos+=chunk.length;}pre.textContent=new TextDecoder().decode(joined)+(file.size>1048576?'\n\n仅预览前 1 MB，请下载查看完整内容。':'');}catch{pre.textContent='文本预览失败，请检查存储跨域设置，或下载查看。';}
+      const markdown=/\.md$/i.test(file.filename||'');
+      const pre=document.createElement('pre');pre.className='cloud-text-source';pre.textContent='正在读取文本…';stage.append(pre);
+      const controller=new AbortController();textPreviewController=controller;
+      const timeout=setTimeout(()=>controller.abort(),15000),limit=1024*1024;
+      try{
+        const response=await fetch(url,{headers:{Range:'bytes=0-'+limit},referrerPolicy:'no-referrer',credentials:'omit',signal:controller.signal});
+        if(!response.ok||!response.body)throw new Error('文本预览失败');
+        const reader=response.body.getReader();let length=0;const chunks=[];
+        try{
+          while(length<=limit){const {done,value}=await reader.read();if(done)break;const chunk=value.subarray(0,limit+1-length);chunks.push(chunk);length+=chunk.length;}
+        }finally{await reader.cancel();reader.releaseLock();}
+        if(serial!==previewSerial)return;
+        const joined=new Uint8Array(length);let pos=0;for(const chunk of chunks){joined.set(chunk,pos);pos+=chunk.length;}
+        const truncated=length>limit||Number(file.size)>limit;
+        const text=new TextDecoder().decode(joined.subarray(0,limit),{stream:truncated});
+        pre.textContent=text;clearTimeout(timeout);
+        $('previewNote').textContent=(truncated?'仅预览前 1 MB，超出部分请下载查看。':'')+(markdown?'Markdown 在当前浏览器本地渲染；原文件不变，外部图片点击链接查看。':'UTF-8 文本预览；原文件不变。');
+        if(markdown){
+          stage.classList.add('markdown-preview-stage');
+          const article=document.createElement('article');article.className='cloud-markdown';article.setAttribute('aria-label','Markdown 文档预览');
+          try{
+            const content=await window.CloudMarkdown.render(text);if(serial!==previewSerial)return;article.append(content);
+            if(!text.trim())article.textContent='这是一个空 Markdown 文件。';
+            const group=document.createElement('div');group.className='markdown-view-switch';group.setAttribute('role','group');group.setAttribute('aria-label','Markdown 显示方式');
+            for(const [label,sourceMode] of [['预览',false],['源码',true]]){
+              const button=document.createElement('button');button.type='button';button.textContent=label;button.setAttribute('aria-pressed',String(!sourceMode));
+              button.onclick=()=>{pre.hidden=!sourceMode;article.hidden=sourceMode;stage.scrollTop=0;group.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));};group.append(button);
+            }
+            tools.append(group);pre.hidden=true;stage.replaceChildren(article,pre);
+          }catch{if(serial===previewSerial)$('previewNote').textContent='Markdown 排版组件暂不可用，已显示源码。'+(truncated?'仅显示前 1 MB。':'');}
+        }
+      }catch(error){if(serial===previewSerial)pre.textContent=error.name==='AbortError'?'读取超时，请关闭后重试。':'文本预览失败，请重试或下载查看。';}
+      finally{clearTimeout(timeout);if(textPreviewController===controller)textPreviewController=null;}
     }else stage.textContent='暂不支持在线预览，请下载查看';
   }
   return {$,esc,icon,fileIcon,refreshIcons,size,date,badge,actions,api,toast,dialog,close,copy,preview};
