@@ -897,7 +897,7 @@
 	        opacity: interfaceDefaults.composerOpacity,
 	        blur: interfaceDefaults.composerBlur
 	      });
-	      setStatus("interfaceStatus", "已恢复默认设置", "ok");
+	      setStatus("interfaceStatus", "已恢复输入区默认外观", "ok");
 	    }
 
 	    function handleInterfaceOutsideClick(event) {
@@ -1589,6 +1589,7 @@
         root.style.setProperty("--composer-safe-space", safeSpace + "px");
         root.style.setProperty("--composer-float-offset", floatOffset + "px");
         positionInterfaceSettings();
+        positionReasoningPicker();
 	    schedulePetPositionCorrection();
         if (keepAtBottom) {
           requestAnimationFrame(() => {
@@ -1989,11 +1990,32 @@
       if (state.reasoningPickerOpen) { menu.hidden = false; button.setAttribute("aria-expanded", "true"); }
       queueLucideRefresh();
     }
+    function positionReasoningPicker() {
+      const menu = $("reasoningPickerMenu");
+      if (!state.reasoningPickerOpen || !menu || menu.hidden) return;
+      if (!menu.offsetParent) { closeReasoningPicker(); return; }
+      const viewport = window.visualViewport;
+      const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
+      const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
+      const trigger = $("reasoningPickerButton").getBoundingClientRect();
+      const parent = menu.offsetParent.getBoundingClientRect();
+      const menuWidth = Math.min(238, width - 24);
+      menu.style.width = menuWidth + "px";
+      menu.style.maxHeight = Math.max(0, height - 24) + "px";
+      const menuHeight = menu.offsetHeight;
+      const x = Math.max(left + 12, Math.min(trigger.left, left + width - menuWidth - 12));
+      const y = Math.max(top + 12, Math.min(trigger.top - menuHeight - 8, top + height - menuHeight - 12));
+      menu.style.left = (x - parent.left) + "px";
+      menu.style.top = (y - parent.top) + "px";
+      menu.style.bottom = "auto";
+    }
+
     function toggleReasoningPicker(event) {
       event?.stopPropagation();
       if (!selectedModelSupportsReasoningControl()) return;
       state.reasoningPickerOpen = !state.reasoningPickerOpen;
       renderReasoningControl();
+      positionReasoningPicker();
     }
     async function chooseReasoningMode(mode) {
       mode = normalizeReasoningMode(mode);
@@ -3753,6 +3775,17 @@
 	      return "更早";
 	    }
 
+    function closeConversationActions({ restoreFocus = false, except = null } = {}) {
+      document.querySelectorAll(".conv.mobile-actions-open").forEach(row => {
+        if (row === except) return;
+        const trigger = row.querySelector(".conv-mobile-more");
+        const returnFocus = restoreFocus && row.contains(document.activeElement);
+        row.classList.remove("mobile-actions-open");
+        trigger?.setAttribute("aria-expanded", "false");
+        if (returnFocus) trigger?.focus();
+      });
+    }
+
 	    function renderConversations() {
 	      const box = $("conversationList");
 	      box.innerHTML = "";
@@ -3809,6 +3842,7 @@
 		          main.type = "button";
 		          main.innerHTML = `<span class="conv-title"><span class="conv-title-text"></span></span><span class="conv-meta"><span class="conv-model"></span><span class="conv-time"></span></span>`;
 		          main.querySelector(".conv-title-text").textContent = conv.title;
+              main.title = conv.title;
 		          if (conv.pinned) {
 		            const pin = document.createElement("span");
 		            pin.className = "conv-pin-indicator";
@@ -3819,7 +3853,7 @@
 		          main.querySelector(".conv-model").textContent = conv.model_name || "未命名模型";
 		          main.querySelector(".conv-model").title = conv.model_name || "未命名模型";
 		          main.querySelector(".conv-time").textContent = formatTime(conv.updated_at);
-		          main.addEventListener("click", () => selectConversation(conv.id));
+		          main.addEventListener("click", () => { closeConversationActions(); selectConversation(conv.id); });
 
 	          const actions = document.createElement("div");
 	          actions.className = "conv-actions";
@@ -3829,16 +3863,27 @@
 	          edit.addEventListener("click", () => startRenameConversation(conv.id));
 	          const del = createIconOnlyButton("trash-2", "删除", { className: "conv-action ui-icon-btn", danger: true, fallback: "⌫" });
 	          del.addEventListener("click", () => deleteConversationById(conv.id));
-	          actions.append(pinToggle, edit, del);
+	          for (const [control, title] of [[pinToggle, conv.pinned ? "取消置顶" : "置顶"], [edit, "重命名"], [del, "删除"]]) {
+            const label = document.createElement("span");
+            label.className = "conv-action-label";
+            label.textContent = title;
+            control.append(label);
+          }
+          actions.id = "conversationActions-" + conv.id;
+          actions.setAttribute("role", "group");
+          actions.setAttribute("aria-label", "对话操作");
+          actions.append(pinToggle, edit, del);
 	          const mobileMore = createIconOnlyButton("ellipsis", "更多会话操作", { className: "conv-mobile-more ui-icon-btn", fallback: "···" });
-	          mobileMore.addEventListener("click", (event) => {
+	          mobileMore.setAttribute("aria-expanded", "false");
+          mobileMore.setAttribute("aria-controls", actions.id);
+          mobileMore.addEventListener("click", (event) => {
 	            event.stopPropagation();
 	            const willOpen = !row.classList.contains("mobile-actions-open");
-	            box.querySelectorAll(".conv.mobile-actions-open").forEach((item) => item.classList.remove("mobile-actions-open"));
+	            closeConversationActions();
 	            row.classList.toggle("mobile-actions-open", willOpen);
 	            mobileMore.setAttribute("aria-expanded", willOpen ? "true" : "false");
 	          });
-	          actions.addEventListener("click", () => row.classList.remove("mobile-actions-open"));
+	          actions.addEventListener("click", () => closeConversationActions());
 	          row.append(main, mobileMore, actions);
 	        }
 	        box.appendChild(row);
@@ -4316,7 +4361,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.10" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.11" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -10349,7 +10394,14 @@
         closeConversationFiles();
 	        closeProfilePopover();
 	        closeProfiles();
-	        closeTokenActivity();
+            closePromptLibrary();
+            closeFavorites();
+            closeMediaAnalysis();
+            closeHandwritingOcr();
+            closeAccentDialog();
+            closeManualCopy();
+            closeReasoningPicker();
+            closeTokenActivity();
 	        closeInterfaceSettings();
 	        closeDesktopPetMenu();
 	        closeSidebarTools();
@@ -10772,3 +10824,20 @@
 
 window.visualViewport?.addEventListener("resize", positionInterfaceSettings, { passive: true });
 window.visualViewport?.addEventListener("scroll", positionInterfaceSettings, { passive: true });
+
+document.addEventListener("click", event => {
+  closeConversationActions({ except: event.target.closest?.(".conv") });
+});
+document.addEventListener("focusin", event => {
+  if (!event.target.closest?.(".conv")) closeConversationActions();
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && document.querySelector(".conv.mobile-actions-open")) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeConversationActions({ restoreFocus: true });
+  }
+}, true);
+
+window.visualViewport?.addEventListener("resize", positionReasoningPicker, { passive: true });
+window.visualViewport?.addEventListener("scroll", positionReasoningPicker, { passive: true });
