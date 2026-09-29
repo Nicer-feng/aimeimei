@@ -8961,3 +8961,39 @@
   .token-tab { min-width: 0; justify-content: center; padding: 0 4px; font-size: 12px; }
   .token-tab .lucide { display: none; }
 }
+
+/* Admin usage trends: independent scales, readable details, no third-party charts. */
+.usage-trend { margin: 18px 0 24px; padding: 20px; min-width: 0; border: 1px solid var(--line); border-radius: 22px; background: linear-gradient(130deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%), var(--surface); }
+.usage-trend-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
+.usage-trend-heading h3 { margin: 0 0 5px; font-size: 17px; }
+.usage-trend-heading p, .usage-trend-note { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.usage-trend-heading p { margin: 0; }
+.usage-trend-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.usage-segment { display: inline-flex; flex-shrink: 0; padding: 4px; border: 1px solid var(--line); background: var(--surface-soft); border-radius: 13px; gap: 3px; }
+.usage-segment button { width: auto; min-height: 34px; border: 0; border-radius: 9px; background: transparent; padding: 6px 12px; color: var(--muted); font-size: 12px; transition: background .18s, color .18s, box-shadow .18s; }
+.usage-segment button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 2px 8px #30202012; }
+.usage-trend button:focus-visible, .usage-chart:focus-visible, .usage-trend summary:focus-visible, .usage-trend-table:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.usage-trend-period { font-size: 12px; color: var(--muted); margin: 18px 0 12px; }
+.usage-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 12px; }
+.usage-chart-card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 17px; padding: 16px 10px 10px; overflow: hidden; }
+.usage-chart-caption { display: flex; justify-content: space-between; align-items: center; padding: 0 6px; font-size: 13px; color: var(--muted); }
+.usage-chart-caption span:first-child::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--chart-color); }
+.usage-chart-total { display: block; padding: 8px 6px 0; font-size: clamp(22px, 2vw, 28px); color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.usage-chart-average { color: var(--muted); margin: 4px 6px 0; font-size: 12px; }
+.usage-chart { display: block; width: 100%; height: auto; overflow: visible; color: var(--chart-color); margin-top: 10px; border-radius: 6px; }
+.usage-chart text { fill: var(--muted); font-size: 24px; }
+.usage-grid-line { stroke: var(--line); stroke-dasharray: 4 6; }
+.usage-chart-cursor { stroke: var(--chart-color); stroke-dasharray: 3 4; opacity: 0; pointer-events: none; }
+.usage-chart-readout { min-height: 20px; margin: 2px 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.usage-trend-details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.usage-trend-details summary { cursor: pointer; color: var(--text); padding: 7px 0; font-size: 13px; }
+.usage-trend-table { overflow-x: auto; max-width: 100%; border-radius: 10px; margin-top: 10px; overscroll-behavior-x: contain; }
+.usage-trend-table table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.usage-trend-table th, .usage-trend-table td { padding: 10px 12px; text-align: right; border-bottom: 1px solid var(--line); }
+.usage-trend-table th:first-child { text-align: left; }
+.usage-trend-table thead { background: var(--surface-soft); color: var(--muted); }
+.usage-trend-empty, .usage-trend-loading { font-size: 13px; color: var(--muted); padding: 18px 0; }
+@keyframes usage-chart-reveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+.usage-chart-marks { animation: usage-chart-reveal .45s ease both; }
+@media (max-width: 620px) { .usage-trend { padding: 12px; border-radius: 16px; } .usage-chart-grid { grid-template-columns: minmax(0, 1fr); } .usage-trend-controls { gap: 6px; } .usage-segment button { padding: 6px 10px; min-height: 38px; } .usage-trend .ui-btn { font-size: 12px; } }
+@media (prefers-reduced-motion: reduce) { .usage-chart-marks { animation: none; } .usage-segment button { transition: none; } }

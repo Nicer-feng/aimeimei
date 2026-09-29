@@ -1,3 +1,5 @@
+from datetime import date, datetime, time as day_time, timedelta
+
 from .shared import *
 
 
@@ -434,8 +436,45 @@ class AdminHandlersMixin:
             rows = self._daily_token_recent_requests(conn, user_id, usage_date)
         return self.json({"date": usage_date, "user_id": user_id, "recent_requests": rows})
 
+    @staticmethod
+    def _usage_window(days):
+        end = date.fromisoformat(today_text())
+        start = end - timedelta(days=days - 1)
+        return start, end
+
+    @staticmethod
+    def _usage_series(rows, start, end):
+        by_date = {row["date"]: dict(row) for row in rows}
+        fields = ("request_count", "prompt_tokens", "completion_tokens", "total_tokens", "estimated_cost")
+        series = []
+        for offset in range((end - start).days + 1):
+            key = (start + timedelta(days=offset)).isoformat()
+            row = by_date.get(key, {})
+            series.append({"date": key, **{
+                field: (float(row.get(field) or 0) if field == "estimated_cost" else int(row.get(field) or 0))
+                for field in fields
+            }})
+        return {"start_date": start.isoformat(), "end_date": end.isoformat(), "days": series,
+                "summary": {field: sum(row[field] for row in series) for field in fields}}
+
+    def handle_admin_usage_trend(self, range_key):
+        if range_key not in ("7d", "30d"):
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid statistics range")
+        start, end = self._usage_window(7 if range_key == "7d" else 30)
+        with db() as conn:
+            rows = conn.execute(
+                """SELECT date, SUM(request_count) AS request_count,
+                   SUM(input_tokens) AS prompt_tokens, SUM(output_tokens) AS completion_tokens,
+                   SUM(total_tokens) AS total_tokens, SUM(estimated_cost) AS estimated_cost
+                   FROM daily_usage WHERE date>=? AND date<=? GROUP BY date ORDER BY date""",
+                (start.isoformat(), end.isoformat()),
+            ).fetchall()
+        return self.json(self._usage_series(rows, start, end))
+
     def handle_admin_daily_token_stats(self):
         params = parse_qs(urlparse(self.path).query)
+        if "range" in params:
+            return self.handle_admin_usage_trend(params["range"][0])
         usage_date = self._daily_token_date((params.get("date") or [today_text()])[0])
         if not usage_date:
             return self.error(HTTPStatus.BAD_REQUEST, "invalid statistics date")
@@ -732,18 +771,27 @@ class AdminHandlersMixin:
         range_key = str((params.get("range") or ["30d"])[0] or "30d").strip().lower()
         if range_key not in ("7d", "30d", "all"):
             range_key = "30d"
-        cutoff = 0
-        if range_key == "7d":
-            cutoff = now() - 7 * 86400
-        elif range_key == "30d":
-            cutoff = now() - 30 * 86400
+        start, end = self._usage_window(7 if range_key == "7d" else 30)
+        start_ts = int(datetime.combine(start, day_time.min).timestamp())
+        end_ts = int(datetime.combine(end + timedelta(days=1), day_time.min).timestamp())
+        cutoff = start_ts if range_key != "all" else 0
         range_where = "(m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）'))"
         range_args = []
         if cutoff:
-            range_where += " AND m.created_at>=?"
-            range_args.append(cutoff)
+            range_where += " AND m.created_at>=? AND m.created_at<?"
+            range_args.extend([cutoff, end_ts])
 
         with db() as conn:
+            trend_rows = conn.execute(
+                """SELECT date(created_at, 'unixepoch', 'localtime') AS date,
+                   COUNT(*) AS request_count, SUM(prompt_tokens) AS prompt_tokens,
+                   SUM(completion_tokens) AS completion_tokens,
+                   SUM(CASE WHEN total_tokens>0 THEN total_tokens ELSE prompt_tokens+completion_tokens END) AS total_tokens,
+                   SUM(estimated_cost) AS estimated_cost FROM messages
+                   WHERE (role='assistant' OR (role='system' AND content='写稿要求整理（辅助调用）'))
+                     AND created_at>=? AND created_at<? GROUP BY date ORDER BY date""",
+                (start_ts, end_ts),
+            ).fetchall()
             total_summary = conn.execute(
                 """
                 SELECT
@@ -863,6 +911,7 @@ class AdminHandlersMixin:
         return self.json(
             {
                 "range": range_key,
+                "trend": self._usage_series(trend_rows, start, end),
                 "summary": {
                     "today_cost": float(today_summary["cost"] or 0),
                     "month_cost": float(month_summary["cost"] or 0),

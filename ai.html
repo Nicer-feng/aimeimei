@@ -58,7 +58,7 @@
   <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.26.11">
+  <link rel="stylesheet" href="/res/ai.css?v=2.26.12">
 
   <link rel="stylesheet" href="/res/markdown.css">
 </head>
@@ -69,7 +69,7 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.26.11</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.26.12</button>
       </div>
       <div class="login-mode-tabs" role="tablist" aria-label="登录方式">
         <button class="login-mode-tab active" id="loginPasswordMode" type="button" role="tab" aria-selected="true"><i data-lucide="key-round" aria-hidden="true"></i><span>密码登录</span></button>
@@ -103,7 +103,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.26.11</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.26.12</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -116,7 +116,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.26.11</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.26.12</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -174,7 +174,7 @@
 	          </a>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.26.11</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.26.12</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -939,6 +939,15 @@
 	        <section class="admin-page" data-admin-page="tokens">
 	          <section class="panel" id="tokenStatsPanel">
 		            <h2 class="panel-title"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></h2>
+                <section class="usage-trend" id="tokenTrend" aria-label="全站用量趋势">
+                  <div class="usage-trend-heading"><div><h3>全站用量趋势</h3><p>总量与每日变化，一起看清楚</p></div>
+                    <div class="usage-trend-controls"><div class="usage-segment" role="group" aria-label="用量趋势时间范围"><button type="button" data-trend-range="7d" aria-pressed="false">近 7 天</button><button type="button" data-trend-range="30d" aria-pressed="true">近 30 天</button></div>
+                    <div class="usage-segment" role="group" aria-label="用量图表类型"><button type="button" data-trend-style="line" aria-pressed="true">折线</button><button type="button" data-trend-style="bar" aria-pressed="false">柱状</button></div>
+                    <button type="button" class="ui-btn ui-btn-secondary" data-trend-refresh>刷新趋势</button></div>
+                  </div>
+                  <p class="usage-trend-note">全站每日用量账本，不受下方账号、模型或单日筛选影响。按服务器自然日统计，含今天；今日尚未结束，费用为估算值。</p>
+                  <div class="usage-trend-content" aria-busy="false"></div><div class="status" role="status" id="tokenTrendStatus" data-trend-status></div>
+                </section>
 	            <div class="token-tabs" role="tablist" aria-label="Token统计维度">
 	              <button class="token-tab active" type="button" data-token-tab="users" role="tab" aria-selected="true"><i data-lucide="users" aria-hidden="true"></i><span>按账号统计</span></button>
 	              <button class="token-tab" type="button" data-token-tab="models" role="tab" aria-selected="false"><i data-lucide="bot" aria-hidden="true"></i><span>按模型统计</span></button>
@@ -1024,6 +1033,13 @@
 	              </div>
 	            </div>
 	            <div class="token-summary-grid" id="costSummaryGrid"></div>
+                <section class="usage-trend" id="costTrend" aria-label="成本与调用趋势">
+                  <div class="usage-trend-heading"><div><h3>成本与调用趋势</h3><p>费用、Token 与请求量同步对照</p></div>
+                    <div class="usage-segment" role="group" aria-label="成本图表类型"><button type="button" data-trend-style="line" aria-pressed="true">折线</button><button type="button" data-trend-style="bar" aria-pressed="false">柱状</button></div>
+                  </div>
+                  <p class="usage-trend-note">按当前保留的消息及价格快照统计，与本页排行一致；与用量账本可能有历史差异。近 7／30 天含今天，今日尚未结束；费用为估算值，不等同于供应商账单。</p>
+                  <div class="usage-trend-content" aria-busy="false"></div>
+                </section>
 	            <div class="grid2">
 	              <section class="panel">
 	                <h2 class="panel-title"><i data-lucide="bot" aria-hidden="true"></i><span>最烧钱模型</span></h2>
@@ -1046,7 +1062,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.26.11</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.26.12</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -1113,7 +1129,7 @@
       <p id="writingDraftState" class="writing-help"></p><button type="button" id="saveWritingDraft">保存稿件与定稿状态</button>
     </details>
   </dialog>
-	  <script src="/res/ai.js?v=2.26.11"></script>
+	  <script src="/res/ai.js?v=2.26.12"></script>
 
 </body>
 </html>

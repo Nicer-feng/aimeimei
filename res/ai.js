@@ -4361,7 +4361,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.11" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.12" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8523,8 +8523,8 @@
 	      search: { title: "联网搜索", desc: "配置 Tavily/Brave、搜索策略、搜索深度和结果数量。" },
 	      tts: { title: "语音服务", desc: "配置豆包 TTS、可用音色、默认语速和 OSS 音频缓存。" },
 	      plugins: { title: "插件管理", desc: "查看图片、听悟、搜索、提示词等功能状态，后续可扩展独立开关。" },
-	      tokens: { title: "Token统计", desc: "按账号、模型和日期查看 Token 用量，明细按需加载。" },
-	      costs: { title: "成本统计", desc: "根据模型价格快照查看平台成本、模型排行和用户排行。" },
+	      tokens: { title: "Token统计", desc: "查看近 7／30 天用量趋势，按账号、模型和日期下钻明细。" },
+	      costs: { title: "成本统计", desc: "对照费用、Token 与调用趋势，查看模型和用户成本排行。" },
 	      system: { title: "系统设置", desc: "修改登录密码并查看系统基础信息。" }
 	    };
 
@@ -8554,7 +8554,7 @@
 	        loadAdminFeatures();
 	        renderPluginStatus();
 	      }
-	      if (key === "tokens") loadTokenStats();
+	      if (key === "tokens") { loadTokenStats(); loadUsageTrend(); }
 	      if (key === "costs") loadCostStats();
       if (key === "system") loadAdminSmsAuth();
 	      queueLucideRefresh();
@@ -8984,6 +8984,16 @@
     const tokenStatsCacheMs = 30000;
 
     function resetTokenStats() {
+      usageTrends.tokenTrend.request++;
+      usageTrends.tokenTrend.controller?.abort();
+      costStatsRequest++;
+      state.costStats = null;
+      for (const id of Object.keys(usageTrends)) {
+        usageTrends[id].data = null;
+        const content = $(id)?.querySelector('.usage-trend-content');
+        content?.replaceChildren();
+        content?.setAttribute("aria-busy", "false");
+      }
       clearTimeout(state.tokenStatsTimer);
       state.tokenStatsRequest?.controller.abort();
       state.tokenStatsRequest = null;
@@ -9445,26 +9455,164 @@
 	      return detail;
 	    }
 
-	    async function loadCostStats() {
-	      if (!hasAdminAccess()) {
-	        state.costStats = null;
-	        renderCostStats();
-	        setStatus("costStatsStatus", "管理员账号或管理密钥可查看成本统计。", "");
-	        return;
-	      }
-	      setStatus("costStatsStatus", "正在加载成本统计...", "");
-	      const range = encodeURIComponent($("costStatsRange")?.value || "30d");
-	      const res = await adminApi(`/api/admin/cost-stats?range=${range}`);
-	      if (!res.ok) {
-	        state.costStats = null;
-	        renderCostStats();
-	        setStatus("costStatsStatus", await readError(res, "成本统计加载失败，稍后再试一下。"), "err");
-	        return;
-	      }
-	      state.costStats = await res.json();
-	      renderCostStats();
-	      setStatus("costStatsStatus", "");
-	    }
+	    const usageTrends = {
+      tokenTrend: { range: "30d", style: "line", data: null, request: 0 },
+      costTrend: { style: "line", data: null }
+    };
+    const usageMetrics = [
+      { key: "total_tokens", label: "Token 用量", color: "#bd547f", unit: "Token" },
+      { key: "estimated_cost", label: "估算费用", color: "#287f9b", unit: "元" },
+      { key: "request_count", label: "请求次数", color: "#8870bd", unit: "次" }
+    ];
+    function trendValue(value, metric) {
+      return metric.key === "estimated_cost"
+        ? "￥" + Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 6 })
+        : tokenNumber(value);
+    }
+    function trendAxis(value, metric) {
+      if (!value) return "0";
+      if (metric.key === "estimated_cost") return Number(value.toPrecision(3)).toLocaleString("zh-CN", { maximumFractionDigits: 6 });
+      return value >= 10000 ? Number((value / 10000).toPrecision(3)) + "万" : Number(value.toPrecision(3)).toLocaleString("zh-CN");
+    }
+    function usageChartMarkup(id, metric, days, style) {
+      const values = days.map(day => Math.max(0, Number(day[metric.key]) || 0));
+      const peak = Math.max(...values, 0), scale = peak || 1;
+      const x = i => 78 + i * 492 / Math.max(1, days.length - 1);
+      const y = value => 178 - value / scale * 142;
+      const points = values.map((value, i) => x(i).toFixed(2) + "," + y(value).toFixed(2));
+      const grid = [0, 0.5, 1].map(ratio => '<line x1="78" x2="570" y1="' + y(scale * ratio) + '" y2="' + y(scale * ratio) + '" class="usage-grid-line"/><text x="68" y="' + (y(scale * ratio) + 6) + '" text-anchor="end">' + trendAxis(scale * ratio, metric) + '</text>').join("");
+      const ticks = [...new Set([0, Math.floor((days.length - 1) / 2), days.length - 1])].map(i => '<text x="' + x(i) + '" y="210" text-anchor="middle">' + escapeHTML(days[i].date.slice(5).replace("-", "/")) + '</text>').join("");
+      const path = style === "bar"
+        ? values.map((value, i) => '<rect x="' + (x(i) - Math.min(26, 320 / days.length) / 2) + '" y="' + y(value) + '" width="' + Math.min(26, 320 / days.length) + '" height="' + (178 - y(value)) + '" rx="3" fill="currentColor"/>').join("")
+        : '<path d="M78,178 L' + points.join(" L") + ' L570,178 Z" fill="currentColor" opacity=".10"/><polyline points="' + points.join(" ") + '" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>' + values.map((value, i) => '<circle cx="' + x(i) + '" cy="' + y(value) + '" r="' + (days.length <= 7 ? 4 : 2.5) + '" fill="currentColor"/>').join("");
+      const total = values.reduce((sum, value) => sum + value, 0);
+      const peakDay = days[values.indexOf(peak)];
+      return '<article class="usage-chart-card" style="--chart-color:' + metric.color + '"><div class="usage-chart-caption"><span>' + metric.label + '</span><span>' + metric.unit + '</span></div><strong class="usage-chart-total">' + trendValue(total, metric) + '</strong><p class="usage-chart-average">日均 ' + trendValue(total / days.length, metric) + '</p>' +
+        '<svg class="usage-chart" viewBox="0 0 600 224" role="img" tabindex="0" data-metric="' + metric.key + '" data-day="' + (days.length - 1) + '" aria-label="' + metric.label + '每日' + (style === "bar" ? "柱状图" : "折线图") + '，总计' + trendValue(total, metric) + '。使用左右方向键查看每天数值，也可展开下方每日明细。" aria-describedby="' + id + '-' + metric.key + '">' + grid + ticks + '<g class="usage-chart-marks">' + path + '</g><line class="usage-chart-cursor" x1="570" x2="570" y1="28" y2="178"/></svg>' +
+        '<p class="usage-chart-readout" id="' + id + '-' + metric.key + '">峰值 ' + escapeHTML(peakDay.date.slice(5)) + ' · ' + trendValue(peak, metric) + '</p></article>';
+    }
+    function renderUsageTrend(id) {
+      const box = $(id), config = usageTrends[id];
+      if (!box) return;
+      box.querySelectorAll('[data-trend-range]').forEach(button => button.setAttribute("aria-pressed", String(button.dataset.trendRange === config.range)));
+      box.querySelectorAll('[data-trend-style]').forEach(button => button.setAttribute("aria-pressed", String(button.dataset.trendStyle === config.style)));
+      const content = box.querySelector('.usage-trend-content');
+      content.setAttribute("aria-busy", "false");
+      const data = config.data, days = data?.days;
+      if (!Array.isArray(days) || !days.length) {
+        content.innerHTML = '<p class="usage-trend-empty">暂无趋势数据，点击刷新重新获取。</p>';
+        return;
+      }
+      const noData = days.every(day => !day.request_count && !day.total_tokens && !day.estimated_cost);
+      content.innerHTML = '<p class="usage-trend-period">' + escapeHTML(data.start_date) + ' — ' + escapeHTML(data.end_date) + (id === "costTrend" && $("costStatsRange").value === "all" ? ' · 全部时间汇总保持不变，趋势仅展示近 30 天' : ' · ' + days.length + ' 个自然日') + '</p>' +
+        (noData ? '<p class="usage-trend-empty">这段时间没有用量记录，图表以零值显示。</p>' : '') +
+        '<div class="usage-chart-grid">' + usageMetrics.map(metric => usageChartMarkup(id, metric, days, config.style)).join("") + '</div>' +
+        '<p class="usage-trend-note">移动鼠标、点按图表或聚焦后用 ← → 查看每日数值。输入 ' + tokenNumber(data.summary?.prompt_tokens) + ' / 输出 ' + tokenNumber(data.summary?.completion_tokens) + ' Token。</p>' +
+        '<details class="usage-trend-details"><summary>展开每日明细 · ' + days.length + ' 天</summary><div class="usage-trend-table" tabindex="0" role="region" aria-label="可横向滚动的每日用量明细"><table><caption>' + escapeHTML(data.start_date) + '至' + escapeHTML(data.end_date) + '用量明细</caption><thead><tr><th scope="col">日期</th><th scope="col">总 Token</th><th scope="col">输入</th><th scope="col">输出</th><th scope="col">估算费用</th><th scope="col">请求</th></tr></thead><tbody>' + [...days].reverse().map(day => '<tr><th scope="row">' + escapeHTML(day.date) + (day.date === data.end_date ? '（今天）' : '') + '</th><td>' + tokenNumber(day.total_tokens) + '</td><td>' + tokenNumber(day.prompt_tokens) + '</td><td>' + tokenNumber(day.completion_tokens) + '</td><td>' + trendValue(day.estimated_cost, usageMetrics[1]) + '</td><td>' + tokenNumber(day.request_count) + '</td></tr>').join("") + '</tbody></table></div></details>';
+    }
+    function setUsageTrendLoading(id) {
+      usageTrends[id].data = null;
+      const content = $(id).querySelector('.usage-trend-content');
+      content.setAttribute("aria-busy", "true");
+      content.innerHTML = '<div class="usage-trend-loading">正在加载每日趋势…</div>';
+    }
+    async function loadUsageTrend() {
+      const config = usageTrends.tokenTrend, requestId = ++config.request;
+      config.controller?.abort();
+      config.controller = new AbortController();
+      setUsageTrendLoading("tokenTrend");
+      setStatus("tokenTrendStatus", "");
+      if (!hasAdminAccess()) {
+        renderUsageTrend("tokenTrend");
+        setStatus("tokenTrendStatus", "管理员账号或管理密钥可查看趋势。", "err");
+        return;
+      }
+      try {
+        const response = await adminApi('/api/admin/token-stats/daily?range=' + config.range, { signal: config.controller.signal });
+        if (!response.ok) throw new Error(await readError(response, "趋势加载失败，请点击刷新趋势重试。"));
+        const data = await response.json();
+        if (requestId !== config.request) return;
+        if (!hasAdminAccess()) { config.data = null; renderUsageTrend("tokenTrend"); return; }
+        if (!Array.isArray(data.days) || data.days.length !== (config.range === "7d" ? 7 : 30)) throw new Error("趋势数据不完整，请刷新重试。");
+        config.data = data;
+        renderUsageTrend("tokenTrend");
+      } catch (error) {
+        if (requestId !== config.request || error.name === "AbortError") return;
+        renderUsageTrend("tokenTrend");
+        setStatus("tokenTrendStatus", error.message || "趋势加载失败，请重试。", "err");
+      }
+    }
+    function setupUsageTrends() {
+      for (const id of Object.keys(usageTrends)) {
+        const box = $(id), config = usageTrends[id];
+        if (!box) continue;
+        box.addEventListener("click", event => {
+          const range = event.target.closest('[data-trend-range]');
+          const style = event.target.closest('[data-trend-style]');
+          if (range) {
+            config.range = range.dataset.trendRange;
+            box.querySelectorAll('[data-trend-range]').forEach(button => button.setAttribute("aria-pressed", String(button === range)));
+            loadUsageTrend();
+          } else if (style) {
+            config.style = style.dataset.trendStyle;
+            box.querySelectorAll('[data-trend-style]').forEach(button => button.setAttribute("aria-pressed", String(button === style)));
+            if (config.data) renderUsageTrend(id);
+          } else if (event.target.closest('[data-trend-refresh]')) loadUsageTrend();
+        });
+        const inspect = (event, keyboard) => {
+          const svg = event.target.closest?.('svg.usage-chart');
+          const days = config.data?.days;
+          if (!svg || !days?.length) return;
+          let index;
+          if (keyboard) {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            index = event.key === 'Home' ? 0 : event.key === 'End' ? days.length - 1 : Number(svg.dataset.day) + (event.key === 'ArrowRight' ? 1 : -1);
+          } else {
+            const rect = svg.getBoundingClientRect();
+            index = Math.round(((event.clientX - rect.left) / rect.width * 600 - 78) / 492 * (days.length - 1));
+          }
+          index = Math.max(0, Math.min(days.length - 1, index));
+          svg.dataset.day = String(index);
+          const line = svg.querySelector('.usage-chart-cursor'), x = 78 + index * 492 / Math.max(1, days.length - 1);
+          line.setAttribute('x1', x); line.setAttribute('x2', x); line.style.opacity = '1';
+          const metric = usageMetrics.find(item => item.key === svg.dataset.metric);
+          $(id + '-' + metric.key).textContent = days[index].date + ' · ' + trendValue(days[index][metric.key], metric);
+        };
+        box.addEventListener('pointermove', event => inspect(event, false));
+        box.addEventListener('pointerdown', event => inspect(event, false));
+        box.addEventListener('keydown', event => inspect(event, true));
+      }
+    }
+
+    let costStatsRequest = 0;
+    async function loadCostStats() {
+      const requestId = ++costStatsRequest;
+      state.costStats = null;
+      renderCostStats();
+      setUsageTrendLoading("costTrend");
+      if (!hasAdminAccess()) {
+        renderUsageTrend("costTrend");
+        setStatus("costStatsStatus", "管理员账号或管理密钥可查看成本统计。", "");
+        return;
+      }
+      setStatus("costStatsStatus", "正在加载成本统计...", "");
+      const range = encodeURIComponent($("costStatsRange")?.value || "30d");
+      try {
+        const res = await adminApi(`/api/admin/cost-stats?range=${range}`);
+        if (!res.ok) throw new Error(await readError(res, "成本统计加载失败，请刷新重试。"));
+        const data = await res.json();
+        if (requestId !== costStatsRequest) return;
+        if (!hasAdminAccess()) { renderUsageTrend("costTrend"); return; }
+        state.costStats = data;
+        renderCostStats();
+        setStatus("costStatsStatus", "");
+      } catch (error) {
+        if (requestId !== costStatsRequest) return;
+        renderCostStats();
+        setStatus("costStatsStatus", error.message || "成本统计加载失败，请刷新重试。", "err");
+      }
+    }
 
 	    function renderCostStats() {
 	      const data = state.costStats || {};
@@ -9482,6 +9630,8 @@
 	          '<div class="token-summary-card"><span>' + escapeHTML(label) + '</span><strong>' + escapeHTML(value) + '</strong></div>'
 	        )).join("");
 	      }
+          usageTrends.costTrend.data = data.trend || null;
+          renderUsageTrend("costTrend");
 	      renderCostRank("costModelList", data.models || [], "model");
 	      renderCostRank("costUserList", data.users || [], "user");
 	      queueLucideRefresh();
@@ -10482,7 +10632,8 @@
     });
     $("dailyTokenStatsSort").addEventListener("change", loadTokenStats);
     $("refreshDailyTokenStats").addEventListener("click", () => loadTokenStats({ force: true }));
-	    $("costStatsRange").addEventListener("change", loadCostStats);
+	    setupUsageTrends();
+    $("costStatsRange").addEventListener("change", loadCostStats);
 	    $("refreshCostStats").addEventListener("click", loadCostStats);
 	    $("recalculateCostStats").addEventListener("click", recalculateCostStats);
 	    $("openSide").addEventListener("click", openSidebar);
