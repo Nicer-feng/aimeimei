@@ -4287,7 +4287,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.8" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.9" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -10456,3 +10456,287 @@
 	    initializeVersionMonitoring();
 	    queueLucideRefresh();
 	    bootstrap();
+
+// Admin controls keep the original fields as the source of truth for existing forms.
+(() => {
+  const drawer = document.getElementById("settingsDrawer");
+  if (!drawer) return;
+  const popup = document.createElement("div");
+  popup.className = "admin-control-popover";
+  popup.id = "adminControlPopover";
+  popup.hidden = true;
+  popup.setAttribute("role", "dialog");
+  document.body.append(popup);
+  let active = null;
+  let serial = 0;
+  const controls = new WeakMap();
+  const dateValue = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const parseDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date();
+  const button = (text, className, action) => {
+    const node = document.createElement("button");
+    node.type = "button";
+    node.className = className;
+    node.textContent = text;
+    if (action) node.addEventListener("click", action);
+    return node;
+  };
+  function close(restoreFocus = false) {
+    if (!active) return;
+    const previous = active;
+    active = null;
+    previous.trigger.setAttribute("aria-expanded", "false");
+    popup.hidden = true;
+    popup.replaceChildren();
+    if (restoreFocus) previous.trigger.focus();
+  }
+  function position() {
+    if (!active) return;
+    const rect = active.trigger.getBoundingClientRect();
+    if (!rect.width || !rect.height) return close();
+    const viewport = window.visualViewport;
+    const width = viewport?.width || window.innerWidth;
+    const height = viewport?.height || window.innerHeight;
+    const offsetX = viewport?.offsetLeft || 0;
+    const offsetY = viewport?.offsetTop || 0;
+    popup.style.width = `${Math.min(Math.max(rect.width, active.isDate ? 320 : 240), width - 24)}px`;
+    popup.style.maxHeight = `${Math.max(120, height - 24)}px`;
+    const box = popup.getBoundingClientRect();
+    const below = rect.bottom + 8;
+    const top = below + box.height <= offsetY + height - 12 ? below : Math.max(offsetY + 12, rect.top - box.height - 8);
+    popup.style.left = `${Math.max(offsetX + 12, Math.min(rect.left, offsetX + width - box.width - 12))}px`;
+    popup.style.top = `${top}px`;
+  }
+  function commit(control, value) {
+    const changed = control.field.value !== value;
+    control.field.value = value;
+    control.sync();
+    close(true);
+    if (changed) {
+      control.field.dispatchEvent(new Event("input", { bubbles: true }));
+      control.field.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+  function renderSelect(control) {
+    popup.replaceChildren();
+    let search;
+    const list = document.createElement("div");
+    list.className = "admin-option-list";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", control.label);
+    const draw = () => {
+      list.replaceChildren();
+      const query = (search?.value || "").trim().toLocaleLowerCase();
+      for (const option of control.field.options) {
+        if (option.hidden || !option.text.toLocaleLowerCase().includes(query)) continue;
+        const item = button(option.text, "admin-option", () => commit(control, option.value));
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", String(option.selected));
+        item.disabled = option.disabled || !!option.closest("optgroup")?.disabled;
+        list.append(item);
+      }
+      if (!list.children.length) {
+        const empty = document.createElement("p");
+        empty.className = "admin-control-empty";
+        empty.textContent = "没有匹配的选项";
+        list.append(empty);
+      }
+      position();
+    };
+    if (control.field.id === "dailyTokenStatsUser" || control.field.options.length > 8) {
+      search = document.createElement("input");
+      search.type = "search";
+      search.className = "admin-option-search";
+      search.placeholder = "搜索选项…";
+      search.setAttribute("aria-label", `搜索${control.label}`);
+      search.addEventListener("input", draw);
+      popup.append(search);
+    }
+    popup.append(list);
+    draw();
+    popup.onkeydown = event => {
+      const items = Array.from(list.querySelectorAll("button:not(:disabled)"));
+      const index = items.indexOf(document.activeElement);
+      let next;
+      if (event.key === "ArrowDown") next = items[(index + 1) % items.length];
+      if (event.key === "ArrowUp") next = items[(index < 0 ? items.length - 1 : index - 1 + items.length) % items.length];
+      if (event.target !== search && event.key === "Home") next = items[0];
+      if (event.target !== search && event.key === "End") next = items.at(-1);
+      if (next) { event.preventDefault(); next.focus(); }
+    };
+    (search || list.querySelector('[aria-selected="true"]:not(:disabled)') || list.querySelector("button:not(:disabled)"))?.focus();
+  }
+  function renderCalendar(control, month, focusValue) {
+    popup.replaceChildren();
+    popup.onkeydown = null;
+    const header = document.createElement("div");
+    header.className = "admin-calendar-header";
+    const heading = document.createElement("strong");
+    heading.textContent = `${month.getFullYear()} 年 ${month.getMonth() + 1} 月`;
+    heading.setAttribute("aria-live", "polite");
+    const navigate = (amount, label, glyph) => {
+      const node = button(glyph, "admin-calendar-nav", () => {
+        const target = new Date(month.getFullYear(), month.getMonth() + amount, 1);
+        if (target.getFullYear() < 100 || target.getFullYear() > 9999) return;
+        renderCalendar(control, target);
+        popup.querySelector(`[aria-label="${label}"]`)?.focus();
+      });
+      node.setAttribute("aria-label", label);
+      return node;
+    };
+    header.append(navigate(-12, "上一年", "«"), navigate(-1, "上个月", "‹"), heading, navigate(1, "下个月", "›"), navigate(12, "下一年", "»"));
+    const grid = document.createElement("div");
+    grid.className = "admin-calendar-grid";
+    for (const day of ["一", "二", "三", "四", "五", "六", "日"]) {
+      const cell = document.createElement("span");
+      cell.className = "admin-calendar-weekday";
+      cell.textContent = day;
+      grid.append(cell);
+    }
+    const start = new Date(month.getFullYear(), month.getMonth(), 1);
+    start.setDate(start.getDate() - (start.getDay() + 6) % 7);
+    const today = dateValue(new Date());
+    const allowed = value => (!control.field.min || value >= control.field.min) && (!control.field.max || value <= control.field.max);
+    for (let index = 0; index < 42; index++) {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      const value = dateValue(date);
+      const day = button(String(date.getDate()), "admin-calendar-day", () => commit(control, value));
+      day.dataset.date = value;
+      day.classList.toggle("outside", date.getMonth() !== month.getMonth());
+      day.classList.toggle("selected", value === control.field.value);
+      day.setAttribute("aria-label", `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`);
+      day.setAttribute("aria-pressed", String(value === control.field.value));
+      if (value === today) day.setAttribute("aria-current", "date");
+      day.disabled = !allowed(value);
+      day.tabIndex = value === (focusValue || control.field.value || today) ? 0 : -1;
+      day.addEventListener("keydown", event => {
+        const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[event.key];
+        if (delta === undefined && !["Home", "End", "PageUp", "PageDown"].includes(event.key)) return;
+        event.preventDefault();
+        const target = new Date(date);
+        if (delta !== undefined) target.setDate(target.getDate() + delta);
+        else if (event.key === "Home") target.setDate(target.getDate() - (target.getDay() + 6) % 7);
+        else if (event.key === "End") target.setDate(target.getDate() + 6 - (target.getDay() + 6) % 7);
+        else {
+          target.setDate(1);
+          target.setMonth(target.getMonth() + (event.key === "PageUp" ? -1 : 1));
+          target.setDate(Math.min(date.getDate(), new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate()));
+        }
+        if (allowed(dateValue(target))) renderCalendar(control, new Date(target.getFullYear(), target.getMonth(), 1), dateValue(target));
+      });
+      grid.append(day);
+    }
+    if (!grid.querySelector('button[tabindex="0"]:not(:disabled)')) {
+      const first = grid.querySelector("button:not(.outside):not(:disabled)");
+      if (first) first.tabIndex = 0;
+    }
+    const footer = document.createElement("div");
+    footer.className = "admin-calendar-footer";
+    for (const [label, offset] of [["回到今天", 0], ["昨天", -1]]) {
+      const date = new Date();
+      date.setDate(date.getDate() + offset);
+      const value = dateValue(date);
+      const shortcut = button(label, "admin-calendar-shortcut", () => commit(control, value));
+      shortcut.disabled = !allowed(value);
+      footer.append(shortcut);
+    }
+    popup.append(header, grid, footer);
+    position();
+    if (focusValue) grid.querySelector(`button[data-date="${focusValue}"]`)?.focus();
+  }
+  function open(control) {
+    if (active === control) return close();
+    close();
+    active = control;
+    popup.hidden = false;
+    popup.setAttribute("aria-label", `选择${control.label}`);
+    popup.classList.toggle("is-calendar", control.isDate);
+    control.trigger.setAttribute("aria-expanded", "true");
+    if (control.isDate) {
+      const date = parseDate(control.field.value);
+      renderCalendar(control, new Date(date.getFullYear(), date.getMonth(), 1));
+      popup.querySelector('button[tabindex="0"]')?.focus();
+    } else renderSelect(control);
+    position();
+  }
+  function enhance(field) {
+    if (controls.has(field) || field.multiple || (field.tagName === "SELECT" && field.size > 1)) return;
+    const isDate = field.type === "date";
+    const labelNode = field.closest("label");
+    const label = field.getAttribute("aria-label") || Array.from(labelNode?.childNodes || []).filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent.trim()).join("") || "选项";
+    const wrapper = document.createElement("span");
+    wrapper.className = "admin-control" + (isDate ? " admin-date-control" : "");
+    const trigger = button("", "admin-control-trigger");
+    trigger.id = `adminControlTrigger${++serial}`;
+    trigger.setAttribute("aria-haspopup", "dialog");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-controls", popup.id);
+    const text = document.createElement("span");
+    text.className = "admin-control-value";
+    const icon = document.createElement("span");
+    icon.className = "admin-control-icon";
+    icon.setAttribute("aria-hidden", "true");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    for (const [name, value] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "1.8", "stroke-linecap": "round", "stroke-linejoin": "round" })) svg.setAttribute(name, value);
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", isDate ? "M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" : "m6 9 6 6 6-6");
+    svg.append(path);
+    icon.append(svg);
+    trigger.append(text, icon);
+    field.before(wrapper);
+    wrapper.append(field, trigger);
+    field.classList.add("admin-native-control");
+    field.tabIndex = -1;
+    field.setAttribute("aria-hidden", "true");
+    // Keep the visible label associated with the interactive replacement.
+    if (labelNode) labelNode.htmlFor = trigger.id;
+    const control = { field, trigger, label, isDate, sync() {
+      const value = isDate ? field.value.replaceAll("-", " / ") : field.selectedOptions[0]?.text || "请选择";
+      text.textContent = value || "选择日期";
+      trigger.disabled = field.disabled;
+      trigger.setAttribute("aria-label", `${label}：${value || "未选择"}`);
+      if (active === control && field.disabled) close();
+    } };
+    controls.set(field, control);
+    // Existing form-fill code assigns .value without emitting change events.
+    // Observe only these instances, leaving the native prototypes untouched.
+    const prototype = isDate ? HTMLInputElement.prototype : HTMLSelectElement.prototype;
+    for (const name of isDate ? ["value"] : ["value", "selectedIndex"]) {
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+      Object.defineProperty(field, name, { configurable: true, get() { return descriptor.get.call(this); }, set(value) { descriptor.set.call(this, value); control.sync(); } });
+    }
+    new MutationObserver(() => {
+      control.sync();
+      if (active === control) {
+        if (isDate) { const date = parseDate(field.value); renderCalendar(control, new Date(date.getFullYear(), date.getMonth(), 1)); }
+        else renderSelect(control);
+      }
+    }).observe(field, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["disabled", "selected", "label", "value", "min", "max"] });
+    field.addEventListener("change", control.sync);
+    trigger.addEventListener("click", () => open(control));
+    trigger.addEventListener("keydown", event => {
+      if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); if (active !== control) open(control); }
+    });
+    control.sync();
+  }
+  const enhanceAll = () => drawer.querySelectorAll('select, input[type="date"]').forEach(enhance);
+  enhanceAll();
+  new MutationObserver(() => {
+    enhanceAll();
+    if (active && (!drawer.classList.contains("show") || !active.trigger.getClientRects().length)) close();
+  }).observe(drawer, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  document.addEventListener("pointerdown", event => {
+    if (active && !popup.contains(event.target) && !active.trigger.contains(event.target)) close();
+  }, true);
+  document.addEventListener("keydown", event => {
+    if (!active) return;
+    if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); close(true); }
+    else if (event.key === "Tab") close(true);
+  }, true);
+  document.addEventListener("focusin", event => {
+    if (active && !popup.contains(event.target) && !active.trigger.contains(event.target)) close();
+  });
+  window.addEventListener("resize", position, { passive: true });
+  window.visualViewport?.addEventListener("resize", position, { passive: true });
+  document.addEventListener("scroll", event => { if (!popup.contains(event.target)) position(); }, true);
+})();

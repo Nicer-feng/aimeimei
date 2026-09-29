@@ -8875,3 +8875,77 @@
 @media (prefers-reduced-motion: reduce) {
   .full-composer { transition: none; transform: none; }
 }
+
+/* Shared custom controls for the administrator workspace. */
+.admin-workspace .admin-control { display: block; min-width: 0; width: 100%; }
+.admin-workspace .admin-native-control { display: none !important; }
+.admin-workspace .admin-control-trigger {
+  width: 100%; min-width: 0; min-height: 44px; display: flex; align-items: center;
+  justify-content: space-between; gap: 10px; padding: 10px 13px; text-align: left;
+  border: 1px solid var(--line); border-radius: 13px; color: var(--text);
+  background: linear-gradient(125deg, var(--surface), color-mix(in srgb, var(--accent) 8%, var(--surface)));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 75%, transparent), 0 3px 10px var(--accent-shadow);
+  font: inherit; font-weight: 650; cursor: pointer;
+  transition: border-color .18s, box-shadow .18s, transform .18s;
+}
+.admin-control-icon svg { display: block; width: 18px; height: 18px; }
+.admin-control-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-control-icon { flex: 0 0 auto; color: var(--accent-strong); font-size: 19px; line-height: 1; transition: transform .2s; }
+.admin-control-trigger[aria-expanded="true"] .admin-control-icon { transform: rotate(180deg); }
+.admin-date-control .admin-control-trigger[aria-expanded="true"] .admin-control-icon { transform: rotate(-12deg) scale(1.15); }
+.admin-workspace .admin-date-control .admin-control-trigger {
+  background: radial-gradient(ellipse at top right, color-mix(in srgb, var(--accent) 35%, transparent), transparent 75%), linear-gradient(125deg, var(--surface), var(--surface-soft));
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  font-variant-numeric: tabular-nums;
+}
+.admin-workspace .admin-control-trigger:hover:not(:disabled),
+.admin-workspace .admin-control-trigger[aria-expanded="true"] { border-color: var(--accent-strong); box-shadow: 0 5px 18px var(--accent-shadow); }
+.admin-workspace .admin-control-trigger:focus-visible,
+.admin-control-popover button:focus-visible, .admin-control-popover input:focus-visible {
+  outline: 2px solid var(--accent-strong); outline-offset: 2px;
+}
+.admin-control-popover {
+  position: fixed; z-index: 1300; box-sizing: border-box; padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 20px;
+  background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 8%, var(--surface)), var(--surface) 60%);
+  color: var(--text); box-shadow: 0 20px 60px rgba(30, 24, 36, .18), 0 5px 18px var(--accent-shadow);
+  overflow: auto; overscroll-behavior: contain; animation: admin-control-reveal .18s ease-out;
+}
+.admin-control-popover[hidden] { display: none; }
+.admin-control-popover button { font: inherit; cursor: pointer; color: var(--text); box-shadow: none; }
+.admin-control-popover button:disabled { opacity: .4; cursor: not-allowed; }
+.admin-control-popover .admin-option-search { width: 100%; box-sizing: border-box; min-height: 42px; margin: 0 0 8px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; }
+.admin-option-list { display: grid; gap: 4px; max-height: 280px; overflow-y: auto; padding: 3px; overscroll-behavior: contain; }
+.admin-control-popover .admin-option { position: relative; width: 100%; min-height: 42px; padding: 10px 32px 10px 12px; border: 0; border-radius: 11px; text-align: left; overflow-wrap: anywhere; background: transparent; transition: background .15s, transform .15s; }
+.admin-control-popover .admin-option:hover:not(:disabled) { background: var(--surface-soft); transform: translateX(2px); }
+.admin-control-popover .admin-option[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); font-weight: 750; }
+.admin-option[aria-selected="true"]::after { content: "✓"; position: absolute; right: 12px; color: var(--accent-strong); }
+.admin-control-empty { padding: 14px; text-align: center; color: var(--muted); font-size: 13px; }
+.admin-calendar-header { display: flex; gap: 4px; align-items: center; padding: 3px 0 12px; }
+.admin-calendar-header strong { flex: 1; text-align: center; font-size: 15px; }
+.admin-control-popover .admin-calendar-nav { width: 30px; height: 32px; padding: 0; border: 0; border-radius: 10px; background: var(--surface); font-size: 22px; }
+.admin-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; animation: admin-control-reveal .18s ease-out; }
+.admin-calendar-weekday { padding: 6px 0; text-align: center; font-size: 12px; color: var(--muted); }
+.admin-control-popover .admin-calendar-day { position: relative; min-width: 0; aspect-ratio: 1; min-height: 34px; padding: 0; border: 1px solid transparent; border-radius: 12px; background: transparent; font-size: 13px; font-variant-numeric: tabular-nums; transition: transform .15s, background .15s, box-shadow .15s; }
+.admin-control-popover .admin-calendar-day.outside { color: var(--muted); opacity: .55; }
+.admin-control-popover .admin-calendar-day:hover:not(:disabled),
+.admin-control-popover .admin-calendar-nav:hover, .admin-control-popover .admin-calendar-shortcut:hover { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); transform: translateY(-1px); }
+.admin-control-popover .admin-calendar-day.selected { background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 16%, var(--surface)), color-mix(in srgb, var(--accent) 35%, var(--surface))); color: var(--text); border-color: var(--accent-strong); box-shadow: 0 4px 12px var(--accent-shadow); font-weight: 800; opacity: 1; }
+.admin-calendar-day[aria-current="date"]::after { content: ""; position: absolute; width: 4px; height: 4px; border-radius: 50%; background: var(--text); bottom: 4px; left: calc(50% - 2px); }
+.admin-calendar-footer { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.admin-control-popover .admin-calendar-shortcut { flex: 1; min-height: 36px; padding: 7px 12px; border-radius: 10px; background: var(--surface-soft); border: 0; font-size: 13px; transition: transform .15s, background .15s; }
+.admin-workspace .daily-token-filter-row { grid-template-columns: minmax(190px, .8fr) minmax(0, 1fr) 160px auto; }
+.admin-workspace .ui-btn { transition: transform .18s, box-shadow .18s, background .18s; }
+@media (hover: hover) {
+  .admin-workspace .ui-btn:hover:not(:disabled), .admin-workspace .admin-control-trigger:hover:not(:disabled) { transform: translateY(-2px); }
+}
+.admin-workspace .ui-btn:active:not(:disabled), .admin-workspace .admin-control-trigger:active:not(:disabled) { transform: scale(.98); }
+.admin-workspace input:not([type="hidden"]):focus, .admin-workspace textarea:focus { box-shadow: 0 0 0 3px var(--focus-ring); transition: box-shadow .18s; }
+@keyframes admin-control-reveal { from { opacity: 0; transform: translateY(5px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (max-width: 900px) { .admin-workspace .daily-token-filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .admin-workspace .daily-token-filter-row { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) {
+  .admin-control-popover, .admin-control-popover *, .admin-workspace .admin-control-trigger,
+  .admin-workspace .admin-control-icon, .admin-workspace .ui-btn,
+  .admin-workspace input:focus, .admin-workspace textarea:focus { animation: none !important; transition: none !important; transform: none !important; }
+}
