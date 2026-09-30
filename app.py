@@ -8,6 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from gift.handlers import GiftHandlersMixin
+from gift.database import init_gift_db
 from file_share.handlers import FileShareHandlersMixin
 from file_share.database import init_share_db
 
@@ -49,6 +51,7 @@ from ai_platform.settings import (
 
 
 class AppHandler(
+    GiftHandlersMixin,
     FileShareHandlersMixin,
     AuthHandlersMixin,
     CatHandlersMixin,
@@ -70,6 +73,10 @@ class AppHandler(
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/gifts/"):
+            return self.gift_dispatch()
+        if path in ("/gifts", "/gifts/"):
+            return self.gift_page()
         if path in ("/admin/share", "/admin/share/"):
             return self.file_share_page(admin=True)
         if path.startswith("/api/file-share/"):
@@ -213,6 +220,8 @@ class AppHandler(
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/gifts/"):
+            return self.gift_dispatch()
         if path.startswith("/api/file-share/"):
             return self.fs_dispatch()
         if path == "/cat/api/login":
@@ -325,6 +334,8 @@ class AppHandler(
 
     def do_PATCH(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/gifts/"):
+            return self.gift_dispatch()
         if path.startswith("/api/profiles/"):
             return self.require_user(self.handle_profile_item)
         if path.startswith("/api/conversations/") and path.endswith("/writing"):
@@ -335,6 +346,8 @@ class AppHandler(
 
     def do_DELETE(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/gifts/"):
+            return self.gift_dispatch()
         if path.startswith("/cat/api/posts/"):
             return self.require_cat_user(self.handle_cat_post_delete)
         if path.startswith("/cat/api/cats/"):
@@ -544,6 +557,7 @@ def main():
     secrets_data = ensure_secrets()
     init_db(secrets_data)
     init_share_db()
+    init_gift_db()
     address = parse_listen(LISTEN)
     server = AIPlatformServer(address, AppHandler, secrets_data)
     print(f"ai-platform listening on {LISTEN}")
