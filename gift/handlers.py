@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse,parse_qs
 from urllib.error import HTTPError,URLError
 from . import services as s
+from .statistics import stats
 from .database import connection,ensure_categories
 from .assets import storage,upload,decode
 from .recognition import recognize
@@ -64,6 +65,7 @@ class GiftHandlersMixin:
                     return self.json({'ok':True})
             if path=='duplicates' and method=='GET':return self.json(s.duplicates(actor,params))
             if path=='dashboard' and method=='GET':return self.json(s.dashboard(actor,params.get('recipient_id')))
+            if path=='statistics' and method=='GET':return self.json(stats(actor,params))
             if path=='recommendations' and method=='GET':return self.json(s.recommendations(actor,params.get('recipient_id')))
             if path=='assets' and method=='POST':
                 asset=upload(actor,decode(data.get('base64')),data.get('filename'),data.get('purpose','product'),self.server.secrets)
