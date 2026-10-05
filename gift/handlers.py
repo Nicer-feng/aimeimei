@@ -13,10 +13,14 @@ from .import_service import preview,confirm
 
 class GiftHandlersMixin:
     def gift_page(self):
-        return self.html(Path(__file__).with_name('index.html').read_text())
+        page=Path(__file__).with_name('index.html').read_text()
+        return self.html(page.replace('__GIFT_VERSION__',Path(__file__).with_name('VERSION').read_text().strip()).replace('__GIFT_BUILD__',Path(__file__).with_name('BUILD_ID').read_text().strip()))
 
     def gift_dispatch(self):
         try:
+            path=urlparse(self.path).path.removeprefix('/api/gifts').strip('/')
+            if self.command=='GET' and path=='version':
+                return self.json({'version':Path(__file__).with_name('VERSION').read_text().strip(),'build_id':Path(__file__).with_name('BUILD_ID').read_text().strip(),'releases':json.loads(Path(__file__).with_name('releases.json').read_text())})
             user=self.current_user()
             if not user:raise s.GiftError('请先登录槑槑',401)
             actor=user['id'];path=urlparse(self.path).path.removeprefix('/api/gifts').strip('/')
@@ -29,7 +33,6 @@ class GiftHandlersMixin:
                 data=self.read_body(limit=15*1024*1024)
                 if not isinstance(data,dict):raise s.GiftError('参数不正确')
             method=self.command
-            if path=='version':return self.json({'version':Path(__file__).with_name('VERSION').read_text().strip()})
             if path=='recipients':
                 if method=='GET':return self.json({'recipients':s.recipients(actor)})
                 if method=='POST':return self.json({'recipient':s.save_recipient(actor,data)},201)
