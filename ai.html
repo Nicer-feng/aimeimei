@@ -58,7 +58,8 @@
   <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.26.12">
+  <link rel="stylesheet" href="/res/ai.css?v=2.27.0">
+  <link rel="stylesheet" href="/res/reader.css?v=2.27.0">
 
   <link rel="stylesheet" href="/res/markdown.css">
 </head>
@@ -69,7 +70,7 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.26.12</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.27.0</button>
       </div>
       <div class="login-mode-tabs" role="tablist" aria-label="登录方式">
         <button class="login-mode-tab active" id="loginPasswordMode" type="button" role="tab" aria-selected="true"><i data-lucide="key-round" aria-hidden="true"></i><span>密码登录</span></button>
@@ -103,7 +104,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.26.12</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.27.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -116,7 +117,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.26.12</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.27.0</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -126,6 +127,7 @@
 	            </span>
           </div>
         </div>
+        <button class="ui-icon-btn reader-toggle" id="readerToggle" type="button" title="摸鱼模式" aria-label="摸鱼模式" aria-pressed="false"><i data-lucide="fish" aria-hidden="true"></i></button>
         <button class="icon mobile-only ui-icon-btn" id="closeSide" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
       </div>
       <button class="global-search-trigger inline-flex items-center" id="openGlobalSearch" type="button">
@@ -175,7 +177,7 @@
 	          </a>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.26.12</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.27.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -215,6 +217,9 @@
         <label class="profile-popover-foot profile-switch"><input id="disableProfileForConversation" type="checkbox"><span>本次聊天不加载 AI档案</span></label>
       </div>
       <section class="messages" id="messages"></section>
+      <section class="messages reader-messages" id="readerMessages" aria-label="阅读内容" tabindex="0" hidden>
+        <div class="reader-inner" id="readerPages"></div>
+      </section>
       <nav class="conversation-minimap" id="conversationMinimap" aria-label="对话缩略导航" hidden>
         <div class="minimap-track" id="minimapTrack">
           <div class="minimap-viewport" id="minimapViewport"></div>
@@ -236,6 +241,11 @@
 			            <button class="prompt-chip ui-badge inline-flex items-center" type="button" data-prompt-text="帮我精简下面这段内容，保留重点，表达更利落：">精简</button>
 		            <button class="prompt-chip ui-badge inline-flex items-center" id="openPrompts" type="button">更多</button>
 	          </div>
+          <div class="reader-controls" id="readerControls" hidden>
+            <button class="ui-icon-btn" id="readerPrevious" type="button" aria-label="上一页" title="上一页"><i data-lucide="chevron-left" aria-hidden="true"></i></button>
+            <button id="readerProgress" type="button" title="阅读进度与小说管理">0%</button>
+            <button class="ui-icon-btn" id="readerNext" type="button" aria-label="下一页" title="下一页"><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+          </div>
           <button class="full-composer-trigger ui-icon-btn" id="openFullComposer" type="button" title="全屏编辑" aria-label="全屏编辑"><i data-lucide="expand" aria-hidden="true"></i></button>
           <div class="full-composer-suggestion" id="fullComposerSuggestion" role="status" hidden>
             <span>检测到长文本，建议进入全屏编辑。</span>
@@ -1063,7 +1073,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.26.12</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.27.0</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -1096,6 +1106,19 @@
 	      </div>
 	    </div>
 	  </section>
+
+  <dialog id="readerLibrary" class="reader-library" aria-labelledby="readerLibraryTitle">
+    <header><h2 id="readerLibraryTitle">我的小说</h2><button class="ui-icon-btn" id="readerLibraryClose" type="button" aria-label="关闭"><i data-lucide="x" aria-hidden="true"></i></button></header>
+    <div class="reader-library-tools">
+      <button class="ui-btn ui-btn-secondary" id="readerUpload" type="button"><i data-lucide="upload" aria-hidden="true"></i><span>上传 TXT</span></button>
+      <input type="file" id="readerFile" accept=".txt,text/plain" hidden>
+      <div class="reader-mode" role="group" aria-label="阅读方式"><button type="button" data-reader-mode="scroll" aria-pressed="true">滚动</button><button type="button" data-reader-mode="page" aria-pressed="false">分页</button></div>
+    </div>
+    <p class="reader-library-hint">仅自己可见 · UTF-8 / GBK / UTF-16 · 单本最多 20MB</p>
+    <div id="readerLibraryStatus" role="status"></div>
+    <div id="readerLibraryList"></div>
+    <form id="readerJump"><label>跳转页码<input id="readerPageInput" type="number" min="1" required aria-label="跳转页码"></label><button class="ui-btn ui-btn-secondary" type="submit">跳转</button></form>
+  </dialog>
 
   <section class="full-composer" id="fullComposer" role="dialog" aria-modal="true" aria-labelledby="fullComposerTitle" hidden>
     <div class="full-composer-shell">
@@ -1130,7 +1153,8 @@
       <p id="writingDraftState" class="writing-help"></p><button type="button" id="saveWritingDraft">保存稿件与定稿状态</button>
     </details>
   </dialog>
-	  <script src="/res/ai.js?v=2.26.12"></script>
+	  <script src="/res/ai.js?v=2.27.0"></script>
+      <script src="/res/reader.js?v=2.27.0"></script>
 
 </body>
 </html>

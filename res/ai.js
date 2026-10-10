@@ -1548,6 +1548,7 @@
     }
 
 	    function showLogin() {
+          globalThis.MeimeiReader?.reset();
 	      $("loginView").style.display = "grid";
 	      $("appView").style.display = "none";
 	      updateDesktopPetVisibility();
@@ -4013,6 +4014,7 @@
     }
 
     function beginConversationTransition(options = {}) {
+      globalThis.MeimeiReader?.exit();
       state.conversationEpoch++;
       closeSideDiscussion();
       state.conversationController?.abort();
@@ -4361,7 +4363,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.26.12" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.27.0" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -5719,6 +5721,7 @@
 	    }
 
 	    function scrollToLatest(behavior = "auto") {
+          if (globalThis.MeimeiReader?.active) return;
 	      const box = $("messages");
 	      state.followOutput = true;
 	      state.hasNewWhilePaused = false;
@@ -6481,6 +6484,7 @@
 
 	    function flushMessagesScroll() {
 	      state.messagesScrollFrame = 0;
+          if (globalThis.MeimeiReader?.active) return;
 	      updateConversationMinimapViewport();
 	      pulseConversationMinimap();
 	      if (state.programmaticScroll) return;
@@ -8242,6 +8246,7 @@
     }
 
 	    async function sendMessage(contentOverride = "", options = {}) {
+          globalThis.MeimeiReader?.exit();
 	      const hasOverride = typeof contentOverride === "string" && contentOverride.trim();
 	      const rawContent = (hasOverride ? contentOverride : $("prompt").value).trim();
 	      const quoteSnapshot = hasOverride ? [] : state.pendingQuotes.map((quote) => ({ ...quote }));

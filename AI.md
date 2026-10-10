@@ -7,8 +7,8 @@
 - 项目名称：AI槑槑。
 - GitHub：`git@github.com:Nicer-feng/aimeimei.git`。
 - 主分支：`main`。
-- 当前基线版本：`2.26.8`。
-- 当前基线构建：`20260927-202237`。
+- 当前基线版本：`2.27.0`。
+- 当前基线构建：`20261010-185908`。
 - 当前材料附件行为：新上传材料默认只绑定本条用户消息；通过聊天顶部“当前对话文件”可显式设为持续参考，旧 `conversation_documents` 仍代表持续参考材料。
 - 当前基线提交：以 `git log -1 --oneline` 为准（发布后需同步本段）。
 - 本地实际仓库：`/Users/feng/Documents/文稿 - Unknown/aliyun3129`。
@@ -561,3 +561,12 @@ AI槑槑 v2.26.7、槑槑云 v0.5.2，构建 `20260927-191015`。按用户要求
 - 发布前 17 个运行文件原始哈希一致，活跃 Office/PDF 编辑任务为 0。代码与 SQLite 一致性快照备份在 `/opt/ai-platform-release-backups/followup-20260927-191015/`。线上真实源码编译、两个备份 CLI 帮助入口、重启、侧边字段迁移及 17 个发布文件哈希核对通过；14 项公网入口/版本/资源/匿名权限检查通过，发布后错误关键词计数为 0。
 
 仍未统一主动取消接口、请求幂等令牌和完整费用账本；无 usage 的建连失败不推算供应商账单。校验错误及用户消息保存前的搜索失败保持现有行为。
+
+### 2026-10-10 私有小说阅读 v2.27.0
+
+- 独立模块：`ai_platform/reading.py`、`ai_platform/handlers/reading.py`、`res/reader.js`、`res/reader.css`。`/api/reading/books` 及子路由均按当前账号鉴权；`reading_books`、`reading_pages` 在启动时幂等建表。
+- 仅宽度至少 1024px、精细指针且支持 hover 的设备显示鱼形入口。单击切换，右键或阅读进度入口打开个人书架。保持原聊天 DOM、输入草稿及后台生成；发送或切换会话退出，不把小说内容放进模型上下文。
+- 每本上限 20MB、每人 30 本/合计 100MB，支持 UTF-8、GB18030、带 BOM 的 UTF-16。一次只激活一本；约 2000 字一页，正文按字符偏移保存，浏览器最多保留 7 页。进度本机即时保存、约 2.5 秒同步，退出/切后台补保存；过时的请求不能覆盖较新的进度。
+- 原 TXT 复用 `infrastructure.storage.PrivateOSS`、现有 MEDIA/CAT 凭据，存入 **`share/reading/{user_id}/`**，采用 V4 签名且上传后验证匿名读取被拒绝。不要换回 `documents/reading`：真实预检发现该目录 Bucket Policy 允许匿名 GET，且当前凭据不能 DELETE。两个仅含合成测试文字的预检对象未能删除：`documents/reading/test/3f17f22c7f304554abb4c55061f13b53.txt`、`documents/reading/test/connectivity-v2270.txt`；没有上传用户小说，后续有授权时可由 OSS 管理员删除。
+- 隔离接口回归：`python3 scripts/test_reading.py`。浏览器：启动 `python3 scripts/test_reading.py --serve` 后，使用其 loopback URL 设置 `READER_TEST_URL`，运行 `scripts/test_reading_ui.js`（需要 Playwright）。涵盖大文本、7 页窗口、翻页、进度恢复、草稿、桌面/窄屏、账号隔离；流式并发使用模拟 SSE，不调用付费模型。真实 OSS 私有读写/删除已单独验证。
+- 已部署构建 `20261010-185908`，备份 `/opt/ai-platform-release-backups/reader-2.27.0-20261010-185908/` 含旧代码和 SQLite 一致性快照。发布前 Office/PDF 活跃编辑数均为 0；重启、14 份文件校验、公网版本/资源哈希/匿名 401 正常。生产临时账号真实 TXT 上传、读取、保存进度、删除通过，账号和该验收文件已清理。原聊天状态 21 项回归通过。

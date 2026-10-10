@@ -1,0 +1,41 @@
+.reader-toggle { flex: 0 0 30px; width: 30px; height: 30px; min-height: 30px; min-width: 30px; border-radius: 50%; color: var(--muted); transition: box-shadow 180ms ease, color 180ms ease; }
+.reader-toggle .lucide { width: 17px; height: 17px; }
+.reader-toggle[aria-pressed="true"] { color: var(--accent-strong); box-shadow: 0 0 0 2px var(--accent-soft), 0 0 12px var(--accent-shadow); }
+#messages, #readerMessages { grid-row: 2; grid-column: 1; }
+#readerMessages[hidden], #readerControls[hidden], #readerJump[hidden] { display: none; }
+.reading-mode #messages { visibility: hidden; pointer-events: none; }
+.reading-mode #conversationMinimap, .reading-mode #scrollLatest { visibility: hidden; pointer-events: none; }
+#readerMessages { display: block; position: relative; z-index: 1; scroll-behavior: auto; overflow-anchor: none; outline: none; }
+.reader-inner { width: min(var(--content), 100%); margin: 0 auto; }
+.reader-page { width: 100%; margin: 0 0 30px; animation: none !important; content-visibility: visible !important; contain: none !important; }
+.reader-page .role { display: flex; align-items: center; gap: 8px; }
+.reader-page .role img { width: 24px; height: 24px; border-radius: 50%; }
+.reader-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 12px 0 0; user-select: text; }
+.reader-controls { display: flex; align-items: center; gap: 3px; position: absolute; top: 8px; right: 46px; }
+.reader-controls button { background: transparent; color: var(--muted-2); border: 0; border-radius: 6px; min-height: 26px; padding: 2px 5px; font-size: 11px; cursor: pointer; }
+.reader-controls .ui-icon-btn { width: 24px; min-width: 24px; height: 26px; }
+.reader-controls .lucide { width: 14px; height: 14px; }
+.reader-controls button:hover { color: var(--text); background: var(--accent-soft); }
+.reader-controls button:disabled { opacity: .3; cursor: default; }
+.reading-mode .composer-chip-row { padding-right: 200px; }
+.reader-library { width: min(560px, calc(100vw - 40px)); max-height: min(700px, 85dvh); overflow: auto; box-sizing: border-box; padding: 22px; background: var(--color-surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); }
+.reader-library::backdrop { background: rgb(20 20 20 / 24%); backdrop-filter: blur(4px); }
+.reader-library header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.reader-library h2 { margin: 0; font-size: 18px; }
+.reader-library-tools { display: flex; justify-content: space-between; gap: 12px; }
+.reader-library-tools .ui-btn { display: inline-flex; gap: 8px; align-items: center; }
+.reader-library .lucide { width: 16px; height: 16px; }
+.reader-library-hint, #readerLibraryStatus { color: var(--muted); font-size: 12px; line-height: 1.6; }
+#readerLibraryStatus { min-height: 20px; }
+.reader-mode { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 8px; }
+.reader-mode button { padding: 5px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+.reader-mode button[aria-pressed="true"] { background: var(--accent-soft); color: var(--text); }
+.reader-book { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); padding: 8px 0; }
+.reader-book-open { min-width: 0; flex: 1; border: 0; background: transparent; color: var(--text); text-align: left; padding: 8px 4px; cursor: pointer; }
+.reader-book-open strong { display: block; font-size: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.reader-book-open small { display: block; margin-top: 5px; color: var(--muted); }
+#readerJump { display: flex; align-items: end; gap: 10px; margin-top: 18px; }
+#readerJump label { font-size: 12px; color: var(--muted); }
+#readerPageInput { width: 130px; min-height: 36px; }
+@media (max-width: 1023px), (hover: none), (pointer: coarse) { .reader-toggle, .reader-controls { display: none !important; } }
+@media (prefers-reduced-motion: reduce) { .reader-toggle { transition: none; } }
