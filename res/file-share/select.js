@@ -5,7 +5,8 @@
   const widgets=new WeakMap();
   function close(restore=false){
     if(!active)return;
-    const {button,popup}=active;active=null;button.setAttribute('aria-expanded','false');button.removeAttribute('aria-controls');popup.remove();
+    const {button,popup}=active;active=null;button.setAttribute('aria-expanded','false');button.removeAttribute('aria-controls');popup.style.pointerEvents='none';popup.inert=true;
+    if(window.UIMotion)window.UIMotion.leave(popup,()=>popup.remove(),'pop');else popup.remove();
     if(restore&&button.isConnected)button.focus();
   }
   function enhance(select){
@@ -42,6 +43,7 @@
     popup.style.maxHeight=Math.max(60,Math.min(320,up?above:below))+'px';
     popup.style.left=Math.max(12,Math.min(rect.left,width-popup.offsetWidth-12))+'px';
     popup.style.top=(up?Math.max(12,rect.top-popup.offsetHeight-6):rect.bottom+6)+'px';
+    popup.classList.add('ui-motion-managed');window.UIMotion?.open(popup,'pop');
     const enabled=buttons.filter(b=>!b.disabled);
     const first=key==='End'?enabled.at(-1):key==='Home'?enabled[0]:buttons[select.selectedIndex]||enabled[0];
     first?.focus({preventScroll:true});if(first)popup.scrollTop=Math.max(0,first.offsetTop-popup.clientHeight+first.offsetHeight+6);

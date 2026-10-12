@@ -1,0 +1,41 @@
+/* Shared finite interaction motion; no animated blur or global page transitions. */
+.ui-motion-managed { animation: none !important; }
+.ui-motion-nav { position: relative; isolation: isolate; }
+.ui-motion-thumb {
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.ui-motion-nav > :is(.admin-nav-item.active, .token-tab.active, button[aria-selected="true"], button.active) {
+  background: transparent;
+  box-shadow: none;
+  border-color: transparent;
+}
+.sidebar-tools-popover .sidebar-tool-card { transition-duration: 180ms; }
+.sidebar-tools-popover.show .sidebar-tool-card { transition-timing-function: cubic-bezier(.16,1,.3,1); }
+.ui-motion-managed:not(.sidebar-tools-popover) { will-change: auto; }
+/* Modern browsers retain the surface during exit; older browsers close immediately. */
+@supports (transition-behavior: allow-discrete) {
+  :is(.prompt-dialog,.favorite-dialog,.profile-dialog,.media-dialog,.ocr-dialog,.copy-dialog,.confirm-dialog,.share-dialog,.theme-dialog,.token-activity-dialog,.global-search-dialog,.changelog-dialog,.model-picker-dialog,.conversation-files-dialog,.image-preview-dialog) {
+    opacity: 0;
+    transition: opacity 160ms ease-in, display 160ms allow-discrete;
+  }
+  :is(.prompt-dialog,.favorite-dialog,.profile-dialog,.media-dialog,.ocr-dialog,.copy-dialog,.confirm-dialog,.share-dialog,.theme-dialog,.token-activity-dialog,.global-search-dialog,.changelog-dialog,.model-picker-dialog,.conversation-files-dialog,.image-preview-dialog).show { opacity: 1; }
+  :is(.prompt-dialog,.favorite-dialog,.profile-dialog,.media-dialog,.ocr-dialog,.copy-dialog,.confirm-dialog,.share-dialog,.theme-dialog,.token-activity-dialog,.global-search-dialog,.changelog-dialog,.model-picker-dialog,.conversation-files-dialog,.image-preview-dialog) > .ui-motion-managed {
+    transition: opacity 160ms ease-in, scale 160ms ease-in;
+  }
+  :is(.prompt-dialog,.favorite-dialog,.profile-dialog,.media-dialog,.ocr-dialog,.copy-dialog,.confirm-dialog,.share-dialog,.theme-dialog,.token-activity-dialog,.global-search-dialog,.changelog-dialog,.model-picker-dialog,.conversation-files-dialog,.image-preview-dialog):not(.show) > .ui-motion-managed { opacity: 0; scale: .98; }
+  :is(#readerLibrary,#writingDialog,#officeVersions,#pdfVersions).ui-motion-managed {
+    opacity: 0;
+    scale: .98;
+    transition: opacity 160ms, scale 160ms, display 160ms allow-discrete, overlay 160ms allow-discrete;
+  }
+  :is(#readerLibrary,#writingDialog,#officeVersions,#pdfVersions).ui-motion-managed[open] { opacity: 1; scale: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-motion-thumb, .ui-motion-managed { animation: none !important; transition: none !important; }
+}

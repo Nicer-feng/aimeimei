@@ -2,35 +2,20 @@
 /* Progressive motion: no business state, no timers, safe without WAAPI. */
 window.CloudMotion = (() => {
   const reduce = matchMedia('(prefers-reduced-motion: reduce)');
-  const running = new Set();
-  let navRect, origin;
   function animate(element, frames, options = {}) {
-    if (!element || reduce.matches || !element.animate) return;
-    const animation = element.animate(frames, {duration:320,easing:'cubic-bezier(.2,.75,.2,1)',...options});
-    running.add(animation);
-    animation.finished.catch(() => {}).finally(() => running.delete(animation));
-    return animation;
+    return window.UIMotion?.animate(element, frames, options);
   }
-  reduce.addEventListener('change', () => { if (reduce.matches) running.forEach(a => a.cancel()); });
-  function captureNav() { navRect = document.querySelector('#nav .active')?.getBoundingClientRect(); }
+  function captureNav() {}
   function nav() {
     const active = document.querySelector('#nav .active');
     document.querySelectorAll('#nav [data-section]').forEach(button => {
       if (button === active) button.setAttribute('aria-current', 'page');
       else button.removeAttribute('aria-current');
     });
-    if (navRect && active) {
-      const next = active.getBoundingClientRect();
-      // Move only the destination icon, keeping its hit target and label steady.
-      animate(active.querySelector('svg'), [{transform:`translate(${(navRect.x-next.x)*.15}px,${(navRect.y-next.y)*.15}px)`,opacity:.4},{transform:'translate(0,0)',opacity:1}]);
-    }
-    navRect = null;
+    window.UIMotion?.nav(document.getElementById('nav'), 'button.active');
   }
   function reveal(container) {
-    if (reduce.matches || !container) return;
-    const items = [...container.querySelectorAll('.stat,.panel,tbody tr,.file-tile,.settings-form')].slice(0,16);
-    if (!items.length) items.push(container);
-    items.forEach((item,index) => animate(item,[{opacity:0,transform:'translateY(10px)'},{opacity:1,transform:'translateY(0)'}],{delay:Math.min(index*24,168),duration:360}));
+    window.UIMotion?.reveal(container, '.stat,.panel,.file-tile,.settings-form');
   }
   function positions(container) {
     if (reduce.matches || !container) return new Map();
@@ -47,21 +32,26 @@ window.CloudMotion = (() => {
       }
     });
   }
-  function captureOrigin() {
-    const target = document.activeElement;
-    origin = target && target !== document.body ? target.getBoundingClientRect() : null;
-  }
+  function captureOrigin() {}
   function open(panel, preview = false) {
-    if (reduce.matches) return;
-    panel.getAnimations().forEach(animation => animation.cancel());
-    const box = panel.getBoundingClientRect();
-    const x = origin ? Math.max(-90,Math.min(90,origin.x+origin.width/2-box.x-box.width/2)) : 0;
-    const y = origin ? Math.max(-45,Math.min(45,origin.y+origin.height/2-box.y-box.height/2)) : 16;
-    animate(panel,[{opacity:0,transform:`translate(${preview?36:x}px,${preview?0:y}px) scale(${preview ? .98 : .96})`},{opacity:1,transform:'translate(0,0) scale(1)'}],{duration:preview?400:280});
+    panel?.classList.add('ui-motion-managed');
+    window.UIMotion?.open(panel, preview ? 'drawer' : 'modal');
+  }
+  function close(panel, done) {
+    if (!window.UIMotion) { done(); return; }
+    window.UIMotion.leave(panel, done, panel.classList.contains('document-preview') ? 'drawer' : 'modal');
   }
   document.addEventListener('change', event => {
     if (!event.target.matches('input[type=checkbox][data-select]')) return;
     animate(event.target.closest('tr,.file-tile')?.querySelector('.file-icon'),[{transform:'scale(.88)'},{transform:'scale(1.06)',offset:.65},{transform:'scale(1)'}],{duration:260});
   });
-  return {captureNav,nav,reveal,captureOrigin,open,positions,rearrange};
+  for (const id of ['officeVersions', 'pdfVersions']) window.UIMotion?.watch(document.getElementById(id));
+  for (const id of ['officeEditor', 'pdfPageEditor']) {
+    const surface = document.getElementById(id);
+    window.UIMotion?.watch(surface, surface?.querySelector('.office-toolbar'));
+  }
+  const resize = new ResizeObserver(nav);
+  const container = document.getElementById('nav');
+  if (container) resize.observe(container);
+  return {captureNav,nav,reveal,captureOrigin,open,close,positions,rearrange};
 })();

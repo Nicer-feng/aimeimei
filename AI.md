@@ -589,6 +589,14 @@ AI槑槑 v2.26.7、槑槑云 v0.5.2，构建 `20260927-191015`。按用户要求
 - 回归必须检查 `#readerPages .reader-text` 实际出现，不能只断言 `MeimeiReader.active`。`scripts/test_reader_usage_ui.js` 覆盖双向切换、UUID 缺失、统计异常/延迟/401、正文失败/超时、大文件滚动及退出后输入。
 - 本次纯静态热修复，不改数据库、聊天/生成流程，无需重启共享服务。发布构建 `20261012-100618`。
 
+### v2.28.4 / 槑槑云 v0.6.3 共享交互动效
+
+- 独立 `res/ui-motion.js` / `ui-motion.css` 用原生 Web Animations 实现按压、触发点展开、导航滑块和有界卡片入场。`res/ai-motion.js` 只观察固定浮层属性，不能观察聊天记录子树或绑定高频鼠标移动。
+- 云端保留 CloudMotion API；普通弹窗收回有 revision 保护，菜单继续使用浏览器 top layer，Office/PDF 编辑器只动画外部工具栏，保存/放弃确认保持原逻辑。
+- 原仓库地址 `https://github.com/wbr664393425-lgtm/scaffold-master`，许可保存于 `res/vendor/scaffold-master.LICENSE`。没有引入 Vue 或 GSAP 运行时。
+- 两产品构建 `20261012-195040`，限定静态文件发布，无需重启或数据库迁移。测试脚本 `scripts/test_ui_motion.js` 必须使用两个隔离本地测试服务；性能数据来自本地模拟流式渲染，不能替代真实设备与上游 API 的性能结论。
+- 当前本地已完成验证，发布包上传被自动审批拦截，等待本次上传部署的明确确认；尚未上线。不得将本地 VERSION 当作公网版本。
+
 ### v2.28.3 表单控件对齐
 
 - 统一混合标签与操作按钮行的高度及底部边距；范围限定统计筛选、上传行、密码修改和阅读跳转。

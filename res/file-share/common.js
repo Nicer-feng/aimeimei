@@ -16,8 +16,16 @@ window.FS = (() => {
   function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,4000);}
   let previewSerial=0,previewURLs=[],pdfPreviewTask=null,pdfRenderTask=null,pdfResizeObserver=null,textPreviewController=null;
   function clearPreview(){previewSerial++;textPreviewController?.abort();textPreviewController=null;pdfResizeObserver?.disconnect();pdfResizeObserver=null;pdfRenderTask?.cancel();pdfRenderTask=null;if(pdfPreviewTask){pdfPreviewTask.destroy().catch(()=>{});pdfPreviewTask=null;}previewURLs.forEach(url=>URL.revokeObjectURL(url));previewURLs=[];$('dialog').classList.remove('document-preview','preview-full');}
-  function dialog(title,html){window.CloudMotion?.captureOrigin();clearPreview();$('dialogTitle').textContent=title;$('dialogBody').innerHTML=html;$('dialogBody').scrollTop=0;if(!$('dialog').open)$('dialog').showModal();refreshIcons();window.CloudMotion?.open($('dialog'));}
-  function close(){const media=$('dialogBody').querySelectorAll('video,audio');media.forEach(m=>{m.pause();m.removeAttribute('src');m.load();});clearPreview();$('dialog').close();$('dialogBody').replaceChildren();}
+  let dialogRevision=0,dialogClosing=false;
+  function dialog(title,html){dialogRevision++;dialogClosing=false;window.UIMotion?.cancel($('dialog'));window.CloudMotion?.captureOrigin();clearPreview();$('dialogTitle').textContent=title;$('dialogBody').innerHTML=html;$('dialogBody').scrollTop=0;if(!$('dialog').open)$('dialog').showModal();refreshIcons();window.CloudMotion?.open($('dialog'));}
+  function close(){
+    if(dialogClosing||!$('dialog').open)return;
+    dialogClosing=true;const revision=++dialogRevision;
+    const media=$('dialogBody').querySelectorAll('video,audio');media.forEach(m=>{m.pause();m.removeAttribute('src');m.load();});
+    textPreviewController?.abort();pdfRenderTask?.cancel();
+    const finish=()=>{if(revision!==dialogRevision)return;dialogClosing=false;clearPreview();$('dialog').close();$('dialogBody').replaceChildren();};
+    if(window.CloudMotion)window.CloudMotion.close($('dialog'),finish);else finish();
+  }
   $('dialogClose').onclick=close;$('dialog').addEventListener('cancel',event=>{event.preventDefault();close();});
   // Dismiss only the surface where the gesture began; dragging out never closes it.
   function dismissOutside(surface,content,dismiss){
