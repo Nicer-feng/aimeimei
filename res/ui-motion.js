@@ -3,6 +3,7 @@
 window.UIMotion = (() => {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const running = new Map();
+  const cleanup = new WeakMap();
   const thumbs = new WeakMap();
   const pressed = new Set();
   const ease = 'cubic-bezier(.16,1,.3,1)';
@@ -10,6 +11,8 @@ window.UIMotion = (() => {
   const enabled = () => !reduced.matches && !document.hidden;
 
   function cancel(element) {
+    cleanup.get(element)?.();
+    cleanup.delete(element);
     running.get(element)?.cancel();
     running.delete(element);
   }
@@ -17,12 +20,19 @@ window.UIMotion = (() => {
     if (!element) return null;
     cancel(element);
     if (!enabled() || !element.animate) return null;
+    const { entrance = false, ...timing } = options;
+    if (entrance) {
+      element.classList.add('ui-motion-entering');
+      cleanup.set(element, () => element.classList.remove('ui-motion-entering'));
+    }
     let animation;
-    try { animation = element.animate(frames, { duration: 220, easing: ease, ...options }); }
-    catch { return null; }
+    try { animation = element.animate(frames, { duration: 220, easing: ease, ...timing }); }
+    catch { cleanup.get(element)?.(); cleanup.delete(element); return null; }
     running.set(element, animation);
     animation.finished.then(() => {
       if (running.get(element) !== animation) return;
+      cleanup.get(element)?.();
+      cleanup.delete(element);
       running.delete(element);
       animation.cancel();
     }, () => { if (running.get(element) === animation) running.delete(element); });
@@ -38,7 +48,7 @@ window.UIMotion = (() => {
     animate(panel, [
       { opacity: 0, scale: kind === 'drawer' ? '1' : '.965', translate: kind === 'drawer' ? '28px 0' : '0 8px', transformOrigin: origin },
       { opacity: 1, scale: '1', translate: '0 0', transformOrigin: origin }
-    ], { duration: kind === 'pop' ? 190 : 240 });
+    ], { duration: kind === 'pop' ? 190 : 240, entrance: true });
   }
   function leave(panel, done, kind = 'modal') {
     const animation = animate(panel, [
@@ -50,10 +60,13 @@ window.UIMotion = (() => {
   }
   function reveal(container, selector) {
     if (!container || !enabled()) return;
-    const nodes = [...container.querySelectorAll(selector)].filter(n => n.getClientRects().length).slice(0, 10);
+    const nodes = [...container.querySelectorAll(selector)].filter(node => {
+      const ancestor = node.parentElement?.closest(selector);
+      return node.getClientRects().length && (!ancestor || !container.contains(ancestor));
+    }).slice(0, 10);
     nodes.forEach((node, index) => animate(node, [
       { opacity: 0, translate: '0 7px' }, { opacity: 1, translate: '0 0' }
-    ], { duration: 220, delay: Math.min(index * 18, 90) }));
+    ], { duration: 220, delay: Math.min(index * 18, 90), fill: 'backwards', entrance: true }));
   }
   function nav(parent, selector) {
     if (!parent) return;
@@ -77,6 +90,7 @@ window.UIMotion = (() => {
       y: direct ? active.offsetTop : (target.top - box.top) / sy + parent.scrollTop - parent.clientTop,
       width: active.offsetWidth, height: active.offsetHeight };
     const previous = entry.rect;
+    if (previous && ['x','y','width','height'].every(key => Math.abs(previous[key] - rect[key]) < .5)) return;
     Object.assign(entry.thumb.style, { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` });
     entry.rect = rect;
     if (previous) animate(entry.thumb, [
@@ -86,6 +100,7 @@ window.UIMotion = (() => {
   // Watch only fixed overlay state attributes, never message/content mutations.
   function watch(surface, panel = surface, kind = 'modal') {
     if (!surface || !panel) return;
+    surface.classList.add('ui-motion-managed');
     panel.classList.add('ui-motion-managed');
     const visible = () => !surface.hidden && (surface.tagName === 'DIALOG' ? surface.open : surface.classList.contains('show'));
     let wasVisible = visible();

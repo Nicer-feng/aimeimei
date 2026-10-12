@@ -17,7 +17,14 @@ window.FS = (() => {
   let previewSerial=0,previewURLs=[],pdfPreviewTask=null,pdfRenderTask=null,pdfResizeObserver=null,textPreviewController=null;
   function clearPreview(){previewSerial++;textPreviewController?.abort();textPreviewController=null;pdfResizeObserver?.disconnect();pdfResizeObserver=null;pdfRenderTask?.cancel();pdfRenderTask=null;if(pdfPreviewTask){pdfPreviewTask.destroy().catch(()=>{});pdfPreviewTask=null;}previewURLs.forEach(url=>URL.revokeObjectURL(url));previewURLs=[];$('dialog').classList.remove('document-preview','preview-full');}
   let dialogRevision=0,dialogClosing=false;
-  function dialog(title,html){dialogRevision++;dialogClosing=false;window.UIMotion?.cancel($('dialog'));window.CloudMotion?.captureOrigin();clearPreview();$('dialogTitle').textContent=title;$('dialogBody').innerHTML=html;$('dialogBody').scrollTop=0;if(!$('dialog').open)$('dialog').showModal();refreshIcons();window.CloudMotion?.open($('dialog'));}
+  function dialog(title,html,options={}){
+    const entering=!$('dialog').open||dialogClosing;
+    dialogRevision++;dialogClosing=false;window.UIMotion?.cancel($('dialog'));window.CloudMotion?.captureOrigin();clearPreview();
+    $('dialog').classList.toggle('document-preview',Boolean(options.preview));
+    $('dialogTitle').textContent=title;$('dialogBody').innerHTML=html;$('dialogBody').scrollTop=0;
+    if(!$('dialog').open)$('dialog').showModal();refreshIcons();
+    if(entering)window.CloudMotion?.open($('dialog'),Boolean(options.preview));
+  }
   function close(){
     if(dialogClosing||!$('dialog').open)return;
     dialogClosing=true;const revision=++dialogRevision;
@@ -46,8 +53,7 @@ window.FS = (() => {
   }
   async function copy(value){try{await navigator.clipboard.writeText(value);toast('分享链接已复制');}catch{dialog('复制链接',`<p class="muted">请长按或选中下方链接复制</p><input readonly value="${esc(value)}">`);$('dialogBody').querySelector('input').select();}}
   async function preview(file,source,download){
-    dialog(file.filename,'<div class="preview-tools" id="previewTools"></div><div class="preview-stage" id="previewStage"><p>正在准备预览，首次转换可能需要几十秒…</p></div><p class="muted preview-note" id="previewNote">仅供预览，原文件保持不变。</p>');
-    $('dialog').classList.add('document-preview');window.CloudMotion?.open($('dialog'),true);
+    dialog(file.filename,'<div class="preview-tools" id="previewTools"></div><div class="preview-stage" id="previewStage"><p>正在准备预览，首次转换可能需要几十秒…</p></div><p class="muted preview-note" id="previewNote">仅供预览，原文件保持不变。</p>',{preview:true});
     const serial=previewSerial,stage=$('previewStage'),tools=$('previewTools');
     const full=document.createElement('button');full.textContent='全屏';full.onclick=()=>{const active=$('dialog').classList.toggle('preview-full');full.textContent=active?'恢复窗口':'全屏';};tools.append(full);
     if(download){const button=document.createElement('button');button.textContent='下载原文件';button.onclick=async()=>{button.disabled=true;try{await download();}catch(error){toast(error.message);}finally{button.disabled=false;}};tools.append(button);}

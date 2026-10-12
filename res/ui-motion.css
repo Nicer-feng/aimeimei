@@ -1,5 +1,6 @@
 /* Shared finite interaction motion; no animated blur or global page transitions. */
 .ui-motion-managed { animation: none !important; }
+.ui-motion-entering { animation: none !important; transition: none !important; }
 .ui-motion-nav { position: relative; isolation: isolate; }
 .ui-motion-thumb {
   position: absolute;

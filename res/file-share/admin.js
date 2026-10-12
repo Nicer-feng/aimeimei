@@ -5,7 +5,7 @@
   const sections=[['overview','概览','layout-dashboard','让每一次文件交付，简单而有序。'],['files','我的文件','files','管理文件，为它们创建安全的分享链接。'],['shares','分享','link','决定谁可以访问，以及何时结束。'],['logs','访问记录','activity','查看每一次访问、预览与下载请求。'],['trash','回收站','trash-2','误删的文件可以恢复，永久删除前会再次确认。'],['settings','设置','settings-2','分享中心的独立偏好设置。']];
   let platformAdmin=false;
   sections.push(['platform','平台管理','shield-check','查看槑槑云用户、存储和访问情况。']);
-  let section='files',page=1,filters={search:'',type:'',sort:'newest'},currentFiles=[],selected=new Map(),renderId=0,captchaId='',uploading=false;
+  let section='files',page=1,filters={search:'',type:'',sort:'newest'},currentFiles=[],selected=new Map(),renderId=0,captchaId='',uploading=false,lastRenderedSection='';
   const office=window.CloudOffice,pdf=window.CloudPdfEditor;
   office.configure({base,api,toast,esc,size,refreshIcons,onChanged:async()=>{if(section==='files')await render(true);}});
   pdf.configure({base,api,toast,esc,size,refreshIcons,onChanged:async()=>{if(section==='files')await render(true);}});
@@ -138,7 +138,7 @@
   async function render(quiet=false){
     closeFileMenu();
     clearTimeout(logRefreshTimer);
-    const requestId=++renderId;const def=sections.find(s=>s[0]===section);$('breadcrumb').textContent=def[1];$('pageTitle').textContent=def[1];$('app').dataset.section=section;$('pageDescription').textContent=def[3];document.querySelectorAll('[data-section]').forEach(b=>b.classList.toggle('active',b.dataset.section===section));window.CloudMotion?.nav();if(!quiet)$('content').innerHTML=empty('正在加载…','loader-circle');refreshIcons();
+    const requestId=++renderId;const def=sections.find(s=>s[0]===section);$('breadcrumb').textContent=def[1];$('pageTitle').textContent=def[1];$('app').dataset.section=section;$('pageDescription').textContent=def[3];document.querySelectorAll('[data-section]').forEach(b=>b.classList.toggle('active',b.dataset.section===section));window.CloudMotion?.nav();if(!quiet&&lastRenderedSection!==section)$('content').innerHTML=empty('正在加载…','loader-circle');refreshIcons();
     let html='',pendingLocations=false;
     if(section==='platform'){html=await CloudPlatform.render(page);
     }else if(section==='overview'){
@@ -153,7 +153,7 @@
     }else if(section==='settings'){
       const d=await api(base+'/settings');const pending=await api(base+'/uploads');html=`<section class="panel settings-form"><h3>分享设置</h3><form id="settingsForm"><label>分享者名称（可选）<input name="display_name" maxlength="80" value="${esc(d.display_name)}"></label><label>单文件最大体积（MB，最大 500）<input type="number" name="max_mb" min="0.01" max="500" step="0.01" value="${d.max_upload_bytes/1024**2}" required></label><button class="primary">保存设置</button></form><h3 class="section-title">对象存储</h3><p>${d.oss_configured?'<span class="badge">已连接现有 OSS</span>':'<span class="badge off">尚未配置 OSS</span>'}</p><p class="muted">Bucket：${esc(d.bucket||'—')}</p><div class="notice">复用现有存储配置，无需重复填写密钥。文件使用私有访问，预览与下载链接有效期为 5 分钟。上传采用分片直传。</div><h3 class="section-title">未完成上传</h3>${pending.items.length?pending.items.map(f=>`<div class="list-row"><div class="list-main"><strong>${esc(f.filename)}</strong><small>${size(f.size)} · ${date(f.created_at)}</small></div><button data-abort="${f.id}">清理</button></div>`).join(''):'<p class="muted">没有未完成的上传。</p>'}<p class="muted"><button type="button" class="quiet version-button" data-version>版本 ${esc(d.version)} · 更新记录</button></p></section>`;
     }
-    if(requestId!==renderId)return;$('content').innerHTML=html;refreshIcons();bindContent();if(!quiet)window.CloudMotion?.reveal($('content'));
+    if(requestId!==renderId)return;$('content').innerHTML=html;refreshIcons();bindContent();if(!quiet&&lastRenderedSection!==section)window.CloudMotion?.reveal($('content'));lastRenderedSection=section;
     if(section==='logs'&&pendingLocations&&logRefreshAttempts<20){logRefreshAttempts++;logRefreshTimer=setTimeout(()=>render(true).catch(()=>{}),2000);}
   }
   function bindContent(){
