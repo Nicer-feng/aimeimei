@@ -8967,6 +8967,37 @@
 .usage-trend-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
 .usage-trend-heading h3 { margin: 0 0 5px; font-size: 17px; }
 .usage-trend-heading p, .usage-trend-note { color: var(--muted); font-size: 12px; line-height: 1.7; }
+/* Labeled controls and adjacent actions share one baseline and control height. */
+:is(.token-filter-row, .usage-time-filter, .media-upload-row, .form-control-row, #readerJump) > label {
+  margin-bottom: 0;
+  min-width: 0;
+}
+:is(.token-filter-row, .usage-time-filter, .media-upload-row, .form-control-row, #readerJump) :is(.ui-btn, .admin-control-trigger, input, select) {
+  min-height: 44px;
+  box-sizing: border-box;
+}
+:is(.token-filter-row, .usage-time-filter, .media-upload-row, .form-control-row, #readerJump) .ui-btn {
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.form-control-row { align-items: end; margin-bottom: 10px; }
+:is(.admin-workspace, .usage-time-filter) input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]) {
+  padding-inline: 12px;
+}
+.library-editor .profile-switch { display: flex; align-items: center; gap: 7px; }
+.library-editor .profile-switch input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+  padding: 0;
+}
+.token-activity-body { grid-auto-rows: max-content; }
+#tokenActivityContent { display: grid; gap: var(--space-4); min-width: 0; }
+.activity-tabs { min-height: 46px; flex-shrink: 0; }
 .usage-trend-heading p { margin: 0; }
 .usage-trend-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .usage-segment { display: inline-flex; flex-shrink: 0; padding: 4px; border: 1px solid var(--line); background: var(--surface-soft); border-radius: 13px; gap: 3px; }
