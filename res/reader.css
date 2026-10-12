@@ -24,6 +24,7 @@
 }
 .reader-library { width: min(560px, calc(100vw - 40px)); max-height: min(700px, 85dvh); overflow: auto; box-sizing: border-box; padding: 22px; background: var(--color-surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); }
 .reader-library::backdrop { background: rgb(20 20 20 / 24%); backdrop-filter: blur(4px); }
+.reader-library.is-file-dragover { outline: 2px dashed var(--accent); outline-offset: -6px; background: var(--accent-soft); }
 .reader-library header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .reader-library h2 { margin: 0; font-size: 18px; }
 .reader-library-tools { display: flex; justify-content: space-between; gap: 12px; }

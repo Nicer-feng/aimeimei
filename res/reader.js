@@ -6,15 +6,15 @@
   let active = false, opening = false, book = null, pages = [], mode = 'scroll';
   let epoch = 0, loading = false, chatSnapshot = null, position = 0, pageNumber = 0;
   let saveTimer = 0, frame = 0, resizeTimer = 0, stamp = 0, owner = '', lastCapture = 0;
-  let enterSerial = 0, librarySerial = 0;
+  let enterSerial = 0, librarySerial = 0, uploading = false, dragDepth = 0;
   const key = (uid, id) => `aiReader:${uid}:${id}`;
   const icons = () => queueLucideRefresh();
   const status = (message = '') => { el('readerLibraryStatus').textContent = message; };
   const error = (err) => { status(err.message || '暂时无法读取，请稍后重试'); };
   const valid = (ticket, user) => ticket === epoch && state.user === user;
-  async function json(path, options) {
+  async function json(path, options, timeoutMs = 12000) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await api('/api/reading/' + path, { ...options, signal: controller.signal });
       const data = await res.json();
@@ -262,17 +262,55 @@
   el('readerLibraryClose').addEventListener('click', () => library.close());
   library.addEventListener('click', event => { if (event.target === library) { const r = library.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) library.close(); } });
   el('readerUpload').addEventListener('click', () => el('readerFile').click());
-  el('readerFile').addEventListener('change', async () => {
-    const file = el('readerFile').files[0], user = state.user; el('readerFile').value = '';
-    if (!file) return;
+  async function uploadFiles(files) {
+    if (uploading || !desktop.matches || !state.authed) return;
+    if (!files?.length) return;
+    if (files.length !== 1) { status('每次请上传一个 TXT 文件'); return; }
+    const file = files[0], user = state.user;
     if (!/\.txt$/i.test(file.name) || !file.size || file.size > 20 * 1024 * 1024) { status('请选择 20MB 以内的 TXT 文件'); return; }
+    uploading = true;
     el('readerUpload').disabled = true; status('正在上传并整理文本…');
     try {
-      await json('books?filename=' + encodeURIComponent(file.name), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
-      if (state.user === user) await openLibrary();
+      await json('books?filename=' + encodeURIComponent(file.name), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file }, 120000);
+      if (state.user === user && library.open) await openLibrary();
     } catch (err) { if (state.user === user) error(err); }
-    finally { el('readerUpload').disabled = false; }
+    finally { uploading = false; el('readerUpload').disabled = false; }
+  }
+  el('readerFile').addEventListener('change', () => {
+    const files = Array.from(el('readerFile').files); el('readerFile').value = '';
+    void uploadFiles(files);
   });
+  const fileDrag = event => library.open && desktop.matches && Array.from(event.dataTransfer?.types || []).includes('Files');
+  const insideLibrary = event => {
+    const rect = library.getBoundingClientRect();
+    return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+  };
+  const clearDrag = () => { dragDepth = 0; library.classList.remove('is-file-dragover'); };
+  library.addEventListener('dragenter', event => {
+    if (!fileDrag(event)) return;
+    event.preventDefault(); event.stopPropagation(); dragDepth++;
+    if (!uploading && insideLibrary(event)) library.classList.add('is-file-dragover');
+  });
+  library.addEventListener('dragover', event => {
+    if (!fileDrag(event)) return;
+    event.preventDefault(); event.stopPropagation();
+    const accept = !uploading && insideLibrary(event);
+    event.dataTransfer.dropEffect = accept ? 'copy' : 'none';
+    library.classList.toggle('is-file-dragover', accept);
+  });
+  library.addEventListener('dragleave', event => {
+    if (!fileDrag(event)) return;
+    event.stopPropagation();
+    if (--dragDepth <= 0) clearDrag();
+  });
+  library.addEventListener('drop', event => {
+    if (!fileDrag(event)) return;
+    event.preventDefault(); event.stopPropagation(); clearDrag();
+    if (insideLibrary(event)) void uploadFiles(Array.from(event.dataTransfer.files));
+  });
+  library.addEventListener('close', clearDrag);
+  window.addEventListener('dragend', clearDrag);
+  window.addEventListener('blur', clearDrag);
   library.querySelectorAll('[data-reader-mode]').forEach(button => button.addEventListener('click', async () => {
     if (!active || loading) { status('请先选择一本小说开始阅读'); return; }
     capture(); mode = button.dataset.readerMode;
