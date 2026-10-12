@@ -11,6 +11,8 @@ const assert = require('node:assert/strict');
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(String(error)));
     await page.goto(base); await page.waitForFunction(() => state.authed);
+    assert.equal(await page.locator('.side-head #readerToggle').count(), 0);
+    assert.equal(await page.locator('.reader-toolbar #readerToggle').count(), 1);
     await page.evaluate(async () => {
       const { books } = await (await fetch('/api/reading/books')).json();
       for (const book of books) await fetch('/api/reading/books/' + book.id, { method: 'DELETE' });
@@ -26,6 +28,10 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('#prompt').inputValue(), '保留的聊天草稿');
     assert.equal(await page.locator('#messages').evaluate(n => getComputedStyle(n).visibility), 'hidden');
     assert.equal(await page.locator('#readerMessages script').count(), 0);
+    const toggleRect = await page.locator('#readerToggle').boundingBox();
+    const controlsRect = await page.locator('#readerControls').boundingBox();
+    assert.ok(toggleRect.x + toggleRect.width <= controlsRect.x);
+    assert.ok(Math.abs(toggleRect.y - controlsRect.y) < 6);
     for (let i = 0; i < 12; i++) {
       const last = await page.locator('.reader-page').last().getAttribute('data-reader-page');
       await page.locator('#readerMessages').evaluate(n => { n.scrollTop = n.scrollHeight; });

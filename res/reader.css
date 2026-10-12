@@ -11,13 +11,17 @@
 .reader-page .role { display: flex; align-items: center; gap: 8px; }
 .reader-page .role img { width: 24px; height: 24px; border-radius: 50%; }
 .reader-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 12px 0 0; user-select: text; }
-.reader-controls { display: flex; align-items: center; gap: 3px; position: absolute; top: 8px; right: 46px; }
+.reader-toolbar { display: flex; align-items: center; gap: 6px; position: absolute; top: 8px; right: 46px; z-index: 2; }
+.reader-controls { display: flex; align-items: center; gap: 3px; }
 .reader-controls button { background: transparent; color: var(--muted-2); border: 0; border-radius: 6px; min-height: 26px; padding: 2px 5px; font-size: 11px; cursor: pointer; }
 .reader-controls .ui-icon-btn { width: 24px; min-width: 24px; height: 26px; }
 .reader-controls .lucide { width: 14px; height: 14px; }
 .reader-controls button:hover { color: var(--text); background: var(--accent-soft); }
 .reader-controls button:disabled { opacity: .3; cursor: default; }
-.reading-mode .composer-chip-row { padding-right: 200px; }
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .composer-chip-row { padding-right: 80px; }
+  .reading-mode .composer-chip-row { padding-right: 240px; }
+}
 .reader-library { width: min(560px, calc(100vw - 40px)); max-height: min(700px, 85dvh); overflow: auto; box-sizing: border-box; padding: 22px; background: var(--color-surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); }
 .reader-library::backdrop { background: rgb(20 20 20 / 24%); backdrop-filter: blur(4px); }
 .reader-library header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
