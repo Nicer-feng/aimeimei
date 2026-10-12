@@ -595,7 +595,7 @@ AI槑槑 v2.26.7、槑槑云 v0.5.2，构建 `20260927-191015`。按用户要求
 - 云端保留 CloudMotion API；普通弹窗收回有 revision 保护，菜单继续使用浏览器 top layer，Office/PDF 编辑器只动画外部工具栏，保存/放弃确认保持原逻辑。
 - 原仓库地址 `https://github.com/wbr664393425-lgtm/scaffold-master`，许可保存于 `res/vendor/scaffold-master.LICENSE`。没有引入 Vue 或 GSAP 运行时。
 - 两产品构建 `20261012-195040`，限定静态文件发布，无需重启或数据库迁移。测试脚本 `scripts/test_ui_motion.js` 必须使用两个隔离本地测试服务；性能数据来自本地模拟流式渲染，不能替代真实设备与上游 API 的性能结论。
-- 当前本地已完成验证，发布包上传被自动审批拦截，等待本次上传部署的明确确认；尚未上线。不得将本地 VERSION 当作公网版本。
+- 用户已明确确认两产品推送与部署。限定文件静态发布，备份目录 `/opt/ai-platform-release-backups/motion-ai-2.28.4-cloud-0.6.3-20261012-195040/`；发布结果以公网版本、页面资源与安装哈希核验为准。
 
 ### v2.28.3 表单控件对齐
 
