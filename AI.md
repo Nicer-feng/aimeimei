@@ -7,8 +7,8 @@
 - 项目名称：AI槑槑。
 - GitHub：`git@github.com:Nicer-feng/aimeimei.git`。
 - 主分支：`main`。
-- 当前基线版本：`2.27.1`。
-- 当前基线构建：`20261012-091828`。
+- 当前基线版本：`2.28.0`。
+- 当前基线构建：`20261012-093455`。
 - 当前材料附件行为：新上传材料默认只绑定本条用户消息；通过聊天顶部“当前对话文件”可显式设为持续参考，旧 `conversation_documents` 仍代表持续参考材料。
 - 当前基线提交：以 `git log -1 --oneline` 为准（发布后需同步本段）。
 - 本地实际仓库：`/Users/feng/Documents/文稿 - Unknown/aliyun3129`。
@@ -572,3 +572,13 @@ AI槑槑 v2.26.7、槑槑云 v0.5.2，构建 `20260927-191015`。按用户要求
 - 原 TXT 复用 `infrastructure.storage.PrivateOSS`、现有 MEDIA/CAT 凭据，存入 **`share/reading/{user_id}/`**，采用 V4 签名且上传后验证匿名读取被拒绝。不要换回 `documents/reading`：真实预检发现该目录 Bucket Policy 允许匿名 GET，且当前凭据不能 DELETE。两个仅含合成测试文字的预检对象未能删除：`documents/reading/test/3f17f22c7f304554abb4c55061f13b53.txt`、`documents/reading/test/connectivity-v2270.txt`；没有上传用户小说，后续有授权时可由 OSS 管理员删除。
 - 隔离接口回归：`python3 scripts/test_reading.py`。浏览器：启动 `python3 scripts/test_reading.py --serve` 后，使用其 loopback URL 设置 `READER_TEST_URL`，运行 `scripts/test_reading_ui.js`（需要 Playwright）。涵盖大文本、7 页窗口、翻页、进度恢复、草稿、桌面/窄屏、账号隔离；流式并发使用模拟 SSE，不调用付费模型。真实 OSS 私有读写/删除已单独验证。
 - 已部署构建 `20261010-185908`，备份 `/opt/ai-platform-release-backups/reader-2.27.0-20261010-185908/` 含旧代码和 SQLite 一致性快照。发布前 Office/PDF 活跃编辑数均为 0；重启、14 份文件校验、公网版本/资源哈希/匿名 401 正常。生产临时账号真实 TXT 上传、读取、保存进度、删除通过，账号和该验收文件已清理。原聊天状态 21 项回归通过。
+
+### 2026-10-12 有效使用时长 v2.28.0
+
+- 构建 `20261012-093455`。新增 `ai_platform/usage_time.py`、`handlers/usage_time.py`、`res/usage-clock.js`、`usage-time.js/css`，独立于消息与模型调用。
+- 后台“使用时长”看全部账号，Token 活动的“使用时长”Tab 只看自己。今天/近7天/近30天/自定义范围、账号筛选排序、点击后才查每日明细。权限由后端控制。
+- 固定 120 秒无有效操作暂停，约 30 秒同步，前台焦点/可信输入/单调时钟共同判断。`usage_time_events` 去重近期报告，`usage_time_daily` 保存北京时间日累计；同账号重叠区间只算一次，重叠模式按先接受的报告归类。浏览器上报不可作为防作弊考勤，不回填历史。
+- 阅读时打开书架、管理或活动弹层记为普通工作模式，关闭恢复。不上报输入内容。仅对 body/弹层 class 与 dialog open 做窄范围观察，不观察消息 DOM，不在鼠标移动或每个 token 时重绘。
+- 契约与统计边界见 `docs/usage-time.md`。测试：`scripts/test_usage_clock.js`、`test_usage_time.py`、`test_usage_time_ui.js`；浏览器失焦用 blur 事件模拟（headless 限制），其他 UI/请求实际运行在临时后端。包含并发重试、随机区间并集、跨日和账号隔离。
+- 发布备份目录：`/opt/ai-platform-release-backups/usage-time-2.28.0-20261012-093455/`。本版本需服务重启以幂等创建两张独立统计表，不改历史聊天数据。
+- 已上线并验证 17 份发布文件、新增表与健康接口；生产临时账号的入账、重复/重叠去重、个人隔离、管理员明细查询均通过，测试账号和统计已清理。公网版本、5 份脚本/样式哈希及匿名 401 通过。原聊天 21 项、本地统计与阅读 8 项、单调时钟及浏览器回归通过。没有调用真实模型。

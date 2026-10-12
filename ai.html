@@ -58,8 +58,9 @@
   <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.27.1">
-  <link rel="stylesheet" href="/res/reader.css?v=2.27.1">
+  <link rel="stylesheet" href="/res/ai.css?v=2.28.0">
+  <link rel="stylesheet" href="/res/reader.css?v=2.28.0">
+  <link rel="stylesheet" href="/res/usage-time.css?v=2.28.0">
 
   <link rel="stylesheet" href="/res/markdown.css">
 </head>
@@ -70,7 +71,7 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.27.1</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.28.0</button>
       </div>
       <div class="login-mode-tabs" role="tablist" aria-label="登录方式">
         <button class="login-mode-tab active" id="loginPasswordMode" type="button" role="tab" aria-selected="true"><i data-lucide="key-round" aria-hidden="true"></i><span>密码登录</span></button>
@@ -104,7 +105,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.27.1</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.28.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -117,7 +118,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.27.1</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.28.0</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -176,7 +177,7 @@
 	          </a>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.27.1</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.28.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -691,6 +692,12 @@
 	        <button class="icon ui-icon-btn" id="closeTokenActivity" title="关闭"><i data-lucide="x" aria-hidden="true"></i><span class="icon-fallback">×</span></button>
 	      </div>
 	      <div class="token-activity-body">
+            <div class="token-tabs activity-tabs" role="tablist" aria-label="个人活动统计">
+              <button type="button" role="tab" data-activity-tab="tokens" aria-selected="true" aria-controls="tokenActivityContent">Token 活动</button>
+              <button type="button" role="tab" data-activity-tab="usage" aria-selected="false" aria-controls="personalUsageTime">使用时长</button>
+            </div>
+            <section id="personalUsageTime" role="tabpanel" hidden></section>
+            <div id="tokenActivityContent" role="tabpanel">
 	        <div class="activity-hero">
 	          <div>
 	            <span class="admin-kicker">Personal Dashboard</span>
@@ -728,6 +735,7 @@
 	          </section>
 	        </div>
 	        <div class="status" id="tokenActivityStatus"></div>
+            </div>
 	      </div>
 	    </div>
 	  </section>
@@ -746,6 +754,7 @@
 	        <button class="admin-nav-item" type="button" data-admin-section="tts"><i data-lucide="volume-2" aria-hidden="true"></i><span>语音服务</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="plugins"><i data-lucide="puzzle" aria-hidden="true"></i><span>插件管理</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="tokens"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></button>
+            <button class="admin-nav-item" type="button" data-admin-section="usage"><i data-lucide="clock" aria-hidden="true"></i><span>使用时长</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="costs"><i data-lucide="coins" aria-hidden="true"></i><span>成本统计</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="system"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>系统设置</span></button>
 	      </div>
@@ -949,6 +958,7 @@
 	          </section>
 	        </section>
 
+            <section class="admin-page" data-admin-page="usage"><div id="adminUsageTime"></div></section>
 	        <section class="admin-page" data-admin-page="tokens">
 	          <section class="panel" id="tokenStatsPanel">
 		            <h2 class="panel-title"><i data-lucide="bar-chart-3" aria-hidden="true"></i><span>Token统计</span></h2>
@@ -1075,7 +1085,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.27.1</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.28.0</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -1155,8 +1165,10 @@
       <p id="writingDraftState" class="writing-help"></p><button type="button" id="saveWritingDraft">保存稿件与定稿状态</button>
     </details>
   </dialog>
-	  <script src="/res/ai.js?v=2.27.1"></script>
-      <script src="/res/reader.js?v=2.27.1"></script>
+	  <script src="/res/ai.js?v=2.28.0"></script>
+      <script src="/res/reader.js?v=2.28.0"></script>
+      <script src="/res/usage-clock.js?v=2.28.0"></script>
+      <script src="/res/usage-time.js?v=2.28.0"></script>
 
 </body>
 </html>

@@ -15,6 +15,7 @@ from file_share.database import init_share_db
 
 from ai_platform.database import db, init_db
 from ai_platform.handlers.reading import ReadingHandlersMixin
+from ai_platform.handlers.usage_time import UsageTimeHandlersMixin
 from ai_platform.handlers import (
     AdminHandlersMixin,
     AuthHandlersMixin,
@@ -52,6 +53,7 @@ from ai_platform.settings import (
 
 
 class AppHandler(
+    UsageTimeHandlersMixin,
     ReadingHandlersMixin,
     GiftHandlersMixin,
     FileShareHandlersMixin,
@@ -75,6 +77,8 @@ class AppHandler(
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path.startswith('/api/usage-time/'):
+            return self.require_user(self.handle_usage_time)
         if path.startswith("/api/reading/"):
             return self.require_user(self.handle_reading)
         if path.startswith("/api/gifts/"):
@@ -224,6 +228,8 @@ class AppHandler(
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path.startswith('/api/usage-time/'):
+            return self.require_user(self.handle_usage_time)
         if path.startswith("/api/reading/"):
             return self.require_user(self.handle_reading)
         if path.startswith("/api/gifts/"):

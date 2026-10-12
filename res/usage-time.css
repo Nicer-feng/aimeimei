@@ -1,0 +1,25 @@
+.usage-time-view { min-width: 0; color: var(--text); }
+.usage-time-filter { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+.usage-time-filter label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.usage-time-filter input, .usage-time-filter select { min-height: 38px; max-width: 100%; }
+.usage-time-summary { display: grid; grid-template-columns: repeat(auto-fit,minmax(140px,1fr)); gap: 12px; margin-bottom: 14px; }
+.usage-time-metric { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--color-surface); }
+.usage-time-metric span { display: block; color: var(--muted); font-size: 12px; }
+.usage-time-metric strong { display: block; margin-top: 8px; font-size: 22px; font-variant-numeric: tabular-nums; }
+.usage-time-note, .usage-time-status { font-size: 12px; line-height: 1.6; color: var(--muted); }
+.usage-time-status { min-height: 20px; }
+.usage-time-account { border-bottom: 1px solid var(--line); padding: 16px 0; }
+.usage-time-account-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.usage-time-account-head > div { min-width: 0; overflow-wrap: anywhere; }
+.usage-time-account-head small { display: block; color: var(--muted); margin-top: 5px; }
+.usage-time-account-head button { flex-shrink: 0; }
+.usage-time-account-numbers { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 12px; }
+.usage-time-account-numbers strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.usage-time-table-scroll { overflow-x: auto; max-width: 100%; margin-top: 14px; }
+.usage-time-table-scroll table { width: 100%; min-width: 440px; border-collapse: collapse; font-size: 13px; }
+.usage-time-table-scroll th, .usage-time-table-scroll td { padding: 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.usage-time-table-scroll th { color: var(--muted); font-weight: 500; }
+#tokenActivityContent[hidden], #personalUsageTime[hidden], .usage-time-detail[hidden] { display: none; }
+.activity-tabs { margin-bottom: 20px; }
+.activity-tabs [aria-selected="true"] { background: var(--accent-soft); color: var(--accent-strong); }
+@media(max-width:600px) { .usage-time-summary { grid-template-columns: repeat(2,minmax(0,1fr)); } .usage-time-metric strong { font-size: 18px; } .usage-time-filter label { flex: 1 1 130px; min-width: 0; } }

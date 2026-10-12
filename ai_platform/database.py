@@ -2,6 +2,7 @@ import sqlite3
 
 from .runtime import b64_token, now, password_hash, read_json
 from .reading import init_reading_tables
+from .usage_time import init_usage_time_tables
 from .settings import (
     DATA_DIR,
     DB_PATH,
@@ -501,6 +502,7 @@ def init_db(secrets_data=None):
         )
 
         init_reading_tables(conn)
+        init_usage_time_tables(conn)
         default_user_id = ensure_default_ai_user(conn, secrets_data)
 
         model_columns = table_columns(conn, "models")

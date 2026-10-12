@@ -173,6 +173,7 @@
       } catch {}
       if (!active) chatSnapshot = { top: el('messages').scrollTop, follow: state.followOutput };
       active = true; state.followOutput = false;
+      window.MeimeiUsage?.modeChanged();
       document.body.classList.add('reading-mode'); root.hidden = false; el('messages').inert = true;
       el('readerControls').hidden = false; el('readerToggle').setAttribute('aria-pressed', 'true');
       hideSelectionToolbar();
@@ -188,6 +189,7 @@
     ++epoch; ++enterSerial; opening = false; loading = false;
     if (!active) return;
     active = false;
+    window.MeimeiUsage?.modeChanged();
     document.body.classList.remove('reading-mode'); root.hidden = true; el('messages').inert = false;
     el('readerControls').hidden = true; el('readerToggle').setAttribute('aria-pressed', 'false');
     el('readerToggle').title = '摸鱼模式';

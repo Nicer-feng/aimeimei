@@ -469,6 +469,7 @@
 	    function applyCurrentUser(user) {
           if (state.user?.id !== user?.id) resetTokenStats();
 	      state.user = user || null;
+          globalThis.MeimeiUsage?.accountChanged();
 	      const label = $("currentUserLabel");
 	      if (label) {
 	        label.textContent = state.user ? (state.user.display_name || state.user.username) : "未登录";
@@ -4363,7 +4364,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.27.1" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.28.0" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8529,6 +8530,7 @@
 	      tts: { title: "语音服务", desc: "配置豆包 TTS、可用音色、默认语速和 OSS 音频缓存。" },
 	      plugins: { title: "插件管理", desc: "查看图片、听悟、搜索、提示词等功能状态，后续可扩展独立开关。" },
 	      tokens: { title: "Token统计", desc: "查看近 7／30 天用量趋势，按账号、模型和日期下钻明细。" },
+          usage: { title: "使用时长", desc: "按账号查看工作与摸鱼模式的有效使用时间。" },
 	      costs: { title: "成本统计", desc: "对照费用、Token 与调用趋势，查看模型和用户成本排行。" },
 	      system: { title: "系统设置", desc: "修改登录密码并查看系统基础信息。" }
 	    };
@@ -8560,6 +8562,7 @@
 	        renderPluginStatus();
 	      }
 	      if (key === "tokens") { loadTokenStats(); loadUsageTrend(); }
+          if (key === "usage") globalThis.MeimeiUsage?.openAdmin();
 	      if (key === "costs") loadCostStats();
       if (key === "system") loadAdminSmsAuth();
 	      queueLucideRefresh();
@@ -9714,6 +9717,7 @@
 	    async function openTokenActivity() {
 	      $("tokenActivityDialog").classList.add("show");
 	      setDialogOpenState();
+          if (!$("personalUsageTime").hidden) { globalThis.MeimeiUsage?.openPersonal(); return; }
 	      await loadTokenActivity();
 	    }
 
