@@ -16,8 +16,7 @@
     [...parent.children].forEach(button => new MutationObserver(update).observe(button, { attributes: true, attributeFilter: ['class','aria-selected'] }));
   });
   window.MeimeiMotion = {
-    admin() { motion.nav(document.querySelector('.admin-nav-list'), '.admin-nav-item.active'); },
-    tools(open) { if (open) motion.reveal(document.getElementById('sidebarToolsPopover'), '.sidebar-tool-card'); }
+    admin() { motion.nav(document.querySelector('.admin-nav-list'), '.admin-nav-item.active'); }
   };
   const resize = new ResizeObserver(() => {
     window.MeimeiMotion.admin();

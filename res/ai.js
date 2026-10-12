@@ -4364,7 +4364,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.28.4" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.28.5" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -10246,10 +10246,7 @@
 	  if (options.save !== false && state.user) {
 	    setUserStorage("sidebar_tools_open", state.sidebarToolsOpen ? "1" : "0");
 	  }
-	  if (state.sidebarToolsOpen) {
-            queueLucideRefresh();
-            window.MeimeiMotion?.tools(true);
-          }
+	  if (state.sidebarToolsOpen && popover?.querySelector('i[data-lucide]')) queueLucideRefresh();
 	}
 
 	function openSidebarTools() {
