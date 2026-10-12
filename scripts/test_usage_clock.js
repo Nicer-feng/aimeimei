@@ -1,5 +1,15 @@
 const assert = require('node:assert/strict');
 const UsageClock = require('../res/usage-clock.js');
+const vm = require('node:vm');
+const fs = require('node:fs');
+for (const crypto of [undefined, { getRandomValues: require('node:crypto').webcrypto.getRandomValues.bind(require('node:crypto').webcrypto) }]) {
+  const context = { crypto, module: { exports: {} } };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../res/usage-clock.js'), 'utf8'), context);
+  const Clock = context.module.exports;
+  const ids = new Set(Array.from({length:1000}, () => Clock.eventId()));
+  assert.equal(ids.size, 1000);
+  for (const id of ids) assert.match(id, /^[a-zA-Z0-9_-]{8,80}$/);
+}
 const sum = c => c.pending.reduce((n,p) => n+p.end_ms-p.start_ms,0);
 const make = () => new UsageClock(1000000,0);
 let c=make();

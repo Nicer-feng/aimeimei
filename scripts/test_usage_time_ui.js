@@ -24,7 +24,7 @@ const assert = require('node:assert/strict');
     await page.evaluate(async()=>{
       await fetch('/api/reading/books?filename=usage-test.txt',{method:'POST',body:'阅读用测试文本。\n'.repeat(400)});
     });
-    await page.locator('#readerToggle').click();await page.waitForFunction(()=>MeimeiReader.active);
+    await page.locator('#readerToggle').click();await page.waitForFunction(()=>MeimeiReader.active && document.querySelector('#readerPages .reader-text'));
     await page.waitForTimeout(5500);
     const reading=await stats();assert.ok(reading.reading_ms>=4000,JSON.stringify(reading));
     await page.evaluate(()=>openTokenActivity());

@@ -6,19 +6,26 @@
   const userId = () => String(state.user?.id || '');
   const visible = () => state.authed && focused && document.visibilityState === 'visible' && document.hasFocus();
   const mode = () => window.MeimeiReader?.active && !document.body.matches('.dialog-open, .admin-open, .full-composer-open') && !document.querySelector('dialog[open], #tokenActivityDialog.show') ? 'reading' : 'work';
+  function pauseTracking() {
+    clock = null; nextSync = performance.now() + 30000;
+    console.warn('Usage time tracking paused; it will retry in 30 seconds.');
+  }
   function accountChanged() {
     if (owner === userId()) return;
     owner = userId(); serial++;
     clock = null; syncing = false; sending = false; nextSync = 0;
-    clearViews();
+    try { clearViews(); } catch { pauseTracking(); }
   }
   async function sync() {
     accountChanged();
     if (!owner || clock || syncing || performance.now() < nextSync) return;
     syncing = true;
     const ticket = serial, started = performance.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-      const res = await api('/api/usage-time/config');
+      // Telemetry errors must not invoke the chat API's login/state transitions.
+      const res = await fetch('/api/usage-time/config', { credentials: 'same-origin', signal: controller.signal });
       if (!res.ok) throw new Error();
       const data = await res.json(), ended = performance.now();
       if (ticket !== serial || owner !== userId()) return;
@@ -26,14 +33,19 @@
       clock = new UsageClock(data.server_now_ms + (ended-started)/2, ended, data.idle_ms);
       lastSend = ended;
     } catch { if (ticket === serial) nextSync = performance.now() + 30000; }
-    finally { if (ticket === serial) syncing = false; }
+    finally { clearTimeout(timeout); if (ticket === serial) syncing = false; }
   }
   function tick(activity = false) {
-    accountChanged();
-    if (!clock) { void sync(); return; }
-    clock.step(performance.now(), visible(), mode(), activity);
+    try {
+      accountChanged();
+      if (!clock) { void sync().catch(pauseTracking); return; }
+      clock.step(performance.now(), visible(), mode(), activity);
+    } catch { pauseTracking(); }
   }
   async function flush(keepalive = false) {
+    try { await flushPending(keepalive); } catch { pauseTracking(); }
+  }
+  async function flushPending(keepalive) {
     tick();
     if (!clock || sending || !owner) return;
     const batch = clock.take(performance.now());
@@ -70,6 +82,7 @@
   window.addEventListener('online', () => { tick(); void flush(); });
   setInterval(() => { tick(); if (performance.now()-lastSend >= 30000) void flush(); }, 5000);
   window.MeimeiUsage = { accountChanged, modeChanged() { tick(); void flush(); }, flush };
+  window.addEventListener('meimei:reading-mode-change', () => window.MeimeiUsage.modeChanged());
   const modeObserver = new MutationObserver(() => { if (clock && mode() !== clock.mode) window.MeimeiUsage.modeChanged(); });
   modeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
   modeObserver.observe(document.getElementById('tokenActivityDialog'), { attributes: true, attributeFilter: ['class'] });

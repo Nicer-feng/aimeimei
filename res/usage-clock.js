@@ -1,5 +1,14 @@
 /* Monotonic time only: a suspended tab never accrues the missing interval. */
 class UsageClock {
+  static eventId() {
+    if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
+    if (typeof globalThis.crypto?.getRandomValues === 'function') {
+      return Array.from(globalThis.crypto.getRandomValues(new Uint32Array(4)), n => n.toString(16).padStart(8, '0')).join('');
+    }
+    // Deduplication key only, never an authentication token; also works on HTTP.
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${++UsageClock.sequence}`;
+  }
+  static sequence = 0;
   constructor(serverNow, now, idleMs = 120000) {
     this.origin = serverNow - now;
     this.last = now;
@@ -26,7 +35,7 @@ class UsageClock {
     if (end <= start) return;
     const previous = this.pending.at(-1);
     if (previous && previous.mode === mode && previous.end_ms === start && end-previous.start_ms <= 30000) previous.end_ms = end;
-    else this.pending.push({ id: crypto.randomUUID(), start_ms: start, end_ms: end, mode });
+    else this.pending.push({ id: UsageClock.eventId(), start_ms: start, end_ms: end, mode });
   }
   take(now) {
     const cutoff = Math.round(now + this.origin) - 110000;

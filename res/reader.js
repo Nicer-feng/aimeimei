@@ -13,10 +13,17 @@
   const error = (err) => { status(err.message || '暂时无法读取，请稍后重试'); };
   const valid = (ticket, user) => ticket === epoch && state.user === user;
   async function json(path, options) {
-    const res = await api('/api/reading/' + path, options);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '请求失败，请重试');
-    return data;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    try {
+      const res = await api('/api/reading/' + path, { ...options, signal: controller.signal });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '请求失败，请重试');
+      return data;
+    } catch (err) {
+      if (controller.signal.aborted) throw new Error('内容加载超时，请重新打开阅读');
+      throw err;
+    } finally { clearTimeout(timer); }
   }
   function controls() {
     if (!book) return;
@@ -173,9 +180,9 @@
       } catch {}
       if (!active) chatSnapshot = { top: el('messages').scrollTop, follow: state.followOutput };
       active = true; state.followOutput = false;
-      window.MeimeiUsage?.modeChanged();
       document.body.classList.add('reading-mode'); root.hidden = false; el('messages').inert = true;
       el('readerControls').hidden = false; el('readerToggle').setAttribute('aria-pressed', 'true');
+      window.dispatchEvent(new Event('meimei:reading-mode-change'));
       hideSelectionToolbar();
       library.close();
       await loadWindow(`offset=${position}`);
@@ -189,9 +196,9 @@
     ++epoch; ++enterSerial; opening = false; loading = false;
     if (!active) return;
     active = false;
-    window.MeimeiUsage?.modeChanged();
     document.body.classList.remove('reading-mode'); root.hidden = true; el('messages').inert = false;
     el('readerControls').hidden = true; el('readerToggle').setAttribute('aria-pressed', 'false');
+    window.dispatchEvent(new Event('meimei:reading-mode-change'));
     el('readerToggle').title = '摸鱼模式';
     if (chatSnapshot) { el('messages').scrollTop = chatSnapshot.top; state.followOutput = chatSnapshot.follow; }
     updateScrollLatestButton();
