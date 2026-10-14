@@ -23,6 +23,7 @@ from .office_preview import office_preview, PreviewError
 from .office_service import OfficeService, OfficeServiceError
 from .pdf_service import PdfService, PdfServiceError
 from .imm_office import IMMWebOfficeError
+from .storage_diagnostics import DiagnosticOSS, storage_failure
 from .security import classify, client_info, hash_password, verify_password
 
 ROOT = Path(__file__).resolve().parent
@@ -129,9 +130,9 @@ class FileShareHandlersMixin:
             return self.error(503, '数据库繁忙，请稍后重试')
         except ImportError:
             return self.error(503, '文件分享依赖未安装，请安装 file_share/requirements.txt')
-        except (HTTPError, URLError, TimeoutError, OSError):
-            # Never return upstream URLs (which may contain signatures) or credentials.
-            return self.error(502, '存储操作失败，请检查 OSS 配置、权限和网络后重试')
+        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            return self.error(502, storage_failure(exc, detailed=
+                urlparse(self.path).path.startswith('/api/file-share/admin/uploads')))
 
     def fs_platform(self, path, data, actor):
         if path == '/report' and self.command == 'GET':
@@ -159,7 +160,7 @@ class FileShareHandlersMixin:
         require(config['configured'], '现有 OSS 尚未配置', 503)
         if row:
             require(row['bucket'] == config['bucket'], '文件所属存储与当前配置不一致，请联系管理员', 409)
-        return PrivateOSS(config)
+        return DiagnosticOSS(config)
 
     def fs_audit(self, conn, user_id, action, target):
         conn.execute('INSERT INTO share_audit_logs(user_id,action,target_id,ip,created_at) VALUES(?,?,?,?,?)',
