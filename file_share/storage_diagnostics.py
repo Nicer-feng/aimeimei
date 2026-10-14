@@ -1,4 +1,5 @@
 """Bounded OSS diagnostics: never expose URLs, response messages or credentials."""
+import base64
 import logging
 import re
 import uuid
@@ -43,15 +44,27 @@ def storage_failure(exc, detailed=False):
     if isinstance(exc, HTTPError):
         status = exc.code
         request_id = safe_token((exc.headers or {}).get('x-oss-request-id', ''))
+        payloads = []
         try:
-            payload = exc.read(8192)
-            # Do not expand XML entities from untrusted upstream error responses.
-            if b'<!DOCTYPE' not in payload.upper() and b'<!ENTITY' not in payload.upper():
-                root = ET.fromstring(payload)
-                code = safe_token(root.findtext('Code'))
-                request_id = request_id or safe_token(root.findtext('RequestId'))
+            payloads.append(exc.read(8192))
         except Exception:
             pass
+        # HEAD errors carry their XML in a base64 header, without a body.
+        encoded = (exc.headers or {}).get('x-oss-err', '')
+        if isinstance(encoded, str) and len(encoded) <= 12000:
+            try:
+                payloads.append(base64.b64decode(encoded, validate=True))
+            except (ValueError, TypeError):
+                pass
+        for payload in payloads:
+            try:
+                if len(payload) > 8192 or b'<!DOCTYPE' in payload.upper() or b'<!ENTITY' in payload.upper():
+                    continue
+                root = ET.fromstring(payload)
+                code = code or safe_token(root.findtext('Code'))
+                request_id = request_id or safe_token(root.findtext('RequestId'))
+            except ET.ParseError:
+                pass
         category = 'HTTP' + str(status)
     elif isinstance(exc, TimeoutError) or (isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)):
         category = 'Timeout'
