@@ -114,7 +114,15 @@ class OfficeService:
         self._admin()
         parts = path.strip('/').split('/')
         method = self.handler.command
-        if method == 'GET' and parts == ['config']:
+        if type(self) is OfficeService and method == 'POST':
+            with read_connection() as conn:
+                collaborative = None
+                if len(parts) == 3 and parts[0] == 'sessions':
+                    collaborative = conn.execute('SELECT 1 FROM share_office_rooms WHERE session_id=?',(parts[1],)).fetchone()
+                elif len(parts) == 3 and parts[0] == 'files' and parts[2] == 'publish':
+                    collaborative = conn.execute('SELECT 1 FROM share_office_rooms r JOIN share_office_sessions s ON s.id=r.session_id WHERE s.file_id=?',(parts[1],)).fetchone()
+                ensure(not collaborative, '此文档使用协作编辑，请使用协作接口', 409)
+        if method == 'GET'  and parts == ['config']:
             settings = self._settings()
             return self.handler.json({key: settings[key] for key in ('enabled', 'max_bytes', 'formats')})
         if len(parts) == 3 and parts[0] == 'files' and parts[2] == 'versions' and method == 'GET':
@@ -267,6 +275,12 @@ class OfficeService:
         with lock:
             return self._snapshot_locked(session_id)
 
+    def _validate_snapshot(self, conn, session_id):
+        active = conn.execute('SELECT status,expires_at FROM share_office_sessions WHERE id=? AND user_id=?',
+                              (session_id, self.user_id)).fetchone()
+        ensure(active and active['status'] == 'ACTIVE' and active['expires_at'] > now(),
+               '编辑会话已结束，请重新打开文件', 409)
+
     def _snapshot_locked(self, session_id):
         self._enabled()
         session, file = self._session(session_id)
@@ -305,11 +319,8 @@ class OfficeService:
             digest, count = oss.sha256(version_key)
             ensure(count == size, '版本文件校验失败，请重试', 502)
             with transaction() as conn:
-                active = conn.execute('SELECT status,expires_at FROM share_office_sessions WHERE id=? AND user_id=?',
-                                      (session_id, self.user_id)).fetchone()
+                self._validate_snapshot(conn, session_id)
                 current = self._owned_file(conn, file['id'])
-                ensure(active and active['status'] == 'ACTIVE' and active['expires_at'] > now(),
-                       '编辑会话已结束，请重新打开文件', 409)
                 number = conn.execute('SELECT COALESCE(MAX(version_no),0)+1 FROM share_office_versions WHERE file_id=?',
                                       (file['id'],)).fetchone()[0]
                 conn.execute('INSERT INTO share_office_versions '

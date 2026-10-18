@@ -96,3 +96,24 @@ CREATE TABLE IF NOT EXISTS share_members (
 );
 CREATE INDEX IF NOT EXISTS sal_time ON share_access_logs(created_at);
 CREATE INDEX IF NOT EXISTS share_audit_action_time ON share_audit_logs(action,created_at);
+
+-- Shared IMM workspaces keep the existing room/version lifecycle. Tokens belong
+-- to individual browser connections, never to the shared collaboration room.
+CREATE TABLE IF NOT EXISTS share_office_collaborators (
+ file_id TEXT NOT NULL REFERENCES share_files(id), user_id TEXT NOT NULL REFERENCES users(id),
+ invited_by TEXT NOT NULL, created_at INTEGER NOT NULL,
+ PRIMARY KEY(file_id,user_id)
+);
+CREATE INDEX IF NOT EXISTS soc_member ON share_office_collaborators(user_id,file_id);
+CREATE TABLE IF NOT EXISTS share_office_rooms (
+ session_id TEXT PRIMARY KEY REFERENCES share_office_sessions(id),
+ original_draft_key TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS share_office_participants (
+ id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES share_office_rooms(session_id),
+ user_id TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL,
+ access_token_hash TEXT NOT NULL, refresh_token_hash TEXT NOT NULL,
+ expires_at INTEGER NOT NULL, refresh_expires_at INTEGER NOT NULL,
+ last_seen_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sop_room ON share_office_participants(room_id,user_id,status);

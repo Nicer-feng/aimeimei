@@ -2,12 +2,12 @@
 (async()=>{
   const {$,esc,icon,fileIcon,refreshIcons,size,date,badge,actions,api,toast,dialog,close,copy,preview}=FS;
   const base='/api/file-share/admin';
-  const sections=[['overview','概览','layout-dashboard','让每一次文件交付，简单而有序。'],['files','我的文件','files','管理文件，为它们创建安全的分享链接。'],['shares','分享','link','决定谁可以访问，以及何时结束。'],['logs','访问记录','activity','查看每一次访问、预览与下载请求。'],['trash','回收站','trash-2','误删的文件可以恢复，永久删除前会再次确认。'],['settings','设置','settings-2','分享中心的独立偏好设置。']];
+  const sections=[['overview','概览','layout-dashboard','让每一次文件交付，简单而有序。'],['files','我的文件','files','管理文件，为它们创建安全的分享链接。'],['collaboration','与我协作','users','登录后加入受邀文档，共同编辑与保存版本。'],['shares','分享','link','决定谁可以访问，以及何时结束。'],['logs','访问记录','activity','查看每一次访问、预览与下载请求。'],['trash','回收站','trash-2','误删的文件可以恢复，永久删除前会再次确认。'],['settings','设置','settings-2','分享中心的独立偏好设置。']];
   let platformAdmin=false;
   sections.push(['platform','平台管理','shield-check','查看槑槑云用户、存储和访问情况。']);
   let section='files',page=1,filters={search:'',type:'',sort:'newest'},currentFiles=[],selected=new Map(),renderId=0,captchaId='',uploading=false,lastRenderedSection='';
   const office=window.CloudOffice,pdf=window.CloudPdfEditor;
-  office.configure({base,api,toast,esc,size,refreshIcons,onChanged:async()=>{if(section==='files')await render(true);}});
+  office.configure({base,api,toast,esc,size,refreshIcons,onChanged:async()=>{if(['files','collaboration'].includes(section))await render(true);}});
   pdf.configure({base,api,toast,esc,size,refreshIcons,onChanged:async()=>{if(section==='files')await render(true);}});
 
   let fileView='list',fileRefreshBusy=false,lastFileRefresh=0;
@@ -52,7 +52,7 @@
     if(!access){$('login').hidden=false;$('app').hidden=true;await Promise.all([captcha(),loadSmsConfig()]);$('loginError').textContent=accessError;refreshIcons();return false;}
     platformAdmin=access.platform_admin;
     office.setCapabilities(access.capabilities);pdf.setCapabilities(access.capabilities);
-    if(access.capabilities?.edit_office){try{office.setConfig(await api(base+'/office/config'));}catch{office.setConfig({enabled:false});}}
+    if(access.capabilities?.edit_office){try{office.setConfig(await api(base+'/office/collaboration/config'));}catch{office.setConfig({enabled:false});}}
     $('nav').innerHTML=sections.filter(s=>s[0]!=='platform'||platformAdmin).map(([key,label,image])=>`<button data-section="${key}">${icon(image)}${label}</button>`).join('');
     $('login').hidden=true;$('app').hidden=false;$('account').textContent=me.user.display_name||me.user.username;
     await navigate(location.hash.slice(1)||'files');checkVersion();return true;
@@ -139,6 +139,7 @@
     closeFileMenu();
     clearTimeout(logRefreshTimer);
     const requestId=++renderId;const def=sections.find(s=>s[0]===section);$('breadcrumb').textContent=def[1];$('pageTitle').textContent=def[1];$('app').dataset.section=section;$('pageDescription').textContent=def[3];document.querySelectorAll('[data-section]').forEach(b=>b.classList.toggle('active',b.dataset.section===section));window.CloudMotion?.nav();if(!quiet&&lastRenderedSection!==section)$('content').innerHTML=empty('正在加载…','loader-circle');refreshIcons();
+    $('createShare').hidden=section==='collaboration';$('uploadButton').hidden=section==='collaboration';
     let html='',pendingLocations=false;
     if(section==='platform'){html=await CloudPlatform.render(page);
     }else if(section==='overview'){
@@ -148,6 +149,9 @@
       html=(section==='files'?`<div id="dropzone" class="dropzone" role="button" tabindex="0">${icon('cloud-upload')} 拖拽文件到这里，或点击选择文件 <small>· 单文件最大 500 MB</small></div>`:'')+`<div class="toolbar"><input id="searchFiles" placeholder="搜索文件名" aria-label="搜索文件名" value="${esc(filters.search)}"><select id="typeFilter" aria-label="文件类型"><option value="">全部类型</option>${['IMAGE','VIDEO','AUDIO','PDF','WORD','EXCEL','PPT','ARCHIVE','TEXT','OTHER'].map(t=>`<option ${filters.type===t?'selected':''}>${t}</option>`).join('')}</select><select id="sortFilter" aria-label="上传时间排序"><option value="newest" ${filters.sort==='newest'?'selected':''}>最新上传</option><option value="oldest" ${filters.sort==='oldest'?'selected':''}>最早上传</option></select><button id="searchButton">搜索</button><button id="refreshFiles" aria-label="刷新文件">${icon('refresh-cw')}刷新</button>${section==='files'?`<div class="view-switch" role="group" aria-label="文件展示方式">${[['list','列表','list'],['small','小图标','grid-2x2'],['large','大图标','layout-grid']].map(([key,label,img])=>`<button data-view="${key}" aria-pressed="${fileView===key}" title="${label}">${icon(img)}<span>${label}</span></button>`).join('')}</div>`:''}</div>`;
       if(section==='files'&&office.hint())html+=`<p class="muted file-hint">${esc(office.hint())}</p>`;
       html+=section==='files'&&fileView!=='list'?iconFiles(d.items):d.items.length?`<div class="table-wrap"><table><thead><tr>${section==='files'?'<th><input type="checkbox" id="selectAll" aria-label="选择本页全部文件"></th>':''}<th>文件名</th><th>大小</th><th>上传时间</th><th class="file-secondary" title="仅统计已保存的文档和 PDF 版本，草稿自动同步不计">最近保存版本</th><th class="file-secondary">分享</th><th class="file-secondary">访问 / 下载</th><th>操作</th></tr></thead><tbody>${d.items.map(f=>`<tr data-file-row="${f.id}">${section==='files'?`<td><input type="checkbox" data-select="${f.id}" aria-label="选择 ${esc(f.filename)}" ${selected.has(f.id)?'checked':''}></td>`:''}<td><div class="file-cell">${fileIcon(f)}<span class="filename">${esc(f.filename)}<br><small>${f.file_type}<span class="file-mobile-meta"> · ${size(f.size)}</span></small></span></div></td><td>${size(f.size)}</td><td>${date(f.created_at)}</td><td class="file-time file-secondary">${f.last_edited_at?date(f.last_edited_at):'—'}</td><td class="file-secondary">${f.active_share_count?'分享中':'未分享'}<br><small>累计 ${f.share_count} 次</small></td><td class="file-secondary">${f.view_count} / ${f.download_count}</td><td><div class="table-actions">${section==='trash'?`<button data-file="${f.id}" data-action="restore">恢复</button><button data-file="${f.id}" data-action="purge" class="danger">永久删除</button>`:`<button data-file="${f.id}" data-action="preview">预览</button><button data-single-share="${f.id}">分享</button><button class="icon-button quiet" data-menu="${f.id}" aria-label="${esc(f.filename)}的详情与更多操作">${icon('ellipsis')}</button>`}</div></td></tr>`).join('')}</tbody></table></div>`:empty(section==='trash'?'回收站是空的':'暂无匹配文件','files');html+=pagination(d.total);if(section==='files')html='<div id="fileWorkspace">'+html+'</div>';
+    }else if(section==='collaboration'){
+      const d=await api(base+'/office/collaboration/shared?page='+page);if(requestId!==renderId)return;currentFiles=d.items;
+      html='<div class="toolbar"><button data-go="collaboration">'+icon('refresh-cw')+'刷新协作文档</button></div>'+(d.items.length?`<div class="table-wrap"><table><thead><tr><th>文档名称</th><th>所有者</th><th>大小</th><th>操作</th></tr></thead><tbody>${d.items.map(f=>`<tr><td><div class="file-cell">${fileIcon(f)}<span class="filename">${esc(f.filename)}</span></div></td><td>${esc(f.display_name||f.username)}</td><td>${size(f.size)}</td><td><div class="table-actions"><button data-file="${f.id}" data-action="office-edit" ${office.canEdit(f)?'':'disabled'}>共同编辑</button><button data-file="${f.id}" data-action="office-versions" ${office.canEdit(f)?'':'disabled'}>版本记录</button></div></td></tr>`).join('')}</tbody></table></div>`:empty('暂无协作文档，请让文件所有者通过“管理协作”邀请你的账号','users'))+pagination(d.total);
     }else if(section==='shares'){const d=await api(base+'/shares?page='+page);html=sharesTable(d.items)+pagination(d.total);
     }else if(section==='logs'){const d=await api(base+'/logs?page='+page);pendingLocations=d.items.some(l=>l.geolocation_status==='pending');html='<div class="toolbar"><button id="refreshLogs">'+icon('refresh-cw')+'刷新记录</button></div>'+logTable(d.items)+pagination(d.total);
     }else if(section==='settings'){
@@ -188,6 +192,7 @@
     if(b.dataset.singleShare)return await shareForm(null,[currentFiles.find(f=>f.id===b.dataset.singleShare)]);
     if(b.dataset.file){const file=currentFiles.find(f=>f.id===b.dataset.file),action=b.dataset.action;
       if(action==='rename')return renameFile(file);
+      if(action==='office-members')return await manageCollaboration(file);
       if(action==='office-edit')return await office.open(file);
       if(action==='office-versions')return await office.showVersions(file);
       if(action==='pdf-edit')return await pdf.open(file);
@@ -205,7 +210,7 @@
   function openFileMenu(id,x,y,anchor){
     closeFileMenu();const f=currentFiles.find(f=>f.id===id);if(!f)return;menuAnchor=anchor;
     const menu=document.createElement('div');menu.id='fileContextMenu';menu.className='file-context-menu';menu.setAttribute('role','dialog');menu.setAttribute('aria-label','文件详情与操作');
-    menu.innerHTML=`<strong>${esc(f.filename)}</strong><dl><dt>大小</dt><dd>${size(f.size)}</dd><dt>上传时间</dt><dd>${date(f.created_at)}</dd><dt title="仅统计已保存的文档和 PDF 版本，草稿自动同步不计">最近保存版本</dt><dd>${f.last_edited_at?date(f.last_edited_at):'—'}</dd><dt>分享</dt><dd>${f.active_share_count?'分享中':'未分享'} · 累计 ${f.share_count} 次</dd><dt>访问 / 下载</dt><dd>${f.view_count} / ${f.download_count}</dd></dl><div class="context-actions"><button data-file="${f.id}" data-action="preview">${icon('eye')}预览</button>${office.canEdit(f)?`<button data-file="${f.id}" data-action="office-edit">${icon('file-pen-line')}在线编辑</button><button data-file="${f.id}" data-action="office-versions">${icon('history')}版本记录</button>`:''}${pdf.canEdit(f)?`<button data-file="${f.id}" data-action="pdf-edit">${icon('files')}整理 PDF 页面</button><button data-file="${f.id}" data-action="pdf-versions">${icon('history')}版本记录</button>`:''}<button data-single-share="${f.id}">${icon('link')}创建分享</button><button data-file="${f.id}" data-action="rename">${icon('pencil')}重命名</button><button data-file="${f.id}" data-action="trash" class="danger">${icon('trash-2')}移入回收站</button></div>`;
+    menu.innerHTML=`<strong>${esc(f.filename)}</strong><dl><dt>大小</dt><dd>${size(f.size)}</dd><dt>上传时间</dt><dd>${date(f.created_at)}</dd><dt title="仅统计已保存的文档和 PDF 版本，草稿自动同步不计">最近保存版本</dt><dd>${f.last_edited_at?date(f.last_edited_at):'—'}</dd><dt>分享</dt><dd>${f.active_share_count?'分享中':'未分享'} · 累计 ${f.share_count} 次</dd><dt>访问 / 下载</dt><dd>${f.view_count} / ${f.download_count}</dd></dl><div class="context-actions"><button data-file="${f.id}" data-action="preview">${icon('eye')}预览</button>${office.canEdit(f)?`<button data-file="${f.id}" data-action="office-edit">${icon('file-pen-line')}在线编辑</button><button data-file="${f.id}" data-action="office-versions">${icon('history')}版本记录</button><button data-file="${f.id}" data-action="office-members">${icon('users')}管理协作</button>`:''}${pdf.canEdit(f)?`<button data-file="${f.id}" data-action="pdf-edit">${icon('files')}整理 PDF 页面</button><button data-file="${f.id}" data-action="pdf-versions">${icon('history')}版本记录</button>`:''}<button data-single-share="${f.id}">${icon('link')}创建分享</button><button data-file="${f.id}" data-action="rename">${icon('pencil')}重命名</button><button data-file="${f.id}" data-action="trash" class="danger">${icon('trash-2')}移入回收站</button></div>`;
     document.body.append(menu);refreshIcons();const r=menu.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(x,innerWidth-r.width-8))+'px';menu.style.top=Math.max(8,Math.min(y,innerHeight-r.height-8))+'px';menu.querySelector('button').focus({preventScroll:true});
     menu.onclick=e=>{if(e.target.closest('button')){const handler=$('content').onclick;closeFileMenu();handler(e);}};
     menu.onkeydown=e=>{const buttons=[...menu.querySelectorAll('button')],index=buttons.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Tab'].includes(e.key)){e.preventDefault();buttons[(index+(e.key==='ArrowUp'||e.shiftKey?-1:1)+buttons.length)%buttons.length].focus();}};
@@ -224,6 +229,17 @@
   }
   window.addEventListener('focus',()=>refreshFiles(true));
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshFiles(true);});
+
+  async function manageCollaboration(file){
+    const path=base+'/office/collaboration/files/'+encodeURIComponent(file.id)+'/members';
+    const data=await api(path);
+    dialog('管理协作 · '+file.filename,`<p class="muted">邀请已开通槑槑云的账号共同编辑。成员可保存版本，只有你能发布。最多邀请 5 个账号。</p><form id="inviteOfficeMember"><label>已有账号的用户名<input id="officeMemberUsername" maxlength="100" required autocomplete="off" placeholder="请输入准确用户名"></label><button class="primary" type="submit">邀请共同编辑</button></form><p id="officeMemberError" class="inline-error" role="alert"></p><div>${data.items.length?data.items.map(m=>`<div class="list-row"><div class="list-main"><strong>${esc(m.display_name||m.username)}</strong><small>${esc(m.username)} · 可编辑</small></div><button data-remove-member="${esc(m.user_id)}">移除</button></div>`).join(''):'<p class="muted">尚未邀请协作者。</p>'}</div><p class="muted">移除成员会保存当前已同步草稿并结束本轮协作，其他成员需重新打开。已发出的云端凭证可能在到期前仍能访问隔离的旧草稿，旧草稿后续修改不能发布。</p>`);
+    $('inviteOfficeMember').onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{await api(path,{action:'invite',username:$('officeMemberUsername').value.trim()});close();toast('邀请成功，对方可从“与我协作”进入');await manageCollaboration(file);}catch(error){$('officeMemberError').textContent=error.message;}finally{b.disabled=false;}};
+    document.querySelectorAll('[data-remove-member]').forEach(b=>b.onclick=async()=>{
+      if(b.dataset.confirm!=='1'){b.dataset.confirm='1';b.textContent='确认移除并结束本轮';return;}
+      b.disabled=true;try{const d=await api(path,{action:'remove',user_id:b.dataset.removeMember});close();toast(d.restart_required?'成员已移除，协作者请重新打开文档':'成员已移除');await manageCollaboration(file);}catch(error){$('officeMemberError').textContent=error.message;b.disabled=false;}
+    });
+  }
 
   async function showVersion(){
     const d=await api(base+'/version');

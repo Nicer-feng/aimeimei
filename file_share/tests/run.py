@@ -28,7 +28,12 @@ with tempfile.TemporaryDirectory(prefix='file-share-test-') as data:
             subprocess.run([sys.executable,str(root/'smoke.py')],env=environment,check=True)
             subprocess.run([sys.executable,str(root/'office.py')],env=environment,check=True)
             subprocess.run([sys.executable,str(root/'pdf.py')],env=environment,check=True)
+            subprocess.run([sys.executable,str(root/'collaboration.py')],env=environment,check=True)
             subprocess.run([sys.executable,str(root/'unit.py')],env=environment,check=True)
+        except Exception:
+            logs.seek(0)
+            print(logs.read()[-16000:], file=sys.stderr)
+            raise
         finally:
             server.terminate()
             server.wait(timeout=10)

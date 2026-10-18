@@ -152,7 +152,7 @@ assert req(member,platform+'/access',{'user_id':'member','enabled':True})[0]==40
 assert req(member,f'/api/file-share/admin/files/{fid}/preview',{})[0]==404
 status,presence=req(member,'/api/file-share/admin/presence',{'login':True})
 assert status==200 and presence['platform_admin'] is False
-assert presence['capabilities']=={'edit_pdf':False,'edit_office':False}
+assert presence['capabilities']=={'edit_pdf':False,'edit_office':True}
 assert req(member,'/api/file-share/admin/office/config')[0]==403
 assert req(member,f'/api/file-share/admin/pdf/files/{fid}/versions')[0]==403
 _,report=req(a,platform+'/report?days=7')

@@ -21,6 +21,7 @@ from .database import read_connection, transaction
 from .platform import platform_report
 from .office_preview import office_preview, PreviewError
 from .office_service import OfficeService, OfficeServiceError
+from .collaboration import CollaborationService
 from .pdf_service import PdfService, PdfServiceError
 from .imm_office import IMMWebOfficeError
 from .storage_diagnostics import DiagnosticOSS, storage_failure
@@ -109,7 +110,7 @@ class FileShareHandlersMixin:
                         conn.execute('UPDATE share_members SET last_visit_at=?,last_login_at=CASE WHEN ? THEN ? ELSE last_login_at END WHERE user_id=?', (timestamp(),data.get('login') is True,timestamp(),user['id']))
                     admin = user['role'] == 'admin'
                     return self.json({'platform_admin':admin,
-                                      'capabilities':{'edit_pdf':admin, 'edit_office':admin}})
+                                      'capabilities':{'edit_pdf':admin, 'edit_office':True}})
                 return self.fs_admin(path.removeprefix('/api/file-share/admin'), data, user['id'])
             return self.fs_public(path.removeprefix('/api/file-share/public/'), data)
         except PreviewError as exc:
@@ -192,6 +193,8 @@ class FileShareHandlersMixin:
         qs = parse_qs(urlparse(self.path).query)
         page = max(1, min(100000, int(qs.get('page', ['1'])[0])))
         offset, limit = (page - 1) * 20, 20
+        if path.startswith('/office/collaboration/'):
+            return CollaborationService(self, user_id).dispatch(path.removeprefix('/office/collaboration'), data)
         if path.startswith('/office/'):
             return OfficeService(self, user_id).dispatch(path.removeprefix('/office'), data)
         if path.startswith('/pdf/'):
@@ -325,6 +328,7 @@ class FileShareHandlersMixin:
                     keys = {row['object_key']}
                     keys.update(r[0] for r in conn.execute('SELECT object_key FROM share_office_versions WHERE file_id=?', (file_id,)))
                     keys.update(r[0] for r in conn.execute('SELECT draft_key FROM share_office_sessions WHERE file_id=?', (file_id,)))
+                    keys.update(r[0] for r in conn.execute('SELECT r.original_draft_key FROM share_office_rooms r JOIN share_office_sessions s ON s.id=r.session_id WHERE s.file_id=?', (file_id,)))
                     pdf_uploads = [dict(r) for r in conn.execute('SELECT object_key,upload_id FROM share_pdf_uploads WHERE file_id=?', (file_id,))]
                     keys.update(r['object_key'] for r in pdf_uploads)
                     # Reserve deletion, then release SQLite while OSS performs I/O.
@@ -343,6 +347,9 @@ class FileShareHandlersMixin:
                     for key in keys:
                         oss.delete(key)
                     conn.execute('DELETE FROM share_pdf_uploads WHERE file_id=?', (file_id,))
+                    conn.execute('DELETE FROM share_office_participants WHERE room_id IN (SELECT id FROM share_office_sessions WHERE file_id=?)', (file_id,))
+                    conn.execute('DELETE FROM share_office_rooms WHERE session_id IN (SELECT id FROM share_office_sessions WHERE file_id=?)', (file_id,))
+                    conn.execute('DELETE FROM share_office_collaborators WHERE file_id=?', (file_id,))
                     conn.execute('DELETE FROM share_office_sessions WHERE file_id=?', (file_id,))
                     conn.execute('DELETE FROM share_office_versions WHERE file_id=?', (file_id,))
                     conn.execute("UPDATE share_files SET status='DELETED',updated_at=? WHERE id=?", (timestamp(),file_id))

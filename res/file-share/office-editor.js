@@ -5,7 +5,8 @@ window.CloudOffice=(()=>{
   let deps=null,canEditOffice=false,config={enabled:false,maxBytes:0,formats:new Set()};
   let sdkPromise=null,starting=false,busy=false,session=null,tokenInfo=null,instance=null,file=null,opener=null;
   let refreshPromise=null,pendingCloseVersionSaved=false,recoveredDraft=false,recoveryLost=false;
-  let versionsFile=null,versionItems=[];
+  let versionsFile=null,versionItems=[],versionsCanPublish=false;
+  let presenceTimer=null,presenceBusy=false,checkpointTimer=null;
 
   function configure(options){deps=options;bind();}
   function setCapabilities(data){canEditOffice=data?.edit_office===true;}
@@ -23,7 +24,7 @@ window.CloudOffice=(()=>{
   }
   function isOpen(){return starting||$('officeEditor').open;}
   function hint(){return config.enabled?'在线编辑试用支持 '+[...config.formats].map(value=>value.toUpperCase()).join(' / ')+'，单文件不超过 '+deps.size(config.maxBytes)+'。保存版本后可选择发布。':'';}
-  function endpoint(path){return deps.base+'/office/'+path;}
+  function endpoint(path){return deps.base+'/office/collaboration/'+path;}
   function setStatus(state,message,error=''){
     const status=$('officeStatus');status.dataset.state=state;status.textContent=message;
     const alert=$('officeError');alert.textContent=error;alert.hidden=!error;
@@ -63,7 +64,7 @@ window.CloudOffice=(()=>{
   }
   function waitUntilReady(){
     return new Promise((resolve,reject)=>{
-      const timeout=setTimeout(()=>reject(new Error('编辑器打开超时，请检查 IMM 授权和 OSS 跨域设置')),30000);
+      const timeout=setTimeout(()=>reject(new Error('编辑器打开超时，请检查 IMM 授权和 OSS 跨域设置')),90000);
       let ready;
       try{ready=instance.ready();}catch(error){clearTimeout(timeout);reject(error);return;}
       Promise.resolve(ready).then(value=>{clearTimeout(timeout);resolve(value);},error=>{clearTimeout(timeout);reject(error);});
@@ -101,7 +102,17 @@ window.CloudOffice=(()=>{
     if(instance.ApiEvent?.AddApiEventListener)instance.ApiEvent.AddApiEventListener(name,callback);
     else if(instance.on)instance.on(name,callback);
   }
+  async function presence(){
+    if(!session||presenceBusy||starting)return;presenceBusy=true;const active=session;
+    try{const d=await deps.api(endpoint('sessions/'+active.id+'/status'),{});if(session!==active)return;
+      $('officeParticipants').textContent='协作中：'+d.participants.map(p=>p.name).join('、');
+    }catch(error){if(session===active&&[401,403,404,409].includes(error.status)){destroy();deps.toast('协作连接已结束或权限已变更，请重新打开文档。');}
+      else if(session===active)setStatus('failed','连接暂时中断','请检查网络；未同步的输入尚未保存。');
+    }finally{presenceBusy=false;}
+  }
   function destroy(){
+    clearInterval(presenceTimer);clearInterval(checkpointTimer);presenceTimer=null;checkpointTimer=null;
+    $('officeParticipants').textContent='';
     try{instance?.destroy();}catch{}
     instance=null;session=null;tokenInfo=null;file=null;refreshPromise=null;starting=false;busy=false;
     pendingCloseVersionSaved=false;recoveredDraft=false;recoveryLost=false;
@@ -121,7 +132,7 @@ window.CloudOffice=(()=>{
     if($('dialog').open)throw new Error('请先关闭当前弹窗');
     opener=document.activeElement;file=candidate;starting=true;
     $('officeTitle').textContent=candidate.filename;
-    $('officeNote').textContent='编辑器会自动同步草稿；下次打开同一文件可恢复已同步内容。保存版本后才会进入版本记录，发布前分享链接不变。';
+    $('officeNote').textContent='协作者正在编辑同一份草稿，每 10 分钟尝试保存检查点。保存版本与发布分开，只有所有者可以发布，普通分享仍显示已发布内容。';
     $('officeClosePrompt').hidden=true;
     $('officeEditor').showModal();
     setStatus('loading','正在连接阿里云编辑器…');setBusy(true);
@@ -148,6 +159,8 @@ window.CloudOffice=(()=>{
       instance.setToken({token:tokenInfo.access_token,timeout:tokenTimeout(tokenInfo.access_expires_at)});
       await waitUntilReady();
       starting=false;setBusy(false);
+      presence();presenceTimer=setInterval(presence,30000);
+      checkpointTimer=setInterval(()=>{if(session&&!busy&&!document.hidden)snapshot(true).catch(()=>{});},10*60*1000);
       if(recoveryLost)deps.toast('上次草稿已过期或丢失，已从发布版本重新开始');
       if(session&&$('officeStatus').dataset.state==='loading')setStatus('draft',recoveredDraft?'已恢复上次同步的草稿':'正在编辑草稿 · 自动同步');
     }catch(error){
@@ -167,15 +180,17 @@ window.CloudOffice=(()=>{
     }
     setStatus('synced','草稿已同步云端');
   }
-  async function snapshot(){
+  async function snapshot(automatic=false){
     if(busy||!session)return;
     setBusy(true);
     try{
       await flushDraft();
-      const data=await deps.api(endpoint('sessions/'+encodeURIComponent(session.id)+'/snapshot'),{});
+      const data=await deps.api(endpoint('sessions/'+encodeURIComponent(session.id)+'/snapshot'),{automatic});
+      if(data.automatic_paused){setStatus('synced','草稿已同步 · 自动版本已达 30 个上限，可手动保存');return;}
       const number=data.version?.number;
-      setStatus('saved',number!=null?'已保存版本 v'+number+' · 尚未发布':'版本已保存 · 尚未发布');
-      deps.toast('版本已保存，分享链接尚未切换');
+      const published=data.version?.published===true;
+      setStatus(published?'published':'saved',published?'内容无变化 · 当前已发布版本 v'+number:number!=null?'已保存版本 v'+number+' · 尚未发布':'版本已保存 · 尚未发布');
+      deps.toast(published?'内容无变化，已复用当前发布版本':'版本已保存，分享链接尚未切换');
       try{await deps.onChanged?.();}catch{}
       return data.version;
     }catch(error){
@@ -198,7 +213,7 @@ window.CloudOffice=(()=>{
     let savedOnClose=false;
     try{
       if(!force){
-        if(withVersion&&!pendingCloseVersionSaved){await flushDraft();const data=await deps.api(endpoint('sessions/'+encodeURIComponent(activeSession.id)+'/snapshot'),{});pendingCloseVersionSaved=true;savedOnClose=true;deps.toast(data.version?.number!=null?'版本 v'+data.version.number+' 已保存，尚未发布':'版本已保存，尚未发布');}
+        if(withVersion&&!pendingCloseVersionSaved){await flushDraft();const data=await deps.api(endpoint('sessions/'+encodeURIComponent(activeSession.id)+'/snapshot'),{});pendingCloseVersionSaved=true;savedOnClose=true;deps.toast(data.version?.published?'内容无变化，已复用当前发布版本':data.version?.number!=null?'版本 v'+data.version.number+' 已保存，尚未发布':'版本已保存，尚未发布');}
         else await flushDraft();
       }
       await deps.api(endpoint('sessions/'+encodeURIComponent(activeSession.id)+'/close'),{});
@@ -223,7 +238,7 @@ window.CloudOffice=(()=>{
     if(!versionItems.length){body.innerHTML='<p class="muted">暂无保存版本。打开文档编辑后，点击“保存版本”。</p>';return;}
     body.innerHTML=versionItems.map(item=>{
       const number=deps.esc(item.number),id=deps.esc(item.id),published=Boolean(item.published);
-      return `<div class="office-version-row"><div><strong>版本 v${number}</strong><small>${deps.esc(displayDate(item.created_at))} · ${deps.esc(deps.size(item.size))}</small></div>${published?'<span class="badge">当前已发布</span>':`<button type="button" data-publish="${id}">发布此版本</button>`}</div>`;
+      return `<div class="office-version-row"><div><strong>版本 v${number}</strong><small>${deps.esc(displayDate(item.created_at))} · ${deps.esc(deps.size(item.size))}</small></div>${published?'<span class="badge">当前已发布</span>':!versionsCanPublish?'<span class="muted">仅所有者可发布</span>':`<button type="button" data-publish="${id}">发布此版本</button>`}</div>`;
     }).join('');
   }
   async function reloadVersions(){
@@ -231,13 +246,14 @@ window.CloudOffice=(()=>{
     try{
       const result=await deps.api(endpoint('files/'+encodeURIComponent(target.id)+'/versions'));
       if(versionsFile!==target)return;
+      versionsCanPublish=result.can_publish===true;
       versionItems=Array.isArray(result.items)?result.items:[];
       renderVersions();
     }catch(error){if(versionsFile===target)body.textContent='读取版本失败：'+error.message;}
   }
   async function showVersions(candidate){
     if(!canEdit(candidate))throw new Error('该文件暂不支持在线编辑');
-    versionsFile=candidate;versionItems=[];
+    versionsFile=candidate;versionItems=[];versionsCanPublish=false;
     $('officeVersionsMessage').textContent='';
     $('officeVersionsMessage').dataset.state='';
     $('officeVersionsTitle').textContent=candidate.filename+' · 版本记录';
