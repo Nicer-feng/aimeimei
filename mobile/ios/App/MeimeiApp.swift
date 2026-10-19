@@ -21,7 +21,12 @@ struct MeimeiApp: App {
             .task {
                 guard store == nil, launchError == nil else { return }
                 do {
+                    #if DEBUG
                     let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
+                        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+                    #else
+                    let testing = false
+                    #endif
                     let directory: URL
                     if testing { directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
                     else { directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("Meimei", isDirectory: true) }

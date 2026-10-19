@@ -49,4 +49,14 @@ final class MeimeiUITests: XCTestCase {
         XCTAssertEqual(composer.value as? String, "Keep this draft")
         capture("06-draft")
     }
+    func testDarkAppearanceLargerTextAndLandscape() {
+        app.terminate()
+        app.launchArguments += ["-appearance", "dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
+        app.launch()
+        login(); capture("07-dark-larger-text")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertTrue(app.buttons["sendButton"].waitForExistence(timeout: 5))
+        capture("08-landscape")
+    }
 }

@@ -13,6 +13,7 @@
 | 主页 | index.html 及引用资源 | 尚未独立版本化，下次功能发布时建立 products/home/ 下的版本和更新记录 | home/v版本号 |
 | 共用基础设施 | app.py、数据库连接、infrastructure/、deploy/ | 在受影响产品的更新记录中说明 | 随对应产品发布 |
 | AI槑槑 Android 原生客户端 | mobile/android/、.github/workflows/android-build.yml | app/build.gradle.kts 独立 versionName/versionCode；mobile/android/README.md | android/v版本号；当前为聊天核心预览版 |
+| AI槑槑 iOS 原生客户端 | mobile/ios/、.github/workflows/ios-build.yml | project.yml 独立版本；mobile/ios/CHANGELOG.md、README.md | 最低 iOS 17；先完成模拟器和未签名构建，TestFlight 后续接入 |
 
 根目录 VERSION 继续表示 AI槑槑版本，不代表整个网站。保留历史标签，不重写历史。不为小猫书和主页虚构已发布版本；无需现在移动现有代码目录。
 

@@ -34,16 +34,26 @@ jobs:
           swift test --package-path mobile/ios
       - name: Generate Xcode project
         run: bash mobile/ios/scripts/generate-project.sh
+      - name: Compile SwiftUI app and test targets
+        run: |
+          xcodebuild build-for-testing -project mobile/ios/Meimei.xcodeproj -scheme Meimei \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/meimei-derived" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" CODE_SIGNING_ALLOWED=NO \
+            > "$RUNNER_TEMP/meimei-build.log" 2>&1 || { tail -100 "$RUNNER_TEMP/meimei-build.log"; exit 1; }
       - name: Boot iPhone simulator
         run: |
           simulator_id=$(python3 mobile/ios/scripts/select-simulator.py)
           echo "SIMULATOR_ID=$simulator_id" >> "$GITHUB_ENV"
           xcrun simctl boot "$simulator_id"
-          xcrun simctl bootstatus "$simulator_id" -b
+          python3 - "$simulator_id" <<'PY'
+          import subprocess, sys
+          subprocess.run(['xcrun', 'simctl', 'bootstatus', sys.argv[1], '-b'], check=True, timeout=240)
+          PY
       - name: Build and run offline UI tests
         run: |
           set -o pipefail
-          xcodebuild test -project mobile/ios/Meimei.xcodeproj -scheme Meimei \
+          xcodebuild test-without-building -project mobile/ios/Meimei.xcodeproj -scheme Meimei \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
             -derivedDataPath "$RUNNER_TEMP/meimei-derived" \
@@ -94,6 +104,7 @@ jobs:
         with:
           name: aimeimei-ios-diagnostics-${{ github.run_number }}
           path: |
+            ${{ runner.temp }}/meimei-build.log
             ${{ runner.temp }}/meimei-ui.log
             ${{ runner.temp }}/meimei-archive.log
             ${{ runner.temp }}/meimei-ui.xcresult
