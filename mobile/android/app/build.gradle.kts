@@ -26,8 +26,8 @@ android {
         applicationId = "asia.feng.aimeimei"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         resValue("string", "app_name", "AI槑槑")
         buildConfigField("String", "API_BASE_URL", "\"${server.toASCIIString().trimEnd('/')}/\"")
     }
@@ -68,6 +68,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
     implementation("com.caverock:androidsvg-aar:1.4")
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:ext-tables:4.6.2")

@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,40 +40,50 @@ import io.noties.markwon.Markwon
 import io.noties.markwon.ext.tables.TablePlugin
 
 class MainActivity : ComponentActivity() {
+    private val model: PlatformViewModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             val colors = if (isSystemInDarkTheme()) darkColorScheme(primary = Color(0xFFE6A7BE)) else lightColorScheme(
                 primary = Color(0xFF9C4F6F), secondary = Color(0xFF6E7370), background = Color(0xFFFFFAF6), surface = Color(0xFFFFFAF6))
-            MaterialTheme(colorScheme = colors) { PlatformApp() }
+            MaterialTheme(colorScheme = colors) { PlatformApp(model) }
         }
     }
+    override fun onStart() { super.onStart(); model.foreground() }
+    override fun onStop() { if (!isChangingConfigurations) model.background(); super.onStop() }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlatformApp(model: PlatformViewModel = viewModel()) {
-    BackHandler(enabled = model.selected != null) { model.back() }
+    var confirmLeave by remember { mutableStateOf(false) }
+    val goBack = { if (model.streaming) confirmLeave = true else model.back() }
+    BackHandler(enabled = model.selected != null) { goBack() }
+    if (confirmLeave) AlertDialog(onDismissRequest = { confirmLeave = false }, title = { Text("停止本次回答并返回？") },
+        text = { Text("已收到的内容会保留，返回后可刷新核对服务器记录。") },
+        confirmButton = { TextButton(onClick = { confirmLeave = false; model.stop(); model.back(); model.refresh() }) { Text("停止并返回") } },
+        dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text("继续等待") } })
     Scaffold(topBar = {
         TopAppBar(title = { Text(model.selected?.title ?: "AI槑槑", maxLines = 1) },
             navigationIcon = {
-                if (model.selected != null) IconButton(onClick = model::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回对话列表") }
+                if (model.selected != null) IconButton(onClick = { goBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回对话列表") }
             }, actions = {
                 if (model.account != null) {
-                    IconButton(onClick = model::refresh, enabled = !model.busy) { Icon(Icons.Filled.Refresh, "刷新") }
-                    TextButton(onClick = model::logout, enabled = !model.busy) { Text("退出") }
+                    IconButton(onClick = model::newConversation, enabled = !model.busy && !model.streaming && model.models.isNotEmpty()) { Icon(Icons.Filled.Add, "新建对话") }
+                    IconButton(onClick = model::refresh, enabled = !model.busy && !model.streaming) { Icon(Icons.Filled.Refresh, "刷新") }
+                    if (model.selected == null) TextButton(onClick = model::logout, enabled = !model.busy && !model.streaming) { Text("退出") }
                 }
             })
     }) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
+        Column(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize().imePadding()) {
             if (model.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             model.error?.let { message ->
                 Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
             }
             when {
                 model.account == null -> LoginForm(model)
-                model.selected != null -> HistoryMessages(model.messages, model.busy)
+                model.selected != null -> ChatScreen(model)
                 else -> ConversationList(model)
             }
         }
@@ -153,7 +165,7 @@ private fun HistoryMessages(messages: List<ChatMessage>, busy: Boolean) {
 }
 
 @Composable
-private fun MarkdownText(content: String) {
+internal fun MarkdownText(content: String) {
     val color = MaterialTheme.colorScheme.onSurface
     AndroidView(factory = { context ->
         TextView(context).apply { textSize = 16f;setTextIsSelectable(true);movementMethod = LinkMovementMethod.getInstance();setLineSpacing(4f, 1.1f) }
