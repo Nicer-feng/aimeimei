@@ -39,8 +39,9 @@ private val chinaZone = ZoneId.of("Asia/Shanghai")
 internal fun adminToday(): LocalDate = LocalDate.now(chinaZone)
 internal fun adminValue(key: String, value: Any): String = when {
     key.endsWith("_ms") && key != "duration_ms" -> {
-        val minutes = (value.toString().toDoubleOrNull() ?: 0.0).toLong() / 60000
-        "${minutes / 60} 小时 ${minutes % 60} 分钟"
+        val milliseconds = (value.toString().toDoubleOrNull() ?: 0.0).toLong()
+        val minutes = milliseconds / 60000
+        when { minutes >= 60 -> "${minutes / 60}小时${minutes % 60}分"; minutes > 0 -> "${minutes}分"; milliseconds > 0 -> "不足1分钟"; else -> "0分" }
     }
     key.contains("cost") -> String.format(Locale.CHINA, "¥%.4f", value.toString().toDoubleOrNull() ?: 0.0)
     key in setOf("last_used_at", "last_active", "created_at", "updated_at") && value is Number -> {
@@ -60,7 +61,11 @@ internal fun adminValue(key: String, value: Any): String = when {
         } }
         if (data.has("reading_ms")) {
             val reading = data.optDouble("reading_ms"); val total = reading + data.optDouble("work_ms")
-            Text("阅读占比 ${if(total > 0) (reading / total * 100).toInt() else 0}%", style = MaterialTheme.typography.bodySmall)
+            if (!data.has("total_ms") && data.has("work_ms")) Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                Text("总有效时长", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(adminValue("total_ms", total), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            }
+            Text("阅读占比 ${if(total > 0) String.format(Locale.CHINA, "%.1f%%", reading / total * 100) else "—"}", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -165,7 +170,7 @@ internal fun AdminStatistics(model: PlatformViewModel, section: String, enabled:
                 "costs" -> "当前结果：${when(query.range) { "7d" -> "近 7 天"; "all" -> "全部时间"; else -> "近 30 天" }}"
                 else -> "当前结果：${when(query.view) { "models" -> "按模型"; "daily" -> "按日 ${query.date}"; else -> "按账号" }}${if(query.term.isNotBlank()) " · ${query.term}" else ""}"
             }) } }
-            item { AdminCard { Column(Modifier.padding(16.dp)) { AdminValues(result.optJSONObject("summary") ?: JSONObject()) } } }
+            item { AdminCard { Column(Modifier.padding(16.dp)) { AdminValues((if(section == "tokens" && applied?.view == "models") result.optJSONObject("model_summary") else null) ?: result.optJSONObject("summary") ?: JSONObject()) } } }
             trend?.let { series -> item { AdminTrend(series, section == "costs") } }
             if (section == "costs") {
                 item { OutlinedButton(onClick = { onRecalculate(applied?.range ?: range) { load() } }, enabled = active, modifier = Modifier.fillMaxWidth()) { Text("回算历史成本") } }

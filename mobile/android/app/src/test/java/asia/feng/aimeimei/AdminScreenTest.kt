@@ -62,6 +62,7 @@ class AdminScreenTest {
                     path == "/api/admin/token-stats" || path == "/api/admin/token-stats/daily" -> """{"summary":{"total_tokens":2000,"total_requests":12},"users":[{"id":"u1","display_name":"家人","username":"family","total_tokens":2000}],"models":[{"id":"m1","name":"模型 A","total_tokens":2000}]}"""
                     path == "/api/admin/cost-stats" -> """{"summary":{"range_cost":0.25,"range_requests":12},"users":[],"models":[]}"""
                     path == "/api/usage-time/admin" -> """{"summary":{"total_ms":60000,"work_ms":60000,"reading_ms":0},"users":[{"id":"u1","display_name":"家人","work_ms":60000,"reading_ms":0,"total_ms":60000}]}"""
+                    path == "/api/usage-time/admin/user" -> """{"days":[{"date":"2026-10-19","work_ms":60000,"reading_ms":120000}],"summary":{"work_ms":60000,"reading_ms":120000}}"""
                     path.endsWith("details") -> """{"recent_requests":[{"conversation_title":"测试聊天","model_name":"模型 A","total_tokens":2000}]}"""
                     else -> "{}"
                 }
@@ -174,6 +175,17 @@ class AdminScreenTest {
             catch (error: ApiFailure) { assertEquals(403, error.status) }
         }
         assertEquals(before, server.requestCount)
+    }
+
+    @Test fun dailyUsageShowsCombinedDurationWhenServerOnlyReturnsWorkAndReading() {
+        showAdmin(); module("使用时长"); awaitTag("admin-statistics")
+        compose.onNodeWithTag("admin-statistics").performScrollToNode(hasText("查看明细"))
+        compose.onNodeWithText("查看明细").performClick()
+        awaitCondition { compose.onAllNodesWithText("3分").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("3分").assertIsDisplayed()
+        compose.onNodeWithText("阅读占比 66.7%").assertIsDisplayed()
+        capture("admin-usage-details")
+        compose.onNodeWithText("关闭").performClick()
     }
 
 }
