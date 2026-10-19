@@ -1,0 +1,106 @@
+import Foundation
+
+public struct Account: Codable, Equatable, Sendable {
+    public let id: String
+    public let username: String
+    public let displayName: String
+    public var label: String { displayName.isEmpty ? username : displayName }
+    enum CodingKeys: String, CodingKey { case id, username; case displayName = "display_name" }
+}
+
+public struct Captcha: Decodable, Sendable {
+    public let id: String
+    public let svg: String
+    enum CodingKeys: String, CodingKey { case id = "captcha_id"; case svg = "image_svg" }
+}
+
+public struct ChatModel: Decodable, Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let reasoningControl: Bool
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case reasoningControl = "supports_reasoning_control"
+    }
+}
+
+public enum ReasoningMode: String, Codable, CaseIterable, Sendable {
+    case fast, balanced, deep
+    public var label: String {
+        switch self { case .fast: return "快速"; case .balanced: return "平衡"; case .deep: return "深度" }
+    }
+}
+
+public struct Conversation: Decodable, Identifiable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+    public let modelID: String
+    public let modelName: String
+    public let reasoningMode: ReasoningMode
+    public let pinned: Bool
+    enum CodingKeys: String, CodingKey {
+        case id, title, pinned
+        case modelID = "model_id", modelName = "model_name", reasoningMode = "reasoning_mode"
+    }
+}
+
+public struct ChatMessage: Decodable, Identifiable, Equatable, Sendable {
+    public let id: Int64
+    public let role: String
+    public let content: String
+    public let reasoning: String
+    public let status: String
+    public let attachments: [String]
+
+    public init(id: Int64, role: String, content: String, reasoning: String = "", status: String = "", attachments: [String] = []) {
+        self.id = id; self.role = role; self.content = content
+        self.reasoning = reasoning; self.status = status; self.attachments = attachments
+    }
+    enum CodingKeys: String, CodingKey {
+        case id, role, content, documents, images
+        case reasoning = "reasoning_content", status = "generation_status"
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int64.self, forKey: .id)
+        role = try c.decode(String.self, forKey: .role)
+        content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
+        reasoning = try c.decodeIfPresent(String.self, forKey: .reasoning) ?? ""
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        struct Attachment: Decodable { let filename: String? }
+        let files = try c.decodeIfPresent([Attachment].self, forKey: .documents) ?? []
+        let images = try c.decodeIfPresent([Attachment].self, forKey: .images) ?? []
+        attachments = (files + images).map { $0.filename ?? "附件" }
+    }
+}
+
+public struct LiveReply: Equatable, Sendable {
+    public var content = ""
+    public var reasoning = ""
+    public var activity = "槑槑正在准备回答…"
+    public var savedID: Int64?
+    public var status = "interrupted"
+    public init() {}
+}
+
+public enum PlatformError: Error, LocalizedError, Equatable {
+    case invalidURL, invalidResponse, malformedStream, storage
+    case http(Int, String)
+    public var errorDescription: String? {
+        switch self {
+        case .invalidURL: return "服务器地址必须是完整的 HTTPS 域名"
+        case .invalidResponse: return "服务器响应异常，请稍后刷新"
+        case .malformedStream: return "流式连接异常，请刷新核对服务器记录"
+        case .storage: return "无法保存本机状态，请检查设备空间后重试"
+        case .http(_, "captcha incorrect"): return "验证码不正确或已过期，请重新输入"
+        case .http(_, "password incorrect"): return "账号或密码不正确"
+        case .http(401, _): return "登录已失效，请重新登录"
+        case .http(409, _): return "当前会话仍在生成，请稍后刷新核对"
+        case .http(400, _): return "请求未被接受，请检查模型或联网配置"
+        case .http(let status, _): return "服务暂时不可用（\(status)），请稍后重试"
+        }
+    }
+    public var isUnauthorized: Bool {
+        if case .http(401, _) = self { return true }; return false
+    }
+}
