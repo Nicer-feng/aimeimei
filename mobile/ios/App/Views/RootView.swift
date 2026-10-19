@@ -59,7 +59,7 @@ private struct SettingsView: View {
                 }
                 Section("关于") {
                     LabeledContent("版本", value: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"))")
-                    Text("iOS 17 及以上 · SwiftUI 原生客户端").font(.footnote).foregroundStyle(.secondary)
+                    Text("支持 iOS 17 及以上版本").font(.footnote).foregroundStyle(.secondary)
                     Text("切后台会结束接收；返回后核对服务器已保存内容。不会自动重发问题。").font(.footnote).foregroundStyle(.secondary)
                 }
                 Section {

@@ -65,8 +65,13 @@ jobs:
           mkdir -p "$RUNNER_TEMP/ios-simulator"
           ditto -c -k --keepParent "$RUNNER_TEMP/meimei-derived/Build/Products/Debug-iphonesimulator/Meimei.app" \
             "$RUNNER_TEMP/ios-simulator/aimeimei-ios-simulator.zip"
-          xcrun xcresulttool export attachments --path "$RUNNER_TEMP/meimei-ui.xcresult" \
-            --output-path "$RUNNER_TEMP/ios-screenshots"
+      - name: Export UI screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/meimei-ui.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/meimei-ui.xcresult" \
+              --output-path "$RUNNER_TEMP/ios-screenshots"
+          fi
       - name: Archive unsigned iPhone app
         run: |
           xcodebuild archive -project mobile/ios/Meimei.xcodeproj -scheme Meimei -configuration Release \

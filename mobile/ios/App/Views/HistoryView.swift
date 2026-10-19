@@ -44,7 +44,7 @@ struct HistoryView: View {
             }
             .overlay {
                 if filtered.isEmpty && !store.busy {
-                    ContentUnavailableView(query.isEmpty ? "还没有聊天" : "没有找到聊天", systemImage: "bubble.left.and.bubble.right", description: Text("发送第一条消息后，对话会出现在这里"))
+                    ContentUnavailableView(query.isEmpty ? "还没有聊天" : "没有找到聊天", systemImage: "bubble.left.and.bubble.right", description: Text(query.isEmpty ? "发送第一条消息后，对话会出现在这里" : "换个关键词试试"))
                         .allowsHitTesting(false)
                 }
             }

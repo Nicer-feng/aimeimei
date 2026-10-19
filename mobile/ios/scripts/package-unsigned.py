@@ -19,6 +19,8 @@ if not (app / "Meimei").is_file():
     raise SystemExit("归档缺少真机应用可执行文件")
 if (app / "embedded.mobileprovision").exists() or (app / "_CodeSignature").exists():
     raise SystemExit("当前流程只允许未签名应用，请先核对归档配置")
+if b"offline-user" in (app / "Meimei").read_bytes():
+    raise SystemExit("正式真机包意外包含离线测试账号，拒绝交付")
 with (app / "Info.plist").open("rb") as handle:
     info = plistlib.load(handle)
 if info.get("CFBundleIdentifier") != "asia.feng.aimeimei" or info.get("MinimumOSVersion") != "17.0":

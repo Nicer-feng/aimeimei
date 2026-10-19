@@ -59,7 +59,9 @@
 
 免费 Personal Team 的设备安装描述文件通常 **7 天到期**，需要重新构建安装。
 如果手机运行 iOS 27 或更新系统，真机调试需使用支持该设备系统的 Xcode；当前云端使用稳定 SDK 不等于已完成这些手机的真机验收。
-无需 Xcode 的第三方本机签名工具属于另一种安装路线，需另行确认其系统兼容性；当前交付不包含它们，也不把 Apple 密码或验证码放到 GitHub。
+如果暂时不想装完整 Xcode，也可以先尝试 **GitHub 未签名 IPA → 本机 Sideloadly 重签 → USB 安装**：从 [Sideloadly 官网](https://sideloadly.io/) 下载 Mac 版本，连接并信任 iPhone，导入构建产物中的 `aimeimei-ios-unsigned.ipa`，在本机工具内填写自己的免费 Apple 账号，按提示签名安装和开启 Developer Mode。该工具官方说明支持免费账号和 7 天续签；当前未在你的 iOS 27 设备上验证兼容性，不能把签名工具的支持说明当成真机成功证明。
+
+第三方本机签名工具不由本项目维护，本次不自动安装或替你登录。Apple 密码和验证码只在你本机输入，不提供给 Codex、不放进 GitHub；如果遇到新系统签名兼容问题，再使用支持设备系统的 Xcode，或后续接入同事的付费账号与 TestFlight。
 
 ## 后续再接 TestFlight
 
