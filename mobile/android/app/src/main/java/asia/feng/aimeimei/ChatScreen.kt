@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 @Composable
 internal fun ChatScreen(model: PlatformViewModel) {
@@ -37,6 +38,8 @@ private fun ConversationContent(model: PlatformViewModel) {
     var following by remember { mutableStateOf(true) }
     var confirmPending by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val waiting = model.pending
+    val showPendingUser = waiting != null && model.messages.none { it.role == "user" && (it.id.toLongOrNull() ?: 0) > waiting.baseline && it.content.trim() == waiting.content.trim() }
     LaunchedEffect(list) {
         list.interactionSource.interactions.collect { interaction ->
             when (interaction) {
@@ -47,8 +50,10 @@ private fun ConversationContent(model: PlatformViewModel) {
             }
         }
     }
-    LaunchedEffect(model.messages.size, model.streaming) {
-        if (following && list.layoutInfo.totalItemsCount > 0) list.scrollToItem(list.layoutInfo.totalItemsCount - 1, Int.MAX_VALUE)
+    val expectedItems = model.messages.size + (if (showPendingUser) 1 else 0) + 1
+    LaunchedEffect(expectedItems, model.streaming) {
+        snapshotFlow { list.layoutInfo.totalItemsCount }.first { it >= expectedItems }
+        if (following) list.scrollToItem(list.layoutInfo.totalItemsCount - 1, Int.MAX_VALUE)
     }
     if (confirmPending) AlertDialog(onDismissRequest = { confirmPending = false }, title = { Text("已核对服务器记录？") },
         text = { Text("服务器可能仍在整理或保存回答。建议先刷新等待；解除后不会自动重发问题，请避免重复提交。") },

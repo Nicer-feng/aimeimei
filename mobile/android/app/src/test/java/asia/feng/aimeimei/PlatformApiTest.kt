@@ -3,9 +3,14 @@ package asia.feng.aimeimei
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -71,5 +76,18 @@ class PlatformApiTest {
         server.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
         try { withTimeout(5000) { api.stream("c1", "问题", false).toList() }; fail("Expected failure") }
         catch (failure: ApiFailure) { assertEquals(401, failure.status) }
+    }
+    @Test fun disconnectDoesNotReplayThePost() = runBlocking {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        try { withTimeout(5000) { api.stream("c1", "仅发一次", false).toList() }; fail("Expected disconnect") }
+        catch (_: ApiFailure) { assertEquals(1, server.requestCount) }
+    }
+    @Test fun stoppingWhileWaitingCancelsTheRequestWithoutRetry() = runBlocking {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val job = launch { api.stream("c1", "等待首包", false).toList() }
+        val request = withContext(Dispatchers.IO) { server.takeRequest(3, TimeUnit.SECONDS) }
+        assertNotNull(request)
+        withTimeout(3000) { job.cancelAndJoin() }
+        assertEquals(1, server.requestCount)
     }
 }

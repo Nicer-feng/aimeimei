@@ -136,7 +136,7 @@ private fun CaptchaImage(captcha: Captcha?, enabled: Boolean, refresh: () -> Uni
 private fun ConversationList(model: PlatformViewModel) {
     val user = model.account ?: return
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 12.dp)) {
-        item { Text("${user.displayName.ifBlank { user.username }} · ${model.models.size} 个可用模型", color = MaterialTheme.colorScheme.onSurfaceVariant,
+        item { Text("${user.displayName.ifBlank { user.username }} · ${model.models.size} 个可用模型 · v${BuildConfig.VERSION_NAME.substringBefore('-')}", color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) }
         if (model.conversations.isEmpty() && !model.busy) item { Text("还没有对话记录", modifier = Modifier.padding(20.dp)) }
         items(model.conversations, key = { it.id }) { conversation ->

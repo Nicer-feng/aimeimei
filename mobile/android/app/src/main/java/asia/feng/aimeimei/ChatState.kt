@@ -47,7 +47,7 @@ data class PendingSend(val conversationId: String, val baseline: Long, val conte
     fun toJson() = JSONObject().put("conversation_id", conversationId).put("baseline", baseline).put("content", content).toString()
     companion object {
         fun parse(value: String?): PendingSend? = runCatching {
-            val json = JSONObject(value ?: return null)
+            val json = JSONObject(value ?: return@runCatching null)
             PendingSend(json.getString("conversation_id"), json.getLong("baseline"), json.getString("content"))
         }.getOrNull()
     }

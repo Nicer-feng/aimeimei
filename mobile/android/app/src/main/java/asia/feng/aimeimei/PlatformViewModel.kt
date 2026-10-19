@@ -34,6 +34,7 @@ class PlatformViewModel(application: Application) : AndroidViewModel(application
     private var operation: Job? = null
     private var streamJob: Job? = null
     private var revision = 0
+    private var generation = 0
     private var buffer: ReplyBuffer? = null
 
     init { restore() }
@@ -90,6 +91,7 @@ class PlatformViewModel(application: Application) : AndroidViewModel(application
         if (ticket == revision) { conversations = list; models = available }
     }
     private fun enter(conversation: Conversation) {
+        generation++
         selected = conversation; messages = emptyList(); live = null
         draft = drafts.getString(key("text"), "").orEmpty()
         webSearch = drafts.getBoolean(key("web"), false)
@@ -151,13 +153,15 @@ class PlatformViewModel(application: Application) : AndroidViewModel(application
         if (!drafts.edit().putString(key("pending"), waiting.toJson()).commit()) { error = "无法保存草稿，请稍后重试"; return }
         pending = waiting; editDraft(""); error = null; streaming = true
         val reply = ReplyBuffer(); buffer = reply; live = reply.snapshot()
+        val run = ++generation
         streamJob = viewModelScope.launch {
-            val ticker = launch { while (isActive) { delay(80); live = reply.snapshot() } }
+            val ticker = launch { while (isActive && run == generation) { delay(80); if (run == generation) live = reply.snapshot() } }
             var failure: Exception? = null
             try { api.stream(conversation.id, content, webSearch).collect { reply.accept(it) } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { failure = error }
-            finally { ticker.cancel(); live = reply.snapshot(finish = true); streaming = false }
+            finally { ticker.cancel(); if (run == generation) { live = reply.snapshot(finish = true); streaming = false } }
+            if (run != generation) return@launch
             if (reply.savedId != null) {
                 val final = reply.snapshot(finish = true)
                 messages = messages + ChatMessage("local-user-${waiting.baseline}", "user", content, "", "completed", emptyList()) +
@@ -174,6 +178,7 @@ class PlatformViewModel(application: Application) : AndroidViewModel(application
     }
     fun stop() {
         if (!streaming) return
+        generation++
         streamJob?.cancel(); streamJob = null
         live = buffer?.snapshot(finish = true); streaming = false
         error = "已停止接收，正在核对服务器保存的内容…"
@@ -183,6 +188,7 @@ class PlatformViewModel(application: Application) : AndroidViewModel(application
     fun foreground() { if (account != null && !streaming && !busy && selected != null) refresh() }
     fun back() {
         if (streaming) return
+        generation++
         operation?.cancel(); revision++; selected = null; messages = emptyList(); live = null; pending = null; busy = false; error = null
         drafts.edit().remove(key("last", "")).apply()
         refresh()
@@ -192,6 +198,7 @@ class PlatformViewModel(application: Application) : AndroidViewModel(application
         work { ticket -> try { api.logout() } finally { if (ticket == revision) { clearAccount(); captcha = runCatching { api.captcha() }.getOrNull() } } }
     }
     private fun clearAccount() {
+        generation++
         streamJob?.cancel(); cookies.clear(); account = null; selected = null; messages = emptyList(); conversations = emptyList(); models = emptyList()
         captcha = null; draft = ""; pending = null; live = null; streaming = false
     }

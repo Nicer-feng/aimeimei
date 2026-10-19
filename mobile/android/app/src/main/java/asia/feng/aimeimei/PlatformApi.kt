@@ -38,7 +38,7 @@ class ApiFailure(val status: Int, message: String) : IOException(message)
 class PlatformApi(private val base: HttpUrl, cookies: CookieJar) {
     private val client = OkHttpClient.Builder().cookieJar(cookies)
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
-        .callTimeout(40, TimeUnit.SECONDS).followRedirects(false).build()
+        .callTimeout(40, TimeUnit.SECONDS).followRedirects(false).retryOnConnectionFailure(false).build()
 
     private val streamClient = client.newBuilder().readTimeout(5, TimeUnit.MINUTES).callTimeout(15, TimeUnit.MINUTES).build()
 
