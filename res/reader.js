@@ -3,6 +3,7 @@
   const el = (id) => document.getElementById(id);
   const root = el('readerMessages'), container = el('readerPages'), library = el('readerLibrary');
   const desktop = matchMedia('(min-width: 1024px) and (hover: hover) and (pointer: fine)');
+  const available = () => desktop.matches || document.documentElement.classList.contains('android-embedded');
   let active = false, opening = false, book = null, pages = [], mode = 'scroll';
   let epoch = 0, loading = false, chatSnapshot = null, position = 0, pageNumber = 0;
   let saveTimer = 0, frame = 0, resizeTimer = 0, stamp = 0, owner = '', lastCapture = 0;
@@ -155,7 +156,7 @@
     }
   }
   async function enter(selected) {
-    if (!desktop.matches || !state.authed) return;
+    if (!available() || !state.authed) return;
     capture(); save();
     const operation = ++enterSerial;
     const ticket = ++epoch, user = state.user;
@@ -208,7 +209,7 @@
     container.replaceChildren(); el('readerLibraryList').replaceChildren(); status();
   }
   async function openLibrary() {
-    if (!desktop.matches || !state.authed) return;
+    if (!available() || !state.authed) return;
     capture(); save();
     const requestId = ++librarySerial;
     const user = state.user;
@@ -263,7 +264,7 @@
   library.addEventListener('click', event => { if (event.target === library) { const r = library.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) library.close(); } });
   el('readerUpload').addEventListener('click', () => el('readerFile').click());
   async function uploadFiles(files) {
-    if (uploading || !desktop.matches || !state.authed) return;
+    if (uploading || !available() || !state.authed) return;
     if (!files?.length) return;
     if (files.length !== 1) { status('每次请上传一个 TXT 文件'); return; }
     const file = files[0], user = state.user;
@@ -280,7 +281,7 @@
     const files = Array.from(el('readerFile').files); el('readerFile').value = '';
     void uploadFiles(files);
   });
-  const fileDrag = event => library.open && desktop.matches && Array.from(event.dataTransfer?.types || []).includes('Files');
+  const fileDrag = event => library.open && available() && Array.from(event.dataTransfer?.types || []).includes('Files');
   const insideLibrary = event => {
     const rect = library.getBoundingClientRect();
     return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
@@ -330,7 +331,7 @@
     if (!active || mode !== 'page' || event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') { event.preventDefault(); turn(event.key === 'ArrowRight' ? 1 : -1); }
   });
-  desktop.addEventListener('change', () => { if (!desktop.matches) { exit(); library.close(); } });
+  desktop.addEventListener('change', () => { if (!available()) { exit(); library.close(); } });
   window.addEventListener('pagehide', () => { capture(); save(true); });
   window.addEventListener('online', () => { if (active) save(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) { capture(); save(true); } });

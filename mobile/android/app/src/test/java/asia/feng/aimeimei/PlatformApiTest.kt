@@ -55,6 +55,26 @@ class PlatformApiTest {
         val patch = server.takeRequest(); assertEquals("PATCH", patch.method); assertEquals("/api/conversations/c1", patch.path)
         assertEquals("fast", org.json.JSONObject(patch.body.readUtf8()).getString("reasoning_mode"))
     }
+    @Test fun conversationActionsPreserveModelAndUseExistingOwnerCheckedRoutes() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"conversation":{"id":"c1","title":"新名字","model_id":"m1","reasoning_mode":"deep","pinned":true}}"""))
+        val renamed = api.renameConversation("c1", "新名字")
+        assertEquals("新名字", renamed.title); assertEquals("m1", renamed.modelId); assertTrue(renamed.pinned)
+        val rename = server.takeRequest(); assertEquals("PATCH", rename.method)
+        val body = org.json.JSONObject(rename.body.readUtf8())
+        assertEquals(setOf("title"), body.keys().asSequence().toSet())
+        assertEquals("新名字", body.getString("title"))
+        for ((pinned, route) in listOf(true to "pin", false to "unpin")) {
+            server.enqueue(MockResponse().setBody("""{"ok":true}""")); api.pinConversation("c1", pinned)
+            val request = server.takeRequest(); assertEquals("POST", request.method); assertEquals("/api/conversations/c1/$route", request.path)
+        }
+        server.enqueue(MockResponse().setBody("""{"ok":true}""")); api.deleteConversation("c1")
+        val delete = server.takeRequest(); assertEquals("DELETE", delete.method); assertEquals("/api/conversations/c1", delete.path)
+    }
+    @Test fun accountRoleIsReadWithoutRequestingAnAdminKey() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"authenticated":true,"user":{"id":"a1","username":"admin","display_name":"管理员","role":"admin"}}"""))
+        assertEquals("admin", api.currentAccount()?.role)
+        assertNull(server.takeRequest().getHeader("X-Admin-Key"))
+    }
     @Test fun readsFragmentedUnicodeSseAndSendsSearchFlag() = runBlocking {
         val payload = ": heartbeat\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"你好😀\"}}]}\r\n\r\n" +
             "data: {\"type\":\"message_saved\",\"message_id\":33,\"generation_status\":\"completed\"}\n\n"

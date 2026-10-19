@@ -17,12 +17,14 @@ import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
 
-class PlatformViewModel(private val application: Application) {
+class PlatformViewModel(private val application: Application, apiOverride: PlatformApi? = null,
+                        private val startGeneration: suspend (Int) -> Unit = { GenerationService.begin(application, it) },
+                        private val endGeneration: (Int) -> Unit = { GenerationService.end(application, it) }) {
     // App-scoped state survives Activity destruction while the generation service is running.
     private val viewModelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var visible = true
-    private val cookies = SessionCookies(application, BuildConfig.API_BASE_URL.toHttpUrl())
-    private val api = PlatformApi(BuildConfig.API_BASE_URL.toHttpUrl(), cookies)
+    internal val cookies = SessionCookies(application, BuildConfig.API_BASE_URL.toHttpUrl())
+    private val api = apiOverride ?: PlatformApi(BuildConfig.API_BASE_URL.toHttpUrl(), cookies)
     private val drafts = application.getSharedPreferences("chat_drafts", Application.MODE_PRIVATE)
     var account by mutableStateOf<Account?>(null); private set
     var captcha by mutableStateOf<Captcha?>(null); private set
@@ -34,6 +36,11 @@ class PlatformViewModel(private val application: Application) {
     var error by mutableStateOf<String?>(null); private set
     var draft by mutableStateOf(""); private set
     var webSearch by mutableStateOf(false); private set
+    var preferredModelId by mutableStateOf(""); private set
+    var preferredReasoningMode by mutableStateOf("balanced"); private set
+    val currentModelId get() = selected?.modelId ?: preferredModelId
+    val currentReasoningMode get() = selected?.reasoningMode ?: preferredReasoningMode
+    val currentModel get() = models.firstOrNull { it.id == currentModelId }
     var streaming by mutableStateOf(false); private set
     var live by mutableStateOf<LiveReply?>(null); private set
     var pending by mutableStateOf<PendingSend?>(null); private set
@@ -71,8 +78,11 @@ class PlatformViewModel(private val application: Application) {
         account = user
         if (user == null) captcha = api.captcha() else {
             loadWorkspace(ticket)
+            restoreWelcomeDraft()
+            // 只有尚待核对的发送才恢复旧会话；正常冷启动展示新聊天。
             val last = drafts.getString(key("last", ""), null)
-            conversations.firstOrNull { it.id == last }?.let { enter(it); loadMessages(ticket) }
+            conversations.firstOrNull { it.id == last && PendingSend.parse(drafts.getString(key("pending", it.id), null)) != null }
+                ?.let { enter(it); loadMessages(ticket) }
         }
     }
     fun refreshCaptcha() = work { ticket -> val value = api.captcha(); if (ticket == revision) captcha = value }
@@ -82,7 +92,7 @@ class PlatformViewModel(private val application: Application) {
             try {
                 val user = api.login(username, password, challenge, answer)
                 if (ticket != revision) return@work
-                account = user; captcha = null; loadWorkspace(ticket)
+                account = user; captcha = null; loadWorkspace(ticket); restoreWelcomeDraft()
             } catch (failure: ApiFailure) {
                 if (ticket == revision && account == null) captcha = runCatching { api.captcha() }.getOrNull()
                 throw failure
@@ -95,7 +105,17 @@ class PlatformViewModel(private val application: Application) {
     }
     private suspend fun loadWorkspace(ticket: Int) {
         val list = api.conversations(); val available = api.models()
-        if (ticket == revision) { conversations = list; models = available }
+        if (ticket == revision) {
+            conversations = list; models = available
+            if (available.none { it.id == preferredModelId }) preferredModelId = available.firstOrNull()?.id.orEmpty()
+        }
+    }
+    private fun restoreWelcomeDraft() {
+        draft = drafts.getString(key("text", ""), "").orEmpty()
+        webSearch = drafts.getBoolean(key("web", ""), false)
+        preferredModelId = drafts.getString(key("model", ""), null)?.takeIf { id -> models.any { it.id == id } }
+            ?: models.firstOrNull()?.id.orEmpty()
+        preferredReasoningMode = drafts.getString(key("mode", ""), "balanced").orEmpty()
     }
     private fun enter(conversation: Conversation) {
         generation++
@@ -128,16 +148,19 @@ class PlatformViewModel(private val application: Application) {
         operation?.cancel(); revision++; enter(conversation); refresh()
     }
     fun newConversation() {
-        if (streaming || busy || models.isEmpty()) return
-        val modelId = selected?.modelId?.takeIf { id -> models.any { it.id == id } } ?: models.first().id
-        work { ticket ->
-            val created = api.createConversation(modelId, "balanced")
-            if (ticket == revision) { conversations = listOf(created) + conversations; enter(created) }
-        }
+        if (streaming || busy) return
+        generation++; selected = null; messages = emptyList(); live = null; pending = null; error = null
+        drafts.edit().remove(key("last", "")).apply()
+        restoreWelcomeDraft()
     }
     fun configure(modelId: String, mode: String) {
-        val current = selected ?: return
         if (streaming || busy || pending != null) return
+        if (selected == null) {
+            preferredModelId = modelId; preferredReasoningMode = mode
+            drafts.edit().putString(key("model", ""), modelId).putString(key("mode", ""), mode).apply()
+            return
+        }
+        val current = selected ?: return
         work { ticket ->
             val updated = api.configureConversation(current.id, modelId, mode)
             if (ticket == revision) { selected = updated; conversations = conversations.map { if (it.id == updated.id) updated else it } }
@@ -152,9 +175,23 @@ class PlatformViewModel(private val application: Application) {
         forgetPending(); live = null; error = "已解除等待，请先核对聊天记录，再决定是否发送。"
     }
     fun send() {
-        val conversation = selected ?: return
         val content = draft.trim()
         if (streaming || busy || pending != null || content.isEmpty()) return
+        if (selected == null) {
+            if (models.none { it.id == preferredModelId }) return
+            work { ticket ->
+                val created = api.createConversation(preferredModelId, preferredReasoningMode)
+                if (ticket != revision) return@work
+                val search = webSearch
+                conversations = listOf(created) + conversations; enter(created)
+                editDraft(content); toggleWebSearch(search)
+                drafts.edit().remove(key("text", "")).apply()
+                busy = false
+                send()
+            }
+            return
+        }
+        val conversation = selected ?: return
         val waiting = PendingSend(conversation.id, messages.maxOfOrNull { it.id.toLongOrNull() ?: 0 } ?: 0, content)
         // Persist the recovery marker before network side effects or clearing the editor.
         if (!drafts.edit().putString(key("pending"), waiting.toJson()).commit()) { error = "无法保存草稿，请稍后重试"; return }
@@ -166,7 +203,7 @@ class PlatformViewModel(private val application: Application) {
             var failure: Exception? = null
             var submitted = false
             try {
-                GenerationService.begin(application, run)
+                startGeneration(run)
                 submitted = true
                 withTimeout(15 * 60 * 1000L) { api.stream(conversation.id, content, webSearch).collect { reply.accept(it) } }
             }
@@ -176,7 +213,7 @@ class PlatformViewModel(private val application: Application) {
             finally {
                 ticker.cancel()
                 if (run == generation) { live = reply.snapshot(finish = true); streaming = false }
-                GenerationService.end(application, run)
+                endGeneration(run)
             }
             if (run != generation) return@launch
             if (reply.savedId != null) {
@@ -217,7 +254,49 @@ class PlatformViewModel(private val application: Application) {
         generation++
         operation?.cancel(); revision++; selected = null; messages = emptyList(); live = null; pending = null; busy = false; error = null
         drafts.edit().remove(key("last", "")).apply()
+        restoreWelcomeDraft()
         refresh()
+    }
+    fun rename(conversation: Conversation, title: String) {
+        if (streaming || busy || title.isBlank()) return
+        work { ticket ->
+            val updated = api.renameConversation(conversation.id, title.trim().take(80))
+            if (ticket == revision) {
+                conversations = conversations.map { if (it.id == updated.id) updated else it }
+                if (selected?.id == updated.id) selected = updated
+            }
+        }
+    }
+    fun pin(conversation: Conversation) {
+        if (streaming || busy) return
+        work { ticket -> api.pinConversation(conversation.id, !conversation.pinned); loadWorkspace(ticket) }
+    }
+    fun delete(conversation: Conversation) {
+        if (streaming || busy) return
+        work { ticket ->
+            api.deleteConversation(conversation.id)
+            if (ticket == revision) {
+                conversations = conversations.filterNot { it.id == conversation.id }
+                drafts.edit().remove(key("text", conversation.id)).remove(key("pending", conversation.id)).remove(key("web", conversation.id)).apply()
+                if (selected?.id == conversation.id) {
+                    selected = null; messages = emptyList(); pending = null; live = null
+                    drafts.edit().remove(key("last", "")).apply(); restoreWelcomeDraft()
+                }
+            }
+        }
+    }
+    fun returnedFromWeb() {
+        if (streaming) return
+        work { ticket ->
+            val user = api.currentAccount()
+            if (ticket != revision) return@work
+            if (user == null || user.id != account?.id) { clearAccount(); captcha = api.captcha(); return@work }
+            account = user; loadWorkspace(ticket)
+            if (selected != null) {
+                selected = conversations.firstOrNull { it.id == selected?.id }
+                if (selected != null) loadMessages(ticket) else { messages = emptyList(); pending = null; live = null; restoreWelcomeDraft() }
+            }
+        }
     }
     fun logout() {
         if (streaming) return

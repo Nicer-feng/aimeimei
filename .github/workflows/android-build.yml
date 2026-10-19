@@ -11,6 +11,7 @@ on:
         options: [debug, release]
   push:
     branches: [main]
+    tags: ['android/v*']
     paths:
       - 'mobile/android/**'
       - '.github/workflows/android-build.yml'
@@ -27,7 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      BUILD_TYPE: ${{ inputs.build_type || 'debug' }}
+      BUILD_TYPE: ${{ startsWith(github.ref, 'refs/tags/android/v') && 'release' || inputs.build_type || 'debug' }}
       API_BASE_URL: ${{ vars.ANDROID_API_BASE_URL || 'https://feng.asia/' }}
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +76,17 @@ jobs:
       - name: Verify signed release and prepare update metadata
         if: env.BUILD_TYPE == 'release'
         run: python3 mobile/android/scripts/prepare-release.py mobile/android/app/build/outputs/apk/release
+      - name: Check release tag matches APK version
+        if: startsWith(github.ref, 'refs/tags/android/v')
+        env:
+          ANDROID_RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          info = json.loads(Path('mobile/android/app/build/outputs/apk/release/update.json').read_text())
+          assert os.environ['ANDROID_RELEASE_TAG'] == 'android/v' + info['versionName'], '发布标签与 APK 版本不一致'
+          PY
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -99,7 +111,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/android-release.jks"
 
   publish:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_type == 'release'
+    if: (github.event_name == 'workflow_dispatch' && inputs.build_type == 'release') || startsWith(github.ref, 'refs/tags/android/v')
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10

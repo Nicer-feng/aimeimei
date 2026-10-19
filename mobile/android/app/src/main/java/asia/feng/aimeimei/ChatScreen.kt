@@ -4,6 +4,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -27,13 +33,26 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 
 @Composable
-internal fun ChatScreen(model: PlatformViewModel) {
-    val session = model.selected ?: return
-    key(session.id) { ConversationContent(model) }
+internal fun ChatScreen(model: PlatformViewModel, openTool: (String) -> Unit) {
+    if (model.selected == null) {
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Image(painterResource(R.drawable.meimei_avatar), "槑槑", Modifier.size(96.dp))
+                Spacer(Modifier.height(20.dp))
+                Text("今天，想聊点什么？", style = MaterialTheme.typography.headlineSmall)
+                Text("有问题，慢慢说，槑槑在这里", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 24.dp))
+                listOf("帮我润色" to "帮我润色下面这段文字，让它更自然、更清楚：", "一起想点子" to "我想和你一起想几个点子：", "解释一个问题" to "请用通俗的语言帮我解释：").forEach { (label, prompt) ->
+                    OutlinedButton(onClick = { model.editDraft(prompt) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text(label) }
+                }
+                if (model.models.isEmpty() && !model.busy) Text("暂无可用模型，请联系管理员配置。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 12.dp))
+            }
+            Composer(model, onSend = model::send, openTool = openTool)
+        }
+    } else key(model.selected?.id) { ConversationContent(model, openTool) }
 }
 
 @Composable
-private fun ConversationContent(model: PlatformViewModel) {
+private fun ConversationContent(model: PlatformViewModel, openTool: (String) -> Unit) {
     val list = rememberLazyListState()
     var following by remember { mutableStateOf(true) }
     var confirmPending by remember { mutableStateOf(false) }
@@ -83,7 +102,7 @@ private fun ConversationContent(model: PlatformViewModel) {
             TextButton(onClick = model::refresh, enabled = !model.busy) { Text("刷新核对") }
             TextButton(onClick = { confirmPending = true }, enabled = !model.busy) { Text("核对后继续") }
         }
-        Composer(model, onSend = { following = true; model.send() })
+        Composer(model, onSend = { following = true; model.send() }, openTool = openTool)
     }
 }
 
@@ -93,7 +112,10 @@ private fun MessageBody(message: ChatMessage) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(if (message.role == "user") "你" else "槑槑", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (message.reasoning.isNotBlank()) ThinkingText(message.reasoning)
-        MarkdownText(message.content.ifBlank { if (message.status in listOf("failed", "interrupted")) "本次回答已中断" else "暂无正文" })
+        val user = message.role == "user"
+        Box(Modifier.fillMaxWidth().background(if (user) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .4f) else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(18.dp)).padding(if (user) 14.dp else 0.dp)) {
+            MarkdownText(message.content.ifBlank { if (message.status in listOf("failed", "interrupted")) "本次回答已中断" else "暂无正文" })
+        }
         if (message.attachments.isNotEmpty()) Text("附件：${message.attachments.joinToString("、")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { copy(context, message.content) }) { Text("复制") }
@@ -107,7 +129,7 @@ private fun ThinkingText(content: String) {
     var expanded by remember { mutableStateOf(false) }
     Column {
         TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起思考过程" else "查看思考过程") }
-        if (expanded) Box(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())) { MarkdownText(content) }
+        AnimatedVisibility(expanded) { Box(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())) { MarkdownText(content) } }
     }
 }
 
@@ -140,9 +162,8 @@ private fun LiveMessage(model: PlatformViewModel, follow: () -> Boolean, scroll:
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Composer(model: PlatformViewModel, onSend: () -> Unit) {
-    val session = model.selected ?: return
-    val chosen = model.models.firstOrNull { it.id == session.modelId }
+private fun Composer(model: PlatformViewModel, onSend: () -> Unit, openTool: (String) -> Unit) {
+    val chosen = model.currentModel
     var showModels by remember { mutableStateOf(false) }
     var showModes by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("") }
@@ -154,8 +175,8 @@ private fun Composer(model: PlatformViewModel, onSend: () -> Unit) {
                 items(model.models.filter { "${it.name} ${it.actualModel} ${it.provider}".contains(filter, ignoreCase = true) }, key = { it.id }) { option ->
                     ListItem(headlineContent = { Text(option.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         supportingContent = { Text("${option.actualModel} · ${option.provider}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        trailingContent = { if (option.id == session.modelId) Icon(Icons.Filled.Check, "已选中") },
-                        modifier = Modifier.fillMaxWidth().clickable(enabled = editable) { showModels = false; model.configure(option.id, session.reasoningMode) })
+                        trailingContent = { if (option.id == model.currentModelId) Icon(Icons.Filled.Check, "已选中") },
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = editable) { showModels = false; model.configure(option.id, model.currentReasoningMode) })
                 }
             }
         }
@@ -163,25 +184,26 @@ private fun Composer(model: PlatformViewModel, onSend: () -> Unit) {
     Surface(shadowElevation = 4.dp, tonalElevation = 1.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(model.draft, model::editDraft, placeholder = { Text("和槑槑聊点什么…") }, modifier = Modifier.weight(1f).heightIn(max = 168.dp), maxLines = 6)
+                OutlinedTextField(model.draft, model::editDraft, placeholder = { Text("和槑槑聊点什么…") }, modifier = Modifier.weight(1f).heightIn(max = 168.dp), maxLines = 6, shape = RoundedCornerShape(20.dp))
                 if (model.streaming) FilledTonalButton(onClick = model::stop) { Text("停止") }
-                else Button(onClick = onSend, enabled = editable && model.draft.isNotBlank()) { Text("发送") }
+                else Button(onClick = onSend, enabled = editable && chosen != null && model.draft.isNotBlank()) { Text("发送") }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { filter = ""; showModels = true }, enabled = editable, modifier = Modifier.weight(1f)) {
-                    Text(chosen?.name ?: session.modelName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(chosen?.name ?: model.selected?.modelName ?: "选择模型", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (chosen?.reasoningControl == true) Box {
-                    TextButton(onClick = { showModes = true }, enabled = editable) { Text(modeLabel(session.reasoningMode)) }
+                    TextButton(onClick = { showModes = true }, enabled = editable) { Text(modeLabel(model.currentReasoningMode)) }
                     DropdownMenu(showModes, { showModes = false }) {
                         listOf("fast", "balanced", "deep").forEach { mode -> DropdownMenuItem(text = { Text(modeLabel(mode)) },
-                            onClick = { showModes = false; model.configure(session.modelId, mode) },
-                            trailingIcon = { if (mode == session.reasoningMode) Icon(Icons.Filled.Check, "已选中") }) }
+                            onClick = { showModes = false; model.configure(model.currentModelId, mode) },
+                            trailingIcon = { if (mode == model.currentReasoningMode) Icon(Icons.Filled.Check, "已选中") }) }
                     }
                 }
                 Checkbox(model.webSearch, model::toggleWebSearch, enabled = editable)
                 Text("联网", style = MaterialTheme.typography.labelMedium)
             }
+            TextButton(onClick = { openTool("chat") }, enabled = editable) { Text("＋ 图片、文件与更多功能") }
         }
     }
 }

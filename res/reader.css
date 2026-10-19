@@ -44,3 +44,11 @@
 #readerPageInput { width: 130px; min-height: 36px; }
 @media (max-width: 1023px), (hover: none), (pointer: coarse) { .reader-toggle, .reader-controls { display: none !important; } }
 @media (prefers-reduced-motion: reduce) { .reader-toggle { transition: none; } }
+
+/* 安卓内嵌页保留阅读入口，触控设备使用完整宽度的工具行。 */
+@media (max-width: 1023px), (hover: none), (pointer: coarse) {
+  .android-embedded .reader-toggle, .android-embedded .reader-controls { display: inline-flex !important; }
+  .android-embedded .reader-toolbar { position: static; justify-content: flex-end; padding: 4px 0; flex-wrap: wrap; }
+  .android-embedded .reader-library-tools { flex-wrap: wrap; }
+  .android-embedded #readerJump { flex-wrap: wrap; }
+}

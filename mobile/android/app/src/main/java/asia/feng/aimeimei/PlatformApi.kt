@@ -25,12 +25,12 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resumeWithException
 
-data class Account(val id: String, val username: String, val displayName: String)
+data class Account(val id: String, val username: String, val displayName: String, val role: String = "user")
 data class Captcha(val id: String, val svg: String)
 data class ChatModel(val id: String, val name: String, val actualModel: String, val provider: String,
                      val reasoningControl: Boolean = false, val nativeSearch: Boolean = false)
 data class Conversation(val id: String, val title: String, val modelName: String, val updatedAt: Long,
-                        val modelId: String = "", val reasoningMode: String = "balanced")
+                        val modelId: String = "", val reasoningMode: String = "balanced", val pinned: Boolean = false)
 data class ChatMessage(val id: String, val role: String, val content: String, val reasoning: String,
                        val status: String, val attachments: List<String>)
 class ApiFailure(val status: Int, message: String) : IOException(message)
@@ -84,15 +84,21 @@ class PlatformApi(private val base: HttpUrl, cookies: CookieJar) {
         request(listOf("api", "conversations"), JSONObject().put("model_id", modelId).put("reasoning_mode", mode)).getJSONObject("conversation"))
     suspend fun configureConversation(id: String, modelId: String, mode: String): Conversation = conversation(
         request(listOf("api", "conversations", id), JSONObject().put("model_id", modelId).put("reasoning_mode", mode), "PATCH").getJSONObject("conversation"))
+    suspend fun renameConversation(id: String, title: String): Conversation = conversation(
+        request(listOf("api", "conversations", id), JSONObject().put("title", title), "PATCH").getJSONObject("conversation"))
+    suspend fun pinConversation(id: String, pinned: Boolean) {
+        request(listOf("api", "conversations", id, if (pinned) "pin" else "unpin"), JSONObject())
+    }
+    suspend fun deleteConversation(id: String) { request(listOf("api", "conversations", id), JSONObject(), "DELETE") }
     suspend fun messages(id: String): List<ChatMessage> = objects(request(listOf("api", "conversations", id, "messages")).optJSONArray("messages")).map {
         val files = objects(it.optJSONArray("documents")).map { doc -> doc.optString("filename", "文件") }
         val images = objects(it.optJSONArray("images")).map { image -> image.optString("filename", "图片") }
         ChatMessage(it.get("id").toString(), it.optString("role"), it.optString("content"), it.optString("reasoning_content"),
             it.optString("generation_status"), files + images)
     }
-    private fun account(value: JSONObject) = Account(value.getString("id"), value.getString("username"), value.optString("display_name"))
+    private fun account(value: JSONObject) = Account(value.getString("id"), value.getString("username"), value.optString("display_name"), value.optString("role", "user"))
     private fun conversation(value: JSONObject) = Conversation(value.getString("id"), value.optString("title", "新对话"),
-        value.optString("model_name"), value.optLong("updated_at"), value.optString("model_id"), value.optString("reasoning_mode", "balanced"))
+        value.optString("model_name"), value.optLong("updated_at"), value.optString("model_id"), value.optString("reasoning_mode", "balanced"), value.optBoolean("pinned"))
 
     fun stream(id: String, content: String, webSearch: Boolean) = callbackFlow {
         val url = base.newBuilder().addPathSegments("api/conversations").addPathSegment(id).addPathSegment("messages").build()

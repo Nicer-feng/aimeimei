@@ -35,6 +35,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
 import com.caverock.androidsvg.SVG
 import io.noties.markwon.Markwon
@@ -51,54 +53,22 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         setContent {
-            val colors = if (isSystemInDarkTheme()) darkColorScheme(primary = Color(0xFFE6A7BE)) else lightColorScheme(
+            val preferences = remember { AppPreferences(applicationContext) }
+            val dark = when (preferences.theme) { "dark" -> true; "light" -> false; else -> isSystemInDarkTheme() }
+            val density = LocalDensity.current
+            val colors = if (dark) darkColorScheme(primary = Color(0xFFE6A7BE)) else lightColorScheme(
                 primary = Color(0xFF9C4F6F), secondary = Color(0xFF6E7370), background = Color(0xFFFFFAF6), surface = Color(0xFFFFFAF6))
-            MaterialTheme(colorScheme = colors) { PlatformApp(model) }
+            CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * preferences.fontScale)) {
+                MaterialTheme(colorScheme = colors) { PlatformApp(model, preferences) }
+            }
         }
     }
     override fun onStart() { super.onStart(); model.foreground() }
     override fun onStop() { if (!isChangingConfigurations) model.background(); super.onStop() }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PlatformApp(model: PlatformViewModel) {
-    var confirmLeave by remember { mutableStateOf(false) }
-    val goBack = { if (model.streaming) confirmLeave = true else model.back() }
-    BackHandler(enabled = model.selected != null) { goBack() }
-    if (confirmLeave) AlertDialog(onDismissRequest = { confirmLeave = false }, title = { Text("停止本次回答并返回？") },
-        text = { Text("已收到的内容会保留，返回后可刷新核对服务器记录。") },
-        confirmButton = { TextButton(onClick = { confirmLeave = false; model.stop(); model.back(); model.refresh() }) { Text("停止并返回") } },
-        dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text("继续等待") } })
-    Scaffold(topBar = {
-        TopAppBar(title = { Text(model.selected?.title ?: "AI槑槑", maxLines = 1) },
-            navigationIcon = {
-                if (model.selected != null) IconButton(onClick = { goBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回对话列表") }
-            }, actions = {
-                UpdateAction(model)
-                if (model.account != null) {
-                    IconButton(onClick = model::newConversation, enabled = !model.busy && !model.streaming && model.models.isNotEmpty()) { Icon(Icons.Filled.Add, "新建对话") }
-                    IconButton(onClick = model::refresh, enabled = !model.busy && !model.streaming) { Icon(Icons.Filled.Refresh, "刷新") }
-                    if (model.selected == null) TextButton(onClick = model::logout, enabled = !model.busy && !model.streaming) { Text("退出") }
-                }
-            })
-    }) { padding ->
-        Column(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize().imePadding()) {
-            if (model.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            model.error?.let { message ->
-                Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
-            }
-            when {
-                model.account == null -> LoginForm(model)
-                model.selected != null -> ChatScreen(model)
-                else -> ConversationList(model)
-            }
-        }
-    }
-}
-
-@Composable
-private fun LoginForm(model: PlatformViewModel) {
+internal fun LoginForm(model: PlatformViewModel) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var answer by remember(model.captcha?.id) { mutableStateOf("") }
@@ -136,38 +106,6 @@ private fun CaptchaImage(captcha: Captcha?, enabled: Boolean, refresh: () -> Uni
     Surface(shape = RoundedCornerShape(8.dp), modifier = Modifier.width(128.dp).height(56.dp).clickable(enabled = enabled, onClickLabel = "刷新验证码", onClick = refresh)) {
         if (bitmap != null) Image(bitmap, contentDescription = "验证码，点击刷新", modifier = Modifier.fillMaxSize())
         else Box(contentAlignment = Alignment.Center) { Text("刷新验证码", style = MaterialTheme.typography.labelMedium) }
-    }
-}
-
-@Composable
-private fun ConversationList(model: PlatformViewModel) {
-    val user = model.account ?: return
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 12.dp)) {
-        item { Text("${user.displayName.ifBlank { user.username }} · ${model.models.size} 个可用模型 · v${BuildConfig.VERSION_NAME.substringBefore('-')}", color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) }
-        if (model.conversations.isEmpty() && !model.busy) item { Text("还没有对话记录", modifier = Modifier.padding(20.dp)) }
-        items(model.conversations, key = { it.id }) { conversation ->
-            ListItem(headlineContent = { Text(conversation.title, maxLines = 2) },
-                supportingContent = { Text(conversation.modelName) }, modifier = Modifier.clickable { model.open(conversation) })
-            HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
-        }
-    }
-}
-
-@Composable
-private fun HistoryMessages(messages: List<ChatMessage>, busy: Boolean) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        if (messages.isEmpty() && !busy) item { Text("这个对话还没有消息", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        items(messages, key = { it.id }) { message ->
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (message.role == "user") "你" else "槑槑", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                val background = if (message.role == "user") MaterialTheme.colorScheme.primaryContainer.copy(alpha = .4f) else Color.Transparent
-                Box(Modifier.fillMaxWidth().background(background, RoundedCornerShape(8.dp)).padding(if (message.role == "user") 12.dp else 0.dp)) {
-                    MarkdownText(message.content.ifBlank { if (message.status in listOf("failed", "interrupted")) "本次回答已中断" else "暂无正文" })
-                }
-                if (message.attachments.isNotEmpty()) Text("附件：${message.attachments.joinToString("、")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
     }
 }
 

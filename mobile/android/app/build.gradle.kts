@@ -26,8 +26,8 @@ android {
         applicationId = "asia.feng.aimeimei"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         resValue("string", "app_name", "AI槑槑")
         buildConfigField("String", "API_BASE_URL", "\"${server.toASCIIString().trimEnd('/')}/\"")
     }
@@ -76,4 +76,6 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }

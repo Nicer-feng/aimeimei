@@ -12,7 +12,7 @@ internal fun UpdateAction(model: PlatformViewModel) {
     val context = LocalContext.current
     val updater = (context.applicationContext as MeimeiApplication).updates
     var open by remember { mutableStateOf(false) }
-    TextButton(onClick = { open = true; updater.check() }) { Text("更新") }
+    TextButton(onClick = { open = true; updater.check() }) { Text("检查更新") }
     if (!open) return
     val state = updater.state
     AlertDialog(onDismissRequest = { open = false }, title = { Text("应用更新 · v${BuildConfig.VERSION_NAME}") }, text = {

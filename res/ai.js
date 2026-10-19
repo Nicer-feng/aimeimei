@@ -1708,6 +1708,7 @@
 		        state.authed = true;
 		        showApp();
 		        await Promise.all([loadModels(), loadSearchConfig(), loadFeatureFlags(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
+		        await openAndroidToolLink();
 	      } catch {
 	        showLogin();
 	      }
@@ -1761,6 +1762,41 @@
       state.authed = true;
       showApp();
       await Promise.all([loadModels(), loadSearchConfig(), loadFeatureFlags(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
+      await openAndroidToolLink();
+    }
+
+    // 安卓工具只定位现有页面；所有数据仍走当前账号和原有权限检查。
+    async function openAndroidToolLink() {
+      const params = new URLSearchParams(location.hash.slice(1));
+      const tool = params.get("app-tool");
+      const actions = { prompts: openPromptLibrary, favorites: openFavorites, profiles: openProfiles,
+        media: openMediaAnalysis, ocr: openHandwritingOcr, activity: openTokenActivity, admin: openSettings };
+      if (!["chat", "writing", "reading", ...Object.keys(actions)].includes(tool)) return;
+      document.documentElement.classList.add("android-embedded");
+      try {
+        const id = params.get("conversation");
+        if (["chat", "writing"].includes(tool)) {
+          if (id) {
+            if (!state.conversations.some(item => item.id === id)) throw new Error("这段聊天已被删除或不可访问，请返回刷新。");
+            await selectConversation(id);
+          } else {
+            saveCurrentDraft(); beginConversationTransition(); stopCurrentTts();
+            state.currentConversation = null; state.messages = []; state.conversationStats = null;
+            state.documentAttachments = []; state.persistentDocuments = [];
+            updateChatHeader(); renderConversations(); renderDocumentPreviews(); renderEmpty(); restoreCurrentDraft();
+          }
+        }
+        if (tool === "admin") {
+          if (!hasAdminAccess()) throw new Error("当前账号没有后台管理权限。");
+          openSettings();
+        } else if (tool === "writing") {
+          if (!(state.currentConversation ? state.currentConversation.writing_mode : getUserStorage("writingMode", "0") === "1")) await toggleWritingMode();
+          // 无会话时先显示写稿首页，发送或打开本单要求后才新建记录。
+          if (state.currentConversation) await openWritingWorkspace();
+        } else if (tool === "reading") {
+          window.MeimeiReader?.openLibrary();
+        } else if (actions[tool]) await actions[tool]();
+      } catch (err) { setStatus("chatStatus", friendlyError(err, "工具打开失败，请返回后重试。"), "err"); }
     }
 
     async function sendLoginSms() {
@@ -4365,7 +4401,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.28.6" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.28.7" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
