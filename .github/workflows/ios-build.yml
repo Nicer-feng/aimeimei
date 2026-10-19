@@ -3,7 +3,7 @@ name: iOS 原生客户端
 on:
   workflow_dispatch:
   push:
-    branches: [main, codex/ios-native]
+    branches: [main]
     paths:
       - 'mobile/ios/**'
       - '.github/workflows/ios-build.yml'
@@ -71,6 +71,8 @@ jobs:
           if [ -d "$RUNNER_TEMP/meimei-ui.xcresult" ]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/meimei-ui.xcresult" \
               --output-path "$RUNNER_TEMP/ios-screenshots"
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/meimei-ui.xcresult" \
+              > "$RUNNER_TEMP/ios-screenshots/test-summary.json"
           fi
       - name: Archive unsigned iPhone app
         run: |

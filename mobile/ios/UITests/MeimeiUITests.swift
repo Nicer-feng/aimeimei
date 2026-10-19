@@ -8,7 +8,7 @@ final class MeimeiUITests: XCTestCase {
         app.launch()
     }
     private func capture(_ name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
     }
     private func login() {
@@ -60,7 +60,14 @@ final class MeimeiUITests: XCTestCase {
         login(); capture("07-dark-larger-text")
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
-        XCTAssertTrue(app.buttons["sendButton"].waitForExistence(timeout: 5))
+        let rotated = XCTNSPredicateExpectation(predicate: NSPredicate { [unowned self] _, _ in
+            let window = self.app.windows.firstMatch.frame
+            let send = self.app.buttons["sendButton"].frame
+            let settings = self.app.buttons["settingsButton"].frame
+            return window.width > window.height && !send.isEmpty && !settings.isEmpty
+                && window.contains(send) && window.contains(settings)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [rotated], timeout: 10), .completed)
         capture("08-landscape")
     }
 }

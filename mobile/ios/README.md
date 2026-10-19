@@ -21,7 +21,7 @@
 ## 先用 GitHub 云端构建，不需要本机 Xcode 或开发者账号
 
 进入仓库 **Actions → iOS 原生客户端 → Run workflow**，选择包含本工程的分支。
-默认分支尚未包含工作流时，可先查看 `codex/ios-native` 推送触发的运行记录。
+默认分支尚未包含工作流时，可先查看 iOS PR 对应的运行记录。
 只修改 `mobile/ios/**` 或 iOS workflow 才会触发 iOS 构建；与 Android 使用不同并发组，互不取消。
 
 构建机为 GitHub 标准 **macos-15 + Xcode 26.3**，部署目标仍是 iOS 17。
@@ -41,7 +41,7 @@
 |---|---|
 | `aimeimei-ios-simulator-运行编号` | 模拟器 `.app` 压缩包，仅供 Mac 的 iOS 模拟器运行 |
 | `aimeimei-ios-unsigned-运行编号` | 未签名真机 IPA、校验和及说明；不能直接安装 |
-| `aimeimei-ios-screenshots-运行编号` | 离线 UI 测试截图 |
+| `aimeimei-ios-screenshots-运行编号` | 离线 UI 测试截图及测试结果汇总 |
 
 产物保留 7 天；失败时保留诊断日志和 xcresult 3 天。模拟器 app 为 Debug，只有显式 `--ui-testing` 才启用离线数据；普通打开仍连接真实后端。真机 Release 包不编译离线登录实现。
 
