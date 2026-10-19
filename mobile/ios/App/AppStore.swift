@@ -54,12 +54,7 @@ final class AppStore {
             if let user = try await api.currentAccount() {
                 account = user
                 try await loadWorkspace()
-                restoreDraft()
-                // 正常启动留在新聊天；只有未确认发送才恢复原会话。
-                if let item = local.pendingSends(accountID: user.id).first,
-                   let conversation = conversations.first(where: { $0.id == item.conversationID }) {
-                    selected = conversation; restoreDraft(); try await loadMessages()
-                }
+                try await restorePosition()
             } else { captcha = try await api.captcha() }
         }
         starting = false
@@ -73,7 +68,7 @@ final class AppStore {
             do {
                 let user = try await api.login(username: username, password: password, captcha: challenge, answer: answer)
                 account = user; captcha = nil
-                try await loadWorkspace(); restoreDraft()
+                try await loadWorkspace(); try await restorePosition()
             } catch {
                 if account == nil { captcha = try? await api.captcha() }
                 throw error
@@ -107,6 +102,16 @@ final class AppStore {
             draft.modelID = selected.modelID; draft.reasoningMode = selected.reasoningMode
         } else if !models.contains(where: { $0.id == draft.modelID }) { draft.modelID = models.first?.id ?? "" }
         pending = local.pending(accountID: account.id, conversationID: conversationID)
+    }
+    private func restorePosition() async throws {
+        selected = nil; messages = []; live = nil; restoreDraft()
+        guard let account else { return }
+        // 正常启动和重新登录都从新聊天开始；只有未确认发送才恢复原会话。
+        for item in local.pendingSends(accountID: account.id).sorted(by: { $0.baseline > $1.baseline }) {
+            if let conversation = conversations.first(where: { $0.id == item.conversationID }) {
+                selected = conversation; restoreDraft(); try await loadMessages(); return
+            }
+        }
     }
     private func saveDraft() {
         guard let account else { return }
@@ -180,7 +185,7 @@ final class AppStore {
         }
     }
     func send() async {
-        guard canSend, let account else { return }
+        guard canSend, foreground, let account else { return }
         await work {
             let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if selected == nil {
@@ -193,6 +198,7 @@ final class AppStore {
                 restoreDraft()
             }
             guard let selected else { return }
+            guard foreground else { return }
             let marker = PendingSend(conversationID: selected.id, baseline: messages.map(\.id).max() ?? 0, content: text)
             // 标记必须先可靠落盘，再允许真正的模型 POST。
             try local.setPending(marker, accountID: account.id, conversationID: selected.id)
@@ -204,6 +210,7 @@ final class AppStore {
                 guard let self else { return }
                 var failure: Error?
                 do {
+                    try Task.checkCancellation()
                     try await self.api.stream(id: selected.id, content: text, webSearch: search) { [weak self] event in
                         guard let self else { throw CancellationError() }
                         try await self.accept(event, conversationID: selected.id, run: id)
@@ -238,6 +245,7 @@ final class AppStore {
         for attempt in 0..<4 {
             guard run == runID, account != nil, foreground, !Task.isCancelled else { return }
             if attempt > 0 { try? await Task.sleep(for: .seconds(attempt)) }
+            guard run == runID, account != nil, foreground, !Task.isCancelled else { return }
             do {
                 try await loadMessages()
                 if pending == nil { try await loadWorkspace(); return }

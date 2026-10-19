@@ -16,6 +16,7 @@ final class MeimeiUITests: XCTestCase {
         app.textFields["usernameField"].tap(); app.textFields["usernameField"].typeText("family")
         app.secureTextFields["passwordField"].tap(); app.secureTextFields["passwordField"].typeText("test-only")
         app.textFields["captchaField"].tap(); app.textFields["captchaField"].typeText("AB23")
+        if !app.buttons["loginButton"].isHittable { app.swipeUp() }
         app.buttons["loginButton"].tap()
         XCTAssertTrue(app.buttons["historyButton"].waitForExistence(timeout: 10))
     }
@@ -34,7 +35,10 @@ final class MeimeiUITests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 5)); composer.tap(); composer.typeText("Hello Meimei")
         app.buttons["sendButton"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "我们从哪里开始？")).firstMatch.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["sendButton"].waitForExistence(timeout: 5)); capture("05-chat")
+        XCTAssertTrue(app.buttons["sendButton"].waitForExistence(timeout: 5))
+        let confirmed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.descendants(matching: .any)["liveReply"])
+        XCTAssertEqual(XCTWaiter.wait(for: [confirmed], timeout: 5), .completed)
+        capture("05-chat")
     }
     func testModelCapabilityAndDraftSurviveNavigation() {
         login()

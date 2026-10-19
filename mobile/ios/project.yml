@@ -63,6 +63,8 @@ schemes:
       config: Debug
     test:
       config: Debug
+      environmentVariables:
+        MEIMEI_OFFLINE_TESTS: '1'
       targets:
         - name: MeimeiTests
           parallelizable: false

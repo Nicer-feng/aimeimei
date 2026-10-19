@@ -24,14 +24,14 @@
 默认分支尚未包含工作流时，可先查看 `codex/ios-native` 推送触发的运行记录。
 只修改 `mobile/ios/**` 或 iOS workflow 才会触发 iOS 构建；与 Android 使用不同并发组，互不取消。
 
-构建机为 GitHub 标准 **macos-26 + Xcode 26.6**，部署目标仍是 iOS 17。
+构建机为 GitHub 标准 **macos-15 + Xcode 26.3**，部署目标仍是 iOS 17。
 固定 XcodeGen **2.46.0**，下载后核对 SHA-256。工程由 `project.yml` 生成，不手工维护 pbxproj。
 不使用任何 Apple/GitHub Secrets，不上传 TestFlight、不创建公开 Release、不访问生产服务器。
 
 流水线依次运行：
 
 1. 原生协议核心测试（验证码登录参数、Cookie、SSE、待核对恢复、草稿隔离等）。
-2. 生成工程，选择当前 Xcode 实际可用的 iPhone 模拟器。
+2. 生成工程，先编译应用和测试，再选择当前 Xcode SDK 对应的稳定 iPhone 模拟器；启动最多等待 4 分钟。
 3. 编译 SwiftUI 应用，运行离线 UI 验收并保存截图；测试只使用 Debug 注入的合成数据。
 4. Release 构建真机架构应用，打包**未签名 IPA**。
 

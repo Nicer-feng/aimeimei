@@ -79,4 +79,16 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.draft.text, "首页草稿"); XCTAssertEqual(store.draft.modelID, "m2")
         await store.select(item); XCTAssertEqual(store.draft.text, "历史会话草稿")
     }
+    func testReloginRestoresPendingWorkAndBackgroundCannotStartSend() async throws {
+        await store.start()
+        let marker = PendingSend(conversationID: "history", baseline: 0, content: "给我一个简单的 Markdown 示例")
+        try local.setPending(marker, accountID: "offline-user", conversationID: "history")
+        await store.login(username: "family", password: "test-only", answer: "AB23")
+        XCTAssertEqual(store.selected?.id, "history"); XCTAssertNil(store.pending)
+        store.newChat(); store.setText("后台不能发起新请求")
+        await store.sceneActive(false); await store.send()
+        XCTAssertNil(store.selected); XCTAssertNil(store.pending)
+        XCTAssertEqual(store.conversations.count, 1)
+        XCTAssertEqual(store.draft.text, "后台不能发起新请求")
+    }
 }

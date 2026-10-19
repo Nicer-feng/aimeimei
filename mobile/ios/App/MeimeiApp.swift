@@ -23,6 +23,7 @@ struct MeimeiApp: App {
                 do {
                     #if DEBUG
                     let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
+                        || ProcessInfo.processInfo.environment["MEIMEI_OFFLINE_TESTS"] == "1"
                         || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
                     #else
                     let testing = false
