@@ -10,7 +10,7 @@ on:
         type: choice
         options: [debug, release]
   push:
-    branches: [main]
+    branches: [main, codex/android-native-admin]
     tags: ['android/v*']
     paths:
       - 'mobile/android/**'

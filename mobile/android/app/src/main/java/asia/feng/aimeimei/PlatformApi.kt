@@ -42,8 +42,8 @@ class PlatformApi(private val base: HttpUrl, cookies: CookieJar) {
 
     private val streamClient = client.newBuilder().readTimeout(5, TimeUnit.MINUTES).callTimeout(15, TimeUnit.MINUTES).build()
 
-    private suspend fun request(segments: List<String>, body: JSONObject? = null, method: String = "POST"): JSONObject = withContext(Dispatchers.IO) {
-        val url = base.newBuilder().apply { segments.forEach { addPathSegment(it) } }.build()
+    private suspend fun request(segments: List<String>, body: JSONObject? = null, method: String = "POST", query: Map<String, String> = emptyMap()): JSONObject = withContext(Dispatchers.IO) {
+        val url = base.newBuilder().apply { segments.forEach { addPathSegment(it) }; query.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
         val builder = Request.Builder().url(url).header("Accept", "application/json")
         if (body != null) builder.method(method, body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
         client.newCall(builder.build()).awaitResponse().use { response ->
@@ -60,6 +60,30 @@ class PlatformApi(private val base: HttpUrl, cookies: CookieJar) {
                 throw ApiFailure(response.code, hint)
             }
             data
+        }
+    }
+
+    // 管理接口沿用当前账号 Cookie，路径和参数分别编码，不接受任意外部地址。
+    internal suspend fun adminRequest(path: List<String>, method: String = "GET", body: JSONObject? = null,
+                                      query: Map<String, String> = emptyMap()): JSONObject {
+        require(path.firstOrNull() in setOf("overview", "users", "models", "search", "tts", "sms-auth", "features",
+            "token-stats", "cost-stats", "cost-recalculate", "password", "usage-time", "version"))
+        require(method in setOf("GET", "POST", "PUT", "DELETE"))
+        val route = when (path.first()) {
+            "version" -> listOf("api", "version")
+            "usage-time" -> { require(path.getOrNull(1) == "admin"); listOf("api") + path }
+            else -> listOf("api", "admin") + path
+        }
+        try { return request(route, if (method == "GET") null else body ?: JSONObject(), method, query) }
+        catch (failure: ApiFailure) {
+            throw ApiFailure(failure.status, when (failure.status) {
+                401 -> "登录已失效或管理员权限已变化，请重新登录"
+                403 -> "当前账号没有管理员权限"
+                409 -> "账号或手机号已被占用，请修改后保存"
+                400 -> "保存未被接受，请检查必填项、参数范围，以及是否保留了至少一位启用的管理员"
+                404 -> "记录已不存在，请返回后刷新"
+                else -> "管理请求失败，请稍后重试（${failure.status}）"
+            })
         }
     }
 

@@ -60,7 +60,9 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
     val closeDrawer = { focus.clearFocus(); keyboard?.hide(); scope.launch { if (preferences.motion) drawer.close() else drawer.snapTo(DrawerValue.Closed) }; Unit }
     val openTool: (String) -> Unit = { id ->
         if (!model.streaming && !model.busy) {
-            webParent = screen; toolId = id; webConversation = model.selected?.id.orEmpty(); screen = "web"
+            webParent = screen
+            if (id == "admin") screen = "admin"
+            else { webParent = screen; toolId = id; webConversation = model.selected?.id.orEmpty(); screen = "web" }
         }
     }
     val back: () -> Unit = {
@@ -82,7 +84,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
         }
     ) {
         Scaffold(topBar = {
-            TopAppBar(title = {
+            if (screen != "admin") TopAppBar(title = {
                 Column {
                     Text(when (screen) { "settings" -> "设置"; "tools" -> "更多工具"; "web" -> if (toolId == "admin") "后台管理" else webTools.firstOrNull { it.id == toolId }?.title ?: "AI槑槑"; else -> model.selected?.title ?: "AI槑槑" },
                         maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
@@ -116,6 +118,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
                     when (page) {
                         "settings" -> SettingsScreen(model, preferences, openTool)
                         "tools" -> ToolScreen(model, openTool)
+                        "admin" -> AdminScreen(model, preferences) { screen = webParent; model.returnedFromWeb() }
                         "web" -> WebToolScreen(model, toolId, webConversation)
                         else -> if (model.account == null) LoginForm(model) else ChatScreen(model, openTool)
                     }
