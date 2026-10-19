@@ -78,6 +78,10 @@ final class AppStoreTests: XCTestCase {
         store.newChat()
         XCTAssertEqual(store.draft.text, "首页草稿"); XCTAssertEqual(store.draft.modelID, "m2")
         await store.select(item); XCTAssertEqual(store.draft.text, "历史会话草稿")
+        _ = try? await api.configureConversation(id: item.id, modelID: "m2", mode: .deep)
+        await store.refresh()
+        XCTAssertEqual(store.draft.modelID, "m2"); XCTAssertEqual(store.draft.reasoningMode, .deep)
+        XCTAssertEqual(store.draft.text, "历史会话草稿")
     }
     func testReloginRestoresPendingWorkAndBackgroundCannotStartSend() async throws {
         await store.start()

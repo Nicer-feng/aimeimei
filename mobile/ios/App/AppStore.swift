@@ -93,7 +93,13 @@ final class AppStore {
         let list = try await api.conversations()
         let available = try await api.models()
         conversations = list; models = available
-        if let selected { self.selected = list.first { $0.id == selected.id } }
+        if let selected {
+            self.selected = list.first { $0.id == selected.id }
+            if let current = self.selected {
+                // 网页或其它设备修改配置后，同步服务端模型，但保留本机未发送草稿。
+                draft.modelID = current.modelID; draft.reasoningMode = current.reasoningMode; saveDraft()
+            }
+        }
     }
     private func restoreDraft() {
         guard let account else { return }
