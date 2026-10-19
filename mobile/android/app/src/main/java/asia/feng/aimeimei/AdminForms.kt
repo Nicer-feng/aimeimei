@@ -70,6 +70,8 @@ internal fun adminForm(kind: String, source: JSONObject = JSONObject()): AdminFo
 internal fun AdminForm.initialValues(): Map<String, String> = fields.associate { field ->
     field.key to if (field.type == AdminFieldType.SECRET || field.key == "clear_api_key") field.default
         else if (!source.has(field.key) || source.isNull(field.key)) field.default else source.get(field.key).toString()
+}.toMutableMap().apply {
+    if (kind == "models" && (source.optDouble("input_price_per_million") > 0 || source.optDouble("output_price_per_million") > 0)) this["cost_enabled"] = "true"
 }
 
 // 仅在内存中保存未提交的凭证，JSON 类型与现有 Web 接口保持一致。
@@ -121,6 +123,7 @@ internal fun AdminForm.payload(values: Map<String, String>, voices: List<Map<Str
             else -> body.put(field.key, raw.trim())
         }
     }
+    if (kind == "models" && (body.optDouble("input_price_per_million") > 0 || body.optDouble("output_price_per_million") > 0)) body.put("cost_enabled", true)
     if (kind == "tts") body.put("voices", JSONArray().apply { voices.forEach { voice -> put(JSONObject(voice.mapValues { it.value.trim() })) } })
     return if (kind == "features") JSONObject().put("features", body) else body
 }

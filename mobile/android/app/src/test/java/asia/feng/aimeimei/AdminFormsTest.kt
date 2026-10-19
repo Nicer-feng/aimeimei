@@ -30,7 +30,7 @@ class AdminFormsTest {
         assertNull(form.validate(values, emptyList()))
         val body = form.payload(values, emptyList())
         assertTrue(body.getBoolean("supports_reasoning_control")); assertEquals(2.4, body.getDouble("input_price_per_million"), 0.0)
-        assertFalse(body.has("api_key")); assertFalse(body.has("has_api_key"))
+        assertFalse(body.has("api_key")); assertFalse(body.has("has_api_key")); assertTrue(body.getBoolean("cost_enabled"))
         assertNotNull(form.validate(values + ("output_price_per_million" to "NaN"), emptyList()))
         assertNotNull(form.validate(values + ("input_price_per_million" to "-1"), emptyList()))
     }

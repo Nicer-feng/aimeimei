@@ -157,7 +157,7 @@ internal fun AdminStatistics(model: PlatformViewModel, section: String, enabled:
         data?.let { result ->
             item { AdminHint(when(section) {
                 "usage" -> "按北京时间统计网页前台有焦点的有效使用时长；连续 2 分钟无操作暂停。现有账本尚不包含原生聊天停留时长。"
-                "costs" -> "费用根据消息和价格快照估算，不等同于供应商账单；今日尚未结束。"
+                "costs" -> "按当前保留消息及价格快照估算，可能与全站用量账本有历史差异。今日尚未结束，费用不等同于供应商账单。"
                 else -> "全站趋势使用每日用量账本，不受下方账号和单日筛选影响；今日尚未结束。"
             }) }
             applied?.let { query -> item { AdminHint(when(section) {

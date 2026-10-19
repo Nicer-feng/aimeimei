@@ -35,6 +35,7 @@ class AdminScreenTest {
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
     private lateinit var preferences: AppPreferences
+    private var role = "admin"
     private val requests = CopyOnWriteArrayList<RecordedRequest>()
     private val overview = """{"overview":{"users":{"total":2,"active":2},"models":{"total":1,"enabled":1,"vision":1},"conversations":{"total":3},"usage":{"total_requests":12,"total_tokens":2000},"features":{"selection_quote":true,"side_discussion":true,"long_text_detection":true},"search":{"configured":true,"enabled":true},"oss":{"configured":true,"chat_image":true,"media":true},"tingwu":{"configured":true},"tts":{"configured":true,"enabled":true,"voice_count":1}}}"""
     @Before fun setup() {
@@ -46,7 +47,7 @@ class AdminScreenTest {
                 requests.add(request)
                 val path = request.requestUrl!!.encodedPath
                 val body = when {
-                    path == "/api/me" -> """{"authenticated":true,"user":{"id":"a1","username":"admin","display_name":"管理员","role":"admin"}}"""
+                    path == "/api/me" -> """{"authenticated":true,"user":{"id":"a1","username":"admin","display_name":"管理员","role":"$role"}}"""
                     path == "/api/conversations" -> """{"conversations":[]}"""
                     path == "/api/models" || path == "/api/admin/models" -> """{"models":[{"id":"m1","name":"模型 A","model":"test","provider":"测试","base_url":"https://example.com/v1","enabled":true,"supports_vision":true,"has_api_key":true}]}"""
                     path == "/api/admin/users" -> if (request.method == "POST") """{"user":{"id":"u2"}}""" else """{"users":[{"id":"u1","username":"family","display_name":"家人","role":"family","is_active":true}]}"""
@@ -135,4 +136,28 @@ class AdminScreenTest {
         assertTrue(requests.any { it.requestUrl!!.queryParameter("type") == "users" && it.requestUrl!!.queryParameter("id") == "u1" })
         compose.onNodeWithText("关闭").performClick()
     }
+    @Test fun voiceAndSystemModulesUseNativeEditors() {
+        showAdmin(true); module("语音服务"); awaitTag("admin-list")
+        compose.onNodeWithText("配置语音服务").performClick(); awaitTag("admin-editor")
+        compose.onNodeWithTag("admin-editor").performScrollToNode(hasText("可用音色"))
+        compose.onNodeWithText("测试音色", substring = true).assertExists()
+        capture("admin-voices-dark")
+        compose.onNodeWithContentDescription("返回").performClick(); awaitTag("admin-list")
+        compose.onNodeWithContentDescription("返回").performClick(); awaitTag("admin-list")
+        module("系统设置"); awaitTag("admin-list")
+        compose.onNodeWithText("fixture-build").assertExists()
+        compose.onNodeWithText("短信登录").performClick(); awaitTag("admin-editor")
+        compose.onNodeWithTag("admin-field-code_param_name").assertTextContains("code")
+    }
+    @Test fun familyAccountCannotCallNativeAdminGateway() {
+        role = "family"; model.restore()
+        runBlocking { withTimeout(10000) { while(model.busy || model.account?.role != "family") delay(10) } }
+        val before = server.requestCount
+        runBlocking {
+            try { model.adminRequest(listOf("users")); fail("Expected permission rejection") }
+            catch (error: ApiFailure) { assertEquals(403, error.status) }
+        }
+        assertEquals(before, server.requestCount)
+    }
+
 }

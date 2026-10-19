@@ -210,7 +210,9 @@ private fun AdminEditor(form: AdminForm, enabled: Boolean, onDirty: (Boolean) ->
             when (field.type) {
                 AdminFieldType.SWITCH -> ListItem(headlineContent = { Text(field.label) }, trailingContent = { Switch(value == "true", { values[field.key] = it.toString(); changed() }, enabled = enabled, modifier = Modifier.testTag("admin-field-${field.key}")) })
                 AdminFieldType.CHOICE -> AdminChoice(field.label, value, field.choices, enabled) { values[field.key] = it; changed() }
-                else -> OutlinedTextField(value, { values[field.key] = it; changed() }, label = { Text(field.label) },
+                else -> OutlinedTextField(value, { values[field.key] = it
+                        if (form.kind == "models" && field.key in setOf("input_price_per_million", "output_price_per_million") && (it.toDoubleOrNull() ?: 0.0) > 0) values["cost_enabled"] = "true"
+                        changed() }, label = { Text(field.label) },
                     supportingText = if (field.help.isNotEmpty()) ({ Text(field.help) }) else null,
                     enabled = enabled, singleLine = field.type != AdminFieldType.MULTILINE,
                     minLines = if (field.type == AdminFieldType.MULTILINE) 3 else 1,
