@@ -1,0 +1,101 @@
+name: iOS 原生客户端
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, codex/ios-native]
+    paths:
+      - 'mobile/ios/**'
+      - '.github/workflows/ios-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mobile/ios/**'
+      - '.github/workflows/ios-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Xcode and test protocol core
+        run: |
+          xcodebuild -version
+          swift test --package-path mobile/ios
+      - name: Generate Xcode project
+        run: bash mobile/ios/scripts/generate-project.sh
+      - name: Boot iPhone simulator
+        run: |
+          simulator_id=$(python3 mobile/ios/scripts/select-simulator.py)
+          echo "SIMULATOR_ID=$simulator_id" >> "$GITHUB_ENV"
+          xcrun simctl boot "$simulator_id"
+          xcrun simctl bootstatus "$simulator_id" -b
+      - name: Build and run offline UI tests
+        run: |
+          set -o pipefail
+          xcodebuild test -project mobile/ios/Meimei.xcodeproj -scheme Meimei \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
+            -derivedDataPath "$RUNNER_TEMP/meimei-derived" \
+            -resultBundlePath "$RUNNER_TEMP/meimei-ui.xcresult" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" CODE_SIGNING_ALLOWED=NO \
+            > "$RUNNER_TEMP/meimei-ui.log" 2>&1 || { tail -100 "$RUNNER_TEMP/meimei-ui.log"; exit 1; }
+      - name: Prepare simulator app
+        run: |
+          mkdir -p "$RUNNER_TEMP/ios-simulator"
+          ditto -c -k --keepParent "$RUNNER_TEMP/meimei-derived/Build/Products/Debug-iphonesimulator/Meimei.app" \
+            "$RUNNER_TEMP/ios-simulator/aimeimei-ios-simulator.zip"
+          xcrun xcresulttool export attachments --path "$RUNNER_TEMP/meimei-ui.xcresult" \
+            --output-path "$RUNNER_TEMP/ios-screenshots"
+      - name: Archive unsigned iPhone app
+        run: |
+          xcodebuild archive -project mobile/ios/Meimei.xcodeproj -scheme Meimei -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/meimei-unsigned.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/meimei-derived" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" CODE_SIGNING_ALLOWED=NO \
+            > "$RUNNER_TEMP/meimei-archive.log" 2>&1 || { tail -100 "$RUNNER_TEMP/meimei-archive.log"; exit 1; }
+          python3 mobile/ios/scripts/package-unsigned.py --archive "$RUNNER_TEMP/meimei-unsigned.xcarchive" \
+            --output "$RUNNER_TEMP/ios-unsigned" --commit "$GITHUB_SHA"
+      - name: Upload simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: aimeimei-ios-simulator-${{ github.run_number }}
+          path: ${{ runner.temp }}/ios-simulator/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload unsigned iPhone app
+        uses: actions/upload-artifact@v4
+        with:
+          name: aimeimei-ios-unsigned-${{ github.run_number }}
+          path: ${{ runner.temp }}/ios-unsigned/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aimeimei-ios-screenshots-${{ github.run_number }}
+          path: ${{ runner.temp }}/ios-screenshots/
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aimeimei-ios-diagnostics-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/meimei-ui.log
+            ${{ runner.temp }}/meimei-archive.log
+            ${{ runner.temp }}/meimei-ui.xcresult
+          retention-days: 3
+          if-no-files-found: ignore
