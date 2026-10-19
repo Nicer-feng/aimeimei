@@ -52,4 +52,11 @@ class AdminApiTest {
             try { api.adminRequest(listOf("users")); fail("Expected rejection") } catch (failure: ApiFailure) { assertEquals(code, failure.status) }
         }
     }
+    @Test fun explicitBusinessErrorsAreTranslatedWithoutEchoingUnknownServerText() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error":"at least one active admin is required"}"""))
+        try { api.adminRequest(listOf("users", "u1"), "PUT", JSONObject().put("is_active", false)); fail("Expected admin protection") }
+        catch (error: ApiFailure) { assertEquals("至少需要保留一位启用的管理员", error.message) }
+        assertFalse(adminFailureHint(400, "test-only-private-debug-text").contains("test-only"))
+    }
+
 }

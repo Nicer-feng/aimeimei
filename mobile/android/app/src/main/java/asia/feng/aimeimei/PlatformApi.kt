@@ -52,7 +52,7 @@ class PlatformApi(private val base: HttpUrl, cookies: CookieJar) {
                 throw ApiFailure(response.code, "服务器响应异常，请稍后重试")
             }
             if (!response.isSuccessful) {
-                val hint = when (data.optString("error")) {
+                val hint = if (segments.getOrNull(1) in setOf("admin", "usage-time")) adminFailureHint(response.code, data.optString("error")) else when (data.optString("error")) {
                     "captcha incorrect" -> "验证码不正确或已过期，请重新输入"
                     "password incorrect" -> "账号或密码不正确"
                     else -> if (response.code == 401) "登录已失效，请重新登录" else "请求失败，请稍后重试（${response.code}）"
@@ -74,17 +74,7 @@ class PlatformApi(private val base: HttpUrl, cookies: CookieJar) {
             "usage-time" -> { require(path.getOrNull(1) == "admin"); listOf("api") + path }
             else -> listOf("api", "admin") + path
         }
-        try { return request(route, if (method == "GET") null else body ?: JSONObject(), method, query) }
-        catch (failure: ApiFailure) {
-            throw ApiFailure(failure.status, when (failure.status) {
-                401 -> "登录已失效或管理员权限已变化，请重新登录"
-                403 -> "当前账号没有管理员权限"
-                409 -> "账号或手机号已被占用，请修改后保存"
-                400 -> "保存未被接受，请检查必填项、参数范围，以及是否保留了至少一位启用的管理员"
-                404 -> "记录已不存在，请返回后刷新"
-                else -> "管理请求失败，请稍后重试（${failure.status}）"
-            })
-        }
+        return request(route, if (method == "GET") null else body ?: JSONObject(), method, query)
     }
 
     suspend fun captcha(): Captcha = request(listOf("api", "captcha")).let {
@@ -163,4 +153,30 @@ private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine
             continuation.resume(response, onCancellation = { _, value, _ -> value.close() })
         }
     })
+}
+
+// 只翻译明确的业务错误，不回显任意服务器响应或凭证内容。
+internal fun adminFailureHint(status: Int, error: String): String {
+    val known = mapOf(
+        "at least one active admin is required" to "至少需要保留一位启用的管理员",
+        "password must be at least 6 characters" to "密码至少需要 6 位",
+        "password must be at least 8 characters" to "家用登录密码至少需要 8 位",
+        "name, base_url and model are required" to "请填写模型名称、API 地址和模型 ID",
+        "username invalid" to "账号格式不正确", "role invalid" to "请选择正确的账号角色",
+        "invalid statistics target" to "统计对象无效，请刷新后重试",
+        "invalid statistics date" to "统计日期不正确", "invalid statistics range" to "统计范围不正确",
+        "unsupported search provider" to "搜索服务暂不支持", "unsupported search mode" to "搜索策略不正确",
+        "unsupported search depth" to "搜索深度不正确")
+    val chinese = setOf("账号或手机号已被绑定", "手机号格式不正确", "验证码参数名不合法", "有效期参数名不合法",
+        "短信有效期或发送间隔不合法", "请先填写签名、模板，并确认服务端 RAM 凭据已配置短信认证权限",
+        "至少保留一个可用音色", "语音参数不正确", "配置格式不正确", "请选择不超过 366 天且不晚于今天的日期范围")
+    if (status == 400 || status == 409) { known[error]?.let { return it }; if (error in chinese) return error }
+    return when (status) {
+        401 -> "登录已失效或管理员权限已变化，请重新登录"
+        403 -> "当前账号没有管理员权限"
+        409 -> "账号或手机号已被占用，请修改后保存"
+        400 -> "请求未被接受，请检查填写的配置和参数范围"
+        404 -> "记录已不存在，请返回后刷新"
+        else -> "管理请求失败，请稍后重试（$status）"
+    }
 }

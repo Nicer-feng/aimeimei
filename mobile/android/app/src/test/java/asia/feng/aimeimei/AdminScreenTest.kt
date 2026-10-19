@@ -139,7 +139,7 @@ class AdminScreenTest {
     @Test fun voiceAndSystemModulesUseNativeEditors() {
         showAdmin(true); module("语音服务"); awaitTag("admin-list")
         compose.onNodeWithText("配置语音服务").performClick(); awaitTag("admin-editor")
-        compose.onNodeWithTag("admin-editor").performScrollToNode(hasText("可用音色"))
+        compose.onNodeWithTag("admin-editor").performScrollToNode(hasText("音色名称"))
         compose.onNodeWithText("测试音色", substring = true).assertExists()
         capture("admin-voices-dark")
         compose.onNodeWithContentDescription("返回").performClick(); awaitTag("admin-list")
