@@ -106,6 +106,14 @@ jobs:
             mobile/android/app/build/reports/lint-results-debug.html
           retention-days: 3
           if-no-files-found: ignore
+      - name: Upload native UI previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ui-previews-${{ github.run_number }}
+          path: mobile/android/app/build/reports/native-ui/*.png
+          retention-days: 3
+          if-no-files-found: ignore
       - name: Remove signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/android-release.jks"

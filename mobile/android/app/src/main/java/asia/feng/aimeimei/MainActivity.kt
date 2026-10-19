@@ -54,17 +54,22 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             val preferences = remember { AppPreferences(applicationContext) }
-            val dark = when (preferences.theme) { "dark" -> true; "light" -> false; else -> isSystemInDarkTheme() }
-            val density = LocalDensity.current
-            val colors = if (dark) darkColorScheme(primary = Color(0xFFE6A7BE)) else lightColorScheme(
-                primary = Color(0xFF9C4F6F), secondary = Color(0xFF6E7370), background = Color(0xFFFFFAF6), surface = Color(0xFFFFFAF6))
-            CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * preferences.fontScale), LocalAppMotion provides preferences.motion) {
-                MaterialTheme(colorScheme = colors) { PlatformApp(model, preferences) }
-            }
+            MeimeiTheme(preferences) { PlatformApp(model, preferences) }
         }
     }
     override fun onStart() { super.onStart(); model.foreground() }
     override fun onStop() { if (!isChangingConfigurations) model.background(); super.onStop() }
+}
+
+@Composable
+internal fun MeimeiTheme(preferences: AppPreferences, content: @Composable () -> Unit) {
+    val dark = when (preferences.theme) { "dark" -> true; "light" -> false; else -> isSystemInDarkTheme() }
+    val density = LocalDensity.current
+    val colors = if (dark) darkColorScheme(primary = Color(0xFFE6A7BE)) else lightColorScheme(
+        primary = Color(0xFF9C4F6F), secondary = Color(0xFF6E7370), background = Color(0xFFFFFAF6), surface = Color(0xFFFFFAF6))
+    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * preferences.fontScale), LocalAppMotion provides preferences.motion) {
+        MaterialTheme(colorScheme = colors, content = content)
+    }
 }
 
 @Composable

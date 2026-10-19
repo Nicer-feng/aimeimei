@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -53,7 +55,9 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
     var webParent by rememberSaveable { mutableStateOf("tools") }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    val closeDrawer = { scope.launch { if (preferences.motion) drawer.close() else drawer.snapTo(DrawerValue.Closed) }; Unit }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val closeDrawer = { focus.clearFocus(); keyboard?.hide(); scope.launch { if (preferences.motion) drawer.close() else drawer.snapTo(DrawerValue.Closed) }; Unit }
     val openTool: (String) -> Unit = { id ->
         if (!model.streaming && !model.busy) {
             webParent = screen; toolId = id; webConversation = model.selected?.id.orEmpty(); screen = "web"
@@ -86,7 +90,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
                 }
             }, navigationIcon = {
                 if (screen != "chat") IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
-                else if (model.account != null) IconButton(onClick = { scope.launch { if (preferences.motion) drawer.open() else drawer.snapTo(DrawerValue.Open) } }) { Icon(Icons.Default.Menu, "打开历史聊天") }
+                else if (model.account != null) IconButton(onClick = { focus.clearFocus(); keyboard?.hide(); scope.launch { if (preferences.motion) drawer.open() else drawer.snapTo(DrawerValue.Open) } }) { Icon(Icons.Default.Menu, "打开历史聊天") }
             }, actions = {
                 if (screen == "chat") {
                     if (model.account != null) {

@@ -1,6 +1,8 @@
 package asia.feng.aimeimei
 
 import android.app.Application
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.*
@@ -20,7 +22,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28])
+@Config(sdk = [28], qualifiers = "w390dp-h844dp-xhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AppShellTest {
     @get:Rule val compose = createComposeRule()
@@ -35,29 +37,41 @@ class AppShellTest {
         server.enqueue(MockResponse().setBody("""{"conversations":[{"id":"old","title":"历史测试会话","model_id":"m1"}]}"""))
         server.enqueue(MockResponse().setBody("""{"models":[{"id":"m1","name":"测试模型","model":"test"}]}"""))
         model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {}, dispatcher = Dispatchers.Unconfined)
-        preferences = AppPreferences(app)
-        compose.setContent { MaterialTheme { PlatformApp(model, preferences) } }
+        // 截图与导航测试关闭过渡，避免在淡入的首帧判断可见性。
+        preferences = AppPreferences(app).apply { changeMotion(false) }
+        compose.setContent { MeimeiTheme(preferences) { PlatformApp(model, preferences) } }
         compose.waitUntil(10000) { model.account != null && !model.busy }
     }
     @After fun close() { server.shutdown() }
+    private fun capture(name: String) {
+        val folder = java.io.File("build/reports/native-ui").apply { mkdirs() }
+        java.io.File(folder, "$name.png").outputStream().use { stream ->
+            check(compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, stream))
+        }
+    }
     @Test fun homeDrawerSettingsAndThemeWorkWithoutCreatingAConversation() {
         compose.onNodeWithText("今天，想聊点什么？").assertIsDisplayed()
         compose.onNodeWithText("检查更新").assertDoesNotExist()
+        capture("home")
         compose.onNodeWithContentDescription("新聊天").performClick()
         compose.onNodeWithContentDescription("打开历史聊天").performClick()
         compose.onNodeWithText("历史测试会话").assertIsDisplayed()
+        capture("history")
         compose.onNodeWithText("设置与账号").performClick()
         compose.onNodeWithText("主题").performClick()
         compose.onNodeWithText("深色").performClick()
         assertEquals("dark", preferences.theme)
         compose.onNodeWithTag("settings-list").performScrollToNode(hasText("检查更新"))
         compose.onNodeWithText("检查更新").assertIsDisplayed()
+        capture("settings-dark")
         compose.onNodeWithContentDescription("返回").performClick()
         compose.onNodeWithText("今天，想聊点什么？").assertIsDisplayed()
         assertEquals(3, server.requestCount)
     }
     @Test fun familyToolsDoNotExposeAdministratorEntry() {
         compose.onNodeWithContentDescription("更多工具").performClick()
+        compose.waitForIdle()
+        capture("tools")
         compose.onNodeWithText("完整聊天").assertIsDisplayed()
         compose.onNodeWithText("后台管理").assertDoesNotExist()
         compose.onNodeWithContentDescription("返回").performClick()
