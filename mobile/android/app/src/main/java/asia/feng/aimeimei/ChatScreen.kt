@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -37,7 +38,7 @@ internal fun ChatScreen(model: PlatformViewModel, openTool: (String) -> Unit) {
     if (model.selected == null) {
         Column(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Image(painterResource(R.drawable.meimei_avatar), "槑槑", Modifier.size(96.dp))
+                Image(painterResource(R.drawable.meimei_welcome), "槑槑欢迎插画", Modifier.widthIn(max = 300.dp).fillMaxWidth().aspectRatio(719f / 413f).clip(RoundedCornerShape(24.dp)))
                 Spacer(Modifier.height(20.dp))
                 Text("今天，想聊点什么？", style = MaterialTheme.typography.headlineSmall)
                 Text("有问题，慢慢说，槑槑在这里", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 24.dp))

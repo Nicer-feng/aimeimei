@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -188,7 +189,7 @@ private fun ToolScreen(model: PlatformViewModel, openTool: (String) -> Unit) {
 private fun SettingsScreen(model: PlatformViewModel, preferences: AppPreferences, openTool: (String) -> Unit) {
     var choice by remember { mutableStateOf("") }
     var logout by remember { mutableStateOf(false) }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("settings-list"), contentPadding = PaddingValues(bottom = 24.dp)) {
         model.account?.let { user ->
             item { SectionLabel("账号") }
             item { SettingsRow(user.displayName.ifBlank { user.username }, "${user.username} · ${if (user.role == "admin") "管理员" else "家庭成员"}") }

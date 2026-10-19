@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CancellationException
@@ -19,9 +20,10 @@ import java.io.IOException
 
 class PlatformViewModel(private val application: Application, apiOverride: PlatformApi? = null,
                         private val startGeneration: suspend (Int) -> Unit = { GenerationService.begin(application, it) },
-                        private val endGeneration: (Int) -> Unit = { GenerationService.end(application, it) }) {
+                        private val endGeneration: (Int) -> Unit = { GenerationService.end(application, it) },
+                        dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate) {
     // App-scoped state survives Activity destruction while the generation service is running.
-    private val viewModelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val viewModelScope = CoroutineScope(SupervisorJob() + dispatcher)
     private var visible = true
     internal val cookies = SessionCookies(application, BuildConfig.API_BASE_URL.toHttpUrl())
     private val api = apiOverride ?: PlatformApi(BuildConfig.API_BASE_URL.toHttpUrl(), cookies)

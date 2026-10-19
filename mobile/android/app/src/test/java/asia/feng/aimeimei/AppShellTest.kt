@@ -1,6 +1,7 @@
 package asia.feng.aimeimei
 
 import android.app.Application
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -33,7 +34,7 @@ class AppShellTest {
         server.enqueue(MockResponse().setBody("""{"authenticated":true,"user":{"id":"u1","username":"family","display_name":"家人","role":"family"}}"""))
         server.enqueue(MockResponse().setBody("""{"conversations":[{"id":"old","title":"历史测试会话","model_id":"m1"}]}"""))
         server.enqueue(MockResponse().setBody("""{"models":[{"id":"m1","name":"测试模型","model":"test"}]}"""))
-        model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {})
+        model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {}, dispatcher = Dispatchers.Unconfined)
         preferences = AppPreferences(app)
         compose.setContent { MaterialTheme { PlatformApp(model, preferences) } }
         compose.waitUntil(10000) { model.account != null && !model.busy }
@@ -49,7 +50,8 @@ class AppShellTest {
         compose.onNodeWithText("主题").performClick()
         compose.onNodeWithText("深色").performClick()
         assertEquals("dark", preferences.theme)
-        compose.onNodeWithText("检查更新").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasText("检查更新"))
+        compose.onNodeWithText("检查更新").assertIsDisplayed()
         compose.onNodeWithContentDescription("返回").performClick()
         compose.onNodeWithText("今天，想聊点什么？").assertIsDisplayed()
         assertEquals(3, server.requestCount)

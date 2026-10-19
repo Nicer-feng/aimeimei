@@ -4,8 +4,6 @@ import android.app.Application
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.MockResponse
@@ -28,18 +26,17 @@ class ChatNavigationTest {
     private lateinit var model: PlatformViewModel
     private var starts = 0
     @Before fun setup() {
-        Dispatchers.setMain(Dispatchers.Unconfined)
         app = RuntimeEnvironment.getApplication()
         app.getSharedPreferences("chat_drafts", 0).edit().clear().commit()
         app.getSharedPreferences("native_session", 0).edit().clear().commit()
         server = MockWebServer(); server.start()
     }
-    @After fun close() { server.shutdown(); Dispatchers.resetMain() }
+    @After fun close() { server.shutdown() }
     private fun bootstrap(history: String = "[]") {
         server.enqueue(MockResponse().setBody("""{"authenticated":true,"user":{"id":"u1","username":"family","display_name":"家人","role":"family"}}"""))
         server.enqueue(MockResponse().setBody("""{"conversations":$history}"""))
         server.enqueue(MockResponse().setBody("""{"models":[{"id":"m1","name":"模型","model":"test"}]}"""))
-        model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), { starts++ }, {})
+        model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), { starts++ }, {}, dispatcher = Dispatchers.Unconfined)
     }
     private suspend fun idle() { withTimeout(5000) { while (model.busy || model.streaming) delay(10) } }
     @Test fun coldStartAndRepeatedNewChatKeepHistoryAndWelcomeDraft() = runBlocking {
@@ -60,7 +57,9 @@ class ChatNavigationTest {
         server.enqueue(MockResponse().setBody("""{"conversations":[{"id":"c1","title":"你好","model_id":"m1"}]}"""))
         server.enqueue(MockResponse().setBody("""{"models":[{"id":"m1","name":"模型"}]}"""))
         server.enqueue(MockResponse().setBody("""{"messages":[{"id":1,"role":"user","content":"你好"},{"id":2,"role":"assistant","content":"回答","generation_status":"completed"}]}"""))
-        model.send(); idle()
+        model.send()
+        // 等待本轮保存并完成刷新，避免把建会话与启动发送间的瞬间当成结束。
+        withTimeout(5000) { while (model.messages.none { it.id == "2" } || model.busy || model.streaming) delay(10) }
         val requests = (0 until server.requestCount).map { server.takeRequest() }
         assertEquals(1, requests.count { it.method == "POST" && it.path == "/api/conversations" })
         val send = requests.single { it.method == "POST" && it.path == "/api/conversations/c1/messages" }
