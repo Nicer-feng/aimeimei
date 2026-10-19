@@ -26,3 +26,23 @@
 现有 Web 的 HTML/CSS、浏览器 DOM 与事件不能直接用于 Compose；原生页面与状态单独实现。后端的账号隔离、模型配置、搜索、Token、费用与材料解析可以复用，无需因 APK 重写。
 
 复杂功能通过同源 WebView 复用现有 Web 页面，原生会话使用 fragment 定位，Cookie 由系统 CookieManager 设置，不传管理密钥。返回时 GET /api/me 和会话列表，校验账号并刷新历史。
+
+## 原生后台（0.5.0）
+
+沿用登录 Cookie 和服务端管理员校验，不使用管理密钥替代账号。
+
+| 模块 | 现有接口 | 原生页面 |
+|---|---|---|
+| 概览 | GET /api/admin/overview | 账号、模型、用量与服务状态 |
+| 账号 | GET/POST /api/admin/users；PUT /api/admin/users/{id} | 新增、编辑、角色、状态、手机号确认 |
+| 模型及密钥 | GET/POST /api/admin/models；PUT/DELETE /api/admin/models/{id} | 模型配置、价格、能力、密钥替换/清空 |
+| 联网搜索 | GET/POST /api/admin/search | 搜索服务、策略、深度、数量、密钥 |
+| 语音 | GET/POST /api/admin/tts | 服务参数、默认音色、可用音色及资源 ID |
+| 插件 | POST /api/admin/features | 引用、侧边讨论、长文本检测开关 |
+| Token | GET /api/admin/token-stats；GET /api/admin/token-stats/daily；各自 /details | 账号/模型/每日维度、排序、搜索、7/30 天趋势及调用明细 |
+| 成本 | GET /api/admin/cost-stats；POST /api/admin/cost-recalculate | 时间范围、费用排行、趋势与确认回算 |
+| 有效时长 | GET /api/usage-time/admin；GET /api/usage-time/admin/user | 日期范围、搜索排序及账号每日明细；沿用已有网页账本 |
+| 短信配置 | GET/POST /api/admin/sms-auth | 签名、模板、有效期和重发间隔 |
+| 系统 | GET /api/version；POST /api/admin/password | 服务版本信息及确认修改家用密码 |
+
+凭证只在表单内存及 HTTPS 请求体中传递，不拼入 URL、不输出日志、不写入界面保存状态。

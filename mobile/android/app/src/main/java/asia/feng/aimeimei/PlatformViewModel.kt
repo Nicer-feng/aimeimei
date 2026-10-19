@@ -296,6 +296,16 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
             }
         }
     }
+    internal suspend fun adminRequest(path: List<String>, method: String = "GET", body: org.json.JSONObject? = null,
+                                      query: Map<String, String> = emptyMap()): org.json.JSONObject {
+        if (account?.role != "admin") throw ApiFailure(403, "当前账号没有管理员权限")
+        return try { api.adminRequest(path, method, body, query) }
+        catch (failure: ApiFailure) {
+            if (failure.status == 401 || failure.status == 403) returnedFromWeb()
+            throw failure
+        }
+    }
+
     fun returnedFromWeb() {
         if (streaming) return
         work { ticket ->
