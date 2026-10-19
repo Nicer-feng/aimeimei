@@ -1,6 +1,7 @@
 package asia.feng.aimeimei
 
 import android.app.Application
+import android.os.Looper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
@@ -23,6 +24,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.concurrent.CopyOnWriteArrayList
@@ -78,7 +80,18 @@ class AdminScreenTest {
         compose.setContent { MeimeiTheme(preferences) { AdminScreen(model, preferences) {} } }
         awaitTag("admin-list")
     }
-    private fun awaitTag(tag: String) { compose.waitUntil(15000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }; compose.waitForIdle() }
+    private fun awaitCondition(condition: () -> Boolean) {
+        // 网络完成后的主线程回调不属于 Compose 虚拟时钟，需要显式推进 Robolectric 消息队列。
+        compose.waitUntil(30000) { Shadows.shadowOf(Looper.getMainLooper()).idle(); condition() }
+    }
+    private fun awaitTag(tag: String) {
+        compose.waitForIdle()
+        try { awaitCondition { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() } }
+        catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError("等待 $tag 超时，已收到请求：${requests.map { it.requestUrl?.encodedPath }}\n${compose.onRoot().printToString()}", error)
+        }
+        compose.waitForIdle()
+    }
     private fun module(title: String) { compose.onNodeWithTag("admin-list").performScrollToNode(hasText(title)); compose.onNodeWithText(title).performClick(); compose.waitForIdle() }
     private fun capture(name: String) {
         compose.runOnIdle {
@@ -127,11 +140,11 @@ class AdminScreenTest {
     }
     @Test fun nativeStatisticsShowChartAndRequestDetails() {
         showAdmin(); module("Token统计"); awaitTag("admin-statistics")
-        compose.waitUntil(15000) { requests.any { it.requestUrl!!.encodedPath == "/api/admin/token-stats/daily" } }
+        awaitCondition { requests.any { it.requestUrl!!.encodedPath == "/api/admin/token-stats/daily" } }
         compose.onNodeWithTag("admin-statistics").performScrollToNode(hasText("查看明细"))
         capture("admin-statistics")
         compose.onNodeWithText("查看明细").performClick()
-        compose.waitUntil(15000) { compose.onAllNodesWithText("测试聊天").fetchSemanticsNodes().isNotEmpty() }
+        awaitCondition { compose.onAllNodesWithText("测试聊天").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("测试聊天").assertIsDisplayed()
         assertTrue(requests.any { it.requestUrl!!.queryParameter("type") == "users" && it.requestUrl!!.queryParameter("id") == "u1" })
         compose.onNodeWithText("关闭").performClick()
