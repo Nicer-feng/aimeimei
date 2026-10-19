@@ -2,11 +2,15 @@ package asia.feng.aimeimei
 
 import android.app.Application
 import android.graphics.Bitmap
-import androidx.compose.ui.graphics.asAndroidBitmap
+import android.graphics.Canvas
+import androidx.activity.ComponentActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.delay
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -25,7 +29,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [28], qualifiers = "w390dp-h844dp-xhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AppShellTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
     private lateinit var preferences: AppPreferences
@@ -37,16 +41,26 @@ class AppShellTest {
         server.enqueue(MockResponse().setBody("""{"conversations":[{"id":"old","title":"历史测试会话","model_id":"m1"}]}"""))
         server.enqueue(MockResponse().setBody("""{"models":[{"id":"m1","name":"测试模型","model":"test"}]}"""))
         model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {}, dispatcher = Dispatchers.Unconfined)
+        // 先完整加载夹具，再建立 Compose 树，避免后台网络写入与导航断言竞态。
+        runBlocking { withTimeout(10000) { while (model.account == null || model.busy) delay(10) } }
         // 截图与导航测试关闭过渡，避免在淡入的首帧判断可见性。
         preferences = AppPreferences(app).apply { changeMotion(false) }
         compose.setContent { MeimeiTheme(preferences) { PlatformApp(model, preferences) } }
-        compose.waitUntil(10000) { model.account != null && !model.busy }
+        compose.waitForIdle()
+        compose.onNodeWithText("今天，想聊点什么？").assertIsDisplayed()
     }
     @After fun close() { server.shutdown() }
     private fun capture(name: String) {
         val folder = java.io.File("build/reports/native-ui").apply { mkdirs() }
-        java.io.File(folder, "$name.png").outputStream().use { stream ->
-            check(compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, stream))
+        // Robolectric 没有系统 PixelCopy 合成器，通过原生 Skia 绘制窗口截图。
+        compose.runOnIdle {
+            val view = compose.activity.window.decorView
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(bitmap))
+            java.io.File(folder, "$name.png").outputStream().use { stream ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
+            }
+            bitmap.recycle()
         }
     }
     @Test fun homeDrawerSettingsAndThemeWorkWithoutCreatingAConversation() {

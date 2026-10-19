@@ -59,7 +59,9 @@ class ChatNavigationTest {
         server.enqueue(MockResponse().setBody("""{"messages":[{"id":1,"role":"user","content":"你好"},{"id":2,"role":"assistant","content":"回答","generation_status":"completed"}]}"""))
         model.send()
         // 等待本轮保存并完成刷新，避免把建会话与启动发送间的瞬间当成结束。
-        withTimeout(5000) { while (model.messages.none { it.id == "2" } || model.busy || model.streaming) delay(10) }
+        withTimeout(10000) {
+            while (model.messages.none { it.id == "2" } || model.pending != null || model.busy || model.streaming || model.selected?.title != "你好") delay(10)
+        }
         val requests = (0 until server.requestCount).map { server.takeRequest() }
         assertEquals(1, requests.count { it.method == "POST" && it.path == "/api/conversations" })
         val send = requests.single { it.method == "POST" && it.path == "/api/conversations/c1/messages" }
