@@ -138,7 +138,7 @@
 	      lastCompositionEndAt: 0,
 	      messageSeq: 0,
 	      searchConfig: null,
-	      featureFlags: { selection_quote: true, side_discussion: true },
+	      featureFlags: { selection_quote: true, side_discussion: true, long_text_detection: true },
 	      adminFeatures: null,
 		      adminKey: localStorage.getItem("aiPlatformAdminKey") || "",
 		      theme: localStorage.getItem("aiPlatformTheme") || "",
@@ -460,7 +460,7 @@
           updateFullComposerStats();
         }
         function handleLongPromptPaste(event) {
-          if (!supportsFullComposer() || fullComposerIsOpen()) return;
+          if (!featureEnabled("long_text_detection") || !supportsFullComposer() || fullComposerIsOpen()) return;
           const pasted = event.clipboardData?.getData('text/plain') || '';
           if (Array.from(pasted).length <= 1500) return;
           $('fullComposerSuggestion').hidden = false;
@@ -1454,6 +1454,7 @@
     }
 
     function applyFeatureFlagsToUI() {
+      if (!featureEnabled("long_text_detection")) dismissFullComposerSuggestion();
       document.body.classList.toggle("feature-selection-quote-off", !selectionQuoteEnabled());
       document.body.classList.toggle("feature-side-discussion-off", !sideDiscussionEnabled());
       if ($("quoteSelection")) $("quoteSelection").hidden = !selectionQuoteEnabled();
@@ -1471,9 +1472,9 @@
         const res = await api("/api/features");
         if (!res.ok) throw new Error(await readError(res, "功能开关加载失败。"));
         const data = await res.json();
-        state.featureFlags = { selection_quote: true, side_discussion: true, ...(data.features || {}) };
+        state.featureFlags = { selection_quote: true, side_discussion: true, long_text_detection: true, ...(data.features || {}) };
       } catch (err) {
-        state.featureFlags = { selection_quote: true, side_discussion: true };
+        state.featureFlags = { selection_quote: true, side_discussion: true, long_text_detection: true };
         console.warn("feature flags load failed", err);
       }
       applyFeatureFlagsToUI();
@@ -4364,7 +4365,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.28.5" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.28.6" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8667,10 +8668,11 @@
 	    function renderFeatureToggles() {
       const box = $("featureToggleList");
       if (!box) return;
-      const features = state.adminFeatures || state.featureFlags || { selection_quote: true, side_discussion: true };
+      const features = state.adminFeatures || state.featureFlags || { selection_quote: true, side_discussion: true, long_text_detection: true };
       const rows = [
         { key: "selection_quote", icon: "quote", title: "引用提问", desc: "选中聊天正文后，可把内容引用到当前输入框。" },
-        { key: "side_discussion", icon: "panel-right-open", title: "侧边讨论", desc: "选中文字后打开右侧并行讨论栏。关闭后右上角入口也会隐藏。" }
+        { key: "side_discussion", icon: "panel-right-open", title: "侧边讨论", desc: "选中文字后打开右侧并行讨论栏。关闭后右上角入口也会隐藏。" },
+        { key: "long_text_detection", icon: "text-cursor-input", title: "长文本自动检测", desc: "桌面端粘贴超过 1500 字时，提示进入全屏编辑。关闭后不再提示，仍可手动进入全屏编辑。" }
       ];
       box.innerHTML = rows.map((item) => (
         '<label class="feature-toggle-card">' +
@@ -8697,7 +8699,7 @@
         const res = await adminApi("/api/admin/features");
         if (!res.ok) throw new Error(await readError(res, "功能开关加载失败。"));
         const data = await res.json();
-        state.adminFeatures = { selection_quote: true, side_discussion: true, ...(data.features || {}) };
+        state.adminFeatures = { selection_quote: true, side_discussion: true, long_text_detection: true, ...(data.features || {}) };
         state.featureFlags = { ...state.featureFlags, ...state.adminFeatures };
         applyFeatureFlagsToUI();
         renderFeatureToggles();
@@ -8713,7 +8715,7 @@
         setStatus("featureStatus", "管理员账号或管理密钥可保存功能开关。", "err");
         return;
       }
-      const features = { selection_quote: true, side_discussion: true, ...(state.adminFeatures || state.featureFlags || {}) };
+      const features = { selection_quote: true, side_discussion: true, long_text_detection: true, ...(state.adminFeatures || state.featureFlags || {}) };
       document.querySelectorAll("[data-feature-toggle]").forEach((input) => {
         features[input.dataset.featureToggle] = input.checked;
       });
@@ -8724,7 +8726,7 @@
         const res = await adminApi("/api/admin/features", { method: "POST", body: JSON.stringify({ features }) });
         if (!res.ok) throw new Error(await readError(res, "功能开关保存失败。"));
         const data = await res.json();
-        state.adminFeatures = { selection_quote: true, side_discussion: true, ...(data.features || {}) };
+        state.adminFeatures = { selection_quote: true, side_discussion: true, long_text_detection: true, ...(data.features || {}) };
         state.featureFlags = { ...state.featureFlags, ...state.adminFeatures };
         applyFeatureFlagsToUI();
         renderFeatureToggles();

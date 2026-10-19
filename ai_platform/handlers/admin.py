@@ -29,6 +29,7 @@ class AdminHandlersMixin:
         updated = {
             "selection_quote": bool(incoming.get("selection_quote", current["selection_quote"])),
             "side_discussion": bool(incoming.get("side_discussion", current["side_discussion"])),
+            "long_text_detection": bool(incoming.get("long_text_detection", current["long_text_detection"])),
         }
         self.server.secrets["feature_flags"] = updated
         write_private(SECRETS_PATH, json.dumps(self.server.secrets, indent=2) + "\n")

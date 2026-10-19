@@ -1,6 +1,7 @@
 DEFAULT_FEATURE_FLAGS = {
     "selection_quote": True,
     "side_discussion": True,
+    "long_text_detection": True,
 }
 
 
