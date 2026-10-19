@@ -5,6 +5,7 @@ import android.os.Looper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import kotlinx.coroutines.Dispatchers
@@ -87,10 +88,11 @@ class AdminScreenTest {
         awaitTag("admin-list")
     }
     private fun awaitCondition(condition: () -> Boolean) {
-        // 网络返回时同时推进共享协程调度器和主线程队列，避免回调停留在测试调度器中。
+        // 推进协程、主线程及跨线程状态通知，避免 Robolectric 将已返回的数据停留在未提交快照中。
         compose.waitUntil(30000) {
             effectDispatcher.scheduler.runCurrent()
             Shadows.shadowOf(Looper.getMainLooper()).idle()
+            Snapshot.sendApplyNotifications()
             condition()
         }
     }
