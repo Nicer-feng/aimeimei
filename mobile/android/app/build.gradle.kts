@@ -26,8 +26,8 @@ android {
         applicationId = "asia.feng.aimeimei"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
         resValue("string", "app_name", "AI槑槑")
         buildConfigField("String", "API_BASE_URL", "\"${server.toASCIIString().trimEnd('/')}/\"")
     }
@@ -61,6 +61,7 @@ android {
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.09.01"))
     implementation("androidx.activity:activity-compose:1.11.0")
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.foundation:foundation")

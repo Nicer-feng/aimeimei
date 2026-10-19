@@ -4,8 +4,11 @@ import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -14,7 +17,10 @@ import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
 
-class PlatformViewModel(application: Application) : AndroidViewModel(application) {
+class PlatformViewModel(private val application: Application) {
+    // App-scoped state survives Activity destruction while the generation service is running.
+    private val viewModelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var visible = true
     private val cookies = SessionCookies(application, BuildConfig.API_BASE_URL.toHttpUrl())
     private val api = PlatformApi(BuildConfig.API_BASE_URL.toHttpUrl(), cookies)
     private val drafts = application.getSharedPreferences("chat_drafts", Application.MODE_PRIVATE)
@@ -35,6 +41,7 @@ class PlatformViewModel(application: Application) : AndroidViewModel(application
     private var streamJob: Job? = null
     private var revision = 0
     private var generation = 0
+    internal val activeGeneration get() = generation
     private var buffer: ReplyBuffer? = null
 
     init { restore() }
@@ -155,12 +162,22 @@ class PlatformViewModel(application: Application) : AndroidViewModel(application
         val reply = ReplyBuffer(); buffer = reply; live = reply.snapshot()
         val run = ++generation
         streamJob = viewModelScope.launch {
-            val ticker = launch { while (isActive && run == generation) { delay(80); if (run == generation) live = reply.snapshot() } }
+            val ticker = launch { while (isActive && run == generation) { delay(80); if (visible && run == generation) live = reply.snapshot() } }
             var failure: Exception? = null
-            try { api.stream(conversation.id, content, webSearch).collect { reply.accept(it) } }
+            var submitted = false
+            try {
+                GenerationService.begin(application, run)
+                submitted = true
+                withTimeout(15 * 60 * 1000L) { api.stream(conversation.id, content, webSearch).collect { reply.accept(it) } }
+            }
+            catch (_: TimeoutCancellationException) { failure = ApiFailure(408, "生成等待超时，请刷新核对已保存内容") }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { failure = error }
-            finally { ticker.cancel(); if (run == generation) { live = reply.snapshot(finish = true); streaming = false } }
+            finally {
+                ticker.cancel()
+                if (run == generation) { live = reply.snapshot(finish = true); streaming = false }
+                GenerationService.end(application, run)
+            }
             if (run != generation) return@launch
             if (reply.savedId != null) {
                 val final = reply.snapshot(finish = true)
@@ -168,7 +185,7 @@ class PlatformViewModel(application: Application) : AndroidViewModel(application
                     ChatMessage(reply.savedId!!, "assistant", final.content, final.reasoning, reply.status, emptyList())
                 forgetPending(); live = null
             }
-            if (failure is ApiFailure && failure.status == 400) {
+            if (!submitted || failure is ApiFailure && failure.status == 400) {
                 forgetPending(); if (draft.isBlank()) editDraft(content)
             }
             error = if (reply.savedId == null) failure?.let(::hint) ?: "连接已结束，尚未收到保存确认，正在核对服务器记录…"
@@ -184,8 +201,12 @@ class PlatformViewModel(application: Application) : AndroidViewModel(application
         error = "已停止接收，正在核对服务器保存的内容…"
         refresh()
     }
-    fun background() { if (streaming) stop() }
-    fun foreground() { if (account != null && !streaming && !busy && selected != null) refresh() }
+    fun background() { visible = false }
+    fun foreground() {
+        visible = true
+        if (streaming) live = buffer?.snapshot(finish = true)
+        else if (account != null && !busy && selected != null) refresh()
+    }
     fun back() {
         if (streaming) return
         generation++

@@ -9,7 +9,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.viewModels
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -34,16 +36,20 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.caverock.androidsvg.SVG
 import io.noties.markwon.Markwon
 import io.noties.markwon.ext.tables.TablePlugin
 
 class MainActivity : ComponentActivity() {
-    private val model: PlatformViewModel by viewModels()
+    private val model get() = (application as MeimeiApplication).chat
+    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= 33 && !getPreferences(MODE_PRIVATE).getBoolean("notification_requested", false)) {
+            getPreferences(MODE_PRIVATE).edit().putBoolean("notification_requested", true).apply()
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         setContent {
             val colors = if (isSystemInDarkTheme()) darkColorScheme(primary = Color(0xFFE6A7BE)) else lightColorScheme(
                 primary = Color(0xFF9C4F6F), secondary = Color(0xFF6E7370), background = Color(0xFFFFFAF6), surface = Color(0xFFFFFAF6))
@@ -56,7 +62,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PlatformApp(model: PlatformViewModel = viewModel()) {
+private fun PlatformApp(model: PlatformViewModel) {
     var confirmLeave by remember { mutableStateOf(false) }
     val goBack = { if (model.streaming) confirmLeave = true else model.back() }
     BackHandler(enabled = model.selected != null) { goBack() }
@@ -69,6 +75,7 @@ private fun PlatformApp(model: PlatformViewModel = viewModel()) {
             navigationIcon = {
                 if (model.selected != null) IconButton(onClick = { goBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回对话列表") }
             }, actions = {
+                UpdateAction(model)
                 if (model.account != null) {
                     IconButton(onClick = model::newConversation, enabled = !model.busy && !model.streaming && model.models.isNotEmpty()) { Icon(Icons.Filled.Add, "新建对话") }
                     IconButton(onClick = model::refresh, enabled = !model.busy && !model.streaming) { Icon(Icons.Filled.Refresh, "刷新") }

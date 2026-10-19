@@ -71,11 +71,16 @@ jobs:
           task=assembleDebug
           if [ "$BUILD_TYPE" = release ]; then task=assembleRelease; fi
           gradle --no-daemon -p mobile/android -PapiBaseUrl="$API_BASE_URL" :app:testDebugUnitTest :app:lintDebug ":app:$task"
+      - name: Verify signed release and prepare update metadata
+        if: env.BUILD_TYPE == 'release'
+        run: python3 mobile/android/scripts/prepare-release.py mobile/android/app/build/outputs/apk/release
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: aimeimei-android-${{ env.BUILD_TYPE }}-${{ github.run_number }}
-          path: mobile/android/app/build/outputs/apk/${{ env.BUILD_TYPE }}/*.apk
+          path: |
+            mobile/android/app/build/outputs/apk/${{ env.BUILD_TYPE }}/*.apk
+            mobile/android/app/build/outputs/apk/${{ env.BUILD_TYPE }}/update.json
           retention-days: 7
           if-no-files-found: error
       - name: Upload test reports on failure
@@ -91,3 +96,37 @@ jobs:
       - name: Remove signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/android-release.jks"
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_type == 'release'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: aimeimei-android-release-${{ github.run_number }}
+          path: dist
+      - name: Publish verified Android update
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const info = JSON.parse(fs.readFileSync('dist/update.json', 'utf8'));
+            if (!/^\d+\.\d+\.\d+$/.test(info.versionName) || !/^aimeimei-[\d.]+\.apk$/.test(info.apkName)) throw new Error('Invalid release metadata');
+            const tag = `android/v${info.versionName}`;
+            try {
+              await github.rest.repos.getReleaseByTag({...context.repo, tag});
+              throw new Error('该版本已经发布，请增加版本号，不覆盖旧安装包');
+            } catch (error) { if (error.status !== 404) throw error; }
+            const result = await github.rest.repos.createRelease({...context.repo, tag_name: tag,
+              target_commitish: context.sha, name: `AI槑槑 Android ${info.versionName}`, draft: true,
+              prerelease: false, make_latest: 'false', body: 'Android 原生客户端正式签名安装包。安装需用户确认；请保管长期签名。'});
+            for (const name of [info.apkName, 'update.json']) {
+              await github.rest.repos.uploadReleaseAsset({...context.repo, release_id: result.data.id, name,
+                data: fs.readFileSync(path.join('dist', name)), headers: {'content-type': name.endsWith('.apk') ? 'application/vnd.android.package-archive' : 'application/json'}});
+            }
+            await github.rest.repos.updateRelease({...context.repo, release_id: result.data.id, draft: false, make_latest: 'false'});
