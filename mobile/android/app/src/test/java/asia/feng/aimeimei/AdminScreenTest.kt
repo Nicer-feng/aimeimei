@@ -35,7 +35,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class AdminScreenTest {
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = UnconfinedTestDispatcher())
+    private val effectDispatcher = UnconfinedTestDispatcher()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = effectDispatcher)
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
     private lateinit var preferences: AppPreferences
@@ -86,16 +87,20 @@ class AdminScreenTest {
         awaitTag("admin-list")
     }
     private fun awaitCondition(condition: () -> Boolean) {
-        // 网络完成后的主线程回调不属于 Compose 虚拟时钟，需要显式推进 Robolectric 消息队列。
-        compose.waitUntil(30000) { Shadows.shadowOf(Looper.getMainLooper()).idle(); condition() }
+        // 网络返回时同时推进共享协程调度器和主线程队列，避免回调停留在测试调度器中。
+        compose.waitUntil(30000) {
+            effectDispatcher.scheduler.runCurrent()
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            condition()
+        }
     }
     private fun awaitTag(tag: String) {
         compose.waitForIdle()
         try { awaitCondition { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() } }
         catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
             val pending = Thread.getAllStackTraces().entries.filter { (thread, stack) ->
-                thread.name.startsWith("DefaultDispatcher") || stack.any { it.className.contains("Http1ExchangeCodec") }
-            }.take(8).joinToString("\n") { (thread, stack) -> "${thread.name} ${thread.state}\n${stack.joinToString("\n")}" }
+                thread.name.startsWith("DefaultDispatcher") || thread.name.contains("OkHttp") || thread.name.contains("main", ignoreCase = true) || stack.any { it.className.contains("Http1ExchangeCodec") }
+            }.take(30).joinToString("\n") { (thread, stack) -> "${thread.name} ${thread.state}\n${stack.joinToString("\n")}" }
             throw AssertionError("等待 $tag 超时，已收到请求：${requests.map { it.requestUrl?.encodedPath }}\n${compose.onRoot().printToString()}\n$pending", error)
         }
         compose.waitForIdle()
