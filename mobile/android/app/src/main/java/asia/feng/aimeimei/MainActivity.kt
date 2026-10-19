@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
             val density = LocalDensity.current
             val colors = if (dark) darkColorScheme(primary = Color(0xFFE6A7BE)) else lightColorScheme(
                 primary = Color(0xFF9C4F6F), secondary = Color(0xFF6E7370), background = Color(0xFFFFFAF6), surface = Color(0xFFFFFAF6))
-            CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * preferences.fontScale)) {
+            CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * preferences.fontScale), LocalAppMotion provides preferences.motion) {
                 MaterialTheme(colorScheme = colors) { PlatformApp(model, preferences) }
             }
         }

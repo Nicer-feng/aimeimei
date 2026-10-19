@@ -129,7 +129,9 @@ private fun ThinkingText(content: String) {
     var expanded by remember { mutableStateOf(false) }
     Column {
         TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起思考过程" else "查看思考过程") }
-        AnimatedVisibility(expanded) { Box(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())) { MarkdownText(content) } }
+        if (LocalAppMotion.current) {
+            AnimatedVisibility(expanded) { Box(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())) { MarkdownText(content) } }
+        } else if (expanded) Box(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())) { MarkdownText(content) }
     }
 }
 
@@ -203,7 +205,7 @@ private fun Composer(model: PlatformViewModel, onSend: () -> Unit, openTool: (St
                 Checkbox(model.webSearch, model::toggleWebSearch, enabled = editable)
                 Text("联网", style = MaterialTheme.typography.labelMedium)
             }
-            TextButton(onClick = { openTool("chat") }, enabled = editable) { Text("＋ 图片、文件与更多功能") }
+            TextButton(onClick = { openTool("chat") }, enabled = editable) { Text("打开完整聊天 · 图片与文件") }
         }
     }
 }

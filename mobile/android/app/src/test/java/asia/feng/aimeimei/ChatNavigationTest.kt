@@ -57,6 +57,8 @@ class ChatNavigationTest {
         model.editDraft("你好"); model.toggleWebSearch(true)
         server.enqueue(MockResponse().setBody("""{"conversation":{"id":"c1","title":"新对话","model_id":"m1","reasoning_mode":"balanced"}}"""))
         server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: {\"choices\":[{\"delta\":{\"content\":\"回答\"}}]}\n\ndata: {\"type\":\"message_saved\",\"message_id\":2,\"generation_status\":\"completed\"}\n\n"))
+        server.enqueue(MockResponse().setBody("""{"conversations":[{"id":"c1","title":"你好","model_id":"m1"}]}"""))
+        server.enqueue(MockResponse().setBody("""{"models":[{"id":"m1","name":"模型"}]}"""))
         server.enqueue(MockResponse().setBody("""{"messages":[{"id":1,"role":"user","content":"你好"},{"id":2,"role":"assistant","content":"回答","generation_status":"completed"}]}"""))
         model.send(); idle()
         val requests = (0 until server.requestCount).map { server.takeRequest() }

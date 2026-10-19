@@ -101,7 +101,16 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     }
     fun refresh() {
         if (streaming) return
-        work { ticket -> if (selected == null) loadWorkspace(ticket) else loadMessages(ticket) }
+        work { ticket ->
+            loadWorkspace(ticket)
+            if (ticket != revision) return@work
+            val current = selected
+            if (current != null) {
+                selected = conversations.firstOrNull { it.id == current.id }
+                if (selected != null) loadMessages(ticket)
+                else { messages = emptyList(); pending = null; live = null; restoreWelcomeDraft() }
+            }
+        }
     }
     private suspend fun loadWorkspace(ticket: Int) {
         val list = api.conversations(); val available = api.models()

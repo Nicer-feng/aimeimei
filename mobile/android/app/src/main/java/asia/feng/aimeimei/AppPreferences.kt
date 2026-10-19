@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+
+internal val LocalAppMotion = staticCompositionLocalOf { true }
 
 class AppPreferences(context: Context) {
     private val store = context.getSharedPreferences("appearance", Context.MODE_PRIVATE)
