@@ -94,7 +94,7 @@ class AppUpdater(private val app: Application) {
         if (job?.isActive == true || !trustedReleaseUrl(offer.apkUrl)) return
         job = scope.launch {
             state = offer.copy(phase = "downloading", message = "正在下载更新…")
-            val partial = File(folder, "update.part")
+            val partial = File.createTempFile("update-", ".part", folder)
             try {
                 withContext(Dispatchers.IO) {
                     val next = request(offer.apkUrl); call = next

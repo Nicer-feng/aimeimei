@@ -188,6 +188,11 @@ class PlatformViewModel(private val application: Application) {
             if (!submitted || failure is ApiFailure && failure.status == 400) {
                 forgetPending(); if (draft.isBlank()) editDraft(content)
             }
+            if (!submitted) {
+                live = null
+                error = (failure as? ApiFailure)?.message ?: "无法启动后台生成服务，请返回前台重试；输入内容已保留"
+                return@launch
+            }
             error = if (reply.savedId == null) failure?.let(::hint) ?: "连接已结束，尚未收到保存确认，正在核对服务器记录…"
                 else if (reply.status != "completed") "本次生成未完成，已保留收到的内容" else null
             refresh()

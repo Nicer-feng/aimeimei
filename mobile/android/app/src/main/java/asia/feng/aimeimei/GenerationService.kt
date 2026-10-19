@@ -40,8 +40,8 @@ class GenerationService : Service() {
             if (!chat.streaming || chat.activeGeneration != task) { stopSelf(); return START_NOT_STICKY }
             runningTask = task
             if (!started) {
-                started = true
                 wakeLock = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:generation").apply { acquire(16 * 60 * 1000L) }
+                started = true
             }
             ready?.complete(Unit)
         } catch (_: Exception) {
@@ -60,7 +60,7 @@ class GenerationService : Service() {
         super.onDestroy()
         // An unexpected service shutdown must not leave an unprotected stream running.
         val chat = (application as MeimeiApplication).chat
-        if (chat.streaming && chat.activeGeneration == task) chat.stop()
+        if (started && chat.streaming && chat.activeGeneration == task) chat.stop()
         if (runningTask == task) runningTask = null
     }
     companion object {

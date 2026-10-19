@@ -28,8 +28,11 @@ def prepare(folder, sdk):
     target = apk.with_name(f"aimeimei-{version}.apk")
     if apk != target:
         apk.rename(target)
+    checksum = hashlib.sha256()
     with target.open("rb") as source:
-        digest = hashlib.file_digest(source, "sha256").hexdigest()
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            checksum.update(chunk)
+    digest = checksum.hexdigest()
     metadata = {"schema": 1, "versionCode": int(package[2]), "versionName": version,
                 "packageName": package[1], "apkName": target.name,
                 "sha256": digest,
