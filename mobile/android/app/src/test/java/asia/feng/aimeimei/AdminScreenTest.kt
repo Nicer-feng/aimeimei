@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -32,8 +33,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], qualifiers = "w390dp-h844dp-xhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+@OptIn(androidx.compose.ui.test.ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class AdminScreenTest {
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = UnconfinedTestDispatcher())
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
     private lateinit var preferences: AppPreferences
@@ -72,6 +74,8 @@ class AdminScreenTest {
         server.start()
         model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {}, dispatcher = Dispatchers.Unconfined)
         runBlocking { withTimeout(10000) { while (model.account == null || model.busy) delay(10) } }
+        // 预热数字与嵌套 JSON 的平台解析类，避免首次后台加载与 Robolectric 主线程类初始化互相等待。
+        org.json.JSONObject(overview)
         preferences = AppPreferences(app).apply { changeMotion(false) }
     }
     @After fun close() { server.shutdown() }
@@ -89,7 +93,10 @@ class AdminScreenTest {
         compose.waitForIdle()
         try { awaitCondition { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() } }
         catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
-            throw AssertionError("等待 $tag 超时，已收到请求：${requests.map { it.requestUrl?.encodedPath }}\n${compose.onRoot().printToString()}", error)
+            val pending = Thread.getAllStackTraces().entries.filter { (thread, stack) ->
+                thread.name.startsWith("DefaultDispatcher") || stack.any { it.className.contains("Http1ExchangeCodec") }
+            }.take(8).joinToString("\n") { (thread, stack) -> "${thread.name} ${thread.state}\n${stack.joinToString("\n")}" }
+            throw AssertionError("等待 $tag 超时，已收到请求：${requests.map { it.requestUrl?.encodedPath }}\n${compose.onRoot().printToString()}\n$pending", error)
         }
         compose.waitForIdle()
     }
