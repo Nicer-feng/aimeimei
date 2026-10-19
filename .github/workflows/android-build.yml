@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-${{ github.ref }}-${{ inputs.build_type || 'debug' }}
+  group: android-${{ github.ref }}-${{ github.sha }}-${{ inputs.build_type || 'debug' }}
   cancel-in-progress: true
 
 jobs:
