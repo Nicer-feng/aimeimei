@@ -2,6 +2,12 @@ import XCTest
 @testable import MeimeiCore
 
 final class CoreTests: XCTestCase {
+    func testByteFramingKeepsEmptyLinesAndSplitUTF8AcrossCRLFAndLF() throws {
+        var parser = SSEByteParser(); var events: [String] = []
+        let raw = ": heartbeat\r\n\r\ndata: 你好😀\r\n\r\ndata: 第二行\n\ndata: 未结束"
+        for byte in raw.utf8 { if let event = try parser.byte(byte) { events.append(event) } }
+        XCTAssertEqual(events, ["你好😀", "第二行"])
+    }
     func testSSECommitsOnlyBlankLineAndKeepsMultilineUnicode() throws {
         var parser = SSEParser()
         XCTAssertNil(try parser.line(": heartbeat"))

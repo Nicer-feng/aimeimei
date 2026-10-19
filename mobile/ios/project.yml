@@ -29,6 +29,7 @@ targets:
         PRODUCT_NAME: Meimei
         INFOPLIST_FILE: App/Info.plist
         GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
@@ -42,6 +43,17 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: asia.feng.aimeimei.uitests
         GENERATE_INFOPLIST_FILE: YES
+  MeimeiTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [AppTests]
+    dependencies:
+      - target: Meimei
+      - package: MeimeiCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: asia.feng.aimeimei.tests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   Meimei:
     build:
@@ -52,6 +64,8 @@ schemes:
     test:
       config: Debug
       targets:
+        - name: MeimeiTests
+          parallelizable: false
         - name: MeimeiUITests
           parallelizable: false
     archive:

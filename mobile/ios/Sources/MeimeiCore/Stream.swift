@@ -1,6 +1,6 @@
 import Foundation
 
-/// 按 SSE 空行提交完整事件；UTF-8 和任意网络分片由 URLSession.AsyncBytes.lines 处理。
+/// 按 SSE 空行提交完整事件，不使用会忽略空行的 AsyncBytes.lines。
 public struct SSEParser {
     private var data: [String] = []
     private var size = 0
@@ -16,6 +16,26 @@ public struct SSEParser {
         size += value.utf8.count
         guard size <= 1_048_576 else { throw PlatformError.malformedStream }
         data.append(value)
+        return nil
+    }
+}
+
+/// 按字节保留空行与 CR/LF 边界，完整一行后才解码 UTF-8，避免截断中文和表情。
+public struct SSEByteParser {
+    private var parser = SSEParser()
+    private var buffer = Data()
+    private var previousCR = false
+    public init() {}
+    public mutating func byte(_ byte: UInt8) throws -> String? {
+        if byte == 10 || byte == 13 {
+            if byte == 10 && previousCR { previousCR = false; return nil }
+            previousCR = byte == 13
+            guard let line = String(data: buffer, encoding: .utf8) else { throw PlatformError.malformedStream }
+            buffer.removeAll(keepingCapacity: true)
+            return try parser.line(line)
+        }
+        previousCR = false; buffer.append(byte)
+        guard buffer.count <= 1_048_576 else { throw PlatformError.malformedStream }
         return nil
     }
 }

@@ -33,7 +33,7 @@ final class MeimeiUITests: XCTestCase {
         let composer = app.textViews["composerField"].exists ? app.textViews["composerField"] : app.textFields["composerField"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5)); composer.tap(); composer.typeText("Hello Meimei")
         app.buttons["sendButton"].tap()
-        XCTAssertTrue(app.staticTexts["我们从哪里开始？"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "我们从哪里开始？")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["sendButton"].waitForExistence(timeout: 5)); capture("05-chat")
     }
     func testModelCapabilityAndDraftSurviveNavigation() {

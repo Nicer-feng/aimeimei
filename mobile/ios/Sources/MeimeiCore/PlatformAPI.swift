@@ -134,16 +134,19 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 300
         let (bytes, response) = try await session.bytes(for: request)
+        defer { bytes.task.cancel() }
         let http = try checked(response)
         guard http.mimeType == "text/event-stream" else { throw PlatformError.invalidResponse }
-        var parser = SSEParser()
-        for try await line in bytes.lines {
-            try Task.checkCancellation()
-            guard let data = try parser.line(line) else { continue }
-            if data.trimmingCharacters(in: .whitespacesAndNewlines) == "[DONE]" { return }
-            let event = try StreamEvent(data: data)
-            try await onEvent(event)
-            if event.type == "message_saved", event.savedID != nil { return }
-        }
+        try await withTaskCancellationHandler {
+            var parser = SSEByteParser()
+            for try await byte in bytes {
+                try Task.checkCancellation()
+                guard let data = try parser.byte(byte) else { continue }
+                if data.trimmingCharacters(in: .whitespacesAndNewlines) == "[DONE]" { return }
+                let event = try StreamEvent(data: data)
+                try await onEvent(event)
+                if event.type == "message_saved", event.savedID != nil { return }
+            }
+        } onCancel: { bytes.task.cancel() }
     }
 }
