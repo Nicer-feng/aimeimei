@@ -5,6 +5,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.delay
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -38,10 +41,13 @@ class AppShellTest {
         server.enqueue(MockResponse().setBody("""{"conversations":[{"id":"old","title":"历史测试会话","model_id":"m1"}]}"""))
         server.enqueue(MockResponse().setBody("""{"models":[{"id":"m1","name":"测试模型","model":"test"}]}"""))
         model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {}, dispatcher = Dispatchers.Unconfined)
+        // 先完整加载夹具，再建立 Compose 树，避免后台网络写入与导航断言竞态。
+        runBlocking { withTimeout(10000) { while (model.account == null || model.busy) delay(10) } }
         // 截图与导航测试关闭过渡，避免在淡入的首帧判断可见性。
         preferences = AppPreferences(app).apply { changeMotion(false) }
         compose.setContent { MeimeiTheme(preferences) { PlatformApp(model, preferences) } }
-        compose.waitUntil(10000) { model.account != null && !model.busy }
+        compose.waitForIdle()
+        compose.onNodeWithText("今天，想聊点什么？").assertIsDisplayed()
     }
     @After fun close() { server.shutdown() }
     private fun capture(name: String) {
