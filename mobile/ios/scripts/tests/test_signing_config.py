@@ -6,8 +6,11 @@ import datetime as dt
 import importlib.util
 import os
 from pathlib import Path
+import plistlib
+import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 spec = importlib.util.spec_from_file_location("signing_config", Path(__file__).parents[1] / "signing-config.py")
 config = importlib.util.module_from_spec(spec)
@@ -123,6 +126,36 @@ class SigningConfigTests(unittest.TestCase):
         for sequence, attempt in [(0, 1), (1, 0), (1, 100), (999900, 1)]:
             with self.assertRaises(ValueError):
                 config.build_number(sequence, attempt)
+
+    def test_export_rejects_unintended_ipad_support(self):
+        for families in ([1, 2], [2], None):
+            with self.subTest(families=families), tempfile.TemporaryDirectory() as directory:
+                self.make_ipa(directory, families)
+                with patch.dict(os.environ, {"RUNNER_TEMP": directory, "IOS_BUILD_NUMBER": "1.1.1"}):
+                    with self.assertRaisesRegex(ValueError, "仅支持 iPhone"):
+                        config.verify_ipa()
+
+    def test_export_records_iphone_only_family(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.make_ipa(directory, [1])
+            with patch.dict(os.environ, {"RUNNER_TEMP": directory, "IOS_BUILD_NUMBER": "1.1.1", "GITHUB_SHA": "synthetic"}):
+                config.verify_ipa()
+            import json
+            metadata = json.loads((Path(directory) / "meimei-signed-export/build.json").read_text())
+            self.assertEqual(metadata["device_families"], [1])
+            self.assertFalse(metadata["uploaded_to_app_store_connect"])
+
+    @staticmethod
+    def make_ipa(directory, families):
+        folder = Path(directory) / "meimei-signed-export"
+        folder.mkdir()
+        info = {"CFBundleIdentifier": config.BUNDLE_ID, "CFBundleVersion": "1.1.1", "CFBundleShortVersionString": "0.1.0"}
+        if families is not None:
+            info["UIDeviceFamily"] = families
+        with zipfile.ZipFile(folder / "Meimei.ipa", "w") as archive:
+            archive.writestr("Payload/Meimei.app/Info.plist", plistlib.dumps(info))
+            archive.writestr("Payload/Meimei.app/embedded.mobileprovision", b"synthetic")
+            archive.writestr("Payload/Meimei.app/_CodeSignature/CodeResources", b"synthetic")
 
 
 if __name__ == "__main__":
