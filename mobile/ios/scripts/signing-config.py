@@ -119,6 +119,8 @@ def verify_ipa():
         info = plistlib.loads(archive.read(info_path))
         if info.get("CFBundleIdentifier") != BUNDLE_ID or str(info.get("CFBundleVersion")) != os.environ["IOS_BUILD_NUMBER"]:
             raise ValueError("导出的 IPA 包名或构建编号不一致")
+        if info.get("UIDeviceFamily") != [1]:
+            raise ValueError("首版仅支持 iPhone，导出 IPA 的 UIDeviceFamily 必须为 [1]")
         if not {"Payload/Meimei.app/embedded.mobileprovision", "Payload/Meimei.app/_CodeSignature/CodeResources"}.issubset(archive.namelist()):
             raise ValueError("导出的 IPA 缺少描述文件或代码签名")
     metadata = {
@@ -126,6 +128,7 @@ def verify_ipa():
         "build": info["CFBundleVersion"], "commit": os.environ["GITHUB_SHA"],
         "sha256": hashlib.sha256(ipa.read_bytes()).hexdigest(), "signed": True,
         "distribution": "app-store-connect", "directly_installable": False,
+        "device_families": info["UIDeviceFamily"],
         "uploaded_to_app_store_connect": False,
     }
     (output / "build.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")

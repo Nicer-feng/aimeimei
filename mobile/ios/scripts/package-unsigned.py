@@ -25,6 +25,8 @@ with (app / "Info.plist").open("rb") as handle:
     info = plistlib.load(handle)
 if info.get("CFBundleIdentifier") != "asia.feng.aimeimei" or info.get("MinimumOSVersion") != "17.0":
     raise SystemExit("包名或最低系统版本不符合首版约定")
+if info.get("UIDeviceFamily") != [1]:
+    raise SystemExit("首版仅支持 iPhone，归档的 UIDeviceFamily 必须为 [1]；请检查应用目标的 TARGETED_DEVICE_FAMILY")
 args.output.mkdir(parents=True, exist_ok=True)
 ipa = args.output / "aimeimei-ios-unsigned.ipa"
 with tempfile.TemporaryDirectory(prefix="meimei-unsigned-") as directory:
@@ -45,6 +47,7 @@ with tempfile.TemporaryDirectory(prefix="meimei-unsigned-") as directory:
     "product": "AI槑槑 iOS", "bundle_id": info["CFBundleIdentifier"],
     "version": info["CFBundleShortVersionString"], "build": info["CFBundleVersion"],
     "minimum_ios": info["MinimumOSVersion"], "commit": args.commit,
+    "device_families": info["UIDeviceFamily"],
     "signed": False, "directly_installable": False, "testflight_uploaded": False,
     "sha256": hashlib.sha256(ipa.read_bytes()).hexdigest(),
 }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
