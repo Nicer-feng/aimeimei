@@ -1,0 +1,127 @@
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: '上传到 App Store Connect（不勾选则只验证签名构建）'
+        type: boolean
+        default: false
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ios-build.yml
+
+  distribute:
+    needs: verify
+    runs-on: macos-15
+    timeout-minutes: 40
+    environment: testflight
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      IOS_BUNDLE_ID: asia.feng.aimeimei
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查签名配置
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
+          IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_P8_BASE64: ${{ secrets.ASC_P8_BASE64 }}
+          SHOULD_UPLOAD: ${{ inputs.upload }}
+        run: |
+          python3 mobile/ios/scripts/signing-config.py check
+          python3 mobile/ios/scripts/signing-config.py build-number
+      - name: 检查签名校验逻辑
+        run: python3 -m unittest discover -s mobile/ios/scripts/tests -v
+      - name: 生成 Xcode 工程
+        run: bash mobile/ios/scripts/generate-project.sh
+      - name: 导入发行证书和描述文件
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
+          IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+        run: bash mobile/ios/scripts/install-signing.sh
+      - name: 归档并导出正式签名 IPA
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          xcodebuild archive -project mobile/ios/Meimei.xcodeproj -scheme Meimei -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/meimei-signed.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/meimei-signed-derived" \
+            CURRENT_PROJECT_VERSION="$IOS_BUILD_NUMBER" CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$IOS_TEAM_ID" CODE_SIGN_IDENTITY="$IOS_CERT_SHA1" \
+            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROFILE_UUID" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $RUNNER_TEMP/meimei-signing.keychain-db" \
+            > "$RUNNER_TEMP/meimei-signed-archive.log" 2>&1 || { tail -80 "$RUNNER_TEMP/meimei-signed-archive.log"; exit 1; }
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/meimei-signed.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/meimei-signing/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/meimei-signed-export" \
+            > "$RUNNER_TEMP/meimei-signed-export.log" 2>&1 || { tail -80 "$RUNNER_TEMP/meimei-signed-export.log"; exit 1; }
+          codesign --verify --deep --strict "$RUNNER_TEMP/meimei-signed.xcarchive/Products/Applications/Meimei.app"
+          python3 mobile/ios/scripts/signing-config.py verify-ipa
+      - name: 安装云端上传工具
+        if: inputs.upload
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: 安装固定版本 fastlane
+        if: inputs.upload
+        run: gem install fastlane --version 2.241.1 --no-document
+      - name: 上传构建到 App Store Connect
+        if: inputs.upload
+        working-directory: mobile/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_P8_BASE64: ${{ secrets.ASC_P8_BASE64 }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          FASTLANE_SKIP_UPDATE_CHECK: '1'
+          FASTLANE_HIDE_CHANGELOG: '1'
+          FASTLANE_OPT_OUT_USAGE: '1'
+        run: fastlane ios upload_beta
+      - name: 写入运行结果
+        env:
+          SHOULD_UPLOAD: ${{ inputs.upload }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          metadata = json.loads((Path(os.environ['RUNNER_TEMP']) / 'meimei-signed-export/build.json').read_text())
+          uploaded = os.environ['SHOULD_UPLOAD'] == 'true'
+          metadata['uploaded_to_app_store_connect'] = uploaded
+          (Path(os.environ['RUNNER_TEMP']) / 'meimei-signed-export/build.json').write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write(f"### AI槑槑 {metadata['version']} ({metadata['build']})\n\n")
+              out.write('构建已上传，等待 Apple 处理。请到 App Store Connect → TestFlight 查看处理结果并配置测试组。\n' if uploaded else '正式签名和 IPA 校验通过；本次没有上传。\n')
+              out.write('\n本工作流不提交外部测试审核、不邀请测试者、不发布 App Store。\n')
+          PY
+      - name: 保存正式签名构建
+        uses: actions/upload-artifact@v4
+        with:
+          name: aimeimei-ios-signed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/meimei-signed-export/*.ipa
+            ${{ runner.temp }}/meimei-signed-export/build.json
+          retention-days: 3
+          if-no-files-found: error
+      - name: 清理临时签名材料
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/meimei-signing.keychain-db" 2>/dev/null || true
+          if [ -n "${IOS_PROFILE_UUID:-}" ]; then
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$IOS_PROFILE_UUID.mobileprovision"
+            rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$IOS_PROFILE_UUID.mobileprovision"
+          fi
+          rm -rf "$RUNNER_TEMP/meimei-signing"

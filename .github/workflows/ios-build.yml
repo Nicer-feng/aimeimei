@@ -1,6 +1,7 @@
 name: iOS 原生客户端
 
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     branches: [main]
@@ -31,6 +32,7 @@ jobs:
       - name: Check Xcode and test protocol core
         run: |
           xcodebuild -version
+          python3 -m unittest discover -s mobile/ios/scripts/tests -v
           swift test --package-path mobile/ios
       - name: Generate Xcode project
         run: bash mobile/ios/scripts/generate-project.sh

@@ -1,0 +1,25 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "上传已签名构建，测试组和外部测试审核在后台单独配置"
+  lane :upload_beta do
+    issuer = ENV["ASC_ISSUER_ID"].to_s.strip
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: issuer.empty? ? nil : issuer,
+      key_content: ENV.fetch("ASC_P8_BASE64"),
+      is_key_content_base64: true,
+      in_house: false
+    )
+    ipas = Dir[File.join(ENV.fetch("RUNNER_TEMP"), "meimei-signed-export", "*.ipa")]
+    UI.user_error!("导出目录应当只有一份 IPA") unless ipas.length == 1
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: "asia.feng.aimeimei",
+      ipa: ipas.first,
+      skip_submission: true,
+      skip_waiting_for_build_processing: true,
+      distribute_external: false
+    )
+  end
+end
