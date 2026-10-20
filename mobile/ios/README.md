@@ -26,7 +26,7 @@
 
 构建机为 GitHub 标准 **macos-15 + Xcode 26.3**，部署目标仍是 iOS 17。
 固定 XcodeGen **2.46.0**，下载后核对 SHA-256。工程由 `project.yml` 生成，不手工维护 pbxproj。
-不使用任何 Apple/GitHub Secrets，不上传 TestFlight、不创建公开 Release、不访问生产服务器。
+这条未签名流水线不使用任何 Apple/GitHub Secrets，不上传 TestFlight、不创建公开 Release、不访问生产服务器。
 
 流水线依次运行：
 
@@ -63,18 +63,12 @@
 
 第三方本机签名工具不由本项目维护，本次不自动安装或替你登录。Apple 密码和验证码只在你本机输入，不提供给 Codex、不放进 GitHub；如果遇到新系统签名兼容问题，再使用支持设备系统的 Xcode，或后续接入同事的付费账号与 TestFlight。
 
-## 后续再接 TestFlight
+## TestFlight 签名和上传
 
-到首次上传时，请付费账号持有人配合：
+另有手动工作流 **iOS TestFlight**，只允许从 main 运行。先复用上述测试，再校验 Team、包名、描述文件类型和有效期、证书私钥匹配关系，导出正式签名 IPA；勾选上传后才传到 App Store Connect。
+兼容个人和团队 API Key，不使用 Apple 账号密码或验证码。不会随普通 push 自动发布，不自动提交外部测试审核或邀请测试者。
 
-1. 确认个人或组织账号及应用归属；个人账号的 App Store Connect 邀请不提供 Certificates, Identifiers & Profiles 权限。
-2. 注册最终 Bundle ID，建立 App Store Connect 应用记录。
-3. 准备含私钥的发行证书 `.p12`、密码及匹配的分发描述文件。
-4. 准备 App Store Connect API Key（`.p8`、Key ID、Issuer ID），配置仓库 Secrets。
-5. 再增加签名和上传工作流，按构建递增 build number；不会将未签名流程偷偷切换为自动发布。
-6. 外部测试准备测试说明、联系邮箱及供审核使用的独立账号，完成测试审核。TestFlight 每个构建最长可测试 90 天。
-
-现在不需要同事的 Apple 账号密码、付费会员、设备 UDID 或任何真实凭据。
+配置所需 Secrets、在 Mac 复制文件内容、运行及审核步骤见 **[TestFlight 配置指南](TESTFLIGHT.md)**。
 
 ## 连接和恢复边界
 
