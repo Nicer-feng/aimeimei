@@ -53,6 +53,32 @@ final class MeimeiUITests: XCTestCase {
         XCTAssertEqual(composer.value as? String, "Keep this draft")
         capture("06-draft")
     }
+    func testSMSLoginAndPasswordSwitchPreserveCooldown() {
+        XCTAssertTrue(app.segmentedControls["loginModePicker"].waitForExistence(timeout: 15))
+        app.segmentedControls["loginModePicker"].buttons["短信验证码"].tap()
+        let phone = app.textFields["phoneField"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 5)); phone.tap(); phone.typeText("13800000000")
+        app.buttons["sendSMSButton"].tap()
+        let notice = app.staticTexts["smsNotice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["sendSMSButton"].isEnabled)
+        app.swipeDown()
+        app.segmentedControls["loginModePicker"].buttons["账号密码"].tap()
+        XCTAssertTrue(app.textFields["usernameField"].exists)
+        app.segmentedControls["loginModePicker"].buttons["短信验证码"].tap()
+        XCTAssertFalse(app.buttons["sendSMSButton"].isEnabled)
+        let code = app.textFields["smsCodeField"]
+        code.tap(); code.typeText("000000")
+        if !app.buttons["loginButton"].isHittable { app.swipeUp() }
+        app.buttons["loginButton"].tap()
+        XCTAssertTrue(app.staticTexts["验证码不正确或已过期"].waitForExistence(timeout: 5))
+        capture("09-sms-invalid-code")
+        code.tap(); code.typeText("123456")
+        if !app.buttons["loginButton"].isHittable { app.swipeUp() }
+        app.buttons["loginButton"].tap()
+        XCTAssertTrue(app.buttons["historyButton"].waitForExistence(timeout: 10))
+        capture("10-sms-login-welcome")
+    }
     func testDarkAppearanceLargerTextAndLandscape() {
         app.terminate()
         app.launchArguments += ["-appearance", "dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]

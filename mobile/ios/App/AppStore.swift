@@ -6,6 +6,9 @@ import MeimeiCore
 final class AppStore {
     private(set) var account: Account?
     private(set) var captcha: Captcha?
+    private(set) var smsConfig: SMSLoginConfiguration?
+    private(set) var smsLogin = SMSLoginState()
+    private(set) var loginNotice: String?
     private(set) var conversations: [Conversation] = []
     private(set) var models: [ChatModel] = []
     private(set) var selected: Conversation?
@@ -55,7 +58,10 @@ final class AppStore {
                 account = user
                 try await loadWorkspace()
                 try await restorePosition()
-            } else { captcha = try await api.captcha() }
+            } else {
+                smsConfig = try? await api.smsLoginConfig()
+                captcha = try await api.captcha()
+            }
         }
         starting = false
     }
@@ -67,7 +73,7 @@ final class AppStore {
         await work {
             do {
                 let user = try await api.login(username: username, password: password, captcha: challenge, answer: answer)
-                account = user; captcha = nil
+                account = user; captcha = nil; smsLogin = SMSLoginState(); loginNotice = nil
                 try await loadWorkspace(); try await restorePosition()
             } catch {
                 if account == nil { captcha = try? await api.captcha() }
@@ -75,10 +81,40 @@ final class AppStore {
             }
         }
     }
+    func setLoginPhone(_ value: String) {
+        guard !busy else { return }
+        smsLogin.setPhone(value); error = nil; loginNotice = nil
+    }
+    func loadSMSConfigurationIfNeeded() async {
+        // 已登录冷启动后若会话中途失效，返回登录页时也要能启用短信入口。
+        guard account == nil, smsConfig == nil else { return }
+        smsConfig = try? await api.smsLoginConfig()
+    }
+    func sendLoginSMS() async {
+        guard smsConfig?.available == true, smsLogin.canSend() else { return }
+        await work {
+            loginNotice = nil
+            let challenge = try await api.sendLoginSMS(phone: smsLogin.phone)
+            try smsLogin.accept(challenge)
+            loginNotice = "如手机号已绑定并启用，验证码将很快送达。"
+        }
+    }
+    func loginSMS(code: String) async {
+        guard smsConfig?.available == true, smsLogin.canVerify(code: code), let challenge = smsLogin.challenge else {
+            error = "请先获取验证码，并输入有效的 6 位短信验证码"; return
+        }
+        await work {
+            let user = try await api.loginSMS(phone: smsLogin.phone, code: code, challengeID: challenge.id)
+            account = user; captcha = nil; smsLogin = SMSLoginState(); loginNotice = nil
+            try await loadWorkspace(); try await restorePosition()
+        }
+    }
+    func clearLoginFeedback() { error = nil; loginNotice = nil }
     private func clearAccount() {
         generation?.cancel(); runID = UUID()
         account = nil; selected = nil; messages = []; conversations = []; models = []
         draft = Draft(); pending = nil; live = nil; streaming = false; captcha = nil
+        smsLogin = SMSLoginState(); loginNotice = nil
         do { try api.clearCredential() } catch { self.error = "本机登录凭证未能清除，请重试退出" }
     }
     func logout() async {
@@ -86,6 +122,7 @@ final class AppStore {
             do { try await api.logout() }
             catch { self.error = "网络未能确认服务器退出；本机登录状态已清除" }
             clearAccount()
+            smsConfig = try? await api.smsLoginConfig()
             captcha = try? await api.captcha()
         }
     }

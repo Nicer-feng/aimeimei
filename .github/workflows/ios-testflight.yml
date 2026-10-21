@@ -1,6 +1,8 @@
 name: iOS TestFlight
 
 on:
+  push:
+    tags: ['ios/testflight/*']
   workflow_dispatch:
     inputs:
       upload:
@@ -17,8 +19,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  source:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/ios/testflight/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 确认发行提交已合入 main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
+
   verify:
-    if: github.ref == 'refs/heads/main'
+    needs: source
     uses: ./.github/workflows/ios-build.yml
 
   distribute:
@@ -39,7 +53,7 @@ jobs:
           IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_P8_BASE64: ${{ secrets.ASC_P8_BASE64 }}
-          SHOULD_UPLOAD: ${{ inputs.upload }}
+          SHOULD_UPLOAD: ${{ github.event_name == 'push' || inputs.upload }}
         run: |
           python3 mobile/ios/scripts/signing-config.py check
           python3 mobile/ios/scripts/signing-config.py build-number
@@ -73,15 +87,15 @@ jobs:
           codesign --verify --deep --strict "$RUNNER_TEMP/meimei-signed.xcarchive/Products/Applications/Meimei.app"
           python3 mobile/ios/scripts/signing-config.py verify-ipa
       - name: 安装云端上传工具
-        if: inputs.upload
+        if: github.event_name == 'push' || inputs.upload
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
       - name: 安装固定版本 fastlane
-        if: inputs.upload
+        if: github.event_name == 'push' || inputs.upload
         run: gem install fastlane --version 2.241.1 --no-document
       - name: 上传构建到 App Store Connect
-        if: inputs.upload
+        if: github.event_name == 'push' || inputs.upload
         working-directory: mobile/ios
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -93,7 +107,7 @@ jobs:
         run: fastlane ios upload_beta
       - name: 写入运行结果
         env:
-          SHOULD_UPLOAD: ${{ inputs.upload }}
+          SHOULD_UPLOAD: ${{ github.event_name == 'push' || inputs.upload }}
         run: |
           python3 - <<'PY'
           import json, os
