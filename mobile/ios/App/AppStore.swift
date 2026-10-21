@@ -85,6 +85,11 @@ final class AppStore {
         guard !busy else { return }
         smsLogin.setPhone(value); error = nil; loginNotice = nil
     }
+    func loadSMSConfigurationIfNeeded() async {
+        // 已登录冷启动后若会话中途失效，返回登录页时也要能启用短信入口。
+        guard account == nil, smsConfig == nil else { return }
+        smsConfig = try? await api.smsLoginConfig()
+    }
     func sendLoginSMS() async {
         guard smsConfig?.available == true, smsLogin.canSend() else { return }
         await work {

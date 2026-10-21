@@ -45,6 +45,15 @@ final class AppStoreTests: XCTestCase {
         XCTAssertNil(store.account)
         let counts = await api.smsCounts(); XCTAssertEqual(counts.verifications, 0)
     }
+    func testExpiredRestoredSessionCanLoadSMSLoginConfiguration() async {
+        await login()
+        let restored = AppStore(api: api, local: local)
+        await restored.start(); XCTAssertNotNil(restored.account); XCTAssertNil(restored.smsConfig)
+        try? await api.logout(); await restored.refresh()
+        XCTAssertNil(restored.account)
+        await restored.loadSMSConfigurationIfNeeded()
+        XCTAssertTrue(restored.smsConfig?.available == true)
+    }
     func testUnavailableSMSDoesNotBlockPasswordLogin() async {
         await api.setSMSAvailable(false); await store.start()
         XCTAssertFalse(store.smsConfig?.available ?? true)

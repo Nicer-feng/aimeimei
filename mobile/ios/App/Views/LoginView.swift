@@ -92,6 +92,7 @@ struct LoginView: View {
                 .frame(maxWidth: .infinity)
         }
         .background(Brand.background).scrollDismissesKeyboard(.interactively)
+        .task { await store.loadSMSConfigurationIfNeeded() }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { now = $0 }
         .onChange(of: store.smsLogin.phone) { _, _ in code = "" }
         .onChange(of: mode) { _, _ in
