@@ -113,7 +113,12 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
         try await call(SMSConfig.self, path: ["api", "sms-login", "config"]).sms_auth
     }
     public func sendLoginSMS(phone: String) async throws -> SMSLoginChallenge {
-        try await call(SMSLoginChallenge.self, path: ["api", "sms-login", "send"], method: "POST", body: ["phone": phone])
+        do {
+            return try await call(SMSLoginChallenge.self, path: ["api", "sms-login", "send"], method: "POST", body: ["phone": phone])
+        } catch let failure as PlatformError {
+            if case .http(429, _) = failure { throw PlatformError.smsLogin("获取验证码过于频繁，请稍后再试") }
+            throw failure
+        }
     }
     public func loginSMS(phone: String, code: String, challengeID: String) async throws -> Account {
         do {

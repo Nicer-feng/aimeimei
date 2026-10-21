@@ -96,7 +96,6 @@ public enum PlatformError: Error, LocalizedError, Equatable {
         case .smsLogin(let message): return message
         case .http(_, "短信登录暂未配置"): return "短信登录暂不可用，请使用账号密码登录"
         case .http(_, "手机号格式不正确"): return "请输入正确的中国大陆手机号"
-        case .http(429, _): return "获取验证码过于频繁，请稍后再试"
         case .http(_, "短信服务暂时不可用，请稍后重试"), .http(_, "验证码发送失败，请检查后台短信配置"),
              .http(_, "验证码核验失败，请稍后重试"): return "短信服务暂不可用，请稍后重试或使用账号密码登录"
         case .http(_, "captcha incorrect"): return "验证码不正确或已过期，请重新输入"
