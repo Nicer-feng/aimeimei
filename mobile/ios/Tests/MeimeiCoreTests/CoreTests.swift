@@ -150,6 +150,47 @@ final class APITests: XCTestCase {
         XCTAssertEqual(messages.first?.id, 123); XCTAssertEqual(messages.first?.status, "interrupted")
         XCTAssertEqual(messages.first?.attachments, ["材料.pdf"])
     }
+    func testSMSLoginContractAndSessionCookie() async throws {
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET"); XCTAssertEqual(request.url?.path, "/api/sms-login/config")
+            return (200, [:], #"{"sms_auth":{"enabled":true,"configured":true,"country_code":"86","code_length":6}}"#)
+        }
+        let config = try await api.smsLoginConfig(); XCTAssertTrue(config.available)
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "POST"); XCTAssertEqual(request.url?.path, "/api/sms-login/send")
+            XCTAssertEqual(try self.body(request) as NSDictionary, ["phone": "13800000000"] as NSDictionary)
+            return (200, [:], #"{"challenge_id":"sms-test","expires_at":2000000300,"resend_after":60,"message":"如手机号已绑定，验证码将很快送达。"}"#)
+        }
+        let challenge = try await api.sendLoginSMS(phone: "13800000000")
+        XCTAssertEqual(challenge.id, "sms-test"); XCTAssertEqual(challenge.resendAfter, 60)
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "POST"); XCTAssertEqual(request.url?.path, "/api/sms-login/verify")
+            XCTAssertEqual(try self.body(request) as NSDictionary, ["phone": "13800000000", "code": "123456", "challenge_id": "sms-test"] as NSDictionary)
+            return (200, ["Set-Cookie": "ap_session=sms-test-session; Path=/; HttpOnly; Max-Age=3600"], #"{"user":{"id":"u1","username":"family","display_name":"家人"}}"#)
+        }
+        let account = try await api.loginSMS(phone: "13800000000", code: "123456", challengeID: challenge.id)
+        XCTAssertEqual(account.id, "u1"); XCTAssertEqual(try credentials.read()?.token, "sms-test-session")
+    }
+    func testWrongSMSCodeKeepsExistingCredentialAndReportsUsefulError() async throws {
+        try credentials.write(SessionCredential(token: "existing-test-session", expires: Date().addingTimeInterval(3600)))
+        StubProtocol.handler = { _ in (401, [:], #"{"error":"验证码无效或已过期"}"#) }
+        do { _ = try await api.loginSMS(phone: "13800000000", code: "000000", challengeID: "sms-test"); XCTFail("应拒绝错误验证码") }
+        catch {
+            XCTAssertEqual(error as? PlatformError, .smsLogin("验证码无效或已过期"))
+            XCTAssertFalse((error as? PlatformError)?.isUnauthorized ?? true)
+        }
+        XCTAssertEqual(try credentials.read()?.token, "existing-test-session")
+    }
+    func testLostSMSRequestAndRateLimitAreNotRetried() async throws {
+        var calls = 0
+        StubProtocol.handler = { _ in calls += 1; throw URLError(.networkConnectionLost) }
+        do { _ = try await api.sendLoginSMS(phone: "13800000000"); XCTFail("应报告发送失败") } catch {}
+        XCTAssertEqual(calls, 1)
+        StubProtocol.handler = { _ in calls += 1; return (429, [:], #"{"error":"请稍后再获取验证码"}"#) }
+        do { _ = try await api.sendLoginSMS(phone: "13800000000"); XCTFail("应报告限流") }
+        catch { XCTAssertEqual(error.localizedDescription, "获取验证码过于频繁，请稍后再试") }
+        XCTAssertEqual(calls, 2)
+    }
     func testRenameDoesNotOverwriteModelOrReasoning() async throws {
         StubProtocol.handler = { request in
             XCTAssertEqual(request.httpMethod, "PATCH")

@@ -86,12 +86,19 @@ public struct LiveReply: Equatable, Sendable {
 public enum PlatformError: Error, LocalizedError, Equatable {
     case invalidURL, invalidResponse, malformedStream, storage
     case http(Int, String)
+    case smsLogin(String)
     public var errorDescription: String? {
         switch self {
         case .invalidURL: return "服务器地址必须是完整的 HTTPS 域名"
         case .invalidResponse: return "服务器响应异常，请稍后刷新"
         case .malformedStream: return "流式连接异常，请刷新核对服务器记录"
         case .storage: return "无法保存本机状态，请检查设备空间后重试"
+        case .smsLogin(let message): return message
+        case .http(_, "短信登录暂未配置"): return "短信登录暂不可用，请使用账号密码登录"
+        case .http(_, "手机号格式不正确"): return "请输入正确的中国大陆手机号"
+        case .http(429, _): return "获取验证码过于频繁，请稍后再试"
+        case .http(_, "短信服务暂时不可用，请稍后重试"), .http(_, "验证码发送失败，请检查后台短信配置"),
+             .http(_, "验证码核验失败，请稍后重试"): return "短信服务暂不可用，请稍后重试或使用账号密码登录"
         case .http(_, "captcha incorrect"): return "验证码不正确或已过期，请重新输入"
         case .http(_, "password incorrect"): return "账号或密码不正确"
         case .http(401, _): return "登录已失效，请重新登录"

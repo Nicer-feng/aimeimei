@@ -25,6 +25,34 @@ final class AppStoreTests: XCTestCase {
         }
         XCTFail("生成或核对未在限定时间内结束")
     }
+    func testSMSLoginRejectsInvalidCodeThenLoadsSameWorkspace() async {
+        await store.start(); XCTAssertTrue(store.smsConfig?.available == true)
+        store.setLoginPhone("+86 13800000000")
+        await store.sendLoginSMS(); await store.sendLoginSMS()
+        var counts = await api.smsCounts(); XCTAssertEqual(counts.sends, 1)
+        await store.loginSMS(code: "000000")
+        XCTAssertNil(store.account); XCTAssertEqual(store.error, "验证码不正确或已过期")
+        XCTAssertNotNil(store.smsLogin.challenge)
+        await store.loginSMS(code: "123456")
+        XCTAssertEqual(store.account?.id, "offline-user"); XCTAssertEqual(store.conversations.count, 1)
+        XCTAssertFalse(store.models.isEmpty); XCTAssertNil(store.smsLogin.challenge)
+        XCTAssertEqual(store.smsLogin.phone, ""); XCTAssertNil(store.loginNotice)
+        counts = await api.smsCounts(); XCTAssertEqual(counts.verifications, 2)
+    }
+    func testChangingPhonePreventsVerifyingOldSMSChallenge() async {
+        await store.start(); store.setLoginPhone("13800000000"); await store.sendLoginSMS()
+        store.setLoginPhone("13900000000"); await store.loginSMS(code: "123456")
+        XCTAssertNil(store.account)
+        let counts = await api.smsCounts(); XCTAssertEqual(counts.verifications, 0)
+    }
+    func testUnavailableSMSDoesNotBlockPasswordLogin() async {
+        await api.setSMSAvailable(false); await store.start()
+        XCTAssertFalse(store.smsConfig?.available ?? true)
+        store.setLoginPhone("13800000000"); await store.sendLoginSMS()
+        let counts = await api.smsCounts(); XCTAssertEqual(counts.sends, 0)
+        await store.login(username: "family", password: "test-only", answer: "AB23")
+        XCTAssertNotNil(store.account)
+    }
     func testNewChatDoesNotCreateConversationAndKeepsWelcomeDraft() async {
         await login(); let count = store.conversations.count
         store.setText("首页未发送的草稿")

@@ -15,6 +15,9 @@ public protocol PlatformServing: Sendable {
     func captcha() async throws -> Captcha
     func currentAccount() async throws -> Account?
     func login(username: String, password: String, captcha: Captcha, answer: String) async throws -> Account
+    func smsLoginConfig() async throws -> SMSLoginConfiguration
+    func sendLoginSMS(phone: String) async throws -> SMSLoginChallenge
+    func loginSMS(phone: String, code: String, challengeID: String) async throws -> Account
     func logout() async throws
     func clearCredential() throws
     func models() async throws -> [ChatModel]
@@ -92,6 +95,7 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
     private struct Item: Decodable { let conversation: Conversation }
     private struct Messages: Decodable { let messages: [ChatMessage] }
     private struct OK: Decodable { let ok: Bool }
+    private struct SMSConfig: Decodable { let sms_auth: SMSLoginConfiguration }
 
     public func captcha() async throws -> Captcha { try await call(Captcha.self, path: ["api", "captcha"]) }
     public func currentAccount() async throws -> Account? {
@@ -104,6 +108,26 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
             "username": username.trimmingCharacters(in: .whitespacesAndNewlines), "password": password,
             "captcha_id": captcha.id, "captcha": answer.trimmingCharacters(in: .whitespacesAndNewlines)
         ]).user
+    }
+    public func smsLoginConfig() async throws -> SMSLoginConfiguration {
+        try await call(SMSConfig.self, path: ["api", "sms-login", "config"]).sms_auth
+    }
+    public func sendLoginSMS(phone: String) async throws -> SMSLoginChallenge {
+        try await call(SMSLoginChallenge.self, path: ["api", "sms-login", "send"], method: "POST", body: ["phone": phone])
+    }
+    public func loginSMS(phone: String, code: String, challengeID: String) async throws -> Account {
+        do {
+            return try await call(Login.self, path: ["api", "sms-login", "verify"], method: "POST", body: [
+                "phone": phone, "code": code, "challenge_id": challengeID
+            ]).user
+        } catch let failure as PlatformError {
+            // 仅映射此接口的已知文案，避免把验证码错误误报为已有会话失效。
+            if case .http(401, let message) = failure,
+               ["验证码无效或已过期", "验证码不正确或已过期"].contains(message) {
+                throw PlatformError.smsLogin(message)
+            }
+            throw failure
+        }
     }
     public func logout() async throws { _ = try await call(OK.self, path: ["api", "logout"], method: "POST", body: [:]) }
     public func clearCredential() throws { try credentials.write(nil) }

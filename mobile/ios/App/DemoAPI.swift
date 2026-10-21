@@ -6,6 +6,11 @@ import MeimeiCore
 actor DemoAPI: PlatformServing {
     private var loggedIn = false
     private var created = 1
+    private var smsSends = 0
+    private var smsVerifications = 0
+    private var smsAvailable = true
+    func setSMSAvailable(_ available: Bool) { smsAvailable = available }
+    func smsCounts() -> (sends: Int, verifications: Int) { (smsSends, smsVerifications) }
     private var nextMessage: Int64 = 10
     private var items = [DemoAPI.conversation("history", "一次小小的好奇")]
     private var history: [String: [ChatMessage]] = ["history": [
@@ -26,6 +31,21 @@ actor DemoAPI: PlatformServing {
         loggedIn ? Self.decode(Account.self, #"{"id":"offline-user","username":"family","display_name":"家人"}"#) : nil
     }
     func login(username: String, password: String, captcha: Captcha, answer: String) async throws -> Account {
+        loggedIn = true; return try await currentAccount()!
+    }
+    func smsLoginConfig() async throws -> SMSLoginConfiguration {
+        Self.decode(SMSLoginConfiguration.self, "{\"enabled\":\(smsAvailable),\"configured\":\(smsAvailable),\"country_code\":\"86\",\"code_length\":6}")
+    }
+    func sendLoginSMS(phone: String) async throws -> SMSLoginChallenge {
+        smsSends += 1
+        try await Task.sleep(for: .milliseconds(150))
+        let body: [String: Any] = ["challenge_id": "offline-sms", "expires_at": Date().addingTimeInterval(300).timeIntervalSince1970,
+                                  "resend_after": 60, "message": "离线测试，不发送真实短信"]
+        return try JSONDecoder().decode(SMSLoginChallenge.self, from: JSONSerialization.data(withJSONObject: body))
+    }
+    func loginSMS(phone: String, code: String, challengeID: String) async throws -> Account {
+        smsVerifications += 1
+        guard code == "123456", challengeID == "offline-sms" else { throw PlatformError.smsLogin("验证码不正确或已过期") }
         loggedIn = true; return try await currentAccount()!
     }
     func logout() async throws { loggedIn = false }
