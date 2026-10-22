@@ -68,6 +68,7 @@ internal fun ChatImageThumbnail(item: ChatAttachment, tools: ChatTools, onOpen: 
     val bitmap by produceState<Bitmap?>(null, item.id, item.clientKey, local?.path, retry) {
         value = null; failure = false
         try {
+            if (local == null && item.id.isBlank() && item.status == "copying") return@produceState
             val file = local ?: tools.imageFile(item)
             value = withContext(Dispatchers.IO) { decodeChatImage(file, 480) }
             failure = value == null
@@ -113,7 +114,10 @@ internal fun FullscreenChatImage(item: ChatAttachment, file: File?, loading: Boo
                     .pointerInput(file) { detectTapGestures(onDoubleTap = { scale = if (scale > 1f) 1f else 2f; offset = Offset.Zero }) }
                     .pointerInput(file) { detectTransformGestures { _, pan, zoom, _ ->
                         scale = (scale * zoom).coerceIn(1f, 5f)
-                        val x = size.width * (scale - 1f) / 2; val y = size.height * (scale - 1f) / 2
+                        val image = bitmap
+                        val fit = if (image == null) 1f else minOf(size.width.toFloat() / image.width, size.height.toFloat() / image.height)
+                        val x = ((image?.width ?: 0) * fit * scale - size.width).coerceAtLeast(0f) / 2
+                        val y = ((image?.height ?: 0) * fit * scale - size.height).coerceAtLeast(0f) / 2
                         offset = Offset((offset.x + pan.x).coerceIn(-x, x), (offset.y + pan.y).coerceIn(-y, y))
                     } }, contentAlignment = Alignment.Center) {
                     val image = bitmap
