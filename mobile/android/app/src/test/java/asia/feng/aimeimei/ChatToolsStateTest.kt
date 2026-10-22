@@ -1,6 +1,13 @@
 package asia.feng.aimeimei
 
 import android.app.Application
+import android.content.ContentProvider
+import android.content.ContentValues
+import android.content.pm.ProviderInfo
+import android.database.MatrixCursor
+import android.net.Uri
+import android.os.ParcelFileDescriptor
+import android.provider.OpenableColumns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -10,6 +17,7 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -20,6 +28,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowContentResolver
+import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 
 @RunWith(RobolectricTestRunner::class)
@@ -33,6 +43,7 @@ class ChatToolsStateTest {
     private var quoteEnabled = true
     private var created = false
     private var sent: JSONObject? = null
+    private var blockUploadPolicy = false
     private val requests = CopyOnWriteArrayList<RecordedRequest>()
     @Before fun setup() {
         app = RuntimeEnvironment.getApplication()
@@ -42,6 +53,7 @@ class ChatToolsStateTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 requests.add(request)
                 val path = request.requestUrl!!.encodedPath
+                if (path == "/api/documents/upload-policy" && blockUploadPolicy) return MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
                 if (path == "/api/conversations/c1/messages" && request.method == "POST") {
                     sent = JSONObject(request.body.readUtf8())
                     return MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: {\"choices\":[{\"delta\":{\"content\":\"回答\"}}]}\n\ndata: {\"type\":\"message_saved\",\"message_id\":2,\"generation_status\":\"completed\"}\n\n")
@@ -113,5 +125,48 @@ class ChatToolsStateTest {
         value.tools.quote(ChatMessage("4", "assistant", "原文内容", "", "completed", emptyList()))
         withTimeout(5000) { while (value.tools.quotes.isEmpty()) delay(10) }
         assertEquals("原文内容", value.tools.quotes.single().text); assertNull(value.selected); assertNull(sent)
+    }
+    private fun fileSelection(file: File): Uri {
+        val provider = object : ContentProvider() {
+            override fun onCreate() = true
+            override fun query(uri: Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, order: String?) =
+                MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME)).apply { addRow(arrayOf("材料.pdf")) }
+            override fun getType(uri: Uri) = "application/pdf"
+            override fun openFile(uri: Uri, mode: String) = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+            override fun delete(uri: Uri, selection: String?, args: Array<out String>?) = 0
+            override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?) = 0
+        }
+        provider.attachInfo(app, ProviderInfo().apply { authority = "native-test-files" })
+        ShadowContentResolver.registerProviderInternal("native-test-files", provider)
+        return Uri.parse("content://native-test-files/document")
+    }
+    @Test fun cancellingUploadStopsTheQueueAndRemovesTemporaryFiles() = runBlocking {
+        val value = start(); blockUploadPolicy = true
+        val file = File.createTempFile("native-test-document", ".pdf", app.cacheDir).apply { writeText("test-only-material") }
+        try {
+            val uri = fileSelection(file)
+            value.tools.addFiles(listOf(uri, uri), false)
+            withTimeout(5000) { while (requests.none { it.requestUrl!!.encodedPath.endsWith("upload-policy") }) delay(10) }
+            value.tools.cancelUploads()
+            withTimeout(5000) { while (File(app.cacheDir, "chat-attachments").walkTopDown().any { it.isFile && it.name.startsWith("selected-") }) delay(10) }
+            assertFalse(value.tools.uploading); assertTrue(value.tools.attachments.isEmpty())
+            assertEquals(1, requests.count { it.requestUrl!!.encodedPath.endsWith("upload-policy") })
+            assertNull(sent)
+        } finally { file.delete() }
+    }
+    @Test fun removingOneUploadKeepsTheNextSelectedFileInTheQueue() = runBlocking {
+        val value = start(); blockUploadPolicy = true
+        val file = File.createTempFile("native-test-document", ".pdf", app.cacheDir).apply { writeText("test-only-material") }
+        try {
+            val uri = fileSelection(file)
+            value.tools.addFiles(listOf(uri, uri), false)
+            withTimeout(5000) { while (requests.none { it.requestUrl!!.encodedPath.endsWith("upload-policy") }) delay(10) }
+            val first = value.tools.attachments.single(); value.tools.removeAttachment(first)
+            withTimeout(5000) { while (requests.count { it.requestUrl!!.encodedPath.endsWith("upload-policy") } < 2) delay(10) }
+            assertTrue(value.tools.uploading); assertEquals(1, value.tools.attachments.size)
+            assertNotEquals(first.clientKey, value.tools.attachments.single().clientKey)
+            value.tools.cancelUploads(); assertFalse(value.tools.uploading)
+        } finally { file.delete() }
     }
 }
