@@ -184,7 +184,16 @@ final class AppStore {
     func discardFailedImage() { guard !locked else { return }; failedImage = nil; error = nil }
     func retryImage() async { if let data = failedImage { await addImage(data) } }
     func addImage(_ data: Data, context: UUID? = nil) async {
-        guard account != nil, !locked, pending == nil, context == nil || context == attachmentContext else { return }
+        let expectedContext = context ?? attachmentContext
+        let expectedOwner = account?.id
+        // 从相册/相机返回可能同时触发前台刷新，等待 GET 完成，避免丢弃刚选的图片。
+        for _ in 0..<100 {
+            guard !Task.isCancelled, account?.id == expectedOwner, attachmentContext == expectedContext else { return }
+            if !busy { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard account != nil, attachmentContext == expectedContext, pending == nil, !streaming else { return }
+        guard !busy else { failedImage = data; error = "当前操作尚未结束，请稍后重试上传"; return }
         guard currentModel?.supportsVision == true else { error = "请先切换到支持图片的模型"; return }
         guard draft.images.count < 5 else { error = "单次最多选择 5 张图片"; return }
         let owner = account?.id; let target = attachmentContext
