@@ -86,14 +86,15 @@ internal suspend fun PlatformApi.documentStatus(id: String) = ChatAttachment.fro
     request(listOf("api", "documents", id, "refresh"), JSONObject()).getJSONObject("document"), false)
 
 internal suspend fun PlatformApi.downloadPrivate(segments: List<String>, destination: File,
-                                               query: Map<String, String> = emptyMap(), limit: Long = 100L * 1024 * 1024): File = withContext(Dispatchers.IO) {
+                                               query: Map<String, String> = emptyMap(), limit: Long = 100L * 1024 * 1024,
+                                               objectDownloadClient: OkHttpClient = objectClient): File = withContext(Dispatchers.IO) {
     var url = base.newBuilder().apply { segments.forEach { addPathSegment(it) }; query.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
     var authenticated = true
     val partial = File(destination.parentFile, destination.name + ".part")
     try {
         for (attempt in 0..3) {
             currentCoroutineContext().ensureActive()
-            val downloadClient = if (authenticated) client.newBuilder().readTimeout(90, TimeUnit.SECONDS).callTimeout(8, TimeUnit.MINUTES).build() else objectClient
+            val downloadClient = if (authenticated) client.newBuilder().readTimeout(90, TimeUnit.SECONDS).callTimeout(8, TimeUnit.MINUTES).build() else objectDownloadClient
             downloadClient.newCall(Request.Builder().url(url).build()).awaitResponse().use { response ->
                 if (response.code in listOf(301, 302, 303, 307, 308)) {
                     val next = url.resolve(response.header("Location").orEmpty()) ?: throw IOException("下载地址无效")

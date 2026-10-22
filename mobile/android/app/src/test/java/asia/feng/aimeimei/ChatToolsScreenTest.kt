@@ -47,6 +47,8 @@ class ChatToolsScreenTest {
     private lateinit var preferences: AppPreferences
     private val requests = CopyOnWriteArrayList<RecordedRequest>()
     private var shareBody: JSONObject? = null
+    private var promptContent = "请帮我把这段文字润色得清楚自然。"
+    private var promptDeleted = false
     @Before fun setup() {
         val app: Application = RuntimeEnvironment.getApplication()
         listOf("chat_drafts", "native_session", "appearance").forEach { app.getSharedPreferences(it, 0).edit().clear().commit() }
@@ -61,8 +63,13 @@ class ChatToolsScreenTest {
                 val body = when {
                     path == "/api/me" -> """{"authenticated":true,"user":{"id":"u1","username":"family","display_name":"家人"}}"""
                     path == "/api/conversations" -> """{"conversations":[{"id":"c1","title":"测试聊天","model_id":"m1"}]}"""
-                    path == "/api/models" -> """{"models":[{"id":"m1","name":"测试模型","model":"test","supports_vision":true}]}"""
-                    path == "/api/conversations/c1/messages" -> """{"messages":[{"id":1,"role":"user","content":"请看这张图片和材料","images":[{"id":"img1","filename":"照片.jpg","mime_type":"image/jpeg","file_size":100}],"documents":[{"id":"doc1","filename":"材料.pdf","mime_type":"application/pdf","file_size":1024,"status":"completed","page_count":2}]},{"id":2,"role":"assistant","content":"这是用于原生界面验收的回答，可以引用、收藏、分享和朗读。","generation_status":"completed"}]}"""
+                    path == "/api/models" -> """{"models":[{"id":"m1","name":"测试模型","model":"test","supports_vision":true},{"id":"m2","name":"文字模型","model":"text","supports_vision":false}]}"""
+                    path == "/api/conversations/c1/messages" -> """{"messages":[{"id":1,"role":"user","content":"请看这张图片和材料","images":[{"id":"img1","filename":"照片.jpg","mime_type":"image/jpeg","file_size":100}],"documents":[{"id":"doc1","filename":"材料.pdf","mime_type":"application/pdf","file_size":1024,"status":"completed","page_count":2}]},{"id":2,"role":"assistant","content":"这是用于原生界面验收的回答，可以引用、收藏、分享和朗读。","generation_status":"completed","usage":{"prompt_tokens":1200,"completion_tokens":89,"total_tokens":1289,"estimated_cost":0.001}}]}"""
+                    path == "/api/conversations/c1/stats" -> """{"stats":{"total_tokens":1289,"message_count":2,"turn_count":1,"model_name":"测试模型","web_search_count":0,"attachment_count":1,"media_task_count":0}}"""
+                    path == "/api/prompts" && request.method == "GET" -> if (promptDeleted) """{"prompts":[]}""" else JSONObject().put("prompts", org.json.JSONArray().put(JSONObject().put("id", "p1").put("title", "文字润色").put("content", promptContent))).toString()
+                    path == "/api/prompts" && request.method == "POST" -> JSONObject().put("prompt", JSONObject(request.body.readUtf8()).put("id", "p2")).toString()
+                    path == "/api/prompts/p1" && request.method == "PUT" -> { val row = JSONObject(request.body.readUtf8()).put("id", "p1"); promptContent = row.getString("content"); JSONObject().put("prompt", row).toString() }
+                    path == "/api/prompts/p1" && request.method == "DELETE" -> { promptDeleted = true; "{}" }
                     path == "/api/features" -> """{"features":{"selection_quote":true}}"""
                     path == "/api/favorites" && request.method == "POST" -> """{"favorite":{"id":"f1"}}"""
                     path == "/api/favorites" -> """{"favorites":[{"id":"f1","message_id":2,"conversation_id":"c1","conversation_title":"测试聊天","content":"这是收藏的原生验收回答。"}]}"""
@@ -150,4 +157,60 @@ class ChatToolsScreenTest {
         await { compose.onAllNodesWithText("朗读").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("c1", model.selected?.id)
     }
+    @Test fun historyShowsThumbnailAndModelPickerCanFilterImageCapableModels() {
+        show()
+        compose.onNodeWithTag("chat-messages").performScrollToNode(hasText("图片 · 照片.jpg"))
+        await { compose.onAllNodesWithContentDescription("图片缩略图：照片.jpg").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("chat-messages").performScrollToNode(hasContentDescription("图片缩略图：照片.jpg"))
+        compose.onNodeWithContentDescription("图片缩略图：照片.jpg").assertIsDisplayed()
+        capture("native-history-image-thumbnail")
+        compose.onNodeWithText("测试模型 · 图片").performClick()
+        compose.onNodeWithText("支持图片").assertIsDisplayed(); compose.onNodeWithText("纯文本模型").assertIsDisplayed()
+        compose.onNodeWithText("仅看支持图片").performClick()
+        compose.onNodeWithText("文字模型").assertDoesNotExist()
+        capture("native-image-model-filter", true)
+    }
+    @Test fun conversationAndAnswerTokenDetailsUseSavedUsage() {
+        show()
+        compose.onNodeWithContentDescription("会话统计").performClick()
+        await { model.tools.conversationStats != null && !model.tools.statsLoading }
+        compose.onNodeWithTag("conversation-token-total").assertTextEquals("1,289 Token").assertIsDisplayed(); compose.onNodeWithText("问答轮数").assertIsDisplayed()
+        capture("native-conversation-tokens", true)
+        compose.onNodeWithText("关闭").performClick()
+        compose.onNodeWithTag("chat-messages").performScrollToNode(hasTestTag("usage-2"))
+        compose.onNodeWithTag("usage-2").performClick()
+        compose.onNodeWithText("输入：1,200 Token").assertIsDisplayed(); compose.onNodeWithText("输出：89 Token").assertIsDisplayed()
+        capture("native-answer-tokens", true)
+    }
+    @Test fun promptLibraryAppendsOnlyAfterConfirmationAndNeverSendsTheMessage() {
+        show()
+        compose.runOnIdle { model.editDraft("我原来的草稿") }
+        compose.onNodeWithText("提示词", substring = false).performClick()
+        await { model.tools.prompts.size == 1 && !model.tools.promptsLoading }
+        compose.onNodeWithText("文字润色").assertIsDisplayed(); capture("native-prompt-library")
+        compose.onNodeWithText("带入当前聊天").performClick()
+        compose.onNodeWithText("输入框里已有草稿").assertIsDisplayed()
+        assertEquals("我原来的草稿", model.draft)
+        compose.onNodeWithText("追加到草稿").performClick()
+        assertEquals("我原来的草稿\n\n请帮我把这段文字润色得清楚自然。", model.draft)
+        assertTrue(requests.none { it.method == "POST" && it.requestUrl!!.encodedPath.endsWith("/messages") })
+    }
+    @Test fun sharedPromptEditsAndDeletionRequireExplicitSaveAndConfirmation() {
+        show(); compose.onNodeWithText("提示词", substring = false).performClick()
+        await { model.tools.prompts.size == 1 && !model.tools.promptsLoading }
+        compose.onNodeWithText("文字润色").performClick(); compose.onNodeWithText("编辑").performClick()
+        await { compose.onAllNodesWithTag("prompt-content").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("prompt-content").performTextReplacement("请先检查逻辑，再润色文字。")
+        assertTrue(requests.none { it.method == "PUT" })
+        capture("native-prompt-editor", true)
+        compose.onNodeWithText("保存").performClick()
+        await { !model.tools.promptSaving && model.tools.prompts.single().optString("content") == "请先检查逻辑，再润色文字。" }
+        compose.onNodeWithText("文字润色").performClick(); compose.onNodeWithText("删除").performClick()
+        compose.onNodeWithText("删除这条共享提示词？").assertIsDisplayed()
+        assertFalse(promptDeleted)
+        compose.onAllNodesWithText("删除", substring = false).onLast().performClick()
+        await { model.tools.prompts.isEmpty() && !model.tools.promptSaving }
+        assertTrue(promptDeleted)
+    }
+
 }
