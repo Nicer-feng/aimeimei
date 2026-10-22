@@ -36,7 +36,7 @@ internal val webTools = listOf(
     WebTool("chat", "完整聊天", "图片、文件、引用、分享与语音朗读"),
     WebTool("writing", "写稿工作台", "材料、要求和稿件整理"),
     WebTool("prompts", "提示词库", "常用模板与个人提示词"),
-    WebTool("favorites", "我的收藏", "收藏内容与历史回看"),
+    WebTool("favorites", "我的收藏", "原生收藏列表、搜索与历史回看"),
     WebTool("profiles", "AI档案", "长期偏好与聊天背景"),
     WebTool("media", "音视频分析", "上传媒体、转写与总结"),
     WebTool("ocr", "手写识别", "图片识别与文字提取"),
@@ -61,7 +61,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
     val openTool: (String) -> Unit = { id ->
         if (!model.streaming && !model.busy) {
             webParent = screen
-            if (id == "admin") screen = "admin"
+            if (id in listOf("admin", "favorites")) screen = id
             else { webParent = screen; toolId = id; webConversation = model.selected?.id.orEmpty(); screen = "web" }
         }
     }
@@ -69,11 +69,13 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
         when {
             drawer.isOpen -> closeDrawer()
             screen == "web" -> { screen = webParent; model.returnedFromWeb() }
+            screen == "favorites" -> { screen = webParent; model.refresh() }
             screen != "chat" -> screen = "chat"
             model.selected != null && !model.streaming -> model.back()
         }
     }
     LaunchedEffect(model.account?.id) { screen = "chat"; drawer.close() }
+    LaunchedEffect(screen) { if (screen != "chat") model.tools.speech.pause() }
     BackHandler(drawer.isOpen || screen != "chat" || model.selected != null && !model.streaming) { back() }
     ModalNavigationDrawer(
         drawerState = drawer, gesturesEnabled = model.account != null && screen == "chat",
@@ -86,7 +88,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
         Scaffold(topBar = {
             if (screen != "admin") TopAppBar(title = {
                 Column {
-                    Text(when (screen) { "settings" -> "设置"; "tools" -> "更多工具"; "web" -> if (toolId == "admin") "后台管理" else webTools.firstOrNull { it.id == toolId }?.title ?: "AI槑槑"; else -> model.selected?.title ?: "AI槑槑" },
+                    Text(when (screen) { "settings" -> "设置"; "tools" -> "更多工具"; "favorites" -> "我的收藏"; "web" -> if (toolId == "admin") "后台管理" else webTools.firstOrNull { it.id == toolId }?.title ?: "AI槑槑"; else -> model.selected?.title ?: "AI槑槑" },
                         maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                     if (screen == "chat" && model.account != null) Text(model.currentModel?.name ?: "新聊天", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -104,6 +106,10 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
         }) { padding ->
             Column(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize().imePadding()) {
                 if (model.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                model.tools.notice?.let { message -> Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(message, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = model.tools::dismissNotice) { Text("关闭") }
+                } }
                 model.error?.let { message ->
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).padding(vertical = 8.dp))
@@ -119,10 +125,12 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
                         "settings" -> SettingsScreen(model, preferences, openTool)
                         "tools" -> ToolScreen(model, openTool)
                         "admin" -> AdminScreen(model, preferences) { screen = webParent; model.returnedFromWeb() }
+                        "favorites" -> FavoritesScreen(model) { screen = "chat" }
                         "web" -> WebToolScreen(model, toolId, webConversation)
                         else -> if (model.account == null) LoginForm(model) else ChatScreen(model, openTool)
                     }
                 }
+                ChatToolsDialogs(model)
             }
         }
     }

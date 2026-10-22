@@ -43,12 +43,15 @@ class ReplyBuffer {
 
 fun draftKey(accountId: String, conversationId: String, kind: String) = "$accountId:$conversationId:$kind"
 
-data class PendingSend(val conversationId: String, val baseline: Long, val content: String) {
-    fun toJson() = JSONObject().put("conversation_id", conversationId).put("baseline", baseline).put("content", content).toString()
+data class PendingSend(val conversationId: String, val baseline: Long, val content: String,
+                       val attachments: List<ChatAttachment> = emptyList(), val draftText: String = content) {
+    fun toJson() = JSONObject().put("conversation_id", conversationId).put("baseline", baseline).put("content", content)
+        .put("attachments", org.json.JSONArray(attachments.map { it.toJson() })).put("draft_text", draftText).toString()
     companion object {
         fun parse(value: String?): PendingSend? = runCatching {
             val json = JSONObject(value ?: return@runCatching null)
-            PendingSend(json.getString("conversation_id"), json.getLong("baseline"), json.getString("content"))
+            PendingSend(json.getString("conversation_id"), json.getLong("baseline"), json.getString("content"),
+                attachmentRows(json.optJSONArray("attachments")).map { ChatAttachment.fromJson(it) }, json.optString("draft_text", json.getString("content")))
         }.getOrNull()
     }
 }

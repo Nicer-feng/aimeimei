@@ -88,12 +88,18 @@ class AdminScreenTest {
         awaitTag("admin-list")
     }
     private fun awaitCondition(condition: () -> Boolean) {
-        // 推进协程、主线程及跨线程状态通知，避免 Robolectric 将已返回的数据停留在未提交快照中。
-        compose.waitUntil(30000) {
-            effectDispatcher.scheduler.runCurrent()
-            Shadows.shadowOf(Looper.getMainLooper()).idle()
-            Snapshot.sendApplyNotifications()
-            condition()
+        // 协作式等待会让出阻塞事件循环；Thread.sleep 式轮询可能挡住网络完成后的恢复回调。
+        try { runBlocking { withTimeout(30000) {
+            while (true) {
+                effectDispatcher.scheduler.runCurrent()
+                Shadows.shadowOf(Looper.getMainLooper()).idle()
+                Snapshot.sendApplyNotifications()
+                compose.mainClock.advanceTimeByFrame()
+                if (condition()) return@withTimeout
+                delay(10)
+            }
+        } } } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+            throw androidx.compose.ui.test.ComposeTimeoutException("等待后台页面状态超时")
         }
     }
     private fun awaitTag(tag: String) {
@@ -155,7 +161,9 @@ class AdminScreenTest {
     }
     @Test fun nativeStatisticsShowChartAndRequestDetails() {
         showAdmin(); module("Token统计"); awaitTag("admin-statistics")
-        awaitCondition { requests.any { it.requestUrl!!.encodedPath == "/api/admin/token-stats/daily" } }
+        awaitCondition { compose.onAllNodesWithText("应用筛选并刷新").fetchSemanticsNodes().any {
+            !it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)
+        } }
         compose.onNodeWithTag("admin-statistics").performScrollToNode(hasText("查看明细"))
         capture("admin-statistics")
         compose.onNodeWithText("查看明细").performClick()
@@ -193,6 +201,9 @@ class AdminScreenTest {
 
     @Test fun dailyUsageShowsCombinedDurationWhenServerOnlyReturnsWorkAndReading() {
         showAdmin(); module("使用时长"); awaitTag("admin-statistics")
+        awaitCondition { compose.onAllNodesWithText("应用筛选并刷新").fetchSemanticsNodes().any {
+            !it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)
+        } }
         compose.onNodeWithTag("admin-statistics").performScrollToNode(hasText("查看明细"))
         compose.onNodeWithText("查看明细").performClick()
         awaitCondition { compose.onAllNodesWithText("3分").fetchSemanticsNodes().isNotEmpty() }

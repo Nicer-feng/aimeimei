@@ -28,21 +28,22 @@ import kotlin.coroutines.resumeWithException
 data class Account(val id: String, val username: String, val displayName: String, val role: String = "user")
 data class Captcha(val id: String, val svg: String)
 data class ChatModel(val id: String, val name: String, val actualModel: String, val provider: String,
-                     val reasoningControl: Boolean = false, val nativeSearch: Boolean = false)
+                     val reasoningControl: Boolean = false, val nativeSearch: Boolean = false, val vision: Boolean = false)
 data class Conversation(val id: String, val title: String, val modelName: String, val updatedAt: Long,
                         val modelId: String = "", val reasoningMode: String = "balanced", val pinned: Boolean = false)
 data class ChatMessage(val id: String, val role: String, val content: String, val reasoning: String,
-                       val status: String, val attachments: List<String>)
+                       val status: String, val attachments: List<String>, val media: List<ChatAttachment> = emptyList(),
+                       val favoriteId: String = "")
 class ApiFailure(val status: Int, message: String) : IOException(message)
 
-class PlatformApi(private val base: HttpUrl, cookies: CookieJar) {
-    private val client = OkHttpClient.Builder().cookieJar(cookies)
+class PlatformApi(internal val base: HttpUrl, cookies: CookieJar) {
+    internal val client = OkHttpClient.Builder().cookieJar(cookies)
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(40, TimeUnit.SECONDS).followRedirects(false).retryOnConnectionFailure(false).build()
 
     private val streamClient = client.newBuilder().readTimeout(5, TimeUnit.MINUTES).callTimeout(15, TimeUnit.MINUTES).build()
 
-    private suspend fun request(segments: List<String>, body: JSONObject? = null, method: String = "POST", query: Map<String, String> = emptyMap()): JSONObject = withContext(Dispatchers.IO) {
+    internal suspend fun request(segments: List<String>, body: JSONObject? = null, method: String = "POST", query: Map<String, String> = emptyMap()): JSONObject = withContext(Dispatchers.IO) {
         val url = base.newBuilder().apply { segments.forEach { addPathSegment(it) }; query.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
         val builder = Request.Builder().url(url).header("Accept", "application/json")
         if (body != null) builder.method(method, body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
@@ -91,7 +92,7 @@ class PlatformApi(private val base: HttpUrl, cookies: CookieJar) {
     suspend fun logout() { request(listOf("api", "logout"), JSONObject()) }
     suspend fun models(): List<ChatModel> = objects(request(listOf("api", "models")).optJSONArray("models")).map {
         ChatModel(it.getString("id"), it.optString("name"), it.optString("model"), it.optString("provider"),
-            it.optBoolean("supports_reasoning_control"), it.optBoolean("supports_native_web_search"))
+            it.optBoolean("supports_reasoning_control"), it.optBoolean("supports_native_web_search"), it.optBoolean("supports_vision"))
     }
     suspend fun conversations(): List<Conversation> = objects(request(listOf("api", "conversations")).optJSONArray("conversations")).map(::conversation)
     suspend fun createConversation(modelId: String, mode: String): Conversation = conversation(
@@ -108,15 +109,20 @@ class PlatformApi(private val base: HttpUrl, cookies: CookieJar) {
         val files = objects(it.optJSONArray("documents")).map { doc -> doc.optString("filename", "文件") }
         val images = objects(it.optJSONArray("images")).map { image -> image.optString("filename", "图片") }
         ChatMessage(it.get("id").toString(), it.optString("role"), it.optString("content"), it.optString("reasoning_content"),
-            it.optString("generation_status"), files + images)
+            it.optString("generation_status"), files + images,
+            objects(it.optJSONArray("images")).map { row -> ChatAttachment.fromJson(row, true) } +
+                objects(it.optJSONArray("documents")).map { row -> ChatAttachment.fromJson(row, false) },
+            (it.opt("favorite_id") as? String).orEmpty())
     }
     private fun account(value: JSONObject) = Account(value.getString("id"), value.getString("username"), value.optString("display_name"), value.optString("role", "user"))
     private fun conversation(value: JSONObject) = Conversation(value.getString("id"), value.optString("title", "新对话"),
         value.optString("model_name"), value.optLong("updated_at"), value.optString("model_id"), value.optString("reasoning_mode", "balanced"), value.optBoolean("pinned"))
 
-    fun stream(id: String, content: String, webSearch: Boolean) = callbackFlow {
+    fun stream(id: String, content: String, webSearch: Boolean, imageIds: List<String> = emptyList(), documentIds: List<String> = emptyList()) = callbackFlow {
         val url = base.newBuilder().addPathSegments("api/conversations").addPathSegment(id).addPathSegment("messages").build()
         val body = JSONObject().put("content", content).put("web_search", webSearch).put("use_profile", true)
+        if (imageIds.isNotEmpty()) body.put("image_ids", JSONArray(imageIds))
+        if (documentIds.isNotEmpty()) body.put("document_ids", JSONArray(documentIds))
         val request = Request.Builder().url(url).post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build()
         val source = EventSources.createFactory(streamClient).newEventSource(request, object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
@@ -145,7 +151,7 @@ class PlatformApi(private val base: HttpUrl, cookies: CookieJar) {
         else (0 until array.length()).mapNotNull { array.optJSONObject(it) }
 }
 
-private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->
+internal suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->
     continuation.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) { if (continuation.isActive) continuation.resumeWithException(e) }

@@ -52,6 +52,8 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     private var generation = 0
     internal val activeGeneration get() = generation
     private var buffer: ReplyBuffer? = null
+    internal val tools = ChatTools(application, api, viewModelScope) { returnedFromWeb() }
+    var focusMessageId by mutableStateOf(""); private set
 
     init { restore() }
     private fun key(kind: String, id: String = selected?.id.orEmpty()) = draftKey(account?.id.orEmpty(), id, kind)
@@ -78,7 +80,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         val user = api.currentAccount()
         if (ticket != revision) return@work
         account = user
-        if (user == null) captcha = api.captcha() else {
+        if (user == null) { tools.bind("", ""); captcha = api.captcha() } else {
             loadWorkspace(ticket)
             restoreWelcomeDraft()
             // 只有尚待核对的发送才恢复旧会话；正常冷启动展示新聊天。
@@ -122,6 +124,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         }
     }
     private fun restoreWelcomeDraft() {
+        tools.bind(account?.id.orEmpty(), "")
         draft = drafts.getString(key("text", ""), "").orEmpty()
         webSearch = drafts.getBoolean(key("web", ""), false)
         preferredModelId = drafts.getString(key("model", ""), null)?.takeIf { id -> models.any { it.id == id } }
@@ -131,6 +134,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     private fun enter(conversation: Conversation) {
         generation++
         selected = conversation; messages = emptyList(); live = null
+        focusMessageId = ""; tools.bind(account?.id.orEmpty(), conversation.id)
         draft = drafts.getString(key("text"), "").orEmpty()
         webSearch = drafts.getBoolean(key("web"), false)
         pending = PendingSend.parse(drafts.getString(key("pending"), null))
@@ -147,7 +151,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
             messages = result
             if (waiting == null) { live = null; return }
             if (pendingReply(waiting, result) != null) {
-                forgetPending(); live = null
+                tools.sent(); forgetPending(); live = null
                 error = result.lastOrNull()?.takeIf { it.status in listOf("failed", "interrupted") }?.let { "本次生成已中断，服务器已保留收到的内容" }
                 return
             }
@@ -182,20 +186,30 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     private fun forgetPending() { drafts.edit().remove(key("pending")).apply(); pending = null }
     fun acknowledgePending() {
         if (streaming || busy) return
-        pending?.let { if (draft.isBlank() && messages.none { m -> m.role == "user" && (m.id.toLongOrNull() ?: 0) > it.baseline && m.content.trim() == it.content.trim() }) editDraft(it.content) }
+        pending?.let {
+            val saved = messages.any { m -> m.role == "user" && (m.id.toLongOrNull() ?: 0) > it.baseline && m.content.trim() == it.content.trim() }
+            if (draft.isBlank() && !saved) editDraft(it.draftText)
+            if (saved) tools.sent()
+        }
         forgetPending(); live = null; error = "已解除等待，请先核对聊天记录，再决定是否发送。"
     }
     fun send() {
-        val content = draft.trim()
-        if (streaming || busy || pending != null || content.isEmpty()) return
+        val question = draft.trim()
+        val content = quoteMessage(question, tools.quotes).ifBlank {
+            if (tools.attachments.any { !it.image }) "请根据这些材料分析。" else if (tools.attachments.isNotEmpty()) "请分析这些图片。" else ""
+        }
+        if (streaming || busy || pending != null || content.isEmpty() || !tools.ready) return
+        if (tools.attachments.any { it.image } && currentModel?.vision != true) { error = "当前模型不支持图片，请先切换支持图片的模型"; return }
         if (selected == null) {
             if (models.none { it.id == preferredModelId }) return
+            val files = tools.attachments; val citations = tools.quotes
             work { ticket ->
                 val created = api.createConversation(preferredModelId, preferredReasoningMode)
                 if (ticket != revision) return@work
                 val search = webSearch
                 conversations = listOf(created) + conversations; enter(created)
-                editDraft(content); toggleWebSearch(search)
+                tools.restoreDraft(files, citations); tools.forgetWelcomeDraft()
+                editDraft(question); toggleWebSearch(search)
                 drafts.edit().remove(key("text", "")).apply()
                 busy = false
                 send()
@@ -203,7 +217,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
             return
         }
         val conversation = selected ?: return
-        val waiting = PendingSend(conversation.id, messages.maxOfOrNull { it.id.toLongOrNull() ?: 0 } ?: 0, content)
+        val waiting = PendingSend(conversation.id, messages.maxOfOrNull { it.id.toLongOrNull() ?: 0 } ?: 0, content, tools.attachments, question)
         // Persist the recovery marker before network side effects or clearing the editor.
         if (!drafts.edit().putString(key("pending"), waiting.toJson()).commit()) { error = "无法保存草稿，请稍后重试"; return }
         pending = waiting; editDraft(""); error = null; streaming = true
@@ -216,7 +230,8 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
             try {
                 startGeneration(run)
                 submitted = true
-                withTimeout(15 * 60 * 1000L) { api.stream(conversation.id, content, webSearch).collect { reply.accept(it) } }
+                withTimeout(15 * 60 * 1000L) { api.stream(conversation.id, content, webSearch,
+                    waiting.attachments.filter { it.image }.map { it.id }, waiting.attachments.filterNot { it.image }.map { it.id }).collect { reply.accept(it) } }
             }
             catch (_: TimeoutCancellationException) { failure = ApiFailure(408, "生成等待超时，请刷新核对已保存内容") }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -229,12 +244,12 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
             if (run != generation) return@launch
             if (reply.savedId != null) {
                 val final = reply.snapshot(finish = true)
-                messages = messages + ChatMessage("local-user-${waiting.baseline}", "user", content, "", "completed", emptyList()) +
+                messages = messages + ChatMessage("local-user-${waiting.baseline}", "user", content, "", "completed", waiting.attachments.map { it.name }, waiting.attachments) +
                     ChatMessage(reply.savedId!!, "assistant", final.content, final.reasoning, reply.status, emptyList())
-                forgetPending(); live = null
+                tools.sent(); forgetPending(); live = null
             }
             if (!submitted || failure is ApiFailure && failure.status == 400) {
-                forgetPending(); if (draft.isBlank()) editDraft(content)
+                forgetPending(); if (draft.isBlank()) editDraft(waiting.draftText)
             }
             if (!submitted) {
                 live = null
@@ -254,7 +269,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         error = "已停止接收，正在核对服务器保存的内容…"
         refresh()
     }
-    fun background() { visible = false }
+    fun background() { visible = false; tools.speech.pause() }
     fun foreground() {
         visible = true
         if (streaming) live = buffer?.snapshot(finish = true)
@@ -327,5 +342,16 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         generation++
         streamJob?.cancel(); cookies.clear(); account = null; selected = null; messages = emptyList(); conversations = emptyList(); models = emptyList()
         captcha = null; draft = ""; pending = null; live = null; streaming = false
+        focusMessageId = ""; tools.bind("", "")
     }
+    fun toggleFavorite(message: ChatMessage) {
+        if (account == null || streaming || pending != null) return
+        tools.toggleFavorite(message) { favoriteId -> messages = messages.map { if (it.id == message.id) it.copy(favoriteId = favoriteId) else it } }
+    }
+    fun openFavorite(conversationId: String, messageId: String): Boolean {
+        val conversation = conversations.firstOrNull { it.id == conversationId } ?: return false
+        open(conversation); focusMessageId = messageId
+        return true
+    }
+    fun clearFocusMessage() { focusMessageId = "" }
 }

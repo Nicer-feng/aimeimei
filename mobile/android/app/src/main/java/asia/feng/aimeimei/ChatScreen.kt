@@ -10,6 +10,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,12 +21,14 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,7 +77,14 @@ private fun ConversationContent(model: PlatformViewModel, openTool: (String) -> 
     val expectedItems = model.messages.size + (if (showPendingUser) 1 else 0) + 1
     LaunchedEffect(expectedItems, model.streaming) {
         snapshotFlow { list.layoutInfo.totalItemsCount }.first { it >= expectedItems }
-        if (following) list.scrollToItem(list.layoutInfo.totalItemsCount - 1, Int.MAX_VALUE)
+        if (following && model.focusMessageId.isEmpty()) list.scrollToItem(list.layoutInfo.totalItemsCount - 1, Int.MAX_VALUE)
+    }
+    LaunchedEffect(model.focusMessageId, model.messages.size) {
+        val id = model.focusMessageId
+        if (id.isNotBlank()) {
+            val index = model.messages.indexOfFirst { it.id == id }
+            if (index >= 0) { following = false; list.scrollToItem(index); model.clearFocusMessage() }
+        }
     }
     if (confirmPending) AlertDialog(onDismissRequest = { confirmPending = false }, title = { Text("已核对服务器记录？") },
         text = { Text("服务器可能仍在整理或保存回答。建议先刷新等待；解除后不会自动重发问题，请避免重复提交。") },
@@ -81,12 +92,12 @@ private fun ConversationContent(model: PlatformViewModel, openTool: (String) -> 
         dismissButton = { TextButton(onClick = { confirmPending = false; model.refresh() }) { Text("再刷新一次") } })
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
-            LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            LazyColumn(state = list, modifier = Modifier.fillMaxSize().testTag("chat-messages"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                 if (model.messages.isEmpty() && !model.streaming && !model.busy) item { Text("有什么想和槑槑聊的？", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                items(model.messages, key = { it.id }) { message -> MessageBody(message) }
+                items(model.messages, key = { it.id }) { message -> MessageBody(message, model) }
                 model.pending?.let { waiting ->
                     if (model.messages.none { it.role == "user" && (it.id.toLongOrNull() ?: 0) > waiting.baseline && it.content.trim() == waiting.content.trim() }) {
-                        item(key = "pending-user") { MessageBody(ChatMessage("pending-user", "user", waiting.content, "", "", emptyList())) }
+                        item(key = "pending-user") { MessageBody(ChatMessage("pending-user", "user", waiting.content, "", "", waiting.attachments.map { it.name }, waiting.attachments)) }
                     }
                 }
                 item(key = "live-reply") { LiveMessage(model, follow = { following }, scroll = {
@@ -107,19 +118,35 @@ private fun ConversationContent(model: PlatformViewModel, openTool: (String) -> 
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBody(message: ChatMessage) {
+private fun MessageBody(message: ChatMessage, model: PlatformViewModel? = null) {
     val context = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(if (message.role == "user") "你" else "槑槑", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(if (message.role == "user") "你" else "槑槑", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { model?.tools?.menuMessage = message }))
         if (message.reasoning.isNotBlank()) ThinkingText(message.reasoning)
         val user = message.role == "user"
         Box(Modifier.fillMaxWidth().background(if (user) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .4f) else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(18.dp)).padding(if (user) 14.dp else 0.dp)) {
-            MarkdownText(message.content.ifBlank { if (message.status in listOf("failed", "interrupted")) "本次回答已中断" else "暂无正文" })
+            val display = quotedDisplay(message.content)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                display.first.forEach { quote -> Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
+                    Text(quote, Modifier.padding(10.dp), maxLines = 4, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                } }
+                MarkdownText(display.second.ifBlank { if (message.status in listOf("failed", "interrupted")) "本次回答已中断" else "暂无正文" },
+                    onQuote = model?.takeIf { !it.streaming && it.pending == null }?.let { viewModel -> { text -> viewModel.tools.quote(message, text) } })
+            }
         }
-        if (message.attachments.isNotEmpty()) Text("附件：${message.attachments.joinToString("、")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (model != null) message.media.forEach { item -> AttachmentCard(item, onOpen = { model.tools.showPreview(item) }) }
+        else if (message.attachments.isNotEmpty()) Text("附件：${message.attachments.joinToString("、")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { copy(context, message.content) }) { Text("复制") }
+            if (model != null) {
+                TextButton(onClick = { model.tools.quote(message) }, enabled = !model.streaming && model.pending == null) { Text("引用") }
+                if (message.role == "assistant" && (message.id.toLongOrNull() ?: 0) > 0) TextButton(onClick = { model.tools.showVoices(message) }) { Text("朗读") }
+                IconButton(onClick = { model.tools.menuMessage = message }) { Icon(Icons.Default.MoreVert, "更多消息操作") }
+            }
+            if (message.favoriteId.isNotEmpty()) Text("已收藏", style = MaterialTheme.typography.labelSmall)
             if (message.status in listOf("failed", "interrupted")) Text("未完整生成", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
         }
     }
@@ -186,12 +213,14 @@ private fun Composer(model: PlatformViewModel, onSend: () -> Unit, openTool: (St
     }
     Surface(shadowElevation = 4.dp, tonalElevation = 1.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            ComposerAttachments(model)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(model.draft, model::editDraft, placeholder = { Text("和槑槑聊点什么…") }, modifier = Modifier.weight(1f).heightIn(max = 168.dp), maxLines = 6, shape = RoundedCornerShape(20.dp))
+                OutlinedTextField(model.draft, model::editDraft, enabled = !model.busy, placeholder = { Text("和槑槑聊点什么…") }, modifier = Modifier.weight(1f).heightIn(max = 168.dp), maxLines = 6, shape = RoundedCornerShape(20.dp))
                 if (model.streaming) FilledTonalButton(onClick = model::stop) { Text("停止") }
-                else Button(onClick = onSend, enabled = editable && chosen != null && model.draft.isNotBlank()) { Text("发送") }
+                else Button(onClick = onSend, enabled = editable && chosen != null && (model.draft.isNotBlank() || model.tools.hasContent) && model.tools.ready) { Text("发送") }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                AttachmentPicker(model, editable && !model.tools.uploading)
                 TextButton(onClick = { filter = ""; showModels = true }, enabled = editable, modifier = Modifier.weight(1f)) {
                     Text(chosen?.name ?: model.selected?.modelName ?: "选择模型", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -206,7 +235,7 @@ private fun Composer(model: PlatformViewModel, onSend: () -> Unit, openTool: (St
                 Checkbox(model.webSearch, model::toggleWebSearch, enabled = editable)
                 Text("联网", style = MaterialTheme.typography.labelMedium)
             }
-            TextButton(onClick = { openTool("chat") }, enabled = editable) { Text("打开完整聊天 · 图片与文件") }
+            TextButton(onClick = { openTool("chat") }, enabled = editable && !model.tools.uploading) { Text("更多聊天工具") }
         }
     }
 }

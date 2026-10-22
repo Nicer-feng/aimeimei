@@ -115,11 +115,25 @@ private fun CaptchaImage(captcha: Captcha?, enabled: Boolean, refresh: () -> Uni
 }
 
 @Composable
-internal fun MarkdownText(content: String) {
+internal fun MarkdownText(content: String, onQuote: ((String) -> Unit)? = null) {
     val color = MaterialTheme.colorScheme.onSurface
     AndroidView(factory = { context ->
         TextView(context).apply { textSize = 16f;setTextIsSelectable(true);movementMethod = LinkMovementMethod.getInstance();setLineSpacing(4f, 1.1f) }
     }, modifier = Modifier.fillMaxWidth(), update = { view ->
+        view.customSelectionActionModeCallback = if (onQuote == null) null else object : android.view.ActionMode.Callback {
+            override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {
+                menu.add(0, 0x613f, 1, "引用提问"); return true
+            }
+            override fun onPrepareActionMode(mode: android.view.ActionMode, menu: android.view.Menu) = false
+            override fun onActionItemClicked(mode: android.view.ActionMode, item: android.view.MenuItem): Boolean {
+                if (item.itemId != 0x613f) return false
+                val start = minOf(view.selectionStart, view.selectionEnd).coerceAtLeast(0)
+                val end = maxOf(view.selectionStart, view.selectionEnd).coerceAtMost(view.text.length)
+                if (end > start) onQuote(view.text.subSequence(start, end).toString())
+                mode.finish(); return true
+            }
+            override fun onDestroyActionMode(mode: android.view.ActionMode) {}
+        }
         view.setTextColor(android.graphics.Color.argb((color.alpha * 255).toInt(), (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt()))
         if (view.tag != content) {
             val renderer = view.getTag(R.id.markdown_renderer) as? Markwon ?: Markwon.builder(view.context).usePlugin(TablePlugin.create(view.context)).build().also { view.setTag(R.id.markdown_renderer, it) }
