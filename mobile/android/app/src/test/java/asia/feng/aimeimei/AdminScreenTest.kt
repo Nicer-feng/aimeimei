@@ -30,6 +30,8 @@ import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], qualifiers = "w390dp-h844dp-xhdpi")
@@ -43,6 +45,7 @@ class AdminScreenTest {
     private lateinit var preferences: AppPreferences
     private var role = "admin"
     private val requests = CopyOnWriteArrayList<RecordedRequest>()
+    private val overviewReady = CountDownLatch(1)
     private val overview = """{"overview":{"users":{"total":2,"active":2},"models":{"total":1,"enabled":1,"vision":1},"conversations":{"total":3},"usage":{"total_requests":12,"total_tokens":2000},"features":{"selection_quote":true,"side_discussion":true,"long_text_detection":true},"search":{"configured":true,"enabled":true},"oss":{"configured":true,"chat_image":true,"media":true},"tingwu":{"configured":true},"tts":{"configured":true,"enabled":true,"voice_count":1}}}"""
     @Before fun setup() {
         val app: Application = RuntimeEnvironment.getApplication()
@@ -57,7 +60,11 @@ class AdminScreenTest {
                     path == "/api/conversations" -> """{"conversations":[]}"""
                     path == "/api/models" || path == "/api/admin/models" -> """{"models":[{"id":"m1","name":"模型 A","model":"test","provider":"测试","base_url":"https://example.com/v1","enabled":true,"supports_vision":true,"has_api_key":true}]}"""
                     path == "/api/admin/users" -> if (request.method == "POST") """{"user":{"id":"u2"}}""" else """{"users":[{"id":"u1","username":"family","display_name":"家人","role":"family","is_active":true}]}"""
-                    path == "/api/admin/overview" -> overview
+                    path == "/api/admin/overview" -> {
+                        // 冷启动页面先完成首次布局，再返回夹具；不让瞬时网络响应与首帧快照竞争。
+                        check(overviewReady.await(10, TimeUnit.SECONDS)) { "后台测试页面尚未完成初始布局" }
+                        overview
+                    }
                     path == "/api/admin/search" -> """{"search":{"provider":"tavily","enabled":true,"mode":"auto","depth":"advanced","result_count":5,"has_api_key":true}}"""
                     path == "/api/admin/tts" -> """{"tts":{"enabled":true,"provider":"volcengine","configured":true,"default_voice":"v1","voices":[{"id":"v1","name":"测试音色","resource_id":"test-resource"}]}}"""
                     path == "/api/admin/sms-auth" -> """{"sms_auth":{"enabled":false,"code_param_name":"code","valid_seconds":300,"resend_seconds":60}}"""
@@ -80,11 +87,12 @@ class AdminScreenTest {
         org.json.JSONObject(overview)
         preferences = AppPreferences(app).apply { changeMotion(false) }
     }
-    @After fun close() { server.shutdown() }
+    @After fun close() { overviewReady.countDown(); server.shutdown() }
     private fun showShell() { compose.setContent { MeimeiTheme(preferences) { PlatformApp(model, preferences) } } }
     private fun showAdmin(dark: Boolean = false) {
         if (dark) preferences.changeTheme("dark")
         compose.setContent { MeimeiTheme(preferences) { AdminScreen(model, preferences) {} } }
+        overviewReady.countDown()
         awaitTag("admin-list")
     }
     private fun awaitCondition(condition: () -> Boolean) {
@@ -128,6 +136,7 @@ class AdminScreenTest {
         compose.onNodeWithText("设置与账号").performClick()
         compose.onNodeWithTag("settings-list").performScrollToNode(hasText("后台管理"))
         compose.onNodeWithText("后台管理").performClick()
+        overviewReady.countDown()
         awaitTag("admin-list"); compose.onNodeWithText("管理工作台").assertIsDisplayed(); capture("admin-home")
         compose.onNodeWithContentDescription("返回").performClick()
         compose.onNodeWithText("主题").assertIsDisplayed()
