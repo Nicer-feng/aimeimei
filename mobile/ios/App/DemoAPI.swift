@@ -84,7 +84,7 @@ actor DemoAPI: PlatformServing {
         (history[id] ?? []).map { message in
             ChatMessage(id: message.id, role: message.role, content: message.content, reasoning: message.reasoning,
                         status: message.status, attachments: message.attachments,
-                        favoriteID: savedFavorites.first { $0.messageID == message.id }?.id, images: message.images, sources: message.sources)
+                        favoriteID: savedFavorites.first { $0.messageID == message.id }?.id, images: message.images, sources: message.sources, documents: message.documents)
         }
     }
     func favorites() async throws -> [FavoriteMessage] { savedFavorites }
@@ -134,8 +134,54 @@ actor DemoAPI: PlatformServing {
     func imageData(id: String) async throws -> Data {
         guard let data = uploaded[id] else { throw PlatformError.http(404, "image not found") }; return data
     }
-    func stream(id: String, content: String, imageIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
-        nextMessage += 1; history[id, default: []].append(ChatMessage(id: nextMessage, role: "user", content: content, images: imageIDs.map { ChatImage(id: $0, filename: "photo.jpg") }))
+    private var files: [ChatDocument] = []
+    private var documentFailure = false
+    private var documentRefreshFailure = false
+    private var documentRequests = 0
+    private var speechPrepares = 0
+    private var speechDownloads = 0
+    private var speechLong = false
+    private var speechDelay: Duration = .zero
+    private var speechEnabled = true
+    func setDocumentFailure(_ value: Bool) { documentFailure = value }
+    func setDocumentRefreshFailure(_ value: Bool) { documentRefreshFailure = value }
+    func setSpeechLong(_ value: Bool) { speechLong = value }
+    func setSpeechEnabled(_ value: Bool) { speechEnabled = value }
+    func setSpeechDelay(_ value: Duration) { speechDelay = value }
+    func speechCounts() -> (prepare: Int, audio: Int) { (speechPrepares, speechDownloads) }
+    func documentCount() -> Int { documentRequests }
+    func documents() async throws -> [ChatDocument] { files }
+    func uploadDocument(_ data: Data, filename: String, progress: @escaping @Sendable (Double) -> Void) async throws -> ChatDocument {
+        documentRequests += 1; progress(0.3); try await Task.sleep(for: .milliseconds(100))
+        if documentFailure { throw URLError(.networkConnectionLost) }
+        let item = ChatDocument(id: UUID().uuidString, filename: filename, status: "processing")
+        files.insert(item, at: 0); progress(1); return item
+    }
+    func refreshDocument(id: String) async throws -> ChatDocument {
+        if documentRefreshFailure { throw URLError(.networkConnectionLost) }
+        guard let i = files.firstIndex(where: { $0.id == id }) else { throw PlatformError.http(404, "document not found") }
+        let item = ChatDocument(id: id, filename: files[i].filename, status: "completed"); files[i] = item; return item
+    }
+    func speechConfiguration() async throws -> SpeechConfiguration {
+        Self.decode(SpeechConfiguration.self, "{\"enabled\":\(speechEnabled),\"configured\":true,\"voices\":[{\"id\":\"gentle\",\"name\":\"温柔女声\"},{\"id\":\"clear\",\"name\":\"清晰男声\"}],\"default_voice\":\"gentle\",\"default_speed\":1}")
+    }
+    func prepareSpeech(messageID: Int64, voice: String, speed: Double) async throws -> PreparedSpeech {
+        speechPrepares += 1
+        return Self.decode(PreparedSpeech.self, "{\"cached\":false,\"long_text\":\(speechLong)}")
+    }
+    func speechAudio(messageID: Int64, voice: String, speed: Double) async throws -> Data {
+        speechDownloads += 1
+        if speechDelay > .zero { try? await Task.sleep(for: speechDelay) }
+        var data = Data()
+        func text(_ value: String) { data.append(Data(value.utf8)) }
+        func number<T: FixedWidthInteger>(_ value: T) { var v = value.littleEndian; withUnsafeBytes(of: &v) { data.append(contentsOf: $0) } }
+        let length: UInt32 = 24000 * 2 * 30
+        text("RIFF"); number(length + 36); text("WAVEfmt "); number(UInt32(16)); number(UInt16(1)); number(UInt16(1))
+        number(UInt32(24000)); number(UInt32(48000)); number(UInt16(2)); number(UInt16(16)); text("data"); number(length)
+        data.append(Data(count: Int(length))); return data
+    }
+    func stream(id: String, content: String, imageIDs: [String], documentIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
+        nextMessage += 1; history[id, default: []].append(ChatMessage(id: nextMessage, role: "user", content: content, images: imageIDs.map { ChatImage(id: $0, filename: "photo.jpg") }, documents: documentIDs.compactMap { id in files.first { $0.id == id } }))
         var reply = ""
         do {
             for token in ["你好，", "很高兴", "和你一起", "把想法理清。", "\n\n**我们从哪里开始？**"] {
@@ -150,5 +196,15 @@ actor DemoAPI: PlatformServing {
             throw error
         }
     }
+}
+
+/// 离线 UI 测试只验证播放状态与交互，不依赖云构建机的音频硬件。
+@MainActor final class DemoAudioOutput: AudioOutput {
+    var onFinish: ((Bool) -> Void)?
+    var onPause: (() -> Void)?
+    func play(_ data: Data) throws { guard !data.isEmpty else { throw PlatformError.invalidResponse } }
+    func pause() {}
+    func resume() throws {}
+    func stop() {}
 }
 #endif

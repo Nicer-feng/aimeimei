@@ -39,7 +39,12 @@ struct MeimeiApp: App {
                     #else
                     api = try PlatformAPI(baseURL: URL(string: "https://feng.asia/")!, credentials: SessionVault())
                     #endif
-                    let value = AppStore(api: api, local: local)
+                    #if DEBUG
+                    let output: (any AudioOutput)? = testing ? DemoAudioOutput() : nil
+                    #else
+                    let output: (any AudioOutput)? = nil
+                    #endif
+                    let value = AppStore(api: api, local: local, audioOutput: output)
                     store = value; await value.start()
                 } catch { launchError = "请检查设备空间和本机数据权限后重新打开应用" }
             }

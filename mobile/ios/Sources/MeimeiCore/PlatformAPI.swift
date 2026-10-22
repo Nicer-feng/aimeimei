@@ -35,12 +35,21 @@ public protocol PlatformServing: Sendable {
     func search(query: String) async throws -> [GlobalSearchResult]
     func uploadImage(_ data: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> ChatImage
     func imageData(id: String) async throws -> Data
-    func stream(id: String, content: String, imageIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws
+    func documents() async throws -> [ChatDocument]
+    func uploadDocument(_ data: Data, filename: String, progress: @escaping @Sendable (Double) -> Void) async throws -> ChatDocument
+    func refreshDocument(id: String) async throws -> ChatDocument
+    func speechConfiguration() async throws -> SpeechConfiguration
+    func prepareSpeech(messageID: Int64, voice: String, speed: Double) async throws -> PreparedSpeech
+    func speechAudio(messageID: Int64, voice: String, speed: Double) async throws -> Data
+    func stream(id: String, content: String, imageIDs: [String], documentIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws
 }
 
 public extension PlatformServing {
+    func stream(id: String, content: String, imageIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
+        try await stream(id: id, content: content, imageIDs: imageIDs, documentIDs: [], webSearch: webSearch, onEvent: onEvent)
+    }
     func stream(id: String, content: String, webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
-        try await stream(id: id, content: content, imageIDs: [], webSearch: webSearch, onEvent: onEvent)
+        try await stream(id: id, content: content, imageIDs: [], documentIDs: [], webSearch: webSearch, onEvent: onEvent)
     }
 }
 
@@ -237,10 +246,69 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
         return image
     }
 
+    private struct DocumentList: Decodable { let documents: [ChatDocument] }
+    private struct DocumentResponse: Decodable { let document: ChatDocument }
+    private struct SpeechConfigResponse: Decodable { let tts: SpeechConfiguration }
+    public func documents() async throws -> [ChatDocument] { try await call(DocumentList.self, path: ["api", "documents"]).documents }
+    public func refreshDocument(id: String) async throws -> ChatDocument {
+        try await call(DocumentResponse.self, path: ["api", "documents", id, "refresh"], method: "POST", body: [:]).document
+    }
+    public func uploadDocument(_ data: Data, filename: String, progress: @escaping @Sendable (Double) -> Void) async throws -> ChatDocument {
+        try DocumentLimits.validate(filename: filename, size: data.count)
+        let policy = try await call(PolicyResponse.self, path: ["api", "documents", "upload-policy"], method: "POST", body: [:]).policy
+        let ext = (filename as NSString).pathExtension.lowercased()
+        let safeFilename = String((filename as NSString).deletingPathExtension.prefix(179 - ext.count)) + "." + ext
+        let key = policy.keyPrefix + UUID().uuidString.lowercased() + "." + ext
+        let boundary = "Meimei-" + UUID().uuidString
+        let form = try policy.documentForm(data: data, key: key, boundary: boundary)
+        var request = URLRequest(url: try externalURL(policy.host)); request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        let external = URLSession(configuration: session.configuration, delegate: NoRedirects(progress: progress), delegateQueue: nil)
+        defer { external.invalidateAndCancel() }
+        let (_, response) = try await external.upload(for: request, from: form)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw PlatformError.media("材料上传失败，请检查网络后重试")
+        }
+        progress(1)
+        return try await call(DocumentResponse.self, path: ["api", "documents"], method: "POST", body: [
+            "filename": safeFilename, "mime_type": "application/octet-stream", "file_size": data.count, "oss_key": key
+        ]).document
+    }
+    public func speechConfiguration() async throws -> SpeechConfiguration { try await call(SpeechConfigResponse.self, path: ["api", "tts", "config"]).tts }
+    public func prepareSpeech(messageID: Int64, voice: String, speed: Double) async throws -> PreparedSpeech {
+        guard messageID > 0, speed.isFinite, (0.5...2).contains(speed) else { throw PlatformError.invalidResponse }
+        return try await call(PreparedSpeech.self, path: ["api", "messages", String(messageID), "tts"], method: "POST", body: ["voice": voice, "speed": speed])
+    }
+    public func speechAudio(messageID: Int64, voice: String, speed: Double) async throws -> Data {
+        guard messageID > 0, speed.isFinite, (0.5...2).contains(speed) else { throw PlatformError.invalidResponse }
+        let query = [URLQueryItem(name: "voice", value: voice), URLQueryItem(name: "speed", value: String(speed))]
+        // 只构造当前消息的固定平台路径，不使用响应中的任意 audio_url。
+        var req = try request(["api", "messages", String(messageID), "tts", "audio"], query: query)
+        req.setValue("audio/*", forHTTPHeaderField: "Accept"); req.timeoutInterval = 300
+        let (data, response) = try await session.data(for: req)
+        if let http = response as? HTTPURLResponse, http.statusCode == 302 {
+            guard http.url?.host == base.host, let location = http.value(forHTTPHeaderField: "Location") else { throw PlatformError.invalidResponse }
+            let external = URLSession(configuration: session.configuration, delegate: NoRedirects(), delegateQueue: nil)
+            defer { external.invalidateAndCancel() }
+            let (audio, remote) = try await external.data(for: URLRequest(url: try externalURL(location)))
+            guard let remote = remote as? HTTPURLResponse, remote.statusCode == 200, remote.mimeType?.hasPrefix("audio/") == true else {
+                throw PlatformError.media("语音加载失败，请稍后重试")
+            }
+            return try checkedAudio(audio)
+        }
+        let http = try checked(response, data: data)
+        guard http.mimeType?.hasPrefix("audio/") == true else { throw PlatformError.invalidResponse }
+        return try checkedAudio(data)
+    }
+    private func checkedAudio(_ data: Data) throws -> Data {
+        guard !data.isEmpty, data.count <= 50 * 1024 * 1024 else { throw PlatformError.media("语音为空或过大，请选择较短的回答") }
+        return data
+    }
+
     /// 所有发送只调用一次 POST；EOF、finish_reason、[DONE] 均不代表入库成功。
-    public func stream(id: String, content: String, imageIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
+    public func stream(id: String, content: String, imageIDs: [String], documentIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
         var request = try request(["api", "conversations", id, "messages"], method: "POST", body: [
-            "content": content, "image_ids": imageIDs, "web_search": webSearch, "use_profile": true
+            "content": content, "document_ids": documentIDs, "image_ids": imageIDs, "web_search": webSearch, "use_profile": true
         ])
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 300

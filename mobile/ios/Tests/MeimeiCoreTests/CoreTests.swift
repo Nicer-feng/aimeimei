@@ -268,6 +268,7 @@ final class APITests: XCTestCase {
             XCTAssertEqual(body["content"] as? String, "问题"); XCTAssertEqual(body["web_search"] as? Bool, true)
             XCTAssertEqual(body["use_profile"] as? Bool, true)
             XCTAssertEqual(body["image_ids"] as? [String], ["pic1"])
+            XCTAssertEqual(body["document_ids"] as? [String], ["doc1"])
             return (200, ["Content-Type": "text/event-stream"], ": heartbeat\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"你好😀\"}}]}\r\n\r\ndata: {\"type\":\"message_saved\",\"message_id\":44,\"generation_status\":\"completed\"}\n\n")
         }
         actor Events {
@@ -275,7 +276,7 @@ final class APITests: XCTestCase {
             func add(_ value: StreamEvent) { values.append(value) }
         }
         let events = Events()
-        try await api.stream(id: "c1", content: "问题", imageIDs: ["pic1"], webSearch: true) { await events.add($0) }
+        try await api.stream(id: "c1", content: "问题", imageIDs: ["pic1"], documentIDs: ["doc1"], webSearch: true) { await events.add($0) }
         let values = await events.values
         XCTAssertEqual(values.map(\.content).joined(), "你好😀"); XCTAssertEqual(values.last?.savedID, 44)
         XCTAssertEqual(calls, 1)
@@ -372,5 +373,107 @@ extension APITests {
         StubProtocol.handler = { _ in calls += 1; return (302, ["Location":"http://oss.example.org/photo"], "") }
         do { _ = try await api.imageData(id: "p1"); XCTFail("不应访问不安全地址") } catch {}
         XCTAssertEqual(calls, 1)
+    }
+}
+
+extension CoreTests {
+    func testDocumentStatusLimitsAndOldDraftCompatibility() throws {
+        let old = try JSONDecoder().decode(Draft.self, from: Data(#"{"text":"旧草稿"}"#.utf8))
+        XCTAssertTrue(old.documents.isEmpty)
+        XCTAssertNoThrow(try DocumentLimits.validate(filename: "项目说明.docx", size: 1024))
+        XCTAssertThrowsError(try DocumentLimits.validate(filename: "app.exe", size: 100))
+        XCTAssertThrowsError(try DocumentLimits.validate(filename: "材料.pdf", size: DocumentLimits.maxBytes + 1))
+        XCTAssertThrowsError(try DocumentLimits.validate(filename: "图片.png", size: 21 * 1024 * 1024))
+        XCTAssertThrowsError(try DocumentLimits.validate(filename: "空文件.txt", size: 0))
+        let document = try JSONDecoder().decode(ChatDocument.self, from: Data(#"{"id":"d1","filename":"项目说明.pdf","status":"processing","error_message":"稍后刷新"}"#.utf8))
+        XCTAssertTrue(document.processing); XCTAssertFalse(document.ready); XCTAssertEqual(document.errorMessage, "稍后刷新")
+    }
+    func testDocumentOnlyPendingMatchesExactMaterialAndSurvivesEncoding() throws {
+        let marker = PendingSend(conversationID: "c", baseline: 1, content: "", documentIDs: ["d1"])
+        let restored = try JSONDecoder().decode(PendingSend.self, from: JSONEncoder().encode(marker))
+        let question = ChatMessage(id: 2, role: "user", content: "", documents: [ChatDocument(id: "d1", filename: "材料.txt", status: "completed")])
+        let answer = ChatMessage(id: 3, role: "assistant", content: "摘要", status: "completed")
+        XCTAssertEqual(restored.reply(in: [question, answer])?.id, 3)
+        XCTAssertNil(PendingSend(conversationID: "c", baseline: 1, content: "", documentIDs: ["d2"]).reply(in: [question, answer]))
+        let old = try JSONDecoder().decode(PendingSend.self, from: Data(#"{"conversationID":"c","baseline":1,"content":"旧问题"}"#.utf8))
+        XCTAssertNil(old.documentIDs)
+    }
+}
+
+extension APITests {
+    func testDocumentUploadUsesCookielessOSSAndRegistersOriginalFilename() async throws {
+        try credentials.write(SessionCredential(token: "test-cookie", expires: Date().addingTimeInterval(600)))
+        var steps: [String] = []
+        StubProtocol.handler = { request in
+            steps.append(request.url?.host == "oss.example.org" ? "oss" : request.url!.path)
+            if request.url?.host == "oss.example.org" {
+                XCTAssertNil(request.value(forHTTPHeaderField: "Cookie")); return (204, [:], "")
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "ap_session=test-cookie")
+            if request.url?.path.hasSuffix("upload-policy") == true {
+                let policy: [String: Any] = ["policy":["host":"https://oss.example.org", "access_key_id":"test", "policy":"p", "signature":"s", "key_prefix":"documents/u/", "max_size":1024,"expires_at":Date().addingTimeInterval(60).timeIntervalSince1970]]
+                return (200, [:], String(decoding: try JSONSerialization.data(withJSONObject: policy), as: UTF8.self))
+            }
+            let payload = try self.body(request)
+            XCTAssertEqual(payload["filename"] as? String, "中文材料.pdf")
+            XCTAssertTrue((payload["oss_key"] as? String)?.hasSuffix(".pdf") == true)
+            XCTAssertEqual(payload["file_size"] as? Int, 3)
+            return (201, [:], #"{"document":{"id":"d1","filename":"中文材料.pdf","status":"submitted"}}"#)
+        }
+        let item = try await api.uploadDocument(Data([1,2,3]), filename: "中文材料.pdf") { _ in }
+        XCTAssertEqual(item.id, "d1"); XCTAssertFalse(item.ready)
+        XCTAssertEqual(steps, ["/api/documents/upload-policy", "oss", "/api/documents"])
+    }
+    func testDocumentsListAndExplicitRefreshPreserveTransientState() async throws {
+        StubProtocol.handler = { request in
+            if request.url?.path == "/api/documents" {
+                XCTAssertEqual(request.httpMethod, "GET")
+                return (200, [:], #"{"documents":[{"id":"d1","filename":"材料.txt","status":"processing"}]}"#)
+            }
+            XCTAssertEqual(request.url?.path, "/api/documents/d1/refresh"); XCTAssertEqual(request.httpMethod, "POST")
+            return (200, [:], #"{"document":{"id":"d1","filename":"材料.txt","status":"processing","error_message":"暂时无法获取"}}"#)
+        }
+        let rows = try await api.documents(); XCTAssertEqual(rows.count, 1)
+        let item = try await api.refreshDocument(id: "d1"); XCTAssertTrue(item.processing); XCTAssertFalse(item.errorMessage.isEmpty)
+    }
+    func testInvalidDocumentFailsBeforeAnyUploadAndExpiredFormRejected() async throws {
+        var calls = 0; StubProtocol.handler = { _ in calls += 1; return (500, [:], "") }
+        do { _ = try await api.uploadDocument(Data([1]), filename: "app.exe") { _ in }; XCTFail("不应上传") } catch {}
+        XCTAssertEqual(calls, 0)
+        let raw: [String: Any] = ["host":"https://oss.example.org", "access_key_id":"test", "policy":"p", "signature":"s", "key_prefix":"documents/u/", "max_size":100,"expires_at":0]
+        let policy = try JSONDecoder().decode(ImageUploadPolicy.self, from: JSONSerialization.data(withJSONObject: raw))
+        XCTAssertThrowsError(try policy.documentForm(data: Data([1]), key: "documents/u/a.txt", boundary: "b"))
+    }
+    func testSpeechPreparationAndStreamAudioUsePlatformAuthAndFrozenParameters() async throws {
+        try credentials.write(SessionCredential(token: "test-cookie", expires: Date().addingTimeInterval(600)))
+        var downloads = 0
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "ap_session=test-cookie")
+            if request.httpMethod == "POST" {
+                XCTAssertEqual(request.url?.path, "/api/messages/42/tts")
+                let payload = try self.body(request); XCTAssertEqual(payload["voice"] as? String, "voice+test"); XCTAssertEqual(payload["speed"] as? Double, 1.25)
+                return (200, [:], #"{"cached":false,"long_text":true,"audio_url":"https://untrusted.invalid/audio"}"#)
+            }
+            downloads += 1
+            XCTAssertEqual(request.url?.path, "/api/messages/42/tts/audio")
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+            XCTAssertEqual(items.first { $0.name == "voice" }?.value, "voice+test")
+            return (200, ["Content-Type":"audio/mpeg"], "audio-bytes")
+        }
+        let prepared = try await api.prepareSpeech(messageID: 42, voice: "voice+test", speed: 1.25)
+        XCTAssertTrue(prepared.longText); XCTAssertEqual(downloads, 0)
+        let bytes = try await api.speechAudio(messageID: 42, voice: "voice+test", speed: 1.25)
+        XCTAssertEqual(String(decoding: bytes, as: UTF8.self), "audio-bytes"); XCTAssertEqual(downloads, 1)
+    }
+    func testCachedSpeechRedirectNeverForwardsCookieAndRejectsNonAudio() async throws {
+        try credentials.write(SessionCredential(token: "test-cookie", expires: Date().addingTimeInterval(600)))
+        StubProtocol.handler = { request in
+            if request.url?.host == "test.invalid" { return (302, ["Location":"https://oss.example.org/cached.mp3?signature=test"], "") }
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie")); return (200, ["Content-Type":"audio/mpeg"], "cached-audio")
+        }
+        let bytes = try await api.speechAudio(messageID: 42, voice: "test", speed: 1)
+        XCTAssertEqual(String(decoding: bytes, as: UTF8.self), "cached-audio")
+        StubProtocol.handler = { _ in (200, ["Content-Type":"text/html"], "not audio") }
+        do { _ = try await api.speechAudio(messageID: 42, voice: "test", speed: 1); XCTFail("不应接受 HTML") } catch {}
     }
 }
