@@ -60,3 +60,24 @@ CREATE TABLE IF NOT EXISTS gift_confirmation_batches (
  id TEXT PRIMARY KEY,user_id TEXT NOT NULL,request_key TEXT NOT NULL,payload_hash TEXT NOT NULL,result TEXT NOT NULL,
  created_at INTEGER NOT NULL,UNIQUE(user_id,request_key)
 );
+CREATE TABLE IF NOT EXISTS gift_orders (
+ id TEXT PRIMARY KEY,user_id TEXT NOT NULL,recipient_id TEXT NOT NULL,purchase_month TEXT NOT NULL,
+ title TEXT NOT NULL,order_number TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(id,user_id),
+ FOREIGN KEY(recipient_id,user_id) REFERENCES gift_recipients(id,user_id)
+);
+CREATE INDEX IF NOT EXISTS gift_orders_month ON gift_orders(user_id,recipient_id,purchase_month);
+CREATE TABLE IF NOT EXISTS gift_order_items (
+ user_id TEXT NOT NULL,order_id TEXT NOT NULL,item_id TEXT NOT NULL,PRIMARY KEY(user_id,item_id),
+ FOREIGN KEY(order_id,user_id) REFERENCES gift_orders(id,user_id) ON DELETE CASCADE,
+ FOREIGN KEY(item_id,user_id) REFERENCES gift_items(id,user_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS gift_shipments (
+ id TEXT PRIMARY KEY,user_id TEXT NOT NULL,order_id TEXT NOT NULL,carrier_code TEXT NOT NULL,
+ carrier_name TEXT NOT NULL DEFAULT '',tracking_number TEXT NOT NULL,receiver_phone TEXT NOT NULL DEFAULT '',
+ sender_phone TEXT NOT NULL DEFAULT '',sender_address TEXT NOT NULL DEFAULT '',delivery_address TEXT NOT NULL DEFAULT '',is_tb INTEGER NOT NULL DEFAULT 0,
+ tracking_result TEXT NOT NULL DEFAULT '{}',checked_at INTEGER,last_attempt_at INTEGER,last_error TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(id,user_id),UNIQUE(order_id,tracking_number),
+ FOREIGN KEY(order_id,user_id) REFERENCES gift_orders(id,user_id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS gift_items_owner ON gift_items(id,user_id);

@@ -22,3 +22,6 @@ family_password.txt
 tmp/
 *.tmp
 *.log
+
+# 送礼物流服务的运行时凭证
+gift-logistics.secret.json

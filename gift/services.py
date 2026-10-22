@@ -129,6 +129,10 @@ def create_item(conn,user,data,ident=None):
     for image in images.values():
         if image: owned(conn,'gift_assets',image,user)
     purchase=day(data.get('purchase_date'));purchase_month=purchase[:7] if purchase else month(data.get('purchase_month'))
+    if ident:
+        linked=conn.execute('SELECT o.recipient_id,o.purchase_month FROM gift_orders o JOIN gift_order_items l ON o.id=l.order_id AND o.user_id=l.user_id WHERE l.user_id=? AND l.item_id=?',(user,ident)).fetchone()
+        if linked and (linked['recipient_id']!=recipient or (purchase_month and linked['purchase_month']!=purchase_month)):
+            raise GiftError('商品已关联订单，请先在订单中取消关联再修改收礼对象或月份',409)
     quantity=integer(data.get('quantity'),1,100000); price=money(data.get('price'));total=money(data.get('total_price'))
     if total is None and price is not None and quantity is not None: total=price*quantity
     url=text(data.get('product_url'),2000)

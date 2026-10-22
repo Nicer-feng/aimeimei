@@ -7,6 +7,7 @@ from urllib.parse import urlparse,parse_qs
 from urllib.error import HTTPError,URLError
 from . import services as s
 from .statistics import stats
+from . import orders
 from .database import connection,ensure_categories
 from .assets import storage,upload,decode
 from .recognition import recognize
@@ -34,6 +35,29 @@ class GiftHandlersMixin:
                 data=self.read_body(limit=15*1024*1024)
                 if not isinstance(data,dict):raise s.GiftError('参数不正确')
             method=self.command
+            if path=='orders/candidates' and method=='GET':return self.json(orders.candidates(actor,params))
+            if path=='orders':
+                if method=='GET':return self.json(orders.list_orders(actor,params))
+                if method=='POST':return self.json({'order':orders.save_order(actor,data)},201)
+            if path.startswith('orders/'):
+                parts=path.split('/')
+                if len(parts)==2:
+                    if method=='GET':
+                        with connection() as conn:return self.json({'order':orders.order_detail(conn,actor,parts[1])})
+                    if method=='PATCH':return self.json({'order':orders.save_order(actor,data,parts[1])})
+                    if method=='DELETE':return self.json(orders.delete_order(actor,parts[1]))
+                if len(parts)==3 and parts[2]=='shipments' and method=='POST':return self.json({'shipment':orders.save_shipment(actor,parts[1],data)},201)
+            if path.startswith('shipments/'):
+                parts=path.split('/')
+                if len(parts)==3 and parts[2]=='refresh' and method=='POST':return self.json(orders.refresh(actor,parts[1]))
+                if len(parts)==2:
+                    if method=='PATCH':
+                        with connection() as conn:shipment=dict(s.owned(conn,'gift_shipments',parts[1],actor))
+                        return self.json({'shipment':orders.save_shipment(actor,shipment['order_id'],data,parts[1])})
+                    if method=='DELETE':
+                        with connection(True) as conn:
+                            s.owned(conn,'gift_shipments',parts[1],actor);conn.execute('DELETE FROM gift_shipments WHERE id=? AND user_id=?',(parts[1],actor))
+                        return self.json({'ok':True})
             if path=='recipients':
                 if method=='GET':return self.json({'recipients':s.recipients(actor)})
                 if method=='POST':return self.json({'recipient':s.save_recipient(actor,data)},201)

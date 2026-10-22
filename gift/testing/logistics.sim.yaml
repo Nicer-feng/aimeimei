@@ -1,0 +1,5 @@
+simulation: gift-logistics-local
+routing: path
+mocks:
+  - routeKey: provider
+    path: logistics-provider/default.js
