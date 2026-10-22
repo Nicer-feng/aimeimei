@@ -262,9 +262,11 @@ private struct MessageRow: View, Equatable {
                     Button(favorite ? "取消收藏" : "收藏回答", systemImage: favorite ? "star.fill" : "star") { onFavorite?() }
                         .labelStyle(.iconOnly).disabled(!canFavorite).accessibilityIdentifier("favoriteMessage-\(message.id)")
                 }
-                ShareLink(item: message.content) { Image(systemName: "square.and.arrow.up") }.accessibilityLabel("分享消息")
-                Button("复制", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.content }
-                    .labelStyle(.iconOnly).accessibilityLabel("复制消息")
+                if !message.content.isEmpty {
+                    ShareLink(item: message.content) { Image(systemName: "square.and.arrow.up") }.accessibilityLabel("分享消息")
+                    Button("复制", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.content }
+                        .labelStyle(.iconOnly).accessibilityLabel("复制消息")
+                }
             }.font(.caption)
             if !message.reasoning.isEmpty {
                 DisclosureGroup("思考过程") { Text(message.reasoning).font(.callout).foregroundStyle(.secondary).textSelection(.enabled) }

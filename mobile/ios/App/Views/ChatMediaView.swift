@@ -4,14 +4,18 @@ import UniformTypeIdentifiers
 import MeimeiCore
 
 enum ChatImagePreparation {
-    static func jpeg(_ data: Data) throws -> Data {
+    static func thumbnail(_ data: Data, maxPixelSize: Int) throws -> CGImage {
         guard data.count <= 30 * 1024 * 1024,
               let source = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 2048
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
               ] as CFDictionary) else { throw PlatformError.media("无法读取图片，请选择另一张图片") }
+        return image
+    }
+    static func jpeg(_ data: Data) throws -> Data {
+        let image = try thumbnail(data, maxPixelSize: 2048)
         let result = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(result, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw PlatformError.media("图片处理失败，请重新选择")
@@ -45,27 +49,46 @@ struct ChatImageTile: View {
                 do {
                     let data = try await store.imageData(image)
                     try Task.checkCancellation()
-                    guard let value = UIImage(data: data) else { failed = true; return }
-                    loaded = value
+                    let value = try await Task.detached { try ChatImagePreparation.thumbnail(data, maxPixelSize: 320) }.value
+                    try Task.checkCancellation()
+                    loaded = UIImage(cgImage: value)
                 } catch { if !Task.isCancelled { failed = true } }
             }
             .sheet(isPresented: $showPreview) {
-                if let loaded { ImagePreview(image: loaded) }
+                ImagePreview(store: store, attachment: image)
             }
     }
 }
 
 private struct ImagePreview: View {
-    let image: UIImage
+    let store: AppStore
+    let attachment: ChatImage
+    @State private var image: UIImage?
+    @State private var failed = false
+    @State private var retry = 0
     @State private var scale = 1.0
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
             GeometryReader { size in
-                ScrollView([.horizontal, .vertical]) {
-                    Image(uiImage: image).resizable().scaledToFit()
-                        .frame(width: size.size.width * scale, height: size.size.height * scale)
+                if let image {
+                    ScrollView([.horizontal, .vertical]) {
+                        Image(uiImage: image).resizable().scaledToFit()
+                            .frame(width: size.size.width * scale, height: size.size.height * scale)
+                    }
+                } else {
+                    VStack(spacing: 12) {
+                        if failed { Text("图片加载失败"); Button("重新加载") { retry += 1 } }
+                        else { ProgressView("正在加载图片…") }
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity).foregroundStyle(.white)
                 }
+            }.task(id: retry) {
+                failed = false
+                do {
+                    let data = try await store.imageData(attachment)
+                    let preview = try await Task.detached { try ChatImagePreparation.thumbnail(data, maxPixelSize: 2048) }.value
+                    try Task.checkCancellation(); image = UIImage(cgImage: preview)
+                } catch { if !Task.isCancelled { failed = true } }
             }.background(Color.black.opacity(0.95))
                 .navigationTitle("图片预览").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
