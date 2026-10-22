@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -86,7 +85,7 @@ internal fun ChatImageThumbnail(item: ChatAttachment, tools: ChatTools, onOpen: 
                 }
             } else if (failure) Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(if (item.id.isBlank()) "本地预览暂不可用" else "图片加载失败", style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { retry++ }) { Text("重新加载图片") }
+                TextButton(onClick = { tools.discardImageCache(item); retry++ }) { Text("重新加载图片") }
             } else CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
         }
     }

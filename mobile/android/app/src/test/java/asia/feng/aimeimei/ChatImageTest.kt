@@ -79,9 +79,12 @@ class ChatImageTest {
         blockPolicy = true
         val source = File.createTempFile("gallery-", ".jpg", app.cacheDir).apply { writeBytes(bytes) }
         try {
-            tools.addFiles(listOf(selection(source)), true)
+            tools.addFiles(listOf(selection(source), selection(source)), true)
             until { requests.any { it.requestUrl!!.encodedPath.endsWith("upload-policy") } }
-            val item = tools.attachments.single()
+            assertEquals(2, tools.attachments.size)
+            assertTrue(tools.attachments.all { tools.localFile(it) != null })
+            assertEquals("queued", tools.attachments.last().status)
+            val item = tools.attachments.first()
             assertEquals("uploading", item.status); assertFalse(item.ready)
             tools.showPreview(item)
             assertNotNull(tools.previewFile); assertNotNull(decodeChatImage(tools.previewFile!!, 480))

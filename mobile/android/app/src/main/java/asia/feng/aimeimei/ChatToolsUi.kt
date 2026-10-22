@@ -214,7 +214,7 @@ internal fun ChatToolsDialogs(model: PlatformViewModel) {
             confirmButton = { TextButton(onClick = { revoke = false; tools.revokeShare() }) { Text("撤销链接") } },
             dismissButton = { TextButton(onClick = { revoke = false }) { Text("保留") } })
     }
-    tools.preview?.let { item -> AttachmentPreview(item, tools.previewFile, tools.previewBusy, tools.previewError, tools::closePreview, { tools.refreshDocument(item) }, { tools.showPreview(item) }) }
+    tools.preview?.let { item -> AttachmentPreview(item, tools.previewFile, tools.previewBusy, tools.previewError, tools::closePreview, { tools.refreshDocument(item) }, tools::retryPreview) }
 }
 
 @Composable
@@ -230,7 +230,12 @@ private fun AttachmentPreview(item: ChatAttachment, file: File?, loading: Boolea
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "打开文件"))
                     } catch (_: Exception) { android.widget.Toast.makeText(context, "手机上没有能打开此格式的应用", android.widget.Toast.LENGTH_SHORT).show() }
                 }) { Text("用其他应用打开") }
-                else Text("材料已保存在服务端，解析完成后可在当前聊天中提问。", style = MaterialTheme.typography.bodySmall)
+                else Text(when {
+                    item.id.isBlank() -> "文件还未上传完成，上传并解析成功后才能作为聊天材料。"
+                    item.status == "completed" -> "可继续基于已解析内容提问。当前历史接口不提供原文件下载。"
+                    item.status == "failed" -> "材料解析失败，可刷新状态或更换文件重新上传。"
+                    else -> "材料已保存在服务端，解析完成后可在当前聊天中提问。"
+                }, style = MaterialTheme.typography.bodySmall)
                 if (item.id.isNotEmpty() && item.status != "completed") TextButton(onClick = refresh) { Text("刷新解析状态") }
             }
         }, confirmButton = { TextButton(onClick = close) { Text("关闭") } })

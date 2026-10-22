@@ -286,7 +286,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
             val file = imageCacheFile(id)
             try {
                 imageDownloads.withPermit { api.downloadPrivate(listOf("api", "chat-images", id, "view"), file, limit = 20L * 1024 * 1024) }
-                require(withContext(Dispatchers.IO) { chatImageBoundsValid(file) }) { "图片内容无效，请重试" }
+                require(withContext(Dispatchers.IO) { decodeChatImage(file, 64)?.let { it.recycle(); true } == true }) { "图片内容无效，请重试" }
                 currentCoroutineContext().ensureActive()
                 if (ticket != revision) throw CancellationException()
                 localFiles[id] = file
@@ -294,6 +294,16 @@ internal class ChatTools(private val app: Application, private val api: Platform
             } catch (error: Exception) { file.delete(); throw error }
         } }
         return try { load.await() } finally { if (load.isCompleted && imageLoads[id] === load) imageLoads.remove(id) }
+    }
+    fun discardImageCache(item: ChatAttachment) {
+        if (!item.image || item.id.isBlank()) return
+        val file = localFile(item)
+        localFiles.entries.removeAll { it.value == file }
+        file?.delete()
+    }
+    fun retryPreview() {
+        val item = preview ?: return
+        discardImageCache(item); showPreview(item)
     }
     fun showPreview(item: ChatAttachment) {
         previewTask?.cancel(); val run = ++previewRun
