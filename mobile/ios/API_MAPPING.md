@@ -31,3 +31,13 @@
 
 SSE 解析标准 `data:` 事件及空行，支持多行数据、CRLF、UTF-8、reasoning 三种字段和搜索状态。
 只有有效 `message_saved.message_id` 及历史核对可确认保存；客户端不把 `[DONE]` 当成成功凭证。
+
+## 图片提问与引用（0.3.0）
+
+- 模型 `supports_vision` 控制选图及发送；缺失时按不支持图片处理。
+- POST `/api/chat-images/upload-policy` 获取签名表单；按 `max_size/expires_at/key_prefix` 校验，独立无 Cookie 会话直传 OSS，不跟随重定向。
+- POST `/api/chat-images` 登记 `filename/mime_type/file_size/oss_key`，返回 `image.id/filename`。
+- 发送接口增加 `image_ids`，不重试模型 POST；待核对标记同时匹配文字和图片 ID，支持只有图片的消息。
+- GET `/api/chat-images/{id}/view` 使用平台 Cookie 获取 302 地址，再用无 Cookie 会话读取 HTTPS 签名图像；预览数据仅存内存。
+- 历史消息 `images` 显示图片，`sources` 展示 `title/url/snippet/position`；原文仅允许不含用户名密码的 HTTP/HTTPS 地址。
+- 草稿保存已登记图片的 ID/文件名，不保存原相册数据、上传授权或 OSS 签名 URL。用户恢复待核对的问题时需重新选择图片，避免复用已经绑定的图片。

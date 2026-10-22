@@ -192,3 +192,39 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.draft.text, "后台不能发起新请求")
     }
 }
+
+extension AppStoreTests {
+    func testImageOnlySendPersistsAndReconcilesWithoutReplay() async throws {
+        await login(); await store.addImage(Data([1,2,3]))
+        let image = try XCTUnwrap(store.draft.images.first)
+        XCTAssertTrue(store.canSend)
+        XCTAssertEqual(local.draft(accountID: "offline-user", conversationID: "").images.map(\.id), [image.id])
+        store.setSearch(true); await store.send(); try await waitUntilIdle()
+        XCTAssertNil(store.pending); XCTAssertTrue(store.draft.images.isEmpty)
+        let question = try XCTUnwrap(store.messages.first { $0.role == "user" })
+        XCTAssertEqual(question.content, ""); XCTAssertEqual(question.images.map(\.id), [image.id])
+        XCTAssertEqual(store.messages.filter { $0.role == "user" }.count, 1)
+        XCTAssertEqual(store.messages.last?.sources.first?.safeURL?.host, "www.swift.org")
+        await store.refresh(); XCTAssertEqual(store.messages.filter { $0.role == "user" }.count, 1)
+    }
+    func testUploadFailureKeepsPhotoForExplicitRetryAndNeverSends() async throws {
+        await login(); store.setText("保留问题"); await api.setUploadFails(true)
+        await store.addImage(Data([1,2,3]))
+        XCTAssertNotNil(store.failedImage); XCTAssertTrue(store.draft.images.isEmpty); XCTAssertFalse(store.canSend)
+        await store.send(); XCTAssertNil(store.selected)
+        await api.setUploadFails(false); await store.retryImage()
+        XCTAssertNil(store.failedImage); XCTAssertEqual(store.draft.images.count, 1)
+        XCTAssertEqual(store.draft.text, "保留问题"); XCTAssertNil(store.selected)
+    }
+    func testVisionCapabilityLimitAndStalePickerIsolation() async throws {
+        await login()
+        let oldContext = store.attachmentContext; store.newChat()
+        await store.addImage(Data([1]), context: oldContext); XCTAssertTrue(store.draft.images.isEmpty)
+        for _ in 0..<6 { await store.addImage(Data([1,2,3])) }
+        XCTAssertEqual(store.draft.images.count, 5)
+        await store.configure(modelID: "m2", mode: .balanced); XCTAssertFalse(store.canSend)
+        await store.configure(modelID: "m1", mode: .balanced); XCTAssertTrue(store.canSend)
+        store.removeImage(store.draft.images[0].id); XCTAssertEqual(store.draft.images.count, 4)
+        await store.logout(); XCTAssertTrue(store.draft.images.isEmpty); XCTAssertNil(store.failedImage)
+    }
+}

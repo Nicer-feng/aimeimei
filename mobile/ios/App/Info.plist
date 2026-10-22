@@ -13,6 +13,7 @@
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSRequiresIPhoneOS</key><true/>
     <key>ITSAppUsesNonExemptEncryption</key><false/>
+    <key>NSCameraUsageDescription</key><string>用于拍摄图片并向槑槑提问，只有选择拍照时才会使用相机。</string>
     <key>UILaunchScreen</key><dict/>
     <key>UIApplicationSceneManifest</key>
     <dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>

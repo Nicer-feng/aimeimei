@@ -57,7 +57,7 @@ actor DemoAPI: PlatformServing {
     func logout() async throws { loggedIn = false }
     nonisolated func clearCredential() throws {}
     func models() async throws -> [ChatModel] {
-        Self.decode([ChatModel].self, #"[{"id":"m1","name":"槑槑 · 思考","supports_reasoning_control":true},{"id":"m2","name":"槑槑 · 轻快","supports_reasoning_control":false}]"#)
+        Self.decode([ChatModel].self, #"[{"id":"m1","name":"槑槑 · 思考","supports_reasoning_control":true,"supports_vision":true},{"id":"m2","name":"槑槑 · 轻快","supports_reasoning_control":false}]"#)
     }
     func conversations() async throws -> [Conversation] { items }
     func createConversation(modelID: String, mode: ReasoningMode) async throws -> Conversation {
@@ -84,7 +84,7 @@ actor DemoAPI: PlatformServing {
         (history[id] ?? []).map { message in
             ChatMessage(id: message.id, role: message.role, content: message.content, reasoning: message.reasoning,
                         status: message.status, attachments: message.attachments,
-                        favoriteID: savedFavorites.first { $0.messageID == message.id }?.id)
+                        favoriteID: savedFavorites.first { $0.messageID == message.id }?.id, images: message.images, sources: message.sources)
         }
     }
     func favorites() async throws -> [FavoriteMessage] { savedFavorites }
@@ -122,8 +122,20 @@ actor DemoAPI: PlatformServing {
         }
         return try JSONDecoder().decode([GlobalSearchResult].self, from: JSONSerialization.data(withJSONObject: rows))
     }
-    func stream(id: String, content: String, webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
-        nextMessage += 1; history[id, default: []].append(ChatMessage(id: nextMessage, role: "user", content: content))
+    private var uploaded: [String: Data] = [:]
+    private var uploadFails = false
+    func setUploadFails(_ value: Bool) { uploadFails = value }
+    func uploadImage(_ data: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> ChatImage {
+        progress(0.25); try await Task.sleep(for: .milliseconds(120))
+        if uploadFails { throw URLError(.networkConnectionLost) }
+        let id = UUID().uuidString; uploaded[id] = data; progress(1)
+        return ChatImage(id: id, filename: "photo.jpg")
+    }
+    func imageData(id: String) async throws -> Data {
+        guard let data = uploaded[id] else { throw PlatformError.http(404, "image not found") }; return data
+    }
+    func stream(id: String, content: String, imageIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
+        nextMessage += 1; history[id, default: []].append(ChatMessage(id: nextMessage, role: "user", content: content, images: imageIDs.map { ChatImage(id: $0, filename: "photo.jpg") }))
         var reply = ""
         do {
             for token in ["你好，", "很高兴", "和你一起", "把想法理清。", "\n\n**我们从哪里开始？**"] {
@@ -131,7 +143,7 @@ actor DemoAPI: PlatformServing {
                 let data = try JSONSerialization.data(withJSONObject: ["choices": [["delta": ["content": token]]]])
                 try await onEvent(StreamEvent(data: String(decoding: data, as: UTF8.self)))
             }
-            nextMessage += 1; history[id, default: []].append(ChatMessage(id: nextMessage, role: "assistant", content: reply, status: "completed"))
+            nextMessage += 1; history[id, default: []].append(ChatMessage(id: nextMessage, role: "assistant", content: reply, status: "completed", sources: webSearch ? Self.decode([ChatSource].self, #"[{"title":"Swift 官方文档","url":"https://www.swift.org/documentation/","snippet":"Swift 编程语言的学习与参考资料。","position":1}]"#) : []))
             try await onEvent(StreamEvent(data: "{\"type\":\"message_saved\",\"conversation_id\":\"\(id)\",\"message_id\":\(nextMessage),\"generation_status\":\"completed\"}"))
         } catch {
             nextMessage += 1; history[id, default: []].append(ChatMessage(id: nextMessage, role: "assistant", content: reply, status: "interrupted"))

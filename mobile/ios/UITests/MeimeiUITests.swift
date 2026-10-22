@@ -134,3 +134,36 @@ final class MeimeiUITests: XCTestCase {
         capture("08-landscape")
     }
 }
+
+extension MeimeiUITests {
+    func testPhotoDraftPreviewImageOnlySendAndSources() {
+        login()
+        XCTAssertTrue(app.buttons["addImageButton"].isEnabled)
+        app.buttons["addImageButton"].tap(); app.buttons["测试图片"].tap()
+        let image = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "image-")).firstMatch
+        XCTAssertTrue(image.waitForExistence(timeout: 10))
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: image)
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 5), .completed)
+        capture("16-image-draft")
+        image.tap(); XCTAssertTrue(app.navigationBars["图片预览"].waitForExistence(timeout: 5)); capture("17-image-preview")
+        app.buttons["完成"].tap()
+        app.descendants(matching: .any)["webSearchToggle"].tap()
+        XCTAssertTrue(app.buttons["sendButton"].isEnabled); app.buttons["sendButton"].tap()
+        let sources = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "sources-")).firstMatch
+        XCTAssertTrue(sources.waitForExistence(timeout: 15)); capture("18-image-reply")
+        sources.tap(); XCTAssertTrue(app.staticTexts["Swift 编程语言的学习与参考资料。"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.links["sourceLink-0"].exists || app.buttons["sourceLink-0"].exists)
+        capture("19-web-sources")
+    }
+    func testTextOnlyModelDisablesPhotoAndReturningKeepsDraft() {
+        login(); app.buttons["addImageButton"].tap(); app.buttons["测试图片"].tap()
+        let remove = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "removeImage-")).firstMatch
+        XCTAssertTrue(remove.waitForExistence(timeout: 10))
+        app.buttons["modelMenu"].tap(); app.buttons["槑槑 · 轻快"].tap()
+        XCTAssertFalse(app.buttons["addImageButton"].isEnabled); XCTAssertFalse(app.buttons["sendButton"].isEnabled)
+        XCTAssertTrue(app.staticTexts["当前模型不支持图片，请切换支持图片的模型或移除图片"].exists)
+        app.buttons["modelMenu"].tap(); app.buttons["槑槑 · 思考"].tap()
+        XCTAssertTrue(app.buttons["sendButton"].isEnabled)
+        remove.tap(); XCTAssertFalse(app.buttons["sendButton"].isEnabled)
+    }
+}
