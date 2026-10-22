@@ -122,6 +122,10 @@ struct ChatView: View {
             } label: { Label(store.currentModel?.name ?? "暂无可用模型", systemImage: "chevron.down").font(.subheadline.weight(.medium)).lineLimit(1) }
                 .accessibilityIdentifier("modelMenu")
             Spacer(minLength: 4)
+            if let model = store.currentModel {
+                Label(model.supportsVision ? "可识图" : "仅文字", systemImage: model.supportsVision ? "photo" : "text.bubble")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize()
+            }
             if store.currentModel?.reasoningControl == true {
                 Menu {
                     ForEach(ReasoningMode.allCases, id: \.self) { mode in
