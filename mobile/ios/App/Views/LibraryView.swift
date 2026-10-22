@@ -122,10 +122,10 @@ private struct SearchPanel: View {
                         }
                     } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            HStack { Text(item.title).font(.headline); Spacer(); Text(item.label).font(.caption).foregroundStyle(.secondary) }
-                            Text(item.snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(4)
-                        }.padding(.vertical, 4).foregroundStyle(.primary)
-                    }.disabled(store.locked).accessibilityIdentifier("search-\(item.id)")
+                            HStack { Text(item.title).font(.headline).foregroundStyle(Color.primary); Spacer(); Text(item.label).font(.caption).foregroundStyle(Color.secondary) }
+                            Text(item.snippet).font(.subheadline).foregroundStyle(Color.secondary).lineLimit(4)
+                        }.padding(.vertical, 4)
+                    }.buttonStyle(.plain).disabled(store.locked).accessibilityIdentifier("search-\(item.id)")
                 }
             }.scrollDismissesKeyboard(.interactively)
         }
