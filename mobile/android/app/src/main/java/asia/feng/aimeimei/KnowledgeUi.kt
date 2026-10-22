@@ -53,7 +53,7 @@ internal fun ChatSearchScreen(model: PlatformViewModel, onOpen: () -> Unit, onFa
         }
         val rows = state.results.filter { role.isBlank() || it.role == role }
         if (!state.searching && state.searchError.isBlank()) Text(
-            if (text.isBlank()) "最近聊天" else "找到 ${rows.size} 条匹配 · 服务端最多返回 60 条综合结果",
+            if (text.isBlank()) "最近聊天" else "显示 ${rows.size} 条匹配",
             Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
         LazyColumn(Modifier.weight(1f).testTag("chat-search-results"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (rows.isEmpty() && !state.searching && state.searchError.isBlank()) item { Text(if (text.isBlank()) "还没有聊天记录" else "没有匹配的聊天内容，试试其他关键词") }
@@ -155,7 +155,7 @@ internal fun ProfilesScreen(model: PlatformViewModel) {
     LaunchedEffect(model.account?.id) { state.loadProfiles() }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("AI 档案", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            Text("我的档案", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
             TextButton(onClick = { edit(null) }, enabled = editable) { Text("新增档案") }
             TextButton(onClick = state::loadProfiles, enabled = editable) { Text("刷新") }
         }
