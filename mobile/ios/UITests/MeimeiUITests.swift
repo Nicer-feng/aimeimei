@@ -179,7 +179,9 @@ extension MeimeiUITests {
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
         app.buttons["sendButton"].tap()
         let read = app.buttons["readMessage-12"]
-        XCTAssertTrue(read.waitForExistence(timeout: 15)); capture("21-document-question")
+        XCTAssertTrue(read.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["项目说明.txt"].firstMatch.exists, "仅文件消息也应显示所引用材料的名称")
+        capture("21-document-question")
         read.tap(); XCTAssertTrue(app.buttons["playSpeechButton"].waitForExistence(timeout: 10))
         app.buttons["speechVoicePicker"].tap(); app.buttons["清晰男声"].tap()
         app.buttons["speechSpeedPicker"].tap(); app.buttons["1.25 倍"].tap()

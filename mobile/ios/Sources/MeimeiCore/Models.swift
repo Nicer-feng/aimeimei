@@ -66,7 +66,8 @@ public struct ChatMessage: Decodable, Identifiable, Equatable, Sendable {
 
     public init(id: Int64, role: String, content: String, reasoning: String = "", status: String = "", attachments: [String] = [], favoriteID: String? = nil, images: [ChatImage] = [], sources: [ChatSource] = [], documents: [ChatDocument] = []) {
         self.id = id; self.role = role; self.content = content
-        self.reasoning = reasoning; self.status = status; self.attachments = attachments
+        self.reasoning = reasoning; self.status = status
+        self.attachments = attachments.isEmpty ? documents.map(\.filename) : attachments
         self.favoriteID = favoriteID; self.images = images; self.sources = sources; self.documents = documents
     }
     enum CodingKeys: String, CodingKey {

@@ -392,6 +392,7 @@ extension CoreTests {
         let marker = PendingSend(conversationID: "c", baseline: 1, content: "", documentIDs: ["d1"])
         let restored = try JSONDecoder().decode(PendingSend.self, from: JSONEncoder().encode(marker))
         let question = ChatMessage(id: 2, role: "user", content: "", documents: [ChatDocument(id: "d1", filename: "材料.txt", status: "completed")])
+        XCTAssertEqual(question.attachments, ["材料.txt"])
         let answer = ChatMessage(id: 3, role: "assistant", content: "摘要", status: "completed")
         XCTAssertEqual(restored.reply(in: [question, answer])?.id, 3)
         XCTAssertNil(PendingSend(conversationID: "c", baseline: 1, content: "", documentIDs: ["d2"]).reply(in: [question, answer]))
