@@ -162,7 +162,7 @@ class ChatToolsStateTest {
             val uri = fileSelection(file)
             value.tools.addFiles(listOf(uri, uri), false)
             withTimeout(5000) { while (requests.none { it.requestUrl!!.encodedPath.endsWith("upload-policy") }) delay(10) }
-            val first = value.tools.attachments.single(); value.tools.removeAttachment(first)
+            val first = value.tools.attachments.first { it.status == "uploading" }; value.tools.removeAttachment(first)
             withTimeout(5000) { while (requests.count { it.requestUrl!!.encodedPath.endsWith("upload-policy") } < 2) delay(10) }
             assertTrue(value.tools.uploading); assertEquals(1, value.tools.attachments.size)
             assertNotEquals(first.clientKey, value.tools.attachments.single().clientKey)

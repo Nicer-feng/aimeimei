@@ -82,6 +82,31 @@ class ChatToolsApiTest {
             assertEquals(2, server.requestCount)
         } finally { file.delete() }
     }
+    @Test fun signedHttpsRedirectPreservesQueryAndNeverForwardsTheLoginCookie() = runBlocking {
+        val certificate = okhttp3.tls.HeldCertificate.Builder().addSubjectAlternativeName("localhost").build()
+        val serverTls = okhttp3.tls.HandshakeCertificates.Builder().heldCertificate(certificate).build()
+        val clientTls = okhttp3.tls.HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+        val storage = MockWebServer().apply { useHttps(serverTls.sslSocketFactory(), false); start() }
+        val destination = File.createTempFile("signed-image-test", ".jpg").apply { delete() }
+        try {
+            val cookies = object : CookieJar {
+                override fun saveFromResponse(url: okhttp3.HttpUrl, cookies: List<okhttp3.Cookie>) {}
+                override fun loadForRequest(url: okhttp3.HttpUrl) = listOf(okhttp3.Cookie.Builder().name("ap_session").value("test-only-session").domain(url.host).build())
+            }
+            val authenticated = PlatformApi(server.url("/"), cookies)
+            val signedUrl = storage.url("/image.jpg").newBuilder().addQueryParameter("OSSAccessKeyId", "test-access").addQueryParameter("Signature", "test+/signature=").addQueryParameter("Expires", "123456").build()
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", signedUrl.toString()))
+            storage.enqueue(MockResponse().setHeader("Content-Type", "image/jpeg").setBody("image-bytes"))
+            val objectDownload = okhttp3.OkHttpClient.Builder().cookieJar(CookieJar.NO_COOKIES).followRedirects(false).sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager).build()
+            authenticated.downloadPrivate(listOf("api", "chat-images", "img1", "view"), destination, objectDownloadClient = objectDownload)
+            assertEquals("image-bytes", destination.readText())
+            assertTrue(server.takeRequest().getHeader("Cookie")!!.contains("ap_session=test-only-session"))
+            val request = storage.takeRequest(); assertNull(request.getHeader("Cookie")); assertNull(request.getHeader("Authorization"))
+            assertEquals("test+/signature=", request.requestUrl!!.queryParameter("Signature"))
+            assertEquals("123456", request.requestUrl!!.queryParameter("Expires"))
+            assertFalse(File(destination.path + ".part").exists())
+        } finally { storage.shutdown(); destination.delete() }
+    }
     @Test fun privateDownloadRejectsHttpRedirectAndRemovesPartialFile() = runBlocking {
         val destination = File.createTempFile("chat-preview-test", ".jpg").apply { delete() }
         server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "http://storage.example/private.jpg"))

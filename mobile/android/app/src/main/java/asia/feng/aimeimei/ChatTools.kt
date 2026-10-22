@@ -8,6 +8,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CancellationException
@@ -42,6 +44,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
     private val activeUploads = mutableMapOf<String, Job>()
     private val localFiles = mutableStateMapOf<String, File>()
     private val imageLoads = mutableMapOf<String, Deferred<File>>()
+    private val imageDownloads = Semaphore(3)
     private var previewTask: Job? = null
     private var previewRun = 0
     var attachments by mutableStateOf<List<ChatAttachment>>(emptyList()); private set
@@ -80,7 +83,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
     }
     fun bind(accountId: String, conversationId: String) {
         if (owner == accountId && conversation == conversationId) return
-        persist(); val oldOwner = owner
+        persist(); attachments.filter { it.id.isBlank() }.forEach { localFiles.remove(it.clientKey)?.delete() }; val oldOwner = owner
         revision++; previewRun++; session.cancel(); imageLoads.clear(); previewTask = null; session = newSession(); poll = null; uploadTask = null; activeUploads.clear()
         uploading = false; speech.stop(); preview = null; previewFile = null; previewBusy = false; previewError = ""
         conversationStats = null; statsOpen = false; statsLoading = false; statsError = ""; promptsLoading = false; promptSaving = false; promptError = ""
@@ -162,42 +165,49 @@ internal class ChatTools(private val app: Application, private val api: Platform
         uploading = true
         val run = ++uploadRun
         val targetDirectory = directory()
+        val selections = uris.map { ChatAttachment("", if (image) "所选图片" else "所选文件", "", 0, image, "copying", 0, clientKey = UUID.randomUUID().toString()) }
+        attachments = attachments + selections
         uploadTask = action { ticket ->
             try { coroutineScope {
-                for (uri in uris) {
-                    val pending = ChatAttachment("", if (image) "所选图片" else "所选文件", "", 0, image, "copying", 0, clientKey = UUID.randomUUID().toString())
-                    attachments = attachments + pending
+                // 先准备整批本地预览，再开始网络上传，慢网不阻塞后续图片的查看。
+                for ((uri, pending) in uris.zip(selections)) {
+                    if (attachments.none { it.clientKey == pending.clientKey }) continue
                     val child = launch {
                         var file: File? = null
-                        var saved = false
+                        var retained = false
                         try {
-                            val copied = withContext(Dispatchers.IO) { copySelection(uri, image, targetDirectory) }
-                            val selectedFile = copied.first; file = selectedFile
-                            val item = pending.copy(name = copied.second, mime = copied.third, size = selectedFile.length(), status = "uploading")
-                            if (ticket != revision) return@launch
-                            localFiles[pending.clientKey] = selectedFile
-                            attachments = attachments.map { if (it.clientKey == pending.clientKey) item else it }
-                            val uploaded = api.uploadChatFile(selectedFile, item.name, item.mime, image) { progress ->
+                            val copied = withContext(Dispatchers.IO) { copySelection(uri, image, targetDirectory).also { file = it.first } }
+                            if (ticket != revision || attachments.none { it.clientKey == pending.clientKey }) return@launch
+                            localFiles[pending.clientKey] = copied.first
+                            attachments = attachments.map { if (it.clientKey == pending.clientKey) it.copy(name = copied.second, mime = copied.third, size = copied.first.length(), status = "queued") else it }
+                            retained = true
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) {
+                            if (ticket == revision) attachments = attachments.map { if (it.clientKey == pending.clientKey) it.copy(status = "failed", error = if (error is IllegalArgumentException) error.message.orEmpty() else "无法读取文件，请移除后重新选择") else it }
+                        } finally { if (!retained) { localFiles.remove(pending.clientKey); file?.delete() } }
+                    }
+                    activeUploads[pending.clientKey] = child; child.join(); activeUploads.remove(pending.clientKey)
+                }
+                for (pending in selections) {
+                    val item = attachments.firstOrNull { it.clientKey == pending.clientKey && it.status == "queued" } ?: continue
+                    val file = localFile(item) ?: continue
+                    val child = launch {
+                        try {
+                            attachments = attachments.map { if (it.clientKey == item.clientKey) it.copy(status = "uploading") else it }
+                            val uploaded = api.uploadChatFile(file, item.name, item.mime, image) { progress ->
                                 scope.launch { if (ticket == revision) attachments = attachments.map { if (it.clientKey == item.clientKey) it.copy(progress = progress) else it } }
-                            }.copy(clientKey = pending.clientKey)
-                            if (ticket != revision) return@launch
-                            // 用户移除后不重新插入附件；已上传的对象沿用服务端清理机制。
-                            if (attachments.any { it.clientKey == pending.clientKey }) {
-                                val cached = cacheUploaded(uploaded, selectedFile)
-                                localFiles[uploaded.id] = cached; localFiles[uploaded.clientKey] = cached; saved = true
-                                attachments = attachments.map { if (it.clientKey == pending.clientKey) uploaded else it }; persist()
+                            }.copy(clientKey = item.clientKey)
+                            if (ticket == revision && attachments.any { it.clientKey == item.clientKey }) {
+                                val cached = cacheUploaded(uploaded, file); localFiles[uploaded.id] = cached; localFiles[item.clientKey] = cached
+                                attachments = attachments.map { if (it.clientKey == item.clientKey) uploaded else it }; persist()
                             }
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Exception) {
-                            if (ticket == revision && attachments.any { it.clientKey == pending.clientKey }) {
-                                saved = file?.exists() == true
-                                attachments = attachments.map { if (it.clientKey == pending.clientKey)
-                                    it.copy(status = "failed", error = if (error is IllegalArgumentException || error is ApiFailure) error.message.orEmpty() else "上传未完成，可重试或移除") else it }
-                            }
-                        } finally { if (!saved) { localFiles.remove(pending.clientKey); file?.delete() } }
+                            if (ticket == revision) attachments = attachments.map { if (it.clientKey == item.clientKey)
+                                it.copy(status = "failed", error = if (error is IllegalArgumentException || error is ApiFailure) error.message.orEmpty() else "上传未完成，可重试或移除") else it }
+                        }
                     }
-                    activeUploads[pending.clientKey] = child
-                    child.join(); activeUploads.remove(pending.clientKey)
+                    activeUploads[item.clientKey] = child; child.join(); activeUploads.remove(item.clientKey)
                 }
             } } finally { if (ticket == revision && run == uploadRun) { uploading = false; uploadTask = null; pollDocuments() } }
         }
@@ -212,7 +222,11 @@ internal class ChatTools(private val app: Application, private val api: Platform
         val ext = name.substringAfterLast('.', "").lowercase()
         if (mime.isBlank()) mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext).orEmpty()
         if (name.isBlank()) name = "${if (image) "图片" else "文件"}.${MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: if (image) "jpg" else "bin"}"
-        if (image) require(mime in listOf("image/jpeg", "image/png", "image/webp")) { "图片支持 JPG、PNG、WebP，请转换后重新选择" }
+        if (image) {
+            require(mime in listOf("image/jpeg", "image/png", "image/webp")) { "图片支持 JPG、PNG、WebP，请转换后重新选择" }
+            val suffix = when (mime) { "image/png" -> ".png"; "image/webp" -> ".webp"; else -> ".jpg" }
+            if (ext !in listOf("jpg", "jpeg", "png", "webp")) name = name.take(170) + suffix
+        }
         val extension = name.substringAfterLast('.', "bin").filter { it.isLetterOrDigit() }.take(10)
         val file = File.createTempFile("selected-", ".$extension", targetDirectory)
         try {
@@ -223,6 +237,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
                     require(count <= limit) { if (image) "单张图片不能超过 20MB" else "单个材料不能超过 50MB" }; output.write(buffer, 0, size) }
             } } ?: throw IllegalArgumentException("无法读取所选文件，请重新选择")
             require(file.length() > 0) { "所选文件为空" }
+            if (image) require(chatImageBoundsValid(file)) { "图片内容无法识别，请重新选择或转换为 JPG" }
             return Triple(file, name, mime.ifBlank { "application/octet-stream" })
         } catch (error: Exception) { file.delete(); throw error }
     }
@@ -270,7 +285,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
         val load = imageLoads.getOrPut(id) { session.async {
             val file = imageCacheFile(id)
             try {
-                api.downloadPrivate(listOf("api", "chat-images", id, "view"), file, limit = 20L * 1024 * 1024)
+                imageDownloads.withPermit { api.downloadPrivate(listOf("api", "chat-images", id, "view"), file, limit = 20L * 1024 * 1024) }
                 require(withContext(Dispatchers.IO) { chatImageBoundsValid(file) }) { "图片内容无效，请重试" }
                 currentCoroutineContext().ensureActive()
                 if (ticket != revision) throw CancellationException()
