@@ -12,7 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -36,7 +36,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class AdminScreenTest {
-    private val effectDispatcher = StandardTestDispatcher()
+    private val effectDispatcher = UnconfinedTestDispatcher()
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = effectDispatcher)
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
@@ -88,12 +88,18 @@ class AdminScreenTest {
         awaitTag("admin-list")
     }
     private fun awaitCondition(condition: () -> Boolean) {
-        // 推进协程、主线程及跨线程状态通知，避免 Robolectric 将已返回的数据停留在未提交快照中。
-        compose.waitUntil(30000) {
-            effectDispatcher.scheduler.runCurrent()
-            Shadows.shadowOf(Looper.getMainLooper()).idle()
-            Snapshot.sendApplyNotifications()
-            condition()
+        // 协作式等待会让出阻塞事件循环；Thread.sleep 式轮询可能挡住网络完成后的恢复回调。
+        try { runBlocking { withTimeout(30000) {
+            while (true) {
+                effectDispatcher.scheduler.runCurrent()
+                Shadows.shadowOf(Looper.getMainLooper()).idle()
+                Snapshot.sendApplyNotifications()
+                compose.mainClock.advanceTimeByFrame()
+                if (condition()) return@withTimeout
+                delay(10)
+            }
+        } } } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+            throw androidx.compose.ui.test.ComposeTimeoutException("等待后台页面状态超时")
         }
     }
     private fun awaitTag(tag: String) {

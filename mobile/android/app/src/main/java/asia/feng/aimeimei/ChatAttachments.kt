@@ -3,6 +3,9 @@ package asia.feng.aimeimei
 import org.json.JSONArray
 import org.json.JSONObject
 
+// 附件与安装包使用独立 Provider，避免清单合并时共享路径配置。
+class ChatAttachmentProvider : androidx.core.content.FileProvider()
+
 data class ChatAttachment(val id: String, val name: String, val mime: String, val size: Long,
                           val image: Boolean, val status: String = "completed", val progress: Int = 100,
                           val error: String = "", val clientKey: String = id, val pages: Int = 0) {
