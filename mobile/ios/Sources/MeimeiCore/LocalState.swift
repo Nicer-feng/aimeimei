@@ -4,13 +4,17 @@ public struct PendingSend: Codable, Equatable, Sendable {
     public let conversationID: String
     public let baseline: Int64
     public let content: String
-    public init(conversationID: String, baseline: Int64, content: String) {
-        self.conversationID = conversationID; self.baseline = baseline; self.content = content
+    public let imageIDs: [String]?
+    public init(conversationID: String, baseline: Int64, content: String, imageIDs: [String] = []) {
+        self.conversationID = conversationID; self.baseline = baseline; self.content = content; self.imageIDs = imageIDs
+    }
+    public func matches(_ message: ChatMessage) -> Bool {
+        message.role == "user" && message.id > baseline && message.content == content && Set(message.images.map(\.id)) == Set(imageIDs ?? [])
     }
     /// 仅核对本次用户消息之后的相邻回答；同问题出现多次时保守地保持待核对。
     public func reply(in messages: [ChatMessage]) -> ChatMessage? {
         let questions = messages.indices.filter {
-            messages[$0].role == "user" && messages[$0].id > baseline && messages[$0].content == content
+            matches(messages[$0])
         }
         guard questions.count == 1, let index = questions.first else { return nil }
         return messages.dropFirst(index + 1).prefix { $0.role != "user" }.first { $0.role == "assistant" && $0.id > 0 }
@@ -18,11 +22,21 @@ public struct PendingSend: Codable, Equatable, Sendable {
 }
 
 public struct Draft: Codable, Equatable, Sendable {
+    public var images: [ChatImage] = []
     public var text = ""
     public var webSearch = false
     public var modelID = ""
     public var reasoningMode: ReasoningMode = .balanced
     public init() {}
+    enum CodingKeys: String, CodingKey { case text, webSearch, modelID, reasoningMode, images }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        webSearch = try c.decodeIfPresent(Bool.self, forKey: .webSearch) ?? false
+        modelID = try c.decodeIfPresent(String.self, forKey: .modelID) ?? ""
+        reasoningMode = try c.decodeIfPresent(ReasoningMode.self, forKey: .reasoningMode) ?? .balanced
+        images = try c.decodeIfPresent([ChatImage].self, forKey: .images) ?? []
+    }
 }
 
 /// 只保存草稿和待核对标记，不缓存历史聊天、密码或登录 Cookie。

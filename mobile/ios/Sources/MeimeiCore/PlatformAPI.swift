@@ -33,10 +33,24 @@ public protocol PlatformServing: Sendable {
     func unfavorite(messageID: Int64) async throws
     func prompts() async throws -> [PromptTemplate]
     func search(query: String) async throws -> [GlobalSearchResult]
-    func stream(id: String, content: String, webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws
+    func uploadImage(_ data: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> ChatImage
+    func imageData(id: String) async throws -> Data
+    func stream(id: String, content: String, imageIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws
+}
+
+public extension PlatformServing {
+    func stream(id: String, content: String, webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
+        try await stream(id: id, content: content, imageIDs: [], webSearch: webSearch, onEvent: onEvent)
+    }
 }
 
 private final class NoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let progress: @Sendable (Double) -> Void
+    init(progress: @escaping @Sendable (Double) -> Void = { _ in }) { self.progress = progress }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
+                    totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        if totalBytesExpectedToSend > 0 { progress(min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend))) }
+    }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)
@@ -180,10 +194,53 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
         try await call(Search.self, path: ["api", "search"], query: [URLQueryItem(name: "q", value: String(query.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)))]).results.filter(\.supported)
     }
 
+    private struct PolicyResponse: Decodable { let policy: ImageUploadPolicy }
+    private struct ImageResponse: Decodable { let image: ChatImage }
+    private func externalURL(_ value: String) throws -> URL {
+        guard let url = URL(string: value), url.scheme == "https", url.host != nil,
+              url.user == nil, url.password == nil else { throw PlatformError.invalidResponse }
+        return url
+    }
+    public func uploadImage(_ data: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> ChatImage {
+        let policy = try await call(PolicyResponse.self, path: ["api", "chat-images", "upload-policy"], method: "POST", body: [:]).policy
+        let key = policy.keyPrefix + UUID().uuidString.lowercased() + ".jpg"
+        let boundary = "Meimei-" + UUID().uuidString
+        let body = try policy.form(image: data, key: key, boundary: boundary)
+        var request = URLRequest(url: try externalURL(policy.host))
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        // OSS 请求单独建会话，绝不携带平台 Cookie，也不跟随上传重定向。
+        let external = URLSession(configuration: session.configuration, delegate: NoRedirects(progress: progress), delegateQueue: nil)
+        defer { external.invalidateAndCancel() }
+        let (_, response) = try await external.upload(for: request, from: body)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw PlatformError.media("图片上传失败，请检查网络后重试")
+        }
+        progress(1)
+        return try await call(ImageResponse.self, path: ["api", "chat-images"], method: "POST", body: [
+            "filename": "photo.jpg", "mime_type": "image/jpeg", "file_size": data.count, "oss_key": key
+        ]).image
+    }
+    public func imageData(id: String) async throws -> Data {
+        let (data, response) = try await session.data(for: request(["api", "chat-images", id, "view"]))
+        guard let http = response as? HTTPURLResponse, http.statusCode == 302,
+              http.url?.host == base.host, let location = http.value(forHTTPHeaderField: "Location") else {
+            _ = try checked(response, data: data); throw PlatformError.invalidResponse
+        }
+        let external = URLSession(configuration: session.configuration, delegate: NoRedirects(), delegateQueue: nil)
+        defer { external.invalidateAndCancel() }
+        let (image, remote) = try await external.data(for: URLRequest(url: try externalURL(location)))
+        guard let remote = remote as? HTTPURLResponse, remote.statusCode == 200,
+              remote.mimeType?.hasPrefix("image/") == true, !image.isEmpty, image.count <= 20 * 1024 * 1024 else {
+            throw PlatformError.media("图片加载失败，请重新打开预览")
+        }
+        return image
+    }
+
     /// 所有发送只调用一次 POST；EOF、finish_reason、[DONE] 均不代表入库成功。
-    public func stream(id: String, content: String, webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
+    public func stream(id: String, content: String, imageIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
         var request = try request(["api", "conversations", id, "messages"], method: "POST", body: [
-            "content": content, "web_search": webSearch, "use_profile": true
+            "content": content, "image_ids": imageIDs, "web_search": webSearch, "use_profile": true
         ])
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 300

@@ -267,6 +267,7 @@ final class APITests: XCTestCase {
             let body = try self.body(request)
             XCTAssertEqual(body["content"] as? String, "问题"); XCTAssertEqual(body["web_search"] as? Bool, true)
             XCTAssertEqual(body["use_profile"] as? Bool, true)
+            XCTAssertEqual(body["image_ids"] as? [String], ["pic1"])
             return (200, ["Content-Type": "text/event-stream"], ": heartbeat\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"你好😀\"}}]}\r\n\r\ndata: {\"type\":\"message_saved\",\"message_id\":44,\"generation_status\":\"completed\"}\n\n")
         }
         actor Events {
@@ -274,7 +275,7 @@ final class APITests: XCTestCase {
             func add(_ value: StreamEvent) { values.append(value) }
         }
         let events = Events()
-        try await api.stream(id: "c1", content: "问题", webSearch: true) { await events.add($0) }
+        try await api.stream(id: "c1", content: "问题", imageIDs: ["pic1"], webSearch: true) { await events.add($0) }
         let values = await events.values
         XCTAssertEqual(values.map(\.content).joined(), "你好😀"); XCTAssertEqual(values.last?.savedID, 44)
         XCTAssertEqual(calls, 1)
@@ -283,6 +284,93 @@ final class APITests: XCTestCase {
         var calls = 0
         StubProtocol.handler = { _ in calls += 1; throw URLError(.networkConnectionLost) }
         do { try await api.stream(id: "c1", content: "仅发一次", webSearch: false) { _ in }; XCTFail("应报告断流") } catch {}
+        XCTAssertEqual(calls, 1)
+    }
+}
+
+extension CoreTests {
+    func testImageAndSourcesDecodeAndUnsafeSourceLinksStayClosed() throws {
+        let message = try JSONDecoder().decode(ChatMessage.self, from: Data(#"{"id":1,"role":"user","content":"","images":[{"id":"p1","filename":"相片.jpg","view_url":"/api/chat-images/p1/view"}],"sources":[{"title":"资料","url":"https://example.org/a","snippet":"摘要","position":1},{"url":"javascript:alert(1)"},{"url":"https://name:password@example.org"}],"documents":[{"filename":"材料.pdf"}]}"#.utf8))
+        XCTAssertEqual(message.images.map(\.id), ["p1"]); XCTAssertEqual(message.attachments, ["材料.pdf"])
+        XCTAssertEqual(message.sources.first?.safeURL?.host, "example.org")
+        XCTAssertNil(message.sources[1].safeURL); XCTAssertNil(message.sources[2].safeURL)
+    }
+    func testPendingImageOnlySendMatchesImageIDsAndNeverAnotherImage() {
+        let pending = PendingSend(conversationID: "c1", baseline: 1, content: "", imageIDs: ["p1"])
+        let correct = ChatMessage(id: 2, role: "user", content: "", images: [ChatImage(id: "p1", filename: "x.jpg")])
+        let wrong = ChatMessage(id: 2, role: "user", content: "", images: [ChatImage(id: "p2", filename: "x.jpg")])
+        let answer = ChatMessage(id: 3, role: "assistant", content: "识图回答", status: "completed")
+        XCTAssertEqual(pending.reply(in: [correct, answer])?.id, 3)
+        XCTAssertNil(pending.reply(in: [wrong, answer]))
+    }
+    func testOldDraftStillDecodesAndImageDraftPersistsPerAccount() throws {
+        let old = try JSONDecoder().decode(Draft.self, from: Data(#"{"text":"旧草稿","modelID":"m1","webSearch":false,"reasoningMode":"fast"}"#.utf8))
+        XCTAssertTrue(old.images.isEmpty)
+        var draft = old; draft.images = [ChatImage(id: "p1", filename: "图片.jpg")]
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let local = try LocalState(directory: directory); try local.setDraft(draft, accountID: "a", conversationID: "c")
+        let restored = try LocalState(directory: directory)
+        XCTAssertEqual(restored.draft(accountID: "a", conversationID: "c").images, draft.images)
+        XCTAssertTrue(restored.draft(accountID: "b", conversationID: "c").images.isEmpty)
+    }
+    func testMultipartPolicyAndSizeAndExpiry() throws {
+        let raw: [String: Any] = ["host":"https://oss.example.org", "access_key_id":"test", "policy":"test-policy", "signature":"test-signature", "key_prefix":"images/u/", "max_size":3,"expires_at":Date().addingTimeInterval(60).timeIntervalSince1970]
+        let policy = try JSONDecoder().decode(ImageUploadPolicy.self, from: JSONSerialization.data(withJSONObject: raw))
+        let body = try policy.form(image: Data([1,2,3]), key: "images/u/test.jpg", boundary: "test-boundary")
+        let text = String(decoding: body, as: UTF8.self)
+        XCTAssertTrue(text.contains("name=\"Content-Type\"\r\n\r\nimage/jpeg"))
+        XCTAssertTrue(text.contains("name=\"success_action_status\"\r\n\r\n204"))
+        XCTAssertThrowsError(try policy.form(image: Data([1,2,3,4]), key: "images/u/test.jpg", boundary: "b"))
+        XCTAssertThrowsError(try policy.form(image: Data([1]), key: "another-user/test.jpg", boundary: "b"))
+        var expired = raw; expired["expires_at"] = 0
+        let stale = try JSONDecoder().decode(ImageUploadPolicy.self, from: JSONSerialization.data(withJSONObject: expired))
+        XCTAssertThrowsError(try stale.form(image: Data([1]), key: "images/u/test.jpg", boundary: "b"))
+    }
+}
+
+extension APITests {
+    func testUploadUsesPolicyThenCookielessOSSAndOnlyThenRegisters() async throws {
+        try credentials.write(SessionCredential(token: "test-cookie", expires: Date().addingTimeInterval(600)))
+        var steps: [String] = []
+        StubProtocol.handler = { request in
+            steps.append(request.url?.host == "oss.example.org" ? "oss" : request.url!.path)
+            if request.url?.host == "oss.example.org" {
+                XCTAssertNil(request.value(forHTTPHeaderField: "Cookie")); XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+                XCTAssertEqual(request.httpMethod, "POST"); XCTAssertTrue(request.value(forHTTPHeaderField: "Content-Type")!.hasPrefix("multipart/form-data"))
+                return (204, [:], "")
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "ap_session=test-cookie")
+            if request.url?.path.hasSuffix("upload-policy") == true {
+                XCTAssertEqual(request.httpMethod, "POST")
+                let raw: [String: Any] = ["policy":["host":"https://oss.example.org", "access_key_id":"test", "policy":"p", "signature":"s", "key_prefix":"images/u/", "max_size":1024,"expires_at":Date().addingTimeInterval(60).timeIntervalSince1970]]
+                return (200, [:], String(decoding: try JSONSerialization.data(withJSONObject: raw), as: UTF8.self))
+            }
+            let payload = try self.body(request)
+            XCTAssertEqual(payload["mime_type"] as? String, "image/jpeg"); XCTAssertEqual(payload["file_size"] as? Int, 3)
+            XCTAssertTrue((payload["oss_key"] as? String)?.hasPrefix("images/u/") == true)
+            return (201, [:], #"{"image":{"id":"uploaded","filename":"photo.jpg"}}"#)
+        }
+        let image = try await api.uploadImage(Data([1,2,3])) { _ in }
+        XCTAssertEqual(image.id, "uploaded"); XCTAssertEqual(steps, ["/api/chat-images/upload-policy", "oss", "/api/chat-images"])
+    }
+    func testImagePreviewFetchKeepsPlatformCookieOutOfSignedURL() async throws {
+        try credentials.write(SessionCredential(token: "test-cookie", expires: Date().addingTimeInterval(600)))
+        StubProtocol.handler = { request in
+            if request.url?.host == "test.invalid" {
+                XCTAssertEqual(request.url?.path, "/api/chat-images/p1/view")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "ap_session=test-cookie")
+                return (302, ["Location":"https://oss.example.org/photo?signature=test"], "")
+            }
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            return (200, ["Content-Type":"image/jpeg"], "test-image")
+        }
+        let data = try await api.imageData(id: "p1"); XCTAssertEqual(String(decoding: data, as: UTF8.self), "test-image")
+    }
+    func testImagePreviewRejectsInsecureRedirectBeforeExternalRequest() async throws {
+        var calls = 0
+        StubProtocol.handler = { _ in calls += 1; return (302, ["Location":"http://oss.example.org/photo"], "") }
+        do { _ = try await api.imageData(id: "p1"); XCTFail("不应访问不安全地址") } catch {}
         XCTAssertEqual(calls, 1)
     }
 }

@@ -16,7 +16,7 @@
 - 草稿按账号和会话隔离，写入应用私有且排除备份的目录；登录 Cookie 使用本机不可迁移钥匙串。
 - 跟随系统、浅色、深色，系统字体、键盘安全区及横屏适配。
 
-未纳入首版：图片/文件上传和预览、TTS、推送、网页工具、Mermaid、完整嵌套 Markdown 兼容。旧历史附件只显示文件名。
+当前支持图片上传、拍照提问、历史图片预览和联网来源查看。暂未纳入：文件上传和预览、TTS、推送、网页工具、Mermaid、完整嵌套 Markdown 兼容；文档附件仍只显示文件名。
 
 服务器为固定 `https://feng.asia/`，复用现有账号和云端历史。普通用户 API 不需要管理员密钥或模型 API Key。
 联网开关沿用服务器现有搜索策略，关闭不等于禁止服务器已配置的自动搜索。
@@ -111,3 +111,9 @@ open mobile/ios/Meimei.xcodeproj
 接口契约见 `API_MAPPING.md`。独立版本和更新记录在 `project.yml`、`CHANGELOG.md`，不抬升网页或 Android 版本。
 
 参考：[免费账号限制](https://developer.apple.com/help/account/basics/about-your-developer-account)、[GitHub Apple 签名](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)、[TestFlight](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/)。
+
+### 0.3.0 图片与来源验收
+
+选择支持图片的模型，通过输入区“图片”选择相册照片或拍照。检查上传进度、移除、失败后手动重试，以及不输入文字直接发送图片。点击缩略图可预览并放大；切换不支持图片的模型后应阻止带图发送。退出重进会话后，应能读取服务器保存的图片。
+
+打开联网搜索后发送问题，回答存在来源时点击“联网来源”，核对标题、摘要并打开原文；没有来源的回答不显示入口。相册、相机权限及真实 OSS/模型链路需要在真机验收；离线 UI 测试使用 Debug 数据，不调用收费模型。

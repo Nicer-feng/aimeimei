@@ -23,6 +23,10 @@ final class AppStore {
     @ObservationIgnored private var searchRequest = UUID()
     @ObservationIgnored private var favoriteOverrides: [Int64: Bool] = [:]
     private(set) var draft = Draft()
+    private(set) var uploadingImage: Data?
+    private(set) var failedImage: Data?
+    private(set) var uploadProgress = 0.0
+    private(set) var attachmentContext = UUID()
     private(set) var pending: PendingSend?
     private(set) var live: LiveReply?
     private(set) var busy = false
@@ -41,7 +45,7 @@ final class AppStore {
     var locked: Bool { busy || streaming }
     var currentModel: ChatModel? { models.first { $0.id == draft.modelID } }
     var canSend: Bool {
-        !locked && pending == nil && !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && currentModel != nil
+        !locked && pending == nil && (!draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draft.images.isEmpty) && currentModel != nil && failedImage == nil && (draft.images.isEmpty || currentModel?.supportsVision == true)
     }
     private var conversationID: String { selected?.id ?? "" }
 
@@ -123,6 +127,7 @@ final class AppStore {
         generation?.cancel(); runID = UUID()
         account = nil; selected = nil; messages = []; conversations = []; models = []
         favorites = []; prompts = []; favoriteOverrides = [:]; resetSearch(); focusedMessageID = nil
+        uploadingImage = nil; failedImage = nil; attachmentContext = UUID()
         draft = Draft(); pending = nil; live = nil; streaming = false; captcha = nil
         smsLogin = SMSLoginState(); loginNotice = nil
         do { try api.clearCredential() } catch { self.error = "本机登录凭证未能清除，请重试退出" }
@@ -149,6 +154,7 @@ final class AppStore {
         }
     }
     private func restoreDraft() {
+        uploadingImage = nil; failedImage = nil; attachmentContext = UUID()
         guard let account else { return }
         draft = local.draft(accountID: account.id, conversationID: conversationID)
         if let selected {
@@ -170,6 +176,55 @@ final class AppStore {
         guard let account else { return }
         do { try local.setDraft(draft, accountID: account.id, conversationID: conversationID) }
         catch { self.error = "草稿暂未保存，请检查设备空间" }
+    }
+    func removeImage(_ id: String) {
+        guard !locked, pending == nil else { return }
+        draft.images.removeAll { $0.id == id }; saveDraft()
+    }
+    func discardFailedImage() { guard !locked else { return }; failedImage = nil; error = nil }
+    func retryImage() async { if let data = failedImage { await addImage(data) } }
+    func addImage(_ data: Data, context: UUID? = nil) async {
+        let expectedContext = context ?? attachmentContext
+        let expectedOwner = account?.id
+        // 从相册/相机返回可能同时触发前台刷新，等待 GET 完成，避免丢弃刚选的图片。
+        for _ in 0..<100 {
+            guard !Task.isCancelled, account?.id == expectedOwner, attachmentContext == expectedContext else { return }
+            if !busy { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard account != nil, attachmentContext == expectedContext, pending == nil, !streaming else { return }
+        guard !busy else { failedImage = data; error = "当前操作尚未结束，请稍后重试上传"; return }
+        guard currentModel?.supportsVision == true else { error = "请先切换到支持图片的模型"; return }
+        guard draft.images.count < 5 else { error = "单次最多选择 5 张图片"; return }
+        let owner = account?.id; let target = attachmentContext
+        await work {
+            uploadingImage = data; failedImage = nil; uploadProgress = 0
+            defer { uploadingImage = nil }
+            do {
+                let image = try await api.uploadImage(data) { [weak self] value in
+                    Task { @MainActor in
+                        guard let self, self.attachmentContext == target, self.uploadingImage != nil else { return }
+                        self.uploadProgress = value
+                    }
+                }
+                guard account?.id == owner, attachmentContext == target else { return }
+                draft.images.append(image); saveDraft()
+            } catch {
+                if account?.id == owner, attachmentContext == target { failedImage = data }
+                throw error
+            }
+        }
+    }
+    func imageData(_ image: ChatImage) async throws -> Data {
+        guard let owner = account?.id else { throw CancellationError() }
+        do {
+            let data = try await api.imageData(id: image.id)
+            guard account?.id == owner else { throw CancellationError() }
+            return data
+        } catch {
+            if let failure = error as? PlatformError, failure.isUnauthorized { report(failure) }
+            throw error
+        }
     }
     func setText(_ text: String) { draft.text = text; saveDraft() }
     func setSearch(_ enabled: Bool) { draft.webSearch = enabled; saveDraft() }
@@ -254,10 +309,10 @@ final class AppStore {
             }
             guard let selected else { return }
             guard foreground else { return }
-            let marker = PendingSend(conversationID: selected.id, baseline: messages.map(\.id).max() ?? 0, content: text)
+            let marker = PendingSend(conversationID: selected.id, baseline: messages.map(\.id).max() ?? 0, content: text, imageIDs: draft.images.map(\.id))
             // 标记必须先可靠落盘，再允许真正的模型 POST。
             try local.setPending(marker, accountID: account.id, conversationID: selected.id)
-            pending = marker; draft.text = ""; saveDraft()
+            pending = marker; draft.text = ""; draft.images = []; saveDraft()
             accumulator = ReplyAccumulator(); live = accumulator.reply; streaming = true
             let id = UUID(); runID = id
             let search = draft.webSearch
@@ -266,7 +321,7 @@ final class AppStore {
                 var failure: Error?
                 do {
                     try Task.checkCancellation()
-                    try await self.api.stream(id: selected.id, content: text, webSearch: search) { [weak self] event in
+                    try await self.api.stream(id: selected.id, content: text, imageIDs: marker.imageIDs ?? [], webSearch: search) { [weak self] event in
                         guard let self else { throw CancellationError() }
                         try await self.accept(event, conversationID: selected.id, run: id)
                     }
@@ -322,6 +377,7 @@ final class AppStore {
         do {
             try local.setPending(nil, accountID: account.id, conversationID: pending.conversationID)
             draft.text = pending.content; saveDraft(); self.pending = nil; live = nil
+            if !(pending.imageIDs ?? []).isEmpty { error = "问题文字已恢复。请重新选择图片后发送，原图片不会自动重发" }
         } catch { report(error) }
     }
 }
