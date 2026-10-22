@@ -10,6 +10,7 @@
 | 退出 | POST /api/logout | 已适配，清除服务端及本地会话 |
 | 模型列表 | GET /api/models | 已适配读取，不暴露管理 API |
 | 会话列表 | GET /api/conversations | 已适配读取；当前后端最多返回 200 条 |
+| 单段会话 | GET /api/conversations/{id} | 0.6.3 新增只读接口，返回 conversation；仅当前账号、未归档会话，缺失及越权返回 404，未登录返回 401；不更新时间戳，不返回模型密钥 |
 | 会话管理 | PATCH /api/conversations/{id}；POST /api/conversations/{id}/pin、/unpin；DELETE /api/conversations/{id} | 原生重命名、置顶、取消置顶、删除；服务端按账号隔离 |
 | 历史消息 | GET /api/conversations/{id}/messages | 已适配读取；message.id 是整数，客户端转为稳定字符串键 |
 | 短信 | GET /api/sms-login/config；POST /api/sms-login/send、/verify | 待原生 UI 接入 |
@@ -70,3 +71,14 @@
 | 共享提示词 | GET/POST /api/prompts；PUT/DELETE /api/prompts/{id} | 搜索、全文、新增编辑、确认删除，确认追加或替换草稿 |
 
 复用现有后端及权限，无服务器或数据库变更。提示词按 Web 的全站共享语义展示。图片下载在鉴权后保留 OSS 签名查询参数，跨站不转发 Cookie；同一图片共享下载，最多同时下载三张。
+
+## 全文搜索、联网来源与 AI 档案（0.6.3）
+
+| 模块 | 接口 | 原生页面 |
+|---|---|---|
+| 聊天全文搜索 | GET /api/search?q=关键词 | 标题、提问、回答和收藏；关键词高亮、提问/回答筛选；复用服务器最多 60 条综合结果，音视频结果不混作聊天 |
+| 搜索定位 | GET /api/conversations/{id}；GET /api/conversations/{id}/messages | 读取真实模型和思考配置后定位原消息；支持最近 200 条列表之外的会话，回到前台继续保留该会话；删除后的收藏可进入原生收藏页 |
+| 联网来源 | 历史消息 sources | 按 position 展示标题、链接、摘要，复制链接、用户主动打开外部浏览器；不发起额外模型调用，不在 WebView 注入账号 Cookie |
+| AI 档案 | GET/POST /api/profiles；PUT/DELETE /api/profiles/{id}；POST /api/profiles/reorder | 当前账号私有档案，原生全文编辑、类型、启停、排序、确认删除；与 Web 同步，聊天继续沿用 use_profile=true |
+
+档案名称最多 80 字、内容最多 12000 字，enabled 使用布尔值、sort_order 使用整数；失败保留编辑内容。搜索请求取消并屏蔽过期响应，账号变化清空搜索和档案内存。新增的单段会话 GET 需先部署 app.py 和 ai_platform/handlers/chat.py，不修改数据库结构。

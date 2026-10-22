@@ -50,6 +50,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     private var streamJob: Job? = null
     private var revision = 0
     private var generation = 0
+    private var searchedConversation = false
     internal val activeGeneration get() = generation
     private var buffer: ReplyBuffer? = null
     internal val tools = ChatTools(application, api, viewModelScope) { returnedFromWeb() }
@@ -110,7 +111,10 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
             if (ticket != revision) return@work
             val current = selected
             if (current != null) {
-                selected = conversations.firstOrNull { it.id == current.id }
+                selected = conversations.firstOrNull { it.id == current.id } ?: if (searchedConversation) {
+                    try { api.conversationDetail(current.id) }
+                    catch (failure: ApiFailure) { if (failure.status == 404) null else throw failure }
+                } else null
                 if (selected != null) loadMessages(ticket)
                 else { messages = emptyList(); pending = null; live = null; restoreWelcomeDraft() }
             }
@@ -132,6 +136,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         preferredReasoningMode = drafts.getString(key("mode", ""), "balanced").orEmpty()
     }
     private fun enter(conversation: Conversation) {
+        searchedConversation = false
         generation++
         selected = conversation; messages = emptyList(); live = null
         focusMessageId = ""; tools.bind(account?.id.orEmpty(), conversation.id)
@@ -354,4 +359,22 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         return true
     }
     fun clearFocusMessage() { focusMessageId = "" }
+    internal fun openSearchResult(result: ChatSearchResult, onOpen: () -> Unit) {
+        if (account == null || streaming || busy || result.conversationId.isBlank()) return
+        work { ticket ->
+            // 搜索不限于最近 200 段聊天，先按账号读取真实会话配置，再加载消息。
+            val conversation = api.conversationDetail(result.conversationId)
+            if (ticket != revision) return@work
+            enter(conversation)
+            searchedConversation = true
+            focusMessageId = result.messageId
+            loadMessages(ticket)
+            if (ticket == revision) {
+                if (result.messageId.isNotBlank() && messages.none { it.id == result.messageId }) {
+                    focusMessageId = ""; error = "原消息已不存在，已打开对应聊天"
+                }
+                onOpen()
+            }
+        }
+    }
 }

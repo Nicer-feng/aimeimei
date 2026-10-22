@@ -848,6 +848,19 @@ class ChatHandlersMixin:
             if not row:
                 return self.error(HTTPStatus.NOT_FOUND, "conversation not found")
 
+            if self.command == "GET":
+                detail = conn.execute(
+                    """SELECT c.*, m.name AS model_name, m.model AS model,
+                              m.supports_vision, m.supports_native_web_search,
+                              m.supports_reasoning_control
+                       FROM conversations c JOIN models m ON m.id=c.model_id
+                       WHERE c.id=? AND c.user_id=? AND c.archived=0""",
+                    (conversation_id, user_id),
+                ).fetchone()
+                if not detail:
+                    return self.error(HTTPStatus.NOT_FOUND, "conversation not found")
+                return self.json({"conversation": conversation_row(detail)})
+
             if self.command == "DELETE":
                 conn.execute(
                     "UPDATE conversations SET archived=1, updated_at=? WHERE id=? AND user_id=?",

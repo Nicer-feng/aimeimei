@@ -37,7 +37,8 @@ internal val webTools = listOf(
     WebTool("writing", "写稿工作台", "材料、要求和稿件整理"),
     WebTool("prompts", "提示词库", "常用模板与个人提示词"),
     WebTool("favorites", "我的收藏", "原生收藏列表、搜索与历史回看"),
-    WebTool("profiles", "AI档案", "长期偏好与聊天背景"),
+    WebTool("search", "搜索聊天", "查找标题、提问、回答与收藏"),
+    WebTool("profiles", "AI档案", "原生管理长期偏好与聊天背景"),
     WebTool("media", "音视频分析", "上传媒体、转写与总结"),
     WebTool("ocr", "手写识别", "图片识别与文字提取"),
     WebTool("activity", "Token活动", "查看个人使用统计"),
@@ -61,7 +62,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
     val openTool: (String) -> Unit = { id ->
         if (!model.streaming && !model.busy) {
             webParent = screen
-            if (id in listOf("admin", "favorites", "prompts")) screen = id
+            if (id in listOf("admin", "favorites", "prompts", "profiles", "search")) screen = id
             else { webParent = screen; toolId = id; webConversation = model.selected?.id.orEmpty(); screen = "web" }
         }
     }
@@ -82,13 +83,14 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
         drawerContent = {
             if (model.account != null) HistoryDrawer(model, onNew = { model.newConversation(); screen = "chat"; closeDrawer() },
                 onOpen = { model.open(it); screen = "chat"; closeDrawer() },
+                onSearch = { if (!model.streaming && !model.busy) { screen = "search"; closeDrawer() } },
                 onTools = { screen = "tools"; closeDrawer() }, onSettings = { screen = "settings"; closeDrawer() })
         }
     ) {
         Scaffold(topBar = {
             if (screen != "admin") TopAppBar(title = {
                 Column {
-                    Text(when (screen) { "settings" -> "设置"; "tools" -> "更多工具"; "favorites" -> "我的收藏"; "prompts" -> "提示词库"; "web" -> if (toolId == "admin") "后台管理" else webTools.firstOrNull { it.id == toolId }?.title ?: "AI槑槑"; else -> model.selected?.title ?: "AI槑槑" },
+                    Text(when (screen) { "search" -> "搜索聊天"; "profiles" -> "AI 档案"; "settings" -> "设置"; "tools" -> "更多工具"; "favorites" -> "我的收藏"; "prompts" -> "提示词库"; "web" -> if (toolId == "admin") "后台管理" else webTools.firstOrNull { it.id == toolId }?.title ?: "AI槑槑"; else -> model.selected?.title ?: "AI槑槑" },
                         maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                     if (screen == "chat" && model.account != null) Text(model.currentModel?.name ?: "新聊天", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -128,6 +130,8 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
                         "admin" -> AdminScreen(model, preferences) { screen = webParent; model.returnedFromWeb() }
                         "favorites" -> FavoritesScreen(model) { screen = "chat" }
                         "prompts" -> PromptsScreen(model) { screen = "chat" }
+                        "profiles" -> ProfilesScreen(model)
+                        "search" -> ChatSearchScreen(model, onOpen = { screen = "chat" }, onFavorites = { screen = "favorites" })
                         "web" -> WebToolScreen(model, toolId, webConversation)
                         else -> if (model.account == null) LoginForm(model) else ChatScreen(model, openTool)
                     }
@@ -139,8 +143,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
 }
 
 @Composable
-private fun HistoryDrawer(model: PlatformViewModel, onNew: () -> Unit, onOpen: (Conversation) -> Unit, onTools: () -> Unit, onSettings: () -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
+private fun HistoryDrawer(model: PlatformViewModel, onNew: () -> Unit, onOpen: (Conversation) -> Unit, onSearch: () -> Unit, onTools: () -> Unit, onSettings: () -> Unit) {
     var menu by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<Conversation?>(null) }
     var deleting by remember { mutableStateOf<Conversation?>(null) }
@@ -154,13 +157,13 @@ private fun HistoryDrawer(model: PlatformViewModel, onNew: () -> Unit, onOpen: (
         FilledTonalButton(onClick = onNew, enabled = enabled, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("新聊天")
         }
-        OutlinedTextField(query, { query = it }, placeholder = { Text("搜索聊天标题") }, singleLine = true,
-            leadingIcon = { Icon(Icons.Default.Search, null) }, shape = CircleShape,
-            modifier = Modifier.fillMaxWidth().padding(16.dp))
+        OutlinedButton(onClick = onSearch, enabled = enabled, shape = CircleShape, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Icon(Icons.Default.Search, null); Spacer(Modifier.width(8.dp)); Text("搜索聊天内容")
+        }
         if (model.streaming) Text("回答生成中，完成后可切换聊天", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 20.dp))
-        val matches = model.conversations.filter { it.title.contains(query, ignoreCase = true) }
+        val matches = model.conversations
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
-            if (matches.isEmpty()) item { Text(if (query.isBlank()) "还没有聊天，从一个问题开始吧" else "没有匹配的聊天", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
+            if (matches.isEmpty()) item { Text("还没有聊天，从一个问题开始吧", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
             items(matches, key = { it.id }) { conversation ->
                 NavigationDrawerItem(selected = model.selected?.id == conversation.id, onClick = { if (enabled) onOpen(conversation) },
                     label = { Column { Text(conversation.title, maxLines = 1, overflow = TextOverflow.Ellipsis); if (conversation.pinned) Text("已置顶", style = MaterialTheme.typography.labelSmall) } },
@@ -217,7 +220,7 @@ private fun SettingsScreen(model: PlatformViewModel, preferences: AppPreferences
         item { ListItem(headlineContent = { Text("界面动效") }, supportingContent = { Text("页面切换与内容展开") }, trailingContent = { Switch(preferences.motion, preferences::changeMotion) }) }
         if (model.account != null) {
             item { SectionLabel("聊天与工具") }
-            item { SettingsRow("AI档案与偏好", "管理长期偏好和聊天背景", enabled = !model.streaming && !model.busy, onClick = { openTool("profiles") }) }
+            item { SettingsRow("AI档案与偏好", "原生管理长期偏好和聊天背景", enabled = !model.streaming && !model.busy, onClick = { openTool("profiles") }) }
             item { SettingsRow("语音与完整聊天", "朗读、文件、图片、分享和引用", enabled = !model.streaming && !model.busy, onClick = { openTool("chat") }) }
             if (model.account?.role == "admin") item { SettingsRow("后台管理", "管理账号与系统功能", enabled = !model.streaming && !model.busy, onClick = { openTool("admin") }) }
         }

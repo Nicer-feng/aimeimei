@@ -70,6 +70,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           python3 -m unittest discover -s mobile/android/scripts/tests -p 'test_*.py'
+          python3 scripts/test_native_knowledge.py
           task=assembleDebug
           if [ "$BUILD_TYPE" = release ]; then task=assembleRelease; fi
           gradle --no-daemon -p mobile/android -PapiBaseUrl="$API_BASE_URL" :app:testDebugUnitTest :app:lintDebug ":app:$task"

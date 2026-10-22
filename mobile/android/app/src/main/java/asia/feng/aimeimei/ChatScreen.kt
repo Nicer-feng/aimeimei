@@ -61,6 +61,7 @@ private fun ConversationContent(model: PlatformViewModel, openTool: (String) -> 
     val list = rememberLazyListState()
     var following by remember { mutableStateOf(true) }
     var confirmPending by remember { mutableStateOf(false) }
+    var highlighted by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val waiting = model.pending
     val showPendingUser = waiting != null && model.messages.none { it.role == "user" && (it.id.toLongOrNull() ?: 0) > waiting.baseline && it.content.trim() == waiting.content.trim() }
@@ -83,7 +84,10 @@ private fun ConversationContent(model: PlatformViewModel, openTool: (String) -> 
         val id = model.focusMessageId
         if (id.isNotBlank()) {
             val index = model.messages.indexOfFirst { it.id == id }
-            if (index >= 0) { following = false; list.scrollToItem(index); model.clearFocusMessage() }
+            if (index >= 0) {
+                snapshotFlow { list.layoutInfo.totalItemsCount }.first { it > index }
+                following = false; highlighted = id; list.scrollToItem(index); model.clearFocusMessage()
+            }
         }
     }
     if (confirmPending) AlertDialog(onDismissRequest = { confirmPending = false }, title = { Text("已核对服务器记录？") },
@@ -94,7 +98,10 @@ private fun ConversationContent(model: PlatformViewModel, openTool: (String) -> 
         Box(Modifier.weight(1f)) {
             LazyColumn(state = list, modifier = Modifier.fillMaxSize().testTag("chat-messages"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                 if (model.messages.isEmpty() && !model.streaming && !model.busy) item { Text("有什么想和槑槑聊的？", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                items(model.messages, key = { it.id }) { message -> MessageBody(message, model) }
+                items(model.messages, key = { it.id }) { message ->
+                    Box(Modifier.fillMaxWidth().background(if (highlighted == message.id) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = .35f) else androidx.compose.ui.graphics.Color.Transparent,
+                        RoundedCornerShape(12.dp)).testTag("message-${message.id}")) { MessageBody(message, model) }
+                }
                 model.pending?.let { waiting ->
                     if (model.messages.none { it.role == "user" && (it.id.toLongOrNull() ?: 0) > waiting.baseline && it.content.trim() == waiting.content.trim() }) {
                         item(key = "pending-user") { MessageBody(ChatMessage("pending-user", "user", waiting.content, "", "", waiting.attachments.map { it.name }, waiting.attachments), model) }
@@ -139,6 +146,7 @@ private fun MessageBody(message: ChatMessage, model: PlatformViewModel? = null) 
         }
         if (model != null) message.media.forEach { item -> AttachmentCard(item, onOpen = { model.tools.showPreview(item) }, tools = model.tools) }
         else if (message.attachments.isNotEmpty()) Text("附件：${message.attachments.joinToString("、")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        MessageSources(message)
         if (message.role == "assistant") message.usage?.let { usage ->
             var details by remember(message.id) { mutableStateOf(false) }
             TextButton(onClick = { details = true }, modifier = Modifier.testTag("usage-${message.id}")) { Text(if (usage.total > 0) "${tokenNumber(usage.total)} Token" else "Token 未返回", style = MaterialTheme.typography.labelSmall) }
