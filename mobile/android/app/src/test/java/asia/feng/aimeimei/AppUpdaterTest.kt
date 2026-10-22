@@ -65,6 +65,7 @@ class AppUpdaterTest {
     }
     @Before fun setup() {
         app = RuntimeEnvironment.getApplication()
+        resetProviderCache()
         app.getSharedPreferences("android_updates", 0).edit().clear().commit()
         File(app.cacheDir, "updates").deleteRecursively()
         Shadows.shadowOf(app.packageManager).setCanRequestPackageInstalls(true)
@@ -72,7 +73,13 @@ class AppUpdaterTest {
         backend = Backend(); packages = Packages(); backend.offer(); updater = create()
     }
     private fun create() = AppUpdater(app, backend, packages, false, Dispatchers.Unconfined).also { instances.add(it) }
-    @After fun close() { instances.forEach { it.cancel() }; backend.gate?.complete(Unit) }
+    @After fun close() { instances.forEach { it.cancel() }; backend.gate?.complete(Unit); resetProviderCache() }
+    private fun resetProviderCache() {
+        // Robolectric 每个用例重建 cacheDir；清理 AndroidX 按 authority 保留的静态路径，模拟真实进程的 Provider 初始化。
+        val field = androidx.core.content.FileProvider::class.java.getDeclaredField("sCache").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST") val cache = field.get(null) as MutableMap<String, Any>
+        synchronized(cache) { cache.remove("${app.packageName}.updates") }
+    }
     private suspend fun await(condition: () -> Boolean) { withTimeout(7000) { while (!condition() || updater.operationActive) delay(10) } }
     private suspend fun download() { updater.check(); await { updater.state.phase == "available" }; updater.download(); await { updater.state.phase in setOf("ready", "error") } }
     private fun apk() = File(app.cacheDir, "updates").listFiles()!!.single { it.extension == "apk" }
