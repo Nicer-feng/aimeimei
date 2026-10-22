@@ -2,6 +2,7 @@
 import hmac
 import json
 import mimetypes
+import re
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -215,6 +216,8 @@ class AppHandler(
             return self.require_user(self.handle_conversation_shares)
         if path.startswith("/api/conversations/") and path.endswith("/stats"):
             return self.require_user(self.handle_conversation_stats)
+        if re.fullmatch(r"/api/conversations/[^/]+", path):
+            return self.require_user(self.handle_conversation_item)
         if path.startswith("/api/sessions/") and path.endswith("/stats"):
             return self.require_user(self.handle_conversation_stats)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
