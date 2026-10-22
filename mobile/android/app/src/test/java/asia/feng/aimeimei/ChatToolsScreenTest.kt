@@ -94,9 +94,15 @@ class ChatToolsScreenTest {
         await { compose.onAllNodesWithText("朗读").fetchSemanticsNodes().isNotEmpty() }
     }
     private fun await(condition: () -> Boolean) {
-        compose.waitUntil(15000) {
-            dispatcher.scheduler.runCurrent(); Shadows.shadowOf(Looper.getMainLooper()).idle(); Snapshot.sendApplyNotifications(); condition()
-        }
+        // 让出测试事件循环并推进实际布局，避免空列表首帧或图片解码完成前就结束等待。
+        runBlocking { withTimeout(15000) {
+            while (true) {
+                dispatcher.scheduler.runCurrent(); Shadows.shadowOf(Looper.getMainLooper()).idle(); Snapshot.sendApplyNotifications()
+                compose.mainClock.advanceTimeByFrame()
+                if (condition()) return@withTimeout
+                delay(10)
+            }
+        } }
         compose.waitForIdle()
     }
     private fun capture(name: String, dialog: Boolean = false) {
@@ -151,7 +157,7 @@ class ChatToolsScreenTest {
         compose.onNodeWithContentDescription("照片.jpg").assertIsDisplayed(); capture("native-image-preview", true)
         compose.onNodeWithText("关闭").performClick()
         compose.onNodeWithContentDescription("更多工具").performClick(); compose.onNodeWithText("我的收藏").performClick()
-        await { !model.tools.favoritesLoading && compose.onAllNodesWithTag("favorites-list").fetchSemanticsNodes().isNotEmpty() }
+        await { !model.tools.favoritesLoading && compose.onAllNodesWithText("这是收藏的原生验收回答。").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("这是收藏的原生验收回答。").assertIsDisplayed(); capture("native-favorites")
         compose.onNodeWithText("查看原消息").performClick()
         await { compose.onAllNodesWithText("朗读").fetchSemanticsNodes().isNotEmpty() }
