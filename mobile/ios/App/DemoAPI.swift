@@ -9,6 +9,12 @@ actor DemoAPI: PlatformServing {
     private var smsSends = 0
     private var smsVerifications = 0
     private var smsAvailable = true
+    private var savedFavorites: [FavoriteMessage] = []
+    private var searchDelays: [String: Duration] = [:]
+    func setSearchDelay(_ delay: Duration, query: String) { searchDelays[query] = delay }
+    func seedArchivedFavorite() {
+        savedFavorites.append(Self.decode(FavoriteMessage.self, #"{"id":"archived","message_id":999,"conversation_id":"deleted","conversation_title":"原会话已删除","content":"删除会话后仍保留的收藏快照"}"#))
+    }
     func setSMSAvailable(_ available: Bool) { smsAvailable = available }
     func smsCounts() -> (sends: Int, verifications: Int) { (smsSends, smsVerifications) }
     private var nextMessage: Int64 = 10
@@ -74,7 +80,48 @@ actor DemoAPI: PlatformServing {
         }
     }
     func deleteConversation(id: String) async throws { items.removeAll { $0.id == id } }
-    func messages(id: String) async throws -> [ChatMessage] { history[id] ?? [] }
+    func messages(id: String) async throws -> [ChatMessage] {
+        (history[id] ?? []).map { message in
+            ChatMessage(id: message.id, role: message.role, content: message.content, reasoning: message.reasoning,
+                        status: message.status, attachments: message.attachments,
+                        favoriteID: savedFavorites.first { $0.messageID == message.id }?.id)
+        }
+    }
+    func favorites() async throws -> [FavoriteMessage] { savedFavorites }
+    func favorite(messageID: Int64) async throws -> FavoriteMessage {
+        if let existing = savedFavorites.first(where: { $0.messageID == messageID }) { return existing }
+        guard let source = history.first(where: { $0.value.contains { $0.id == messageID && $0.role == "assistant" } }),
+              let message = source.value.first(where: { $0.id == messageID }) else { throw PlatformError.http(404, "message not found") }
+        let body: [String: Any] = ["id": "f\(messageID)", "message_id": messageID, "conversation_id": source.key,
+                                  "conversation_title": items.first { $0.id == source.key }?.title ?? "原会话已删除", "content": message.content]
+        let item = try JSONDecoder().decode(FavoriteMessage.self, from: JSONSerialization.data(withJSONObject: body))
+        savedFavorites.insert(item, at: 0); return item
+    }
+    func unfavorite(messageID: Int64) async throws { savedFavorites.removeAll { $0.messageID == messageID } }
+    func prompts() async throws -> [PromptTemplate] {
+        Self.decode([PromptTemplate].self, #"[{"id":"daily","title":"每日计划","content":"请帮我制定今天的计划，列出优先级和下一步。"}]"#)
+    }
+    func search(query: String) async throws -> [GlobalSearchResult] {
+        if let delay = searchDelays[query] { try? await Task.sleep(for: delay) }
+        var rows: [[String: Any]] = []
+        for item in items {
+            if query.isEmpty || item.title.localizedCaseInsensitiveContains(query) {
+                rows.append(["id": "conversation:\(item.id)", "type": "conversation", "session_id": item.id,
+                             "message_id": 0, "title": item.title, "snippet": "最近对话"])
+            }
+            if !query.isEmpty {
+                for message in history[item.id] ?? [] where message.content.localizedCaseInsensitiveContains(query) {
+                    rows.append(["id": "message:\(message.id)", "type": "message", "session_id": item.id,
+                                 "message_id": message.id, "title": item.title, "snippet": message.content])
+                }
+            }
+        }
+        for item in savedFavorites where !query.isEmpty && item.content.localizedCaseInsensitiveContains(query) {
+            rows.append(["id": "favorite:\(item.id)", "type": "favorite", "session_id": item.canOpenConversation ? item.conversationID : "",
+                         "message_id": item.canOpenConversation ? item.messageID : 0, "title": item.conversationTitle, "snippet": item.content])
+        }
+        return try JSONDecoder().decode([GlobalSearchResult].self, from: JSONSerialization.data(withJSONObject: rows))
+    }
     func stream(id: String, content: String, webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
         nextMessage += 1; history[id, default: []].append(ChatMessage(id: nextMessage, role: "user", content: content))
         var reply = ""

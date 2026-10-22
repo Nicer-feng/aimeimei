@@ -25,6 +25,65 @@ final class AppStoreTests: XCTestCase {
         }
         XCTFail("生成或核对未在限定时间内结束")
     }
+    func testFavoriteChangesSyncToWebStateAndDoNotChangeDraft() async throws {
+        await login(); await store.select(store.conversations[0]); store.setText("保留当前草稿")
+        let message = try XCTUnwrap(store.messages.first { $0.id == 2 })
+        XCTAssertFalse(store.isFavorite(message))
+        await store.toggleFavorite(message); XCTAssertTrue(store.isFavorite(message))
+        await store.loadFavorites(); XCTAssertEqual(store.favorites.map(\.messageID), [2])
+        let remote = try await api.favorites(); XCTAssertEqual(remote.count, 1)
+        await store.removeFavorite(store.favorites[0]); XCTAssertFalse(store.isFavorite(message))
+        let remaining = try await api.favorites(); XCTAssertTrue(remaining.isEmpty)
+        XCTAssertEqual(store.draft.text, "保留当前草稿")
+        _ = try await api.favorite(messageID: 2)
+        await store.refresh()
+        XCTAssertTrue(store.isFavorite(try XCTUnwrap(store.messages.first { $0.id == 2 })))
+    }
+    func testPromptRequiresConfirmationAndNeverCreatesOrSendsConversation() async throws {
+        await login(); await store.loadPrompts()
+        let prompt = try XCTUnwrap(store.prompts.first)
+        store.setText("还没写完的草稿")
+        XCTAssertFalse(store.applyPrompt(prompt)); XCTAssertEqual(store.draft.text, "还没写完的草稿")
+        XCTAssertTrue(store.applyPrompt(prompt, replace: true)); XCTAssertEqual(store.draft.text, prompt.content)
+        XCTAssertNil(store.selected); XCTAssertTrue(store.messages.isEmpty); XCTAssertEqual(store.conversations.count, 1)
+        let restored = local.draft(accountID: "offline-user", conversationID: "")
+        XCTAssertEqual(restored.text, prompt.content)
+    }
+    func testSearchOpenLocatesMessageAndPreservesOtherConversationDraft() async {
+        await login(); store.setText("首页草稿")
+        await store.searchLibrary("把想法")
+        XCTAssertTrue(store.searchResults.contains { $0.messageID == 2 })
+        let opened = await store.openMessage(conversationID: "history", messageID: 2)
+        XCTAssertTrue(opened); XCTAssertEqual(store.focusedMessageID, 2); XCTAssertEqual(store.selected?.id, "history")
+        store.setText("历史草稿")
+        let missing = await store.openMessage(conversationID: "missing", messageID: 42)
+        XCTAssertFalse(missing); XCTAssertEqual(store.draft.text, "历史草稿"); XCTAssertEqual(store.selected?.id, "history")
+        store.newChat(); XCTAssertNil(store.focusedMessageID); XCTAssertEqual(store.draft.text, "首页草稿")
+    }
+    func testSlowerPreviousSearchCannotReplaceLatestResults() async throws {
+        await login(); await api.setSearchDelay(.milliseconds(500), query: "把想法")
+        let old = Task { await store.searchLibrary("把想法") }
+        try await Task.sleep(for: .milliseconds(300))
+        await store.searchLibrary("没有这个关键词"); await old.value
+        XCTAssertTrue(store.searchResults.isEmpty); XCTAssertFalse(store.searching)
+    }
+    func testDeletedConversationFavoriteCanStillBeReadAndSearched() async {
+        await login(); await api.seedArchivedFavorite(); await store.loadFavorites()
+        XCTAssertEqual(store.favorites.first?.content, "删除会话后仍保留的收藏快照")
+        XCTAssertFalse(store.favorites.first?.canOpenConversation ?? true)
+        await store.searchLibrary("快照")
+        XCTAssertEqual(store.searchResults.first?.id, "favorite:archived")
+        let snapshot = await store.favoriteSnapshot(resultID: "favorite:archived")
+        XCTAssertEqual(snapshot?.messageID, 999)
+    }
+    func testLogoutClearsLibraryAndRejectsSearchArrivingAfterLogout() async throws {
+        await login(); await api.seedArchivedFavorite(); await store.loadFavorites(); await store.loadPrompts()
+        await api.setSearchDelay(.milliseconds(500), query: "把想法")
+        let pendingSearch = Task { await store.searchLibrary("把想法") }
+        try await Task.sleep(for: .milliseconds(300)); await store.logout(); await pendingSearch.value
+        XCTAssertNil(store.account); XCTAssertTrue(store.favorites.isEmpty); XCTAssertTrue(store.prompts.isEmpty)
+        XCTAssertTrue(store.searchResults.isEmpty); XCTAssertFalse(store.searching)
+    }
     func testSMSLoginRejectsInvalidCodeThenLoadsSameWorkspace() async {
         await store.start(); XCTAssertTrue(store.smsConfig?.available == true)
         store.setLoginPhone("+86 13800000000")

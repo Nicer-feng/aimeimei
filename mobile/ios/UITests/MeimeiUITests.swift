@@ -53,6 +53,43 @@ final class MeimeiUITests: XCTestCase {
         XCTAssertEqual(composer.value as? String, "Keep this draft")
         capture("06-draft")
     }
+    func testFavoriteSearchAndReturnToOriginalMessage() {
+        login(); app.buttons["historyButton"].tap()
+        app.buttons.containing(.staticText, identifier: "一次小小的好奇").firstMatch.tap()
+        XCTAssertTrue(app.buttons["favoriteMessage-2"].waitForExistence(timeout: 5))
+        app.buttons["favoriteMessage-2"].tap()
+        app.buttons["libraryButton"].tap()
+        XCTAssertTrue(app.buttons["favorite-2"].waitForExistence(timeout: 5))
+        capture("11-favorites")
+        app.buttons["favorite-2"].tap()
+        app.buttons["openFavoriteOrigin"].tap()
+        XCTAssertTrue(app.buttons["historyButton"].waitForExistence(timeout: 5))
+        app.buttons["libraryButton"].tap()
+        app.segmentedControls["librarySections"].buttons["搜索"].tap()
+        let field = app.textFields["globalSearchField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("Markdown")
+        XCTAssertTrue(app.buttons["search-message:1"].waitForExistence(timeout: 5))
+        capture("12-global-search")
+        app.buttons["search-message:1"].tap()
+        XCTAssertTrue(app.buttons["historyButton"].waitForExistence(timeout: 5))
+        capture("13-message-location")
+    }
+    func testPromptReplacementRequiresConfirmationAndDoesNotSend() {
+        login()
+        let composer = app.textViews["composerField"].exists ? app.textViews["composerField"] : app.textFields["composerField"]
+        composer.tap(); composer.typeText("Keep my draft")
+        app.buttons["promptsButton"].tap()
+        XCTAssertTrue(app.buttons["prompt-daily"].waitForExistence(timeout: 5))
+        app.buttons["prompt-daily"].tap(); capture("14-prompt-preview")
+        app.buttons["applyPromptButton"].tap()
+        XCTAssertTrue(app.alerts["替换当前草稿？"].waitForExistence(timeout: 5))
+        app.alerts.buttons["保留草稿"].tap()
+        app.buttons["applyPromptButton"].tap(); app.alerts.buttons["替换草稿"].tap()
+        XCTAssertTrue(app.buttons["historyButton"].waitForExistence(timeout: 5))
+        XCTAssertEqual(composer.value as? String, "请帮我制定今天的计划，列出优先级和下一步。")
+        XCTAssertTrue(app.descendants(matching: .any)["welcomeView"].exists)
+        capture("15-prompt-draft")
+    }
     func testSMSLoginAndPasswordSwitchPreserveCooldown() {
         XCTAssertTrue(app.segmentedControls["loginModePicker"].waitForExistence(timeout: 15))
         app.segmentedControls["loginModePicker"].buttons["短信验证码"].tap()

@@ -5,6 +5,7 @@ struct ChatView: View {
     let store: AppStore
     @State private var nearBottom = true
     @State private var confirmRestore = false
+    @State private var showPrompts = false
     @FocusState private var composing: Bool
     var body: some View {
         VStack(spacing: 0) {
@@ -15,7 +16,10 @@ struct ChatView: View {
                     LazyVStack(alignment: .leading, spacing: 24) {
                         if store.messages.isEmpty && store.pending == nil { welcome }
                         ForEach(store.messages) { message in
-                            MessageRow(message: message).equatable()
+                            MessageRow(message: message, favorite: store.isFavorite(message), canFavorite: !store.locked,
+                                       onFavorite: { Task { await store.toggleFavorite(message) } }).equatable()
+                                .id(message.id)
+                                .overlay { RoundedRectangle(cornerRadius: 18).stroke(store.focusedMessageID == message.id ? Brand.accent : .clear, lineWidth: 2).allowsHitTesting(false) }
                         }
                         if let pending = store.pending,
                            !store.messages.contains(where: { $0.role == "user" && $0.id > pending.baseline && $0.content == pending.content }) {
@@ -40,7 +44,17 @@ struct ChatView: View {
                 .accessibilityIdentifier("chatScroll")
                 .onChange(of: store.live?.content) { _, _ in if nearBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onChange(of: store.messages.count) { _, _ in if nearBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
-                .onChange(of: store.selected?.id) { _, _ in nearBottom = true; proxy.scrollTo("bottom", anchor: .bottom) }
+                .onChange(of: store.selected?.id) { _, _ in
+                    nearBottom = store.focusedMessageID == nil
+                    if let id = store.focusedMessageID { proxy.scrollTo(id, anchor: .center) }
+                    else { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+                .task(id: store.focusRequest) {
+                    guard let id = store.focusedMessageID else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    nearBottom = false; proxy.scrollTo(id, anchor: .center)
+                }
                 .overlay(alignment: .bottomTrailing) {
                     if !nearBottom {
                         Button("回到底部", systemImage: "arrow.down") { nearBottom = true; withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
@@ -58,6 +72,7 @@ struct ChatView: View {
             }
         }
         .background(Brand.background)
+        .sheet(isPresented: $showPrompts) { LibraryView(store: store, initial: .prompts) }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .alert("已核对服务器记录？", isPresented: $confirmRestore) {
             Button("继续等待", role: .cancel) {}
@@ -124,6 +139,8 @@ struct ChatView: View {
             HStack {
                 Toggle(isOn: Binding(get: { store.draft.webSearch }, set: store.setSearch)) { Label("联网搜索", systemImage: "globe") }
                     .toggleStyle(.button).font(.caption).disabled(store.locked || store.pending != nil)
+                Button("提示词", systemImage: "text.book.closed") { composing = false; showPrompts = true }
+                    .font(.caption).disabled(store.locked || store.pending != nil).accessibilityIdentifier("promptsButton")
                 Spacer()
                 Button("刷新", systemImage: "arrow.clockwise") { Task { await store.refresh() } }
                     .labelStyle(.iconOnly).disabled(store.locked).accessibilityLabel("刷新服务器记录")
@@ -134,12 +151,22 @@ struct ChatView: View {
 
 private struct MessageRow: View, Equatable {
     let message: ChatMessage
+    var favorite = false
+    var canFavorite = false
+    var onFavorite: (() -> Void)?
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.message == rhs.message && lhs.favorite == rhs.favorite && lhs.canFavorite == rhs.canFavorite
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Label(message.role == "user" ? "你" : "槑槑", systemImage: message.role == "user" ? "person.crop.circle" : "sparkles")
                     .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 Spacer()
+                if message.role == "assistant" && message.id > 0 && !message.content.isEmpty {
+                    Button(favorite ? "取消收藏" : "收藏回答", systemImage: favorite ? "star.fill" : "star") { onFavorite?() }
+                        .labelStyle(.iconOnly).disabled(!canFavorite).accessibilityIdentifier("favoriteMessage-\(message.id)")
+                }
                 ShareLink(item: message.content) { Image(systemName: "square.and.arrow.up") }.accessibilityLabel("分享消息")
                 Button("复制", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.content }
                     .labelStyle(.iconOnly).accessibilityLabel("复制消息")
@@ -161,5 +188,6 @@ private struct MessageRow: View, Equatable {
         .frame(maxWidth: .infinity, alignment: .leading).padding(16)
         .background(message.role == "user" ? Brand.accent.opacity(0.07) : Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("message-\(message.id)")
     }
 }
