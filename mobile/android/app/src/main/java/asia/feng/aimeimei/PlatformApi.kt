@@ -33,7 +33,7 @@ data class Conversation(val id: String, val title: String, val modelName: String
                         val modelId: String = "", val reasoningMode: String = "balanced", val pinned: Boolean = false)
 data class ChatMessage(val id: String, val role: String, val content: String, val reasoning: String,
                        val status: String, val attachments: List<String>, val media: List<ChatAttachment> = emptyList(),
-                       val favoriteId: String = "")
+                       val favoriteId: String = "", val usage: ChatUsage? = null)
 class ApiFailure(val status: Int, message: String) : IOException(message)
 
 class PlatformApi(internal val base: HttpUrl, cookies: CookieJar) {
@@ -112,7 +112,7 @@ class PlatformApi(internal val base: HttpUrl, cookies: CookieJar) {
             it.optString("generation_status"), files + images,
             objects(it.optJSONArray("images")).map { row -> ChatAttachment.fromJson(row, true) } +
                 objects(it.optJSONArray("documents")).map { row -> ChatAttachment.fromJson(row, false) },
-            (it.opt("favorite_id") as? String).orEmpty())
+            (it.opt("favorite_id") as? String).orEmpty(), it.optJSONObject("usage")?.let(ChatUsage::fromJson))
     }
     private fun account(value: JSONObject) = Account(value.getString("id"), value.getString("username"), value.optString("display_name"), value.optString("role", "user"))
     private fun conversation(value: JSONObject) = Conversation(value.getString("id"), value.optString("title", "新对话"),

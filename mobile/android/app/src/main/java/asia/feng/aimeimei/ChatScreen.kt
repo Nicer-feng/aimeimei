@@ -97,7 +97,7 @@ private fun ConversationContent(model: PlatformViewModel, openTool: (String) -> 
                 items(model.messages, key = { it.id }) { message -> MessageBody(message, model) }
                 model.pending?.let { waiting ->
                     if (model.messages.none { it.role == "user" && (it.id.toLongOrNull() ?: 0) > waiting.baseline && it.content.trim() == waiting.content.trim() }) {
-                        item(key = "pending-user") { MessageBody(ChatMessage("pending-user", "user", waiting.content, "", "", waiting.attachments.map { it.name }, waiting.attachments)) }
+                        item(key = "pending-user") { MessageBody(ChatMessage("pending-user", "user", waiting.content, "", "", waiting.attachments.map { it.name }, waiting.attachments), model) }
                     }
                 }
                 item(key = "live-reply") { LiveMessage(model, follow = { following }, scroll = {
@@ -137,8 +137,21 @@ private fun MessageBody(message: ChatMessage, model: PlatformViewModel? = null) 
                     onQuote = model?.takeIf { !it.streaming && it.pending == null }?.let { viewModel -> { text -> viewModel.tools.quote(message, text) } })
             }
         }
-        if (model != null) message.media.forEach { item -> AttachmentCard(item, onOpen = { model.tools.showPreview(item) }) }
+        if (model != null) message.media.forEach { item -> AttachmentCard(item, onOpen = { model.tools.showPreview(item) }, tools = model.tools) }
         else if (message.attachments.isNotEmpty()) Text("附件：${message.attachments.joinToString("、")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (message.role == "assistant") message.usage?.let { usage ->
+            var details by remember(message.id) { mutableStateOf(false) }
+            TextButton(onClick = { details = true }) { Text(if (usage.total > 0) "${tokenNumber(usage.total)} Token" else "Token 未返回", style = MaterialTheme.typography.labelSmall) }
+            if (details) AlertDialog(onDismissRequest = { details = false }, title = { Text("本条回答用量") }, text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("输入：${tokenNumber(usage.input)} Token"); Text("输出：${tokenNumber(usage.output)} Token"); Text("合计：${tokenNumber(usage.total)} Token")
+                    if (usage.cached > 0) Text("缓存命中：${tokenNumber(usage.cached)} Token")
+                    if (usage.cacheCreated > 0) Text("缓存写入：${tokenNumber(usage.cacheCreated)} Token")
+                    if (usage.cost > 0) Text("估算费用：¥${"%.6f".format(java.util.Locale.ROOT, usage.cost)}")
+                    Text("以服务端保存的用量为准，未返回用量不表示没有消耗。", style = MaterialTheme.typography.bodySmall)
+                }
+            }, confirmButton = { TextButton(onClick = { details = false }) { Text("关闭") } })
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { copy(context, message.content) }) { Text("复制") }
             if (model != null) {
@@ -197,14 +210,22 @@ private fun Composer(model: PlatformViewModel, onSend: () -> Unit, openTool: (St
     var showModels by remember { mutableStateOf(false) }
     var showModes by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("") }
+    var visionOnly by remember { mutableStateOf(false) }
+    val imageAttached = model.tools.attachments.any { it.image }
     val editable = !model.busy && !model.streaming && model.pending == null
     if (showModels) ModalBottomSheet(onDismissRequest = { showModels = false }) {
         Column(Modifier.padding(horizontal = 20.dp).fillMaxWidth()) {
             OutlinedTextField(filter, { filter = it }, label = { Text("搜索模型") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Row(verticalAlignment = Alignment.CenterVertically) { FilterChip(selected = visionOnly, onClick = { visionOnly = !visionOnly }, label = { Text("仅看支持图片") }) }
+            val matches = model.models.filter { (!visionOnly || it.vision) && "${it.name} ${it.actualModel} ${it.provider}".contains(filter, ignoreCase = true) }
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
-                items(model.models.filter { "${it.name} ${it.actualModel} ${it.provider}".contains(filter, ignoreCase = true) }, key = { it.id }) { option ->
+                if (matches.isEmpty()) item { Text("没有符合条件的模型", Modifier.padding(vertical = 20.dp)) }
+                items(matches, key = { it.id }) { option ->
                     ListItem(headlineContent = { Text(option.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = { Text("${option.actualModel} · ${option.provider}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = { Column {
+                            Text("${option.actualModel} · ${option.provider}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(modelCapabilities(option), style = MaterialTheme.typography.labelSmall, color = if (option.vision) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        } },
                         trailingContent = { if (option.id == model.currentModelId) Icon(Icons.Filled.Check, "已选中") },
                         modifier = Modifier.fillMaxWidth().clickable(enabled = editable) { showModels = false; model.configure(option.id, model.currentReasoningMode) })
                 }
@@ -217,12 +238,12 @@ private fun Composer(model: PlatformViewModel, onSend: () -> Unit, openTool: (St
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(model.draft, model::editDraft, enabled = !model.busy, placeholder = { Text("和槑槑聊点什么…") }, modifier = Modifier.weight(1f).heightIn(max = 168.dp), maxLines = 6, shape = RoundedCornerShape(20.dp))
                 if (model.streaming) FilledTonalButton(onClick = model::stop) { Text("停止") }
-                else Button(onClick = onSend, enabled = editable && chosen != null && (model.draft.isNotBlank() || model.tools.hasContent) && model.tools.ready) { Text("发送") }
+                else Button(onClick = onSend, enabled = editable && chosen != null && (!imageAttached || chosen.vision) && (model.draft.isNotBlank() || model.tools.hasContent) && model.tools.ready) { Text("发送") }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 AttachmentPicker(model, editable && !model.tools.uploading)
                 TextButton(onClick = { filter = ""; showModels = true }, enabled = editable, modifier = Modifier.weight(1f)) {
-                    Text(chosen?.name ?: model.selected?.modelName ?: "选择模型", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text((chosen?.name ?: model.selected?.modelName ?: "选择模型") + if (chosen?.vision == true) " · 图片" else "", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (chosen?.reasoningControl == true) Box {
                     TextButton(onClick = { showModes = true }, enabled = editable) { Text(modeLabel(model.currentReasoningMode)) }
@@ -235,7 +256,11 @@ private fun Composer(model: PlatformViewModel, onSend: () -> Unit, openTool: (St
                 Checkbox(model.webSearch, model::toggleWebSearch, enabled = editable)
                 Text("联网", style = MaterialTheme.typography.labelMedium)
             }
-            TextButton(onClick = { openTool("chat") }, enabled = editable && !model.tools.uploading) { Text("更多聊天工具") }
+            if (imageAttached && chosen?.vision != true) Text("当前模型不支持图片，请切换到标有「支持图片」的模型。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Row {
+                TextButton(onClick = { openTool("prompts") }, enabled = editable && !model.tools.uploading) { Text("提示词") }
+                TextButton(onClick = { openTool("chat") }, enabled = editable && !model.tools.uploading) { Text("更多聊天工具") }
+            }
         }
     }
 }

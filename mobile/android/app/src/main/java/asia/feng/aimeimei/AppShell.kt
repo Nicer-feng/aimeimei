@@ -33,7 +33,7 @@ import kotlinx.coroutines.launch
 
 data class WebTool(val id: String, val title: String, val detail: String)
 internal val webTools = listOf(
-    WebTool("chat", "完整聊天", "图片、文件、引用、分享与语音朗读"),
+    WebTool("chat", "完整聊天", "来源详情、图表等进阶聊天功能"),
     WebTool("writing", "写稿工作台", "材料、要求和稿件整理"),
     WebTool("prompts", "提示词库", "常用模板与个人提示词"),
     WebTool("favorites", "我的收藏", "原生收藏列表、搜索与历史回看"),
@@ -61,7 +61,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
     val openTool: (String) -> Unit = { id ->
         if (!model.streaming && !model.busy) {
             webParent = screen
-            if (id in listOf("admin", "favorites")) screen = id
+            if (id in listOf("admin", "favorites", "prompts")) screen = id
             else { webParent = screen; toolId = id; webConversation = model.selected?.id.orEmpty(); screen = "web" }
         }
     }
@@ -88,7 +88,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
         Scaffold(topBar = {
             if (screen != "admin") TopAppBar(title = {
                 Column {
-                    Text(when (screen) { "settings" -> "设置"; "tools" -> "更多工具"; "favorites" -> "我的收藏"; "web" -> if (toolId == "admin") "后台管理" else webTools.firstOrNull { it.id == toolId }?.title ?: "AI槑槑"; else -> model.selected?.title ?: "AI槑槑" },
+                    Text(when (screen) { "settings" -> "设置"; "tools" -> "更多工具"; "favorites" -> "我的收藏"; "prompts" -> "提示词库"; "web" -> if (toolId == "admin") "后台管理" else webTools.firstOrNull { it.id == toolId }?.title ?: "AI槑槑"; else -> model.selected?.title ?: "AI槑槑" },
                         maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                     if (screen == "chat" && model.account != null) Text(model.currentModel?.name ?: "新聊天", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -98,6 +98,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
             }, actions = {
                 if (screen == "chat") {
                     if (model.account != null) {
+                        if (model.selected != null) IconButton(onClick = model.tools::showStats, enabled = !model.busy && !model.streaming) { Icon(Icons.Default.Info, "会话统计") }
                         IconButton(onClick = { model.newConversation() }, enabled = !model.streaming && !model.busy) { Icon(Icons.Default.Add, "新聊天") }
                         IconButton(onClick = { screen = "tools" }) { Icon(Icons.Default.MoreVert, "更多工具") }
                     } else IconButton(onClick = { screen = "settings" }) { Icon(Icons.Default.Settings, "设置") }
@@ -126,6 +127,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
                         "tools" -> ToolScreen(model, openTool)
                         "admin" -> AdminScreen(model, preferences) { screen = webParent; model.returnedFromWeb() }
                         "favorites" -> FavoritesScreen(model) { screen = "chat" }
+                        "prompts" -> PromptsScreen(model) { screen = "chat" }
                         "web" -> WebToolScreen(model, toolId, webConversation)
                         else -> if (model.account == null) LoginForm(model) else ChatScreen(model, openTool)
                     }

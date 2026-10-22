@@ -25,6 +25,15 @@ class ChatToolsApiTest {
         assertEquals("f1", message.favoriteId); assertEquals(listOf("img1", "doc1"), message.media.map { it.id })
         assertTrue(message.media.all { it.ready }); assertEquals(3, message.media.last().pages)
     }
+    @Test fun historyPreservesExactTokenAndCostDetailsWithoutInventingMissingUsage() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"messages":[{"id":1,"role":"assistant","usage":{"prompt_tokens":1234,"completion_tokens":56,"total_tokens":1290,"cached_tokens":200,"cache_creation_tokens":100,"estimated_cost":0.0012}},{"id":2,"role":"assistant"}]}"""))
+        val messages = api.messages("c1")
+        assertEquals(1290L, messages[0].usage!!.total); assertEquals(1234L, messages[0].usage!!.input)
+        assertEquals(56L, messages[0].usage!!.output); assertEquals(200L, messages[0].usage!!.cached)
+        assertEquals(100L, messages[0].usage!!.cacheCreated); assertEquals(0.0012, messages[0].usage!!.cost, .000001)
+        assertNull(messages[1].usage)
+        assertEquals(30L, ChatUsage.fromJson(JSONObject("""{"prompt_tokens":10,"completion_tokens":20}""")).total)
+    }
     @Test fun sendsAttachmentIdsWithTheExactQuotedTextAndNoSecondPost() = runBlocking {
         server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: {\"type\":\"message_saved\",\"message_id\":9,\"generation_status\":\"completed\"}\n\n"))
         val content = quoteMessage("解释一下", listOf(ChatQuote("3", "assistant", "原文\n第二行")))

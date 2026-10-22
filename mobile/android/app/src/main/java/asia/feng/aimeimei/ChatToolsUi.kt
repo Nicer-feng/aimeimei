@@ -4,14 +4,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,21 +18,11 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
@@ -92,14 +78,16 @@ internal fun AttachmentPicker(model: PlatformViewModel, enabled: Boolean) {
 }
 
 @Composable
-internal fun AttachmentCard(item: ChatAttachment, onOpen: () -> Unit, onRemove: (() -> Unit)? = null) {
+internal fun AttachmentCard(item: ChatAttachment, onOpen: () -> Unit, onRemove: (() -> Unit)? = null, tools: ChatTools? = null, onRetry: (() -> Unit)? = null) {
     OutlinedCard(Modifier.fillMaxWidth().testTag("attachment-${item.clientKey}")) {
+        if (item.image && tools != null) ChatImageThumbnail(item, tools, onOpen)
         Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).clickable(onClick = onOpen).padding(vertical = 10.dp)) {
                 Text("${if (item.image) "图片" else "文件"} · ${item.name}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                 Text(attachmentStatus(item), color = if (item.status == "failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall)
             }
+            if (onRetry != null) TextButton(onClick = onRetry) { Text("重试上传") }
             if (onRemove != null) TextButton(onClick = onRemove) { Text("移除") }
         }
         if (item.status == "uploading") LinearProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
@@ -123,7 +111,8 @@ internal fun ComposerAttachments(model: PlatformViewModel) {
             tools.attachments.forEach { item -> AttachmentCard(item, onOpen = {
                 if (!item.image && item.id.isNotEmpty() && !item.ready) tools.refreshDocument(item)
                 tools.showPreview(item)
-            }, onRemove = if (!model.streaming && model.pending == null) ({ tools.removeAttachment(item) }) else null) }
+            }, onRemove = if (!model.streaming && model.pending == null) ({ tools.removeAttachment(item) }) else null, tools = tools,
+                onRetry = if (!model.streaming && model.pending == null && !tools.uploading && item.status == "failed" && item.id.isBlank()) ({ tools.retryAttachment(item) }) else null) }
         }
         if (tools.uploading) TextButton(onClick = tools::cancelUploads) { Text("取消上传") }
     }
@@ -152,6 +141,7 @@ internal fun ChatToolsDialogs(model: PlatformViewModel) {
     if (model.account == null) return
     val context = LocalContext.current
     val tools = model.tools
+    if (tools.statsOpen) ConversationStatsDialog(model)
     tools.menuMessage?.let { message ->
         AlertDialog(onDismissRequest = { tools.menuMessage = null }, title = { Text("消息操作") }, text = {
             Column {
@@ -224,11 +214,11 @@ internal fun ChatToolsDialogs(model: PlatformViewModel) {
             confirmButton = { TextButton(onClick = { revoke = false; tools.revokeShare() }) { Text("撤销链接") } },
             dismissButton = { TextButton(onClick = { revoke = false }) { Text("保留") } })
     }
-    tools.preview?.let { item -> AttachmentPreview(item, tools.previewFile, tools.previewBusy, tools::closePreview, { tools.refreshDocument(item) }) }
+    tools.preview?.let { item -> AttachmentPreview(item, tools.previewFile, tools.previewBusy, tools.previewError, tools::closePreview, { tools.refreshDocument(item) }, { tools.showPreview(item) }) }
 }
 
 @Composable
-private fun AttachmentPreview(item: ChatAttachment, file: File?, loading: Boolean, close: () -> Unit, refresh: () -> Unit) {
+private fun AttachmentPreview(item: ChatAttachment, file: File?, loading: Boolean, error: String, close: () -> Unit, refresh: () -> Unit, retry: () -> Unit) {
     val context = LocalContext.current
     if (!item.image) {
         AlertDialog(onDismissRequest = close, title = { Text(item.name) }, text = {
@@ -246,32 +236,7 @@ private fun AttachmentPreview(item: ChatAttachment, file: File?, loading: Boolea
         }, confirmButton = { TextButton(onClick = close) { Text("关闭") } })
         return
     }
-    val bitmap by produceState<Bitmap?>(null, file) {
-        value = if (file == null) null else withContext(Dispatchers.IO) {
-            runCatching {
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }; BitmapFactory.decodeFile(file.path, bounds)
-                var sample = 1; while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) sample *= 2
-                BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
-            }.getOrNull()
-        }
-    }
-    var scale by remember(file) { mutableFloatStateOf(1f) }
-    var offset by remember(file) { mutableStateOf(Offset.Zero) }
-    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize().padding(16.dp), shape = MaterialTheme.shapes.large) {
-            Column(Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) { Text(item.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis); TextButton(onClick = close) { Text("关闭") } }
-                Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().pointerInput(file) {
-                    detectTransformGestures { _, pan, zoom, _ -> scale = (scale * zoom).coerceIn(1f, 5f); offset = if (scale == 1f) Offset.Zero else offset + pan }
-                }, contentAlignment = Alignment.Center) {
-                    val image = bitmap
-                    if (image != null) Image(image.asImageBitmap(), item.name, Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y }, contentScale = ContentScale.Fit)
-                    else if (loading) CircularProgressIndicator() else Text("图片暂时无法显示，请关闭后重试")
-                }
-                Text("双指缩放，拖动查看", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
+    FullscreenChatImage(item, file, loading, error, close, retry)
 }
 
 @Composable
