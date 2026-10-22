@@ -12,7 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.StandardTestDispatcher
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -36,7 +36,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class AdminScreenTest {
-    private val effectDispatcher = UnconfinedTestDispatcher()
+    private val effectDispatcher = StandardTestDispatcher()
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = effectDispatcher)
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
@@ -155,7 +155,9 @@ class AdminScreenTest {
     }
     @Test fun nativeStatisticsShowChartAndRequestDetails() {
         showAdmin(); module("Token统计"); awaitTag("admin-statistics")
-        awaitCondition { requests.any { it.requestUrl!!.encodedPath == "/api/admin/token-stats/daily" } }
+        awaitCondition { compose.onAllNodesWithText("应用筛选并刷新").fetchSemanticsNodes().any {
+            !it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)
+        } }
         compose.onNodeWithTag("admin-statistics").performScrollToNode(hasText("查看明细"))
         capture("admin-statistics")
         compose.onNodeWithText("查看明细").performClick()
@@ -193,6 +195,9 @@ class AdminScreenTest {
 
     @Test fun dailyUsageShowsCombinedDurationWhenServerOnlyReturnsWorkAndReading() {
         showAdmin(); module("使用时长"); awaitTag("admin-statistics")
+        awaitCondition { compose.onAllNodesWithText("应用筛选并刷新").fetchSemanticsNodes().any {
+            !it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)
+        } }
         compose.onNodeWithTag("admin-statistics").performScrollToNode(hasText("查看明细"))
         compose.onNodeWithText("查看明细").performClick()
         awaitCondition { compose.onAllNodesWithText("3分").fetchSemanticsNodes().isNotEmpty() }

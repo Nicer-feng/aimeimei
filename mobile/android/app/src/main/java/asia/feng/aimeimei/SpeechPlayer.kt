@@ -31,14 +31,22 @@ internal class SpeechPlayer(private val app: Application, private val api: Platf
     private var ticker: Job? = null
     private var revision = 0
     private var mayPlay = false
-    private val audio = app.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
-    private val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
-    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attributes)
+    private var focusHeld = false
+    private val audio by lazy { app.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager }
+    private val attributes by lazy { AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build() }
+    private val focus by lazy { AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attributes)
         .setOnAudioFocusChangeListener { change ->
             if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) pause()
             if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) player?.setVolume(.2f, .2f)
             if (change == AudioManager.AUDIOFOCUS_GAIN) player?.setVolume(1f, 1f)
-        }.build()
+        }.build() }
+    private fun takeFocus(): Boolean {
+        focusHeld = audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        return focusHeld
+    }
+    private fun releaseFocus() {
+        if (focusHeld) { focusHeld = false; audio.abandonAudioFocusRequest(focus) }
+    }
     fun play(id: String, voice: String, speed: Float, directory: File) {
         if ((id.toLongOrNull() ?: 0) <= 0) return
         stop(); mayPlay = true; messageId = id; phase = "preparing"
@@ -58,11 +66,11 @@ internal class SpeechPlayer(private val app: Application, private val api: Platf
                 next.setOnPreparedListener {
                     if (ticket == revision) {
                         duration = it.duration.coerceAtLeast(0)
-                        if (mayPlay && audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { it.start(); phase = "playing" }
+                        if (mayPlay && takeFocus()) { it.start(); phase = "playing" }
                         else phase = "paused"
                     }
                 }
-                next.setOnCompletionListener { if (ticket == revision) { phase = "paused"; position = duration; audio.abandonAudioFocusRequest(focus) } }
+                next.setOnCompletionListener { if (ticket == revision) { phase = "paused"; position = duration; releaseFocus() } }
                 next.setOnErrorListener { _, _, _ -> if (ticket == revision) { stop(); onError("语音播放失败，请重新生成或重试") }; true }
                 next.setDataSource(audioFile.path); next.prepareAsync()
                 ticker = scope.launch {
@@ -77,12 +85,12 @@ internal class SpeechPlayer(private val app: Application, private val api: Platf
     }
     fun pause() {
         mayPlay = false
-        if (phase == "playing") { player?.pause(); phase = "paused"; audio.abandonAudioFocusRequest(focus) }
+        if (phase == "playing") { player?.pause(); phase = "paused"; releaseFocus() }
     }
     fun toggle() {
         val current = player ?: return
         if (phase == "playing") pause()
-        else if (phase == "paused" && audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+        else if (phase == "paused" && takeFocus()) {
             mayPlay = true
             if (position >= duration) { current.seekTo(0); position = 0 }
             current.start(); phase = "playing"
@@ -93,7 +101,7 @@ internal class SpeechPlayer(private val app: Application, private val api: Platf
     }
     fun stop() {
         revision++; mayPlay = false; job?.cancel(); job = null; ticker?.cancel(); ticker = null
-        player?.release(); player = null; audio.abandonAudioFocusRequest(focus)
+        player?.release(); player = null; releaseFocus()
         file?.delete(); file = null; messageId = ""; phase = "idle"; position = 0; duration = 0
     }
 }

@@ -125,6 +125,7 @@ internal fun ComposerAttachments(model: PlatformViewModel) {
                 tools.showPreview(item)
             }, onRemove = if (!model.streaming && model.pending == null) ({ tools.removeAttachment(item) }) else null) }
         }
+        if (tools.uploading) TextButton(onClick = tools::cancelUploads) { Text("取消上传") }
     }
     val speech = tools.speech
     if (speech.phase != "idle") OutlinedCard(Modifier.fillMaxWidth().testTag("speech-player")) {
