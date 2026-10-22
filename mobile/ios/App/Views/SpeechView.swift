@@ -14,10 +14,10 @@ struct SpeechView: View {
                     Section("朗读设置") {
                         Picker("音色", selection: Binding(get: { controller.voice }, set: controller.setVoice)) {
                             ForEach(config.voices) { Text($0.name).tag($0.id) }
-                        }.accessibilityIdentifier("speechVoicePicker")
+                        }.pickerStyle(.menu).accessibilityIdentifier("speechVoicePicker")
                         Picker("语速", selection: Binding(get: { controller.speed }, set: controller.setSpeed)) {
                             ForEach(Array(Set([0.5, 0.75, 1, 1.25, 1.5, 2, controller.speed])).sorted(), id: \.self) { value in Text(String(format: "%g 倍", value)).tag(value) }
-                        }.accessibilityIdentifier("speechSpeedPicker")
+                        }.pickerStyle(.menu).accessibilityIdentifier("speechSpeedPicker")
                     }.disabled(controller.state == .loading || controller.configurationLoading)
                     Section {
                         switch controller.state {
