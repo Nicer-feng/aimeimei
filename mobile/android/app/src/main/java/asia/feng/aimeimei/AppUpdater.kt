@@ -52,8 +52,10 @@ class AppUpdater internal constructor(private val app: Application, private val 
         }.getOrElse { preferences.edit().remove("ready").commit(); null }
     }
     private fun persist(offer: UpdateState) {
-        check(preferences.edit().putString("ready", JSONObject().put("manifest", offer.manifest!!.toJson()).put("apkUrl", offer.apkUrl).toString()).commit())
+        kotlin.check(preferences.edit().putString("ready", JSONObject().put("manifest", offer.manifest!!.toJson()).put("apkUrl", offer.apkUrl).toString()).commit())
     }
+    private fun available(offer: UpdateState): UpdateState? = offer.takeIf { it.manifest != null && it.manifest.versionCode > packages.installed().code }
+        ?.copy(phase = "available", percent = 0, message = "发现正式版 v${offer.manifest?.versionName}。下载后还需确认安装。")
     fun check(force: Boolean = false) {
         if (job?.isActive == true) return
         if (preview) { state = UpdateState("preview", message = "当前为内部验证包，请使用长期签名正式版更新。"); return }
@@ -61,10 +63,12 @@ class AppUpdater internal constructor(private val app: Application, private val 
         val ticket = ++revision
         job = scope.launch {
             state = UpdateState("checking", message = "正在检查新版本…")
+            var fallback: UpdateState? = null
             try {
                 val result = withContext(Dispatchers.IO) {
                     // 重新打开弹窗优先恢复已验证的安装包，不把待安装状态重置成重新下载。
                     val cached = saved()
+                    fallback = cached ?: available(previous)
                     if (cached != null && !force) return@withContext cached
                     File(folder, "update.apk").delete()
                     val rows = androidReleases(backend.releases())
@@ -80,7 +84,7 @@ class AppUpdater internal constructor(private val app: Application, private val 
                     val apk = files.first { it.optString("name") == info.apkName }
                     val url = apk.getString("browser_download_url")
                     require(updateAssetUrl(url, info.versionName, info.apkName) && apk.getLong("size") == info.size)
-                    val known = cached ?: previous.takeIf { it.manifest != null && it.manifest.versionCode > installed.code }
+                    val known = fallback
                     // 更新源短暂返回旧列表时，保留已经发现的更高版本，不误报当前已最新。
                     if (known?.manifest != null && known.manifest.versionCode >= info.versionCode) return@withContext known
                     if (info.versionCode <= installed.code) current()
@@ -89,8 +93,7 @@ class AppUpdater internal constructor(private val app: Application, private val 
                 if (ticket == revision) state = result
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
-                if (ticket == revision) state = previous.takeIf { it.manifest != null && it.manifest.versionCode > packages.installed().code }
-                    ?: UpdateState("error", message = "更新信息暂未同步或校验失败，请重新检查；当前版本没有改变。")
+                if (ticket == revision) state = fallback ?: UpdateState("error", message = "更新信息暂未同步或校验失败，请重新检查；当前版本没有改变。")
             }
         }
     }
@@ -109,8 +112,8 @@ class AppUpdater internal constructor(private val app: Application, private val 
                     } }
                     verify(file, info); currentCoroutineContext().ensureActive()
                     val apk = target(info)
-                    if (apk.exists()) check(apk.delete())
-                    check(file.renameTo(apk)); persist(offer)
+                    if (apk.exists()) kotlin.check(apk.delete())
+                    kotlin.check(file.renameTo(apk)); persist(offer)
                 }
                 if (ticket == revision) state = ready(offer)
             } catch (cancelled: CancellationException) { throw cancelled }

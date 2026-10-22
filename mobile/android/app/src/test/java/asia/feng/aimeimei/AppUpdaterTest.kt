@@ -149,4 +149,13 @@ class AppUpdaterTest {
         await { File(app.cacheDir, "updates").listFiles().orEmpty().none { it.extension == "part" } }
         assertEquals("available", updater.state.phase); assertNull(app.getSharedPreferences("android_updates", 0).getString("ready", null))
     }
+    @Test fun failedDownloadCanRetryTheKnownNewVersionEvenIfTheFeedReturnsAnOldRelease() = runBlocking {
+        backend.fail = true; download(); assertEquals("error", updater.state.phase)
+        backend.offer(8, "0.6.0"); backend.fail = false
+        updater.check(force = true); await { updater.state.phase != "checking" }
+        assertEquals("available", updater.state.phase); assertEquals("0.6.1", updater.state.manifest!!.versionName)
+        updater.download(); await { updater.state.phase == "ready" }
+        assertEquals(2, backend.downloads)
+    }
+
 }
