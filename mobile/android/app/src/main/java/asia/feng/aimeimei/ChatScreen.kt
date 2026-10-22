@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -91,7 +92,7 @@ private fun ConversationContent(model: PlatformViewModel, openTool: (String) -> 
         dismissButton = { TextButton(onClick = { confirmPending = false; model.refresh() }) { Text("再刷新一次") } })
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
-            LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            LazyColumn(state = list, modifier = Modifier.fillMaxSize().testTag("chat-messages"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                 if (model.messages.isEmpty() && !model.streaming && !model.busy) item { Text("有什么想和槑槑聊的？", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(model.messages, key = { it.id }) { message -> MessageBody(message, model) }
                 model.pending?.let { waiting ->

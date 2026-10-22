@@ -148,6 +148,7 @@ private fun audioTime(value: Int) = "%d:%02d".format(value / 60000, value / 1000
 
 @Composable
 internal fun ChatToolsDialogs(model: PlatformViewModel) {
+    if (model.account == null) return
     val context = LocalContext.current
     val tools = model.tools
     tools.menuMessage?.let { message ->
@@ -187,6 +188,8 @@ internal fun ChatToolsDialogs(model: PlatformViewModel) {
     tools.shareMessage?.let { message ->
         var scope by remember(message.id) { mutableStateOf("assistant") }
         var expiry by remember(message.id) { mutableIntStateOf(86400) }
+        var expiryMenu by remember { mutableStateOf(false) }
+        var revoke by remember { mutableStateOf(false) }
         AlertDialog(onDismissRequest = tools::closeShare, title = { Text("分享聊天内容") }, text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 if (tools.shareUrl.isEmpty()) {
@@ -197,20 +200,28 @@ internal fun ChatToolsDialogs(model: PlatformViewModel) {
                         }
                     }
                     Text("有效期")
-                    Row { listOf(3600 to "1小时", 86400 to "1天", 604800 to "7天").forEach { (value, label) ->
-                        FilterChip(selected = expiry == value, onClick = { expiry = value }, label = { Text(label) }, enabled = !tools.sharing)
-                    } }
+                    val expiries = listOf(3600 to "1小时", 21600 to "6小时", 86400 to "1天", 604800 to "7天")
+                    Box {
+                        TextButton(onClick = { expiryMenu = true }, enabled = !tools.sharing) { Text(expiries.first { it.first == expiry }.second) }
+                        DropdownMenu(expiryMenu, { expiryMenu = false }) { expiries.forEach { (value, label) ->
+                            DropdownMenuItem(text = { Text(label) }, onClick = { expiry = value; expiryMenu = false })
+                        } }
+                    }
                     if (tools.sharing) LinearProgressIndicator(Modifier.fillMaxWidth())
                 } else {
                     Text("链接已创建，到期后自动失效。")
                     Text(tools.shareUrl, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 12.dp))
                     TextButton(onClick = { copyChatText(context, tools.shareUrl) }) { Text("复制链接") }
                     TextButton(onClick = { shareChatText(context, tools.shareUrl) }) { Text("分享链接") }
+                    TextButton(onClick = { revoke = true }, enabled = !tools.sharing) { Text("撤销链接") }
                 }
             }
         }, confirmButton = { if (tools.shareUrl.isEmpty()) TextButton(onClick = { tools.createShare(scope, expiry) }, enabled = !tools.sharing) { Text("创建链接") }
             else TextButton(onClick = tools::closeShare) { Text("完成") } },
             dismissButton = { if (tools.shareUrl.isEmpty()) TextButton(onClick = tools::closeShare, enabled = !tools.sharing) { Text("取消") } })
+        if (revoke) AlertDialog(onDismissRequest = { revoke = false }, title = { Text("撤销这条分享链接？") }, text = { Text("撤销后，其他人将无法再通过这条链接查看内容。") },
+            confirmButton = { TextButton(onClick = { revoke = false; tools.revokeShare() }) { Text("撤销链接") } },
+            dismissButton = { TextButton(onClick = { revoke = false }) { Text("保留") } })
     }
     tools.preview?.let { item -> AttachmentPreview(item, tools.previewFile, tools.previewBusy, tools::closePreview, { tools.refreshDocument(item) }) }
 }

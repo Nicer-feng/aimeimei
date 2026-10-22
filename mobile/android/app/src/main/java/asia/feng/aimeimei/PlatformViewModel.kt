@@ -80,7 +80,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         val user = api.currentAccount()
         if (ticket != revision) return@work
         account = user
-        if (user == null) captcha = api.captcha() else {
+        if (user == null) { tools.bind("", ""); captcha = api.captcha() } else {
             loadWorkspace(ticket)
             restoreWelcomeDraft()
             // 只有尚待核对的发送才恢复旧会话；正常冷启动展示新聊天。

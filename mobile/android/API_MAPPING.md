@@ -15,9 +15,9 @@
 | 短信 | GET /api/sms-login/config；POST /api/sms-login/send、/verify | 待原生 UI 接入 |
 | 新建/配置会话 | POST /api/conversations；PATCH /api/conversations/{id} | 已接入 model_id/reasoning_mode；档位以真实能力字段为准 |
 | 流式发送 | POST /api/conversations/{id}/messages | 已接入；OkHttp SSE，发送 content/web_search/use_profile，不直接调用上游模型 |
-| 图片 | POST /api/chat-images/upload-policy；POST /api/chat-images | 待接入系统相册及 OSS 上传 |
-| 办公文件 | POST /api/documents/upload-policy；POST /api/documents；GET /api/documents/{id} | 待接入系统文件选择与解析轮询 |
-| 语音 | POST /api/messages/{id}/tts | 待接入主动生成和播放 |
+| 图片 | POST /api/chat-images/upload-policy；POST /api/chat-images | 已接入系统相册、拍照、OSS 上传、附件发送和原生缩放预览 |
+| 办公文件 | POST /api/documents/upload-policy；POST /api/documents；GET /api/documents/{id} | 已接入系统文件选择、OSS 上传、解析轮询和附件发送 |
+| 语音 | POST /api/messages/{id}/tts | 已接入音色/语速选择、主动生成、原生播放/暂停/进度；GET /api/tts/config 与受保护音频下载 |
 
 认证是服务端 `Set-Cookie: ap_session=...`，不是响应中的 Bearer token。使用应用私有 CookieJar，在 Android Keystore 生成 AES-GCM 密钥加密存储 cookie；不保存登录密码、不记录 Cookie 日志，不开启备份，不允许明文 HTTP。
 
@@ -46,3 +46,15 @@
 | 系统 | GET /api/version；POST /api/admin/password | 服务版本信息及确认修改家用密码 |
 
 凭证只在表单内存及 HTTPS 请求体中传递，不拼入 URL、不输出日志、不写入界面保存状态。
+
+## 原生消息工具（0.6.0）
+
+| 模块 | 现有接口 | 原生页面 |
+|---|---|---|
+| 收藏 | GET/POST /api/favorites；DELETE /api/favorites/message/{id}、/api/favorites/{id} | 回答收藏与取消、收藏列表搜索与全文、返回最近会话原消息 |
+| 引用 | GET /api/features；沿用 POST 消息的 content | 正文选区/整条引用、最多 3 段、与 Web 相同的引用格式 |
+| 公开分享 | POST /api/conversations/{id}/shares；DELETE /api/conversation-shares/{id} | 明确确认范围、有效期、创建/复制/系统分享与撤销当前链接 |
+| 文字分享 | Android ACTION_SEND | 用户打开系统分享菜单，不自动发送给联系人 |
+| 图片/音频预览 | GET /api/chat-images/{id}/view；GET /api/messages/{id}/tts/audio | 登录请求与 OSS 跳转下载分开，不向对象存储转发 Cookie |
+
+历史文件接口没有原始文档下载地址，客户端仅承诺元数据、解析状态与本次缓存原件的系统打开；不虚构下载接口。

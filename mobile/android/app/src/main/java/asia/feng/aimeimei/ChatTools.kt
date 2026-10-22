@@ -43,6 +43,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
     var voiceConfig by mutableStateOf<JSONObject?>(null); private set
     var shareMessage by mutableStateOf<ChatMessage?>(null); private set
     var shareUrl by mutableStateOf(""); private set
+    private var shareId = ""
     var sharing by mutableStateOf(false); private set
     var favorites by mutableStateOf<List<JSONObject>>(emptyList()); private set
     var favoritesLoading by mutableStateOf(false); private set
@@ -61,7 +62,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
         persist(); val oldOwner = owner
         revision++; session.cancel(); session = newSession(); poll = null
         uploading = false; speech.stop(); preview = null; previewFile = null; previewBusy = false
-        voiceMessage = null; voiceConfig = null; shareMessage = null; shareUrl = ""; sharing = false; menuMessage = null
+        voiceMessage = null; voiceConfig = null; shareMessage = null; shareUrl = ""; shareId = ""; sharing = false; menuMessage = null
         favoritesLoading = false; favoriteBusy = null; notice = null
         if (oldOwner != accountId) { localFiles.clear(); favorites = emptyList() }
         if (accountId.isEmpty() && oldOwner.isNotEmpty()) {
@@ -226,15 +227,25 @@ internal class ChatTools(private val app: Application, private val api: Platform
     fun startSpeech(message: ChatMessage, voice: String, speed: Float) {
         closeVoices(); speech.play(message.id, voice, speed, directory())
     }
-    fun showShare(message: ChatMessage) { shareMessage = message; shareUrl = ""; menuMessage = null }
+    fun showShare(message: ChatMessage) { shareMessage = message; shareUrl = ""; shareId = ""; menuMessage = null }
     fun closeShare() { if (!sharing) { shareMessage = null; shareUrl = "" } }
     fun createShare(scope: String, expiry: Int) {
         val message = shareMessage ?: return
         if (sharing || conversation.isEmpty()) return
         sharing = true
         action { ticket ->
-            try { val url = api.share(conversation, message.id, scope, expiry); if (ticket == revision) shareUrl = url }
+            try { val result = api.share(conversation, message.id, scope, expiry); if (ticket == revision) { shareUrl = result.url; shareId = result.id } }
             finally { if (ticket == revision) sharing = false }
+        }
+    }
+    fun revokeShare() {
+        if (shareId.isEmpty() || sharing) return
+        sharing = true
+        action { ticket ->
+            try {
+                api.request(listOf("api", "conversation-shares", shareId), JSONObject(), "DELETE")
+                if (ticket == revision) { shareUrl = ""; shareId = ""; shareMessage = null; notice = "分享链接已撤销" }
+            } finally { if (ticket == revision) sharing = false }
         }
     }
     fun toggleFavorite(message: ChatMessage, onChanged: (String) -> Unit) {

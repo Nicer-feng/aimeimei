@@ -33,6 +33,18 @@ internal suspend fun PlatformApi.uploadChatFile(file: File, name: String, mime: 
                                               onProgress: (Int) -> Unit): ChatAttachment {
     val route = if (image) "chat-images" else "documents"
     val policy = request(listOf("api", route, "upload-policy"), JSONObject()).getJSONObject("policy")
+    val plan = chatUploadRequest(policy, file, name, mime, image, onProgress)
+    objectClient.newCall(plan.request).awaitResponse().use {
+        if (!it.isSuccessful) throw IOException("文件上传失败，请重新选择文件后重试")
+    }
+    val result = request(listOf("api", route), JSONObject().put("filename", name.take(180)).put("mime_type", plan.mime)
+        .put("file_size", file.length()).put("oss_key", plan.key))
+    return ChatAttachment.fromJson(result.getJSONObject(if (image) "image" else "document"), image)
+}
+
+internal data class ChatUploadPlan(val request: Request, val key: String, val mime: String)
+internal fun chatUploadRequest(policy: JSONObject, file: File, name: String, mime: String, image: Boolean,
+                               onProgress: (Int) -> Unit): ChatUploadPlan {
     require(file.length() in 1..policy.getLong("max_size")) { "文件大小超过服务限制" }
     val extension = "." + name.substringAfterLast('.', "").lowercase()
     require(attachmentRowsOrStrings(policy, "allowed_extensions").contains(extension)) { "暂不支持这个文件格式" }
@@ -62,12 +74,7 @@ internal suspend fun PlatformApi.uploadChatFile(file: File, name: String, mime: 
         .addFormDataPart("policy", policy.getString("policy")).addFormDataPart("Signature", policy.getString("signature"))
         .addFormDataPart("success_action_status", "200").addFormDataPart("Content-Type", media)
         .addFormDataPart("file", suffix, progressBody).build()
-    objectClient.newCall(Request.Builder().url(host).post(body).build()).awaitResponse().use {
-        if (!it.isSuccessful) throw IOException("文件上传失败，请重新选择文件后重试")
-    }
-    val result = request(listOf("api", route), JSONObject().put("filename", name.take(180)).put("mime_type", media)
-        .put("file_size", file.length()).put("oss_key", key))
-    return ChatAttachment.fromJson(result.getJSONObject(if (image) "image" else "document"), image)
+    return ChatUploadPlan(Request.Builder().url(host).post(body).build(), key, media)
 }
 
 private fun attachmentRowsOrStrings(row: JSONObject, key: String): List<String> {
@@ -123,12 +130,14 @@ internal suspend fun PlatformApi.favorite(messageId: String, add: Boolean): Stri
     else { request(listOf("api", "favorites", "message", messageId), JSONObject(), "DELETE"); "" }
 }
 
-internal suspend fun PlatformApi.share(conversationId: String, messageId: String, scope: String, expiry: Int): String {
-    require(scope in listOf("assistant", "turn", "conversation") && expiry in listOf(3600, 86400, 604800))
+internal data class ChatShare(val id: String, val url: String)
+internal suspend fun PlatformApi.share(conversationId: String, messageId: String, scope: String, expiry: Int): ChatShare {
+    require(scope in listOf("assistant", "turn", "conversation") && expiry in listOf(3600, 21600, 86400, 604800))
     val share = request(listOf("api", "conversations", conversationId, "shares"), JSONObject()
         .put("scope", scope).put("message_id", messageId.toLong()).put("expires_in", expiry)).getJSONObject("share")
     val path = share.getString("url")
     require(path.startsWith("/ai/share/") && !path.contains('?') && !path.contains('#'))
-    return base.resolve(path)?.takeIf { it.host == base.host && it.scheme == base.scheme && it.port == base.port }?.toString()
+    val url = base.resolve(path)?.takeIf { it.host == base.host && it.scheme == base.scheme && it.port == base.port }?.toString()
         ?: throw IOException("分享地址无效")
+    return ChatShare(share.getString("id"), url)
 }

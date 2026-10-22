@@ -30,6 +30,7 @@ internal class SpeechPlayer(private val app: Application, private val api: Platf
     private var job: Job? = null
     private var ticker: Job? = null
     private var revision = 0
+    private var mayPlay = false
     private val audio = app.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
     private val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
     private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attributes)
@@ -40,7 +41,7 @@ internal class SpeechPlayer(private val app: Application, private val api: Platf
         }.build()
     fun play(id: String, voice: String, speed: Float, directory: File) {
         if ((id.toLongOrNull() ?: 0) <= 0) return
-        stop(); messageId = id; phase = "preparing"
+        stop(); mayPlay = true; messageId = id; phase = "preparing"
         val ticket = ++revision
         job = scope.launch {
             var downloaded: File? = null
@@ -57,7 +58,7 @@ internal class SpeechPlayer(private val app: Application, private val api: Platf
                 next.setOnPreparedListener {
                     if (ticket == revision) {
                         duration = it.duration.coerceAtLeast(0)
-                        if (audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { it.start(); phase = "playing" }
+                        if (mayPlay && audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { it.start(); phase = "playing" }
                         else phase = "paused"
                     }
                 }
@@ -75,12 +76,14 @@ internal class SpeechPlayer(private val app: Application, private val api: Platf
         }
     }
     fun pause() {
+        mayPlay = false
         if (phase == "playing") { player?.pause(); phase = "paused"; audio.abandonAudioFocusRequest(focus) }
     }
     fun toggle() {
         val current = player ?: return
         if (phase == "playing") pause()
         else if (phase == "paused" && audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            mayPlay = true
             if (position >= duration) { current.seekTo(0); position = 0 }
             current.start(); phase = "playing"
         }
@@ -89,7 +92,7 @@ internal class SpeechPlayer(private val app: Application, private val api: Platf
         if (phase in listOf("playing", "paused")) { position = value.coerceIn(0, duration); player?.seekTo(position) }
     }
     fun stop() {
-        revision++; job?.cancel(); job = null; ticker?.cancel(); ticker = null
+        revision++; mayPlay = false; job?.cancel(); job = null; ticker?.cancel(); ticker = null
         player?.release(); player = null; audio.abandonAudioFocusRequest(focus)
         file?.delete(); file = null; messageId = ""; phase = "idle"; position = 0; duration = 0
     }
