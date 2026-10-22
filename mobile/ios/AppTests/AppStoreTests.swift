@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 import MeimeiCore
 @testable import Meimei
 
@@ -226,5 +227,19 @@ extension AppStoreTests {
         await store.configure(modelID: "m1", mode: .balanced); XCTAssertTrue(store.canSend)
         store.removeImage(store.draft.images[0].id); XCTAssertEqual(store.draft.images.count, 4)
         await store.logout(); XCTAssertTrue(store.draft.images.isEmpty); XCTAssertNil(store.failedImage)
+    }
+}
+
+extension AppStoreTests {
+    func testImagePreparationRejectsInvalidDataAndLimitsLargePhoto() throws {
+        XCTAssertThrowsError(try ChatImagePreparation.jpeg(Data("not an image".utf8)))
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 4000, height: 1000)).pngData { context in
+            UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 4000, height: 1000))
+        }
+        let jpeg = try ChatImagePreparation.jpeg(source)
+        let image = try XCTUnwrap(UIImage(data: jpeg))
+        XCTAssertEqual(max(image.size.width, image.size.height), 2048)
+        XCTAssertEqual(image.size.width / image.size.height, 4, accuracy: 0.01)
+        XCTAssertEqual(Array(jpeg.prefix(2)), [0xFF, 0xD8])
     }
 }

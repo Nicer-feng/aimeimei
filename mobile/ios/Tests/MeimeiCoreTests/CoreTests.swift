@@ -323,6 +323,9 @@ extension CoreTests {
         XCTAssertTrue(text.contains("name=\"success_action_status\"\r\n\r\n204"))
         XCTAssertThrowsError(try policy.form(image: Data([1,2,3,4]), key: "images/u/test.jpg", boundary: "b"))
         XCTAssertThrowsError(try policy.form(image: Data([1]), key: "another-user/test.jpg", boundary: "b"))
+        var expired = raw; expired["expires_at"] = 0
+        let stale = try JSONDecoder().decode(ImageUploadPolicy.self, from: JSONSerialization.data(withJSONObject: expired))
+        XCTAssertThrowsError(try stale.form(image: Data([1]), key: "images/u/test.jpg", boundary: "b"))
     }
 }
 
