@@ -159,8 +159,9 @@ class ChatToolsScreenTest {
     }
     @Test fun historyShowsThumbnailAndModelPickerCanFilterImageCapableModels() {
         show()
-        compose.onNodeWithTag("chat-messages").performScrollToNode(hasContentDescription("图片缩略图：照片.jpg"))
+        compose.onNodeWithTag("chat-messages").performScrollToNode(hasText("图片 · 照片.jpg"))
         await { compose.onAllNodesWithContentDescription("图片缩略图：照片.jpg").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("chat-messages").performScrollToNode(hasContentDescription("图片缩略图：照片.jpg"))
         compose.onNodeWithContentDescription("图片缩略图：照片.jpg").assertIsDisplayed()
         capture("native-history-image-thumbnail")
         compose.onNodeWithText("测试模型 · 图片").performClick()
@@ -173,11 +174,11 @@ class ChatToolsScreenTest {
         show()
         compose.onNodeWithContentDescription("会话统计").performClick()
         await { model.tools.conversationStats != null && !model.tools.statsLoading }
-        compose.onNodeWithText("1,289 Token").assertIsDisplayed(); compose.onNodeWithText("问答轮数").assertIsDisplayed()
+        compose.onNodeWithTag("conversation-token-total").assertTextEquals("1,289 Token").assertIsDisplayed(); compose.onNodeWithText("问答轮数").assertIsDisplayed()
         capture("native-conversation-tokens", true)
         compose.onNodeWithText("关闭").performClick()
-        compose.onNodeWithTag("chat-messages").performScrollToNode(hasText("1,289 Token"))
-        compose.onNodeWithText("1,289 Token").performClick()
+        compose.onNodeWithTag("chat-messages").performScrollToNode(hasTestTag("usage-2"))
+        compose.onNodeWithTag("usage-2").performClick()
         compose.onNodeWithText("输入：1,200 Token").assertIsDisplayed(); compose.onNodeWithText("输出：89 Token").assertIsDisplayed()
         capture("native-answer-tokens", true)
     }
@@ -198,8 +199,8 @@ class ChatToolsScreenTest {
         show(); compose.onNodeWithText("提示词", substring = false).performClick()
         await { model.tools.prompts.size == 1 && !model.tools.promptsLoading }
         compose.onNodeWithText("文字润色").performClick(); compose.onNodeWithText("编辑").performClick()
-        val field = compose.onAllNodes(hasSetTextAction()).onLast()
-        field.performTextReplacement("请先检查逻辑，再润色文字。")
+        await { compose.onAllNodesWithTag("prompt-content").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("prompt-content").performTextReplacement("请先检查逻辑，再润色文字。")
         assertTrue(requests.none { it.method == "PUT" })
         capture("native-prompt-editor", true)
         compose.onNodeWithText("保存").performClick()

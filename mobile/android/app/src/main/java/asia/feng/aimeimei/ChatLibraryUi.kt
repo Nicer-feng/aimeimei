@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import org.json.JSONObject
 import java.text.NumberFormat
 import java.util.Locale
@@ -46,7 +48,7 @@ internal fun ConversationStatsDialog(model: PlatformViewModel) {
                 TextButton(onClick = tools::showStats, enabled = !tools.statsLoading) { Text("重试") }
             }
             tools.conversationStats?.let { stats ->
-                Text(tokenNumber(stats.optLong("total_tokens")) + " Token", style = MaterialTheme.typography.headlineMedium)
+                Text(tokenNumber(stats.optLong("total_tokens")) + " Token", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.testTag("conversation-token-total"))
                 listOf("turn_count" to "问答轮数", "message_count" to "消息数", "web_search_count" to "有联网来源的回答", "attachment_count" to "历史图片数", "media_task_count" to "关联音视频任务数").forEach { (key, label) ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label); Text(tokenNumber(stats.optLong(key))) }
                 }
@@ -116,17 +118,25 @@ internal fun PromptsScreen(model: PlatformViewModel, onUse: () -> Unit) {
         }, confirmButton = { TextButton(onClick = { apply(row) }, enabled = enabled) { Text("带入当前聊天") } },
             dismissButton = { TextButton(onClick = { selected = null }) { Text("关闭") } })
     }
-    if (editing) AlertDialog(onDismissRequest = { if (!tools.promptSaving) editing = false }, title = { Text(if (editingId == null) "新增提示词" else "编辑提示词") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("提示词由所有账号共享，保存后网页也会同步。", style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(title, { title = it.take(80) }, label = { Text("名称") }, singleLine = true, enabled = !tools.promptSaving)
-            OutlinedTextField(content, { content = it.take(4000) }, label = { Text("提示词内容") }, modifier = Modifier.heightIn(max = 280.dp), minLines = 4, maxLines = 10, enabled = !tools.promptSaving)
-            Text("${content.length} / 4000", style = MaterialTheme.typography.labelSmall)
-            if (tools.promptError.isNotBlank()) Text(tools.promptError, color = MaterialTheme.colorScheme.error)
-            if (tools.promptSaving) LinearProgressIndicator(Modifier.fillMaxWidth())
+    if (editing) Dialog(onDismissRequest = { if (!tools.promptSaving) editing = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.imePadding().systemBarsPadding()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { editing = false }, enabled = !tools.promptSaving) { Text("取消") }
+                    Text(if (editingId == null) "新增提示词" else "编辑提示词", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    TextButton(onClick = { tools.savePrompt(editingId, title, content) { editing = false; selected = null } }, enabled = !tools.promptSaving && title.isNotBlank() && content.isNotBlank()) { Text("保存") }
+                }
+                if (tools.promptSaving) LinearProgressIndicator(Modifier.fillMaxWidth())
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("提示词由所有账号共享，保存后网页也会同步。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(title, { title = it.take(80) }, label = { Text("名称") }, singleLine = true, enabled = !tools.promptSaving, modifier = Modifier.fillMaxWidth().testTag("prompt-title"))
+                    OutlinedTextField(content, { content = it.take(4000) }, label = { Text("提示词内容") }, modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp).testTag("prompt-content"), minLines = 8, maxLines = 16, enabled = !tools.promptSaving)
+                    Text("${content.length} / 4000", style = MaterialTheme.typography.labelSmall)
+                    if (tools.promptError.isNotBlank()) Text(tools.promptError, color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
-    }, confirmButton = { TextButton(onClick = { tools.savePrompt(editingId, title, content) { editing = false; selected = null } }, enabled = !tools.promptSaving && title.isNotBlank() && content.isNotBlank()) { Text("保存") } },
-        dismissButton = { TextButton(onClick = { editing = false }, enabled = !tools.promptSaving) { Text("取消") } })
+    }
     deleting?.let { row -> AlertDialog(onDismissRequest = { if (!tools.promptSaving) deleting = null }, title = { Text("删除这条共享提示词？") }, text = {
         Column { Text("删除「${row.optString("title")}」后，其他账号也无法再使用。已有聊天不受影响。"); if (tools.promptError.isNotBlank()) Text(tools.promptError, color = MaterialTheme.colorScheme.error) }
     }, confirmButton = { TextButton(onClick = { tools.deletePrompt(row.getString("id")) { deleting = null; selected = null } }, enabled = !tools.promptSaving) { Text("删除") } },

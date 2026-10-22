@@ -141,7 +141,7 @@ private fun MessageBody(message: ChatMessage, model: PlatformViewModel? = null) 
         else if (message.attachments.isNotEmpty()) Text("附件：${message.attachments.joinToString("、")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (message.role == "assistant") message.usage?.let { usage ->
             var details by remember(message.id) { mutableStateOf(false) }
-            TextButton(onClick = { details = true }) { Text(if (usage.total > 0) "${tokenNumber(usage.total)} Token" else "Token 未返回", style = MaterialTheme.typography.labelSmall) }
+            TextButton(onClick = { details = true }, modifier = Modifier.testTag("usage-${message.id}")) { Text(if (usage.total > 0) "${tokenNumber(usage.total)} Token" else "Token 未返回", style = MaterialTheme.typography.labelSmall) }
             if (details) AlertDialog(onDismissRequest = { details = false }, title = { Text("本条回答用量") }, text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("输入：${tokenNumber(usage.input)} Token"); Text("输出：${tokenNumber(usage.output)} Token"); Text("合计：${tokenNumber(usage.total)} Token")
