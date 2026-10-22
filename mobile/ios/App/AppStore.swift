@@ -4,6 +4,14 @@ import MeimeiCore
 
 @MainActor @Observable
 final class AppStore {
+    struct FailedDocument { let data: Data; let filename: String }
+    let speech: SpeechController
+    private(set) var documents: [ChatDocument] = []
+    private(set) var importingDocuments = false
+    private(set) var documentUploadingName: String?
+    private(set) var documentUploadProgress = 0.0
+    private(set) var failedDocument: FailedDocument?
+
     private(set) var account: Account?
     private(set) var captcha: Captcha?
     private(set) var smsConfig: SMSLoginConfiguration?
@@ -41,11 +49,15 @@ final class AppStore {
     @ObservationIgnored private var lastRender = Date.distantPast
     @ObservationIgnored private var foreground = true
 
-    init(api: any PlatformServing, local: LocalState) { self.api = api; self.local = local }
+    init(api: any PlatformServing, local: LocalState, audioOutput: (any AudioOutput)? = nil) {
+        self.api = api; self.local = local
+        speech = SpeechController(api: api, output: audioOutput ?? DeviceAudioOutput())
+        speech.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
+    }
     var locked: Bool { busy || streaming }
     var currentModel: ChatModel? { models.first { $0.id == draft.modelID } }
     var canSend: Bool {
-        !locked && pending == nil && (!draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draft.images.isEmpty) && currentModel != nil && failedImage == nil && (draft.images.isEmpty || currentModel?.supportsVision == true)
+        !locked && !importingDocuments && pending == nil && (!draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draft.images.isEmpty || !draft.documents.isEmpty) && currentModel != nil && failedImage == nil && failedDocument == nil && draft.documents.allSatisfy(\.ready) && (draft.images.isEmpty || currentModel?.supportsVision == true)
     }
     private var conversationID: String { selected?.id ?? "" }
 
@@ -124,7 +136,8 @@ final class AppStore {
     }
     func clearLoginFeedback() { error = nil; loginNotice = nil }
     private func clearAccount() {
-        generation?.cancel(); runID = UUID()
+        generation?.cancel(); runID = UUID(); speech.reset()
+        documents = []; importingDocuments = false; failedDocument = nil; documentUploadingName = nil
         account = nil; selected = nil; messages = []; conversations = []; models = []
         favorites = []; prompts = []; favoriteOverrides = [:]; resetSearch(); focusedMessageID = nil
         uploadingImage = nil; failedImage = nil; attachmentContext = UUID()
@@ -154,6 +167,8 @@ final class AppStore {
         }
     }
     private func restoreDraft() {
+        importingDocuments = false
+        failedDocument = nil; documentUploadingName = nil
         uploadingImage = nil; failedImage = nil; attachmentContext = UUID()
         guard let account else { return }
         draft = local.draft(accountID: account.id, conversationID: conversationID)
@@ -238,7 +253,7 @@ final class AppStore {
         }
     }
     func newChat() {
-        guard !locked else { return }
+        guard !locked else { return }; speech.stop()
         generation?.cancel(); runID = UUID()
         selected = nil; messages = []; live = nil; restoreDraft(); error = nil; focusedMessageID = nil
     }
@@ -246,7 +261,7 @@ final class AppStore {
         await work {
             generation?.cancel(); runID = UUID()
             let history = try await api.messages(id: item.id)
-            selected = item; messages = history; live = nil; focusedMessageID = nil; restoreDraft()
+            speech.stop(); selected = item; messages = history; live = nil; focusedMessageID = nil; restoreDraft()
             for message in history { favoriteOverrides[message.id] = nil }
             try resolvePending()
         }
@@ -260,7 +275,7 @@ final class AppStore {
             let oldID = selected?.id
             try await loadWorkspace()
             if selected != nil { try await loadMessages() }
-            else if oldID != nil { messages = []; live = nil; restoreDraft() }
+            else if oldID != nil { speech.stop(); messages = []; live = nil; restoreDraft() }
         }
     }
     private func loadMessages() async throws {
@@ -290,7 +305,7 @@ final class AppStore {
         }
         await work {
             try await api.deleteConversation(id: item.id)
-            if selected?.id == item.id { selected = nil; messages = []; live = nil; restoreDraft() }
+            if selected?.id == item.id { speech.stop(); selected = nil; messages = []; live = nil; restoreDraft() }
             try await loadWorkspace()
         }
     }
@@ -309,10 +324,10 @@ final class AppStore {
             }
             guard let selected else { return }
             guard foreground else { return }
-            let marker = PendingSend(conversationID: selected.id, baseline: messages.map(\.id).max() ?? 0, content: text, imageIDs: draft.images.map(\.id))
+            let marker = PendingSend(conversationID: selected.id, baseline: messages.map(\.id).max() ?? 0, content: text, imageIDs: draft.images.map(\.id), documentIDs: draft.documents.map(\.id))
             // 标记必须先可靠落盘，再允许真正的模型 POST。
             try local.setPending(marker, accountID: account.id, conversationID: selected.id)
-            pending = marker; draft.text = ""; draft.images = []; saveDraft()
+            pending = marker; draft.text = ""; draft.images = []; draft.documents = []; saveDraft()
             accumulator = ReplyAccumulator(); live = accumulator.reply; streaming = true
             let id = UUID(); runID = id
             let search = draft.webSearch
@@ -321,7 +336,7 @@ final class AppStore {
                 var failure: Error?
                 do {
                     try Task.checkCancellation()
-                    try await self.api.stream(id: selected.id, content: text, imageIDs: marker.imageIDs ?? [], webSearch: search) { [weak self] event in
+                    try await self.api.stream(id: selected.id, content: text, imageIDs: marker.imageIDs ?? [], documentIDs: marker.documentIDs ?? [], webSearch: search) { [weak self] event in
                         guard let self else { throw CancellationError() }
                         try await self.accept(event, conversationID: selected.id, run: id)
                     }
@@ -367,6 +382,7 @@ final class AppStore {
     func sceneActive(_ active: Bool) async {
         foreground = active
         if !active {
+            speech.stop()
             // iOS 不保证普通聊天长连接在后台存活，保留标记并结束接收。
             if streaming { stop() }
         } else if !starting && account != nil && !locked { await refresh() }
@@ -377,6 +393,7 @@ final class AppStore {
         do {
             try local.setPending(nil, accountID: account.id, conversationID: pending.conversationID)
             draft.text = pending.content; saveDraft(); self.pending = nil; live = nil
+            if !(pending.documentIDs ?? []).isEmpty { error = "问题文字已恢复。如需再次引用材料，请从文件列表重新选择" }
             if !(pending.imageIDs ?? []).isEmpty { error = "问题文字已恢复。请重新选择图片后发送，原图片不会自动重发" }
         } catch { report(error) }
     }
@@ -468,7 +485,7 @@ extension AppStore {
                 error = "原消息已删除或不在当前返回的历史中"; return
             }
             generation?.cancel(); runID = UUID()
-            conversations = list; selected = item; messages = history; live = nil
+            speech.stop(); conversations = list; selected = item; messages = history; live = nil
             for message in history { favoriteOverrides[message.id] = nil }
             restoreDraft(); try resolvePending()
             focusedMessageID = messageID > 0 ? messageID : nil; focusRequest = UUID(); opened = true
@@ -479,5 +496,81 @@ extension AppStore {
         await loadFavorites()
         let id = resultID.hasPrefix("favorite:") ? String(resultID.dropFirst(9)) : resultID
         return favorites.first { $0.id == id }
+    }
+}
+
+extension AppStore {
+    func setDocumentImporting(_ value: Bool, context: UUID) {
+        guard attachmentContext == context else { return }; importingDocuments = value
+    }
+    var documentPollKey: String { attachmentContext.uuidString + draft.documents.filter(\.processing).map(\.id).sorted().joined(separator: ":") }
+    func loadDocuments() async {
+        guard let owner = account?.id else { return }
+        await work {
+            let rows = try await api.documents()
+            guard account?.id == owner else { return }
+            documents = rows
+            for row in rows {
+                if let i = draft.documents.firstIndex(where: { $0.id == row.id }) { draft.documents[i] = row }
+            }
+            saveDraft()
+        }
+    }
+    func chooseDocument(_ item: ChatDocument) -> Bool {
+        guard account != nil, !locked, pending == nil, !item.id.isEmpty else { return false }
+        if draft.documents.contains(where: { $0.id == item.id }) { return true }
+        guard draft.documents.count < 5 else { error = "单次最多引用 5 份材料"; return false }
+        draft.documents.append(item); saveDraft(); return true
+    }
+    func removeDocument(_ id: String) {
+        guard !locked, pending == nil else { return }
+        draft.documents.removeAll { $0.id == id }; saveDraft()
+    }
+    func discardFailedDocument() { guard !locked else { return }; failedDocument = nil; error = nil }
+    func retryDocument() async {
+        if let item = failedDocument { await addDocument(item.data, filename: item.filename) }
+    }
+    func addDocument(_ data: Data, filename: String, context: UUID? = nil) async {
+        let target = context ?? attachmentContext; let owner = account?.id
+        for _ in 0..<100 {
+            guard !Task.isCancelled, attachmentContext == target, account?.id == owner else { return }
+            if !busy { break }; try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard account != nil, attachmentContext == target, !streaming, pending == nil else { return }
+        guard !busy else { failedDocument = FailedDocument(data: data, filename: filename); error = "当前操作尚未结束，请稍后重试上传"; return }
+        guard draft.documents.count < 5 else { error = "单次最多引用 5 份材料"; return }
+        do { try DocumentLimits.validate(filename: filename, size: data.count) } catch { report(error); return }
+        await work {
+            documentUploadingName = filename; documentUploadProgress = 0; failedDocument = nil
+            defer { documentUploadingName = nil }
+            do {
+                let item = try await api.uploadDocument(data, filename: filename) { [weak self] value in
+                    Task { @MainActor in
+                        guard let self, self.attachmentContext == target, self.documentUploadingName != nil else { return }
+                        self.documentUploadProgress = value
+                    }
+                }
+                guard account?.id == owner, attachmentContext == target else { return }
+                draft.documents.append(item); documents.removeAll { $0.id == item.id }; documents.insert(item, at: 0); saveDraft()
+            } catch {
+                if account?.id == owner, attachmentContext == target { failedDocument = FailedDocument(data: data, filename: filename) }
+                throw error
+            }
+        }
+    }
+    func refreshDocuments(includeFailed: Bool = false) async {
+        guard foreground, account != nil, !locked, pending == nil else { return }
+        let owner = account?.id; let target = attachmentContext
+        let ids = draft.documents.filter { $0.processing || (includeFailed && !$0.ready) }.map(\.id)
+        guard !ids.isEmpty else { return }
+        await work {
+            for id in ids {
+                let item = try await api.refreshDocument(id: id)
+                guard account?.id == owner, attachmentContext == target else { return }
+                if let i = draft.documents.firstIndex(where: { $0.id == id }) { draft.documents[i] = item }
+                if let i = documents.firstIndex(where: { $0.id == id }) { documents[i] = item }
+                saveDraft()
+            }
+        }
     }
 }

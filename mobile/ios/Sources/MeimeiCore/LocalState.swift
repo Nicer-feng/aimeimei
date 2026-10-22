@@ -5,11 +5,12 @@ public struct PendingSend: Codable, Equatable, Sendable {
     public let baseline: Int64
     public let content: String
     public let imageIDs: [String]?
-    public init(conversationID: String, baseline: Int64, content: String, imageIDs: [String] = []) {
-        self.conversationID = conversationID; self.baseline = baseline; self.content = content; self.imageIDs = imageIDs
+    public let documentIDs: [String]?
+    public init(conversationID: String, baseline: Int64, content: String, imageIDs: [String] = [], documentIDs: [String] = []) {
+        self.conversationID = conversationID; self.baseline = baseline; self.content = content; self.imageIDs = imageIDs; self.documentIDs = documentIDs
     }
     public func matches(_ message: ChatMessage) -> Bool {
-        message.role == "user" && message.id > baseline && message.content == content && Set(message.images.map(\.id)) == Set(imageIDs ?? [])
+        message.role == "user" && message.id > baseline && message.content == content && Set(message.images.map(\.id)) == Set(imageIDs ?? []) && Set(message.documents.map(\.id)) == Set(documentIDs ?? [])
     }
     /// 仅核对本次用户消息之后的相邻回答；同问题出现多次时保守地保持待核对。
     public func reply(in messages: [ChatMessage]) -> ChatMessage? {
@@ -23,12 +24,13 @@ public struct PendingSend: Codable, Equatable, Sendable {
 
 public struct Draft: Codable, Equatable, Sendable {
     public var images: [ChatImage] = []
+    public var documents: [ChatDocument] = []
     public var text = ""
     public var webSearch = false
     public var modelID = ""
     public var reasoningMode: ReasoningMode = .balanced
     public init() {}
-    enum CodingKeys: String, CodingKey { case text, webSearch, modelID, reasoningMode, images }
+    enum CodingKeys: String, CodingKey { case text, webSearch, modelID, reasoningMode, images, documents }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
@@ -36,6 +38,7 @@ public struct Draft: Codable, Equatable, Sendable {
         modelID = try c.decodeIfPresent(String.self, forKey: .modelID) ?? ""
         reasoningMode = try c.decodeIfPresent(ReasoningMode.self, forKey: .reasoningMode) ?? .balanced
         images = try c.decodeIfPresent([ChatImage].self, forKey: .images) ?? []
+        documents = try c.decodeIfPresent([ChatDocument].self, forKey: .documents) ?? []
     }
 }
 

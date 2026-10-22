@@ -120,7 +120,11 @@ final class MeimeiUITests: XCTestCase {
         app.terminate()
         app.launchArguments += ["-appearance", "dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
         app.launch()
-        login(); capture("07-dark-larger-text")
+        login()
+        let tools = app.scrollViews["composerToolsScroll"]
+        XCTAssertTrue(tools.waitForExistence(timeout: 5)); tools.swipeLeft()
+        XCTAssertTrue(app.buttons["documentsButton"].isHittable, "大字模式下应能横向滑动到文件工具")
+        tools.swipeRight(); capture("07-dark-larger-text")
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         let rotated = XCTNSPredicateExpectation(predicate: NSPredicate { [unowned self] _, _ in
@@ -165,5 +169,32 @@ extension MeimeiUITests {
         app.buttons["modelMenu"].tap(); app.buttons["槑槑 · 思考"].tap()
         XCTAssertTrue(app.buttons["sendButton"].isEnabled)
         remove.tap(); XCTAssertFalse(app.buttons["sendButton"].isEnabled)
+    }
+}
+
+extension MeimeiUITests {
+    func testDocumentQuestionAndSpeechPlaybackControls() {
+        login(); app.buttons["documentsButton"].tap()
+        XCTAssertTrue(app.buttons["demoDocumentButton"].waitForExistence(timeout: 5)); app.buttons["demoDocumentButton"].tap()
+        XCTAssertTrue(app.staticTexts["项目说明.txt"].firstMatch.waitForExistence(timeout: 10)); capture("20-documents")
+        app.buttons["完成"].tap()
+        if app.buttons["refreshDocumentsButton"].exists { app.buttons["refreshDocumentsButton"].tap() }
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["sendButton"])
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+        app.buttons["sendButton"].tap()
+        let read = app.buttons["readMessage-12"]
+        XCTAssertTrue(read.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["项目说明.txt"].firstMatch.exists, "仅文件消息也应显示所引用材料的名称")
+        capture("21-document-question")
+        read.tap(); XCTAssertTrue(app.buttons["playSpeechButton"].waitForExistence(timeout: 10))
+        app.buttons["speechVoicePicker"].tap(); app.buttons["清晰男声"].tap()
+        app.buttons["speechSpeedPicker"].tap(); app.buttons["1.25 倍"].tap()
+        XCTAssertTrue(app.buttons["playSpeechButton"].exists, "选择音色和语速不应自动生成或播放")
+        capture("22-speech-settings")
+        app.buttons["playSpeechButton"].tap()
+        XCTAssertTrue(app.buttons["pauseSpeechButton"].waitForExistence(timeout: 15)); capture("23-speech-playing")
+        app.buttons["pauseSpeechButton"].tap(); XCTAssertTrue(app.buttons["resumeSpeechButton"].waitForExistence(timeout: 5)); capture("24-speech-paused")
+        app.buttons["resumeSpeechButton"].tap(); XCTAssertTrue(app.buttons["pauseSpeechButton"].waitForExistence(timeout: 5))
+        app.buttons["完成"].tap(); XCTAssertTrue(app.buttons["historyButton"].waitForExistence(timeout: 5))
     }
 }

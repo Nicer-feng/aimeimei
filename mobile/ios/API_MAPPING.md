@@ -41,3 +41,12 @@ SSE 解析标准 `data:` 事件及空行，支持多行数据、CRLF、UTF-8、r
 - GET `/api/chat-images/{id}/view` 使用平台 Cookie 获取 302 地址，再用无 Cookie 会话读取 HTTPS 签名图像；预览数据仅存内存。
 - 历史消息 `images` 显示图片，`sources` 展示 `title/url/snippet/position`；原文仅允许不含用户名密码的 HTTP/HTTPS 地址。
 - 草稿保存已登记图片的 ID/文件名，不保存原相册数据、上传授权或 OSS 签名 URL。用户恢复待核对的问题时需重新选择图片，避免复用已经绑定的图片。
+
+## 文件问答与朗读（0.4.0）
+
+- GET `/api/documents` 读取当前用户的材料；POST `/api/documents/upload-policy` 获取 OSS 表单，独立无 Cookie 会话上传后 POST `/api/documents` 登记 `filename/mime_type/file_size/oss_key`。
+- POST `/api/documents/{id}/refresh` 查询已有解析任务，保留 `submitted/processing/failed/completed` 与 `error_message`。前台有限轮询，不自动重传、重新提交解析或删除文件。
+- 草稿 `documents` 只存材料元数据；发送增加 `document_ids`，最多 5 份，全部 `completed` 才发送，不修改 `/api/conversations/{id}/documents` 持续材料配置。
+- GET `/api/tts/config` 读取 `tts.enabled/configured/voices/default_voice/default_speed`。POST `/api/messages/{id}/tts` 只准备播放，检查 `cached/long_text` 后再按用户确认 GET `/api/messages/{id}/tts/audio?voice=...&speed=...`。
+- 音频接口可返回 200 `audio/*` 或 302 OSS HTTPS 签名地址；OSS 不携带平台 Cookie，不跟随进一步重定向。客户端自行构造固定消息路径，不使用任意返回的 `audio_url`。
+- 音频不落盘，暂停/继续不请求后端；取消、页面关闭、会话切换、后台和退出使过时响应失效。无自动生成/下载重试，缓存由现有后端管理。

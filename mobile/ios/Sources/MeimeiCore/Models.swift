@@ -60,13 +60,15 @@ public struct ChatMessage: Decodable, Identifiable, Equatable, Sendable {
     public let status: String
     public let attachments: [String]
     public let favoriteID: String?
+    public let documents: [ChatDocument]
     public let images: [ChatImage]
     public let sources: [ChatSource]
 
-    public init(id: Int64, role: String, content: String, reasoning: String = "", status: String = "", attachments: [String] = [], favoriteID: String? = nil, images: [ChatImage] = [], sources: [ChatSource] = []) {
+    public init(id: Int64, role: String, content: String, reasoning: String = "", status: String = "", attachments: [String] = [], favoriteID: String? = nil, images: [ChatImage] = [], sources: [ChatSource] = [], documents: [ChatDocument] = []) {
         self.id = id; self.role = role; self.content = content
-        self.reasoning = reasoning; self.status = status; self.attachments = attachments
-        self.favoriteID = favoriteID; self.images = images; self.sources = sources
+        self.reasoning = reasoning; self.status = status
+        self.attachments = attachments.isEmpty ? documents.map(\.filename) : attachments
+        self.favoriteID = favoriteID; self.images = images; self.sources = sources; self.documents = documents
     }
     enum CodingKeys: String, CodingKey {
         case id, role, content, documents, images, sources
@@ -80,11 +82,10 @@ public struct ChatMessage: Decodable, Identifiable, Equatable, Sendable {
         reasoning = try c.decodeIfPresent(String.self, forKey: .reasoning) ?? ""
         status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
         favoriteID = try c.decodeIfPresent(String.self, forKey: .favoriteID)
-        struct Attachment: Decodable { let filename: String? }
-        let files = try c.decodeIfPresent([Attachment].self, forKey: .documents) ?? []
+        documents = try c.decodeIfPresent([ChatDocument].self, forKey: .documents) ?? []
         images = try c.decodeIfPresent([ChatImage].self, forKey: .images) ?? []
         sources = try c.decodeIfPresent([ChatSource].self, forKey: .sources) ?? []
-        attachments = files.map { $0.filename ?? "附件" }
+        attachments = documents.map(\.filename)
     }
 }
 
@@ -117,6 +118,13 @@ public enum PlatformError: Error, LocalizedError, Equatable {
         case .http(_, "password incorrect"): return "账号或密码不正确"
         case .http(_, "message not found"), .http(_, "conversation not found"): return "原消息或会话已删除，请刷新后重试"
         case .http(_, "favorite not found"): return "该收藏已移除，请刷新列表"
+        case .http(_, "语音朗读暂未开启"): return "语音朗读暂未开启"
+        case .http(_, "语音服务还没有配置好"), .http(_, "语音服务暂不可用"): return "语音服务暂不可用，请检查后台配置"
+        case .http(_, "这条回答没有可朗读的文字"): return "这条回答没有可朗读的文字"
+        case .http(_, "这条回答不存在或不可朗读"): return "这条回答不存在或不可朗读，请刷新聊天记录"
+        case .http(_, "document not found"): return "材料已删除或不可访问，请重新选择材料"
+        case .http(_, "材料不存在或仍在解析中"): return "材料不存在或仍在解析中，请刷新材料状态"
+        case .http(_, "材料文件 OSS 还没有配置好"), .http(_, "阿里云文档解析还没有配置好"): return "材料解析服务暂未配置，请联系管理员"
         case .http(401, _): return "登录已失效，请重新登录"
         case .http(409, _): return "当前会话仍在生成，请稍后刷新核对"
         case .http(400, _): return "请求未被接受，请检查模型或联网配置"

@@ -9,10 +9,12 @@ final class AppStoreTests: XCTestCase {
     private var local: LocalState!
     private var api: DemoAPI!
     private var store: AppStore!
+    private var audio: TestAudioOutput!
     override func setUpWithError() throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         local = try LocalState(directory: directory); api = DemoAPI()
-        store = AppStore(api: api, local: local)
+        audio = TestAudioOutput()
+        store = AppStore(api: api, local: local, audioOutput: audio)
     }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at: directory) }
     private func login() async {
@@ -241,5 +243,100 @@ extension AppStoreTests {
         XCTAssertEqual(max(image.size.width, image.size.height), 2048)
         XCTAssertEqual(image.size.width / image.size.height, 4, accuracy: 0.01)
         XCTAssertEqual(Array(jpeg.prefix(2)), [0xFF, 0xD8])
+    }
+}
+
+@MainActor private final class TestAudioOutput: AudioOutput {
+    var onFinish: ((Bool) -> Void)?
+    var onPause: (() -> Void)?
+    private(set) var plays = 0
+    private(set) var pauses = 0
+    private(set) var resumes = 0
+    private(set) var data: Data?
+    func play(_ data: Data) throws { plays += 1; self.data = data }
+    func pause() { pauses += 1 }
+    func resume() throws { resumes += 1 }
+    func stop() { data = nil }
+}
+
+extension AppStoreTests {
+    private func waitSpeech(_ condition: () -> Bool) async throws {
+        for _ in 0..<100 { if condition() { return }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTFail("朗读状态未及时更新")
+    }
+    func testDocumentParsingBlocksSendAndTransientRefreshDoesNotReupload() async throws {
+        await login(); store.setText("请总结这份材料")
+        await store.addDocument(Data("材料".utf8), filename: "项目说明.txt")
+        XCTAssertEqual(store.draft.documents.count, 1); XCTAssertFalse(store.canSend)
+        await api.setDocumentRefreshFailure(true); await store.refreshDocuments()
+        XCTAssertTrue(store.draft.documents[0].processing); XCTAssertFalse(store.canSend)
+        await api.setDocumentRefreshFailure(false); await store.refreshDocuments()
+        XCTAssertTrue(store.canSend)
+        let count = await api.documentCount(); XCTAssertEqual(count, 1)
+        await store.send(); try await waitUntilIdle()
+        XCTAssertNil(store.pending); XCTAssertTrue(store.draft.documents.isEmpty)
+        XCTAssertEqual(store.messages.first?.documents.first?.filename, "项目说明.txt")
+    }
+    func testFileOnlyQuestionWorksWithTextModelAndRemovalKeepsWebFile() async throws {
+        await login(); await store.configure(modelID: "m2", mode: .balanced)
+        await store.addDocument(Data("材料".utf8), filename: "材料.txt"); await store.refreshDocuments()
+        let file = try XCTUnwrap(store.draft.documents.first)
+        store.removeDocument(file.id)
+        let remote = try await api.documents(); XCTAssertEqual(remote.count, 1)
+        XCTAssertTrue(store.chooseDocument(file)); XCTAssertTrue(store.canSend)
+        store.setDocumentImporting(true, context: store.attachmentContext); XCTAssertFalse(store.canSend)
+        store.setDocumentImporting(false, context: store.attachmentContext); XCTAssertTrue(store.canSend)
+        await store.send(); try await waitUntilIdle()
+        XCTAssertEqual(store.messages.first?.content, ""); XCTAssertEqual(store.messages.first?.documents.map(\.id), [file.id])
+    }
+    func testDocumentRetryLimitContextAndLogoutIsolation() async throws {
+        await login(); let old = store.attachmentContext; store.newChat()
+        await store.addDocument(Data([1]), filename: "x.txt", context: old); XCTAssertTrue(store.draft.documents.isEmpty)
+        await api.setDocumentFailure(true); await store.addDocument(Data([1]), filename: "失败.txt")
+        XCTAssertNotNil(store.failedDocument); XCTAssertFalse(store.canSend)
+        await api.setDocumentFailure(false); await store.retryDocument(); XCTAssertNil(store.failedDocument)
+        for _ in 0..<5 { await store.addDocument(Data([1]), filename: "材料.txt") }
+        XCTAssertEqual(store.draft.documents.count, 5)
+        await store.logout(); XCTAssertTrue(store.documents.isEmpty); XCTAssertTrue(store.draft.documents.isEmpty); XCTAssertNil(store.failedDocument)
+    }
+    func testSpeechPauseResumeAndSettingsNeverRegenerateUntilExplicitPlay() async throws {
+        await login(); await store.speech.loadConfiguration()
+        let initial = await api.speechCounts(); XCTAssertEqual(initial.audio, 0)
+        store.speech.play(messageID: 2); try await waitSpeech { store.speech.state == .playing }
+        store.speech.pause(); XCTAssertEqual(store.speech.state, .paused)
+        store.speech.resume(); XCTAssertEqual(store.speech.state, .playing)
+        let first = await api.speechCounts(); XCTAssertEqual(first.prepare, 1); XCTAssertEqual(first.audio, 1)
+        XCTAssertEqual(audio.pauses, 1); XCTAssertEqual(audio.resumes, 1)
+        store.speech.setVoice("clear"); store.speech.setSpeed(1.25); XCTAssertEqual(store.speech.state, .idle)
+        let still = await api.speechCounts(); XCTAssertEqual(still.audio, 1)
+        store.speech.play(messageID: 2); try await waitSpeech { store.speech.state == .playing }
+        let changed = await api.speechCounts(); XCTAssertEqual(changed.audio, 2)
+        await store.logout(); XCTAssertNil(audio.data); XCTAssertNil(store.speech.configuration)
+    }
+    func testLongSpeechRequiresConfirmationBeforeAnyAudioRequest() async throws {
+        await login(); await api.setSpeechLong(true); await store.speech.loadConfiguration()
+        store.speech.play(messageID: 2); try await waitSpeech { store.speech.needsConfirmation }
+        let before = await api.speechCounts(); XCTAssertEqual(before.audio, 0)
+        store.speech.cancelLongText(); XCTAssertFalse(store.speech.needsConfirmation)
+        store.speech.play(messageID: 2); try await waitSpeech { store.speech.needsConfirmation }
+        store.speech.confirmLongText(); try await waitSpeech { store.speech.state == .playing }
+        let after = await api.speechCounts(); XCTAssertEqual(after.prepare, 2); XCTAssertEqual(after.audio, 1)
+    }
+    func testStoppedSpeechCannotPlayLateResponseAndDisabledConfigMakesNoRequest() async throws {
+        await login(); await store.speech.loadConfiguration(); await api.setSpeechDelay(.milliseconds(250))
+        store.speech.play(messageID: 2)
+        for _ in 0..<50 { if await api.speechCounts().audio > 0 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        store.newChat(); try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(audio.plays, 0); XCTAssertEqual(store.speech.state, .idle)
+        await api.setSpeechEnabled(false); await store.speech.loadConfiguration(reload: true)
+        let before = await api.speechCounts(); store.speech.play(messageID: 2)
+        try await Task.sleep(for: .milliseconds(50)); let after = await api.speechCounts()
+        XCTAssertEqual(before.prepare, after.prepare); XCTAssertEqual(before.audio, after.audio)
+    }
+    func testFileImporterReadsSelectedFileAndRejectsEmptyFile() throws {
+        let file = directory.appendingPathComponent("项目说明.txt"); try Data("测试材料".utf8).write(to: file)
+        let imported = try ImportedDocument.read(file)
+        XCTAssertEqual(imported.filename, "项目说明.txt"); XCTAssertEqual(String(decoding: imported.data, as: UTF8.self), "测试材料")
+        try Data().write(to: file); XCTAssertThrowsError(try ImportedDocument.read(file))
     }
 }

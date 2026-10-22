@@ -8,11 +8,14 @@ struct ChatView: View {
     @State private var nearBottom = true
     @State private var confirmRestore = false
     @State private var showPrompts = false
+    @State private var showDocuments = false
+    @State private var speechMessage: ChatMessage?
     @State private var photos: [PhotosPickerItem] = []
     @State private var showPhotos = false
     @State private var showCamera = false
     @State private var preparing = false
     @State private var mediaContext = UUID()
+    @ScaledMetric(relativeTo: .caption) private var toolRowHeight = 36.0
     @FocusState private var composing: Bool
     var body: some View {
         VStack(spacing: 0) {
@@ -24,13 +27,13 @@ struct ChatView: View {
                         if store.messages.isEmpty && store.pending == nil { welcome }
                         ForEach(store.messages) { message in
                             MessageRow(store: store, message: message, favorite: store.isFavorite(message), canFavorite: !store.locked,
-                                       onFavorite: { Task { await store.toggleFavorite(message) } }).equatable()
+                                       onFavorite: { Task { await store.toggleFavorite(message) } }, onRead: { speechMessage = message }).equatable()
                                 .id(message.id)
                                 .overlay { RoundedRectangle(cornerRadius: 18).stroke(store.focusedMessageID == message.id ? Brand.accent : .clear, lineWidth: 2).allowsHitTesting(false) }
                         }
                         if let pending = store.pending,
                            !store.messages.contains(where: { pending.matches($0) }) {
-                            MessageRow(store: store, message: ChatMessage(id: -1, role: "user", content: pending.content, images: (pending.imageIDs ?? []).map { ChatImage(id: $0, filename: "photo.jpg") })).equatable()
+                            MessageRow(store: store, message: ChatMessage(id: -1, role: "user", content: pending.content, images: (pending.imageIDs ?? []).map { ChatImage(id: $0, filename: "photo.jpg") }, documents: (pending.documentIDs ?? []).map { ChatDocument(id: $0, filename: "材料（待核对）", status: "completed") })).equatable()
                         }
                         if let live = store.live {
                             VStack(alignment: .leading, spacing: 10) {
@@ -79,6 +82,15 @@ struct ChatView: View {
             }
         }
         .background(Brand.background)
+        .sheet(isPresented: $showDocuments) { DocumentsView(store: store) }
+        .sheet(item: $speechMessage) { message in SpeechView(controller: store.speech, message: message) }
+        .task(id: store.documentPollKey) {
+            for _ in 0..<12 {
+                guard store.draft.documents.contains(where: \.processing), !Task.isCancelled else { return }
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                await store.refreshDocuments()
+            }
+        }
         .sheet(isPresented: $showPrompts) { LibraryView(store: store, initial: .prompts) }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: max(1, 5 - store.draft.images.count), matching: .images)
@@ -155,6 +167,9 @@ struct ChatView: View {
     }
     private var composer: some View {
         VStack(spacing: 10) {
+            if store.importingDocuments || !store.draft.documents.isEmpty || store.documentUploadingName != nil || store.failedDocument != nil {
+                DraftDocumentsView(store: store)
+            }
             if !store.draft.images.isEmpty || store.uploadingImage != nil || store.failedImage != nil {
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 10) {
@@ -198,35 +213,40 @@ struct ChatView: View {
                 }
             }
             HStack {
-                Toggle(isOn: Binding(get: { store.draft.webSearch }, set: store.setSearch)) { Label("联网搜索", systemImage: "globe") }
-                    .accessibilityIdentifier("webSearchToggle").toggleStyle(.button).font(.caption).disabled(store.locked || store.pending != nil)
-                Button("提示词", systemImage: "text.book.closed") { composing = false; showPrompts = true }
-                    .font(.caption).disabled(store.locked || store.pending != nil).accessibilityIdentifier("promptsButton")
-                Menu {
-                    Button("从相册选择", systemImage: "photo.on.rectangle") { composing = false; mediaContext = store.attachmentContext; showPhotos = true }
-                    Button("拍照", systemImage: "camera") {
-                        composing = false; mediaContext = store.attachmentContext
-                        Task {
-                            guard UIImagePickerController.isSourceTypeAvailable(.camera) else { store.error = "此设备无法使用相机"; return }
-                            let allowed = await AVCaptureDevice.requestAccess(for: .video)
-                            if allowed, mediaContext == store.attachmentContext { showCamera = true } else { store.error = "请在系统设置中允许槑槑使用相机，或从相册选择图片" }
-                        }
-                    }
-                    #if DEBUG
-                    if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
-                        Button("测试图片") {
-                            let data = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 200)).jpegData(withCompressionQuality: 0.8) { context in
-                                UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 200))
-                                ("图片提问" as NSString).draw(at: CGPoint(x: 30, y: 80), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 30), .foregroundColor: UIColor.white])
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        Toggle(isOn: Binding(get: { store.draft.webSearch }, set: store.setSearch)) { Label("联网搜索", systemImage: "globe") }
+                            .accessibilityIdentifier("webSearchToggle").toggleStyle(.button).font(.caption).disabled(store.locked || store.pending != nil)
+                        Button("提示词", systemImage: "text.book.closed") { composing = false; showPrompts = true }
+                            .font(.caption).disabled(store.locked || store.pending != nil).accessibilityIdentifier("promptsButton")
+                        Menu {
+                            Button("从相册选择", systemImage: "photo.on.rectangle") { composing = false; mediaContext = store.attachmentContext; showPhotos = true }
+                            Button("拍照", systemImage: "camera") {
+                                composing = false; mediaContext = store.attachmentContext
+                                Task {
+                                    guard UIImagePickerController.isSourceTypeAvailable(.camera) else { store.error = "此设备无法使用相机"; return }
+                                    let allowed = await AVCaptureDevice.requestAccess(for: .video)
+                                    if allowed, mediaContext == store.attachmentContext { showCamera = true } else { store.error = "请在系统设置中允许槑槑使用相机，或从相册选择图片" }
+                                }
                             }
-                            let context = store.attachmentContext; Task { await importImage(data, context: context) }
-                        }
-                    }
-                    #endif
-                } label: { Label("图片", systemImage: "photo") }
-                    .font(.caption).disabled(store.locked || store.pending != nil || preparing || store.draft.images.count >= 5 || store.failedImage != nil || store.currentModel?.supportsVision != true)
-                    .accessibilityIdentifier("addImageButton")
-                Spacer()
+                            #if DEBUG
+                            if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
+                                Button("测试图片") {
+                                    let data = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 200)).jpegData(withCompressionQuality: 0.8) { context in
+                                        UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 200))
+                                        ("图片提问" as NSString).draw(at: CGPoint(x: 30, y: 80), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 30), .foregroundColor: UIColor.white])
+                                    }
+                                    let context = store.attachmentContext; Task { await importImage(data, context: context) }
+                                }
+                            }
+                            #endif
+                        } label: { Label("图片", systemImage: "photo") }
+                            .font(.caption).disabled(store.locked || store.pending != nil || preparing || store.draft.images.count >= 5 || store.failedImage != nil || store.importingDocuments || store.currentModel?.supportsVision != true)
+                            .accessibilityIdentifier("addImageButton")
+                        Button("文件", systemImage: "paperclip") { composing = false; showDocuments = true }
+                            .font(.caption).disabled(store.locked || store.importingDocuments || store.pending != nil || preparing).accessibilityIdentifier("documentsButton")
+                    }.fixedSize(horizontal: true, vertical: false).frame(maxHeight: .infinity)
+                }.frame(height: toolRowHeight).accessibilityIdentifier("composerToolsScroll")
                 Button("刷新", systemImage: "arrow.clockwise") { Task { await store.refresh() } }
                     .labelStyle(.iconOnly).disabled(store.locked).accessibilityLabel("刷新服务器记录")
             }
@@ -249,6 +269,7 @@ private struct MessageRow: View, Equatable {
     var favorite = false
     var canFavorite = false
     var onFavorite: (() -> Void)?
+    var onRead: (() -> Void)?
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.message == rhs.message && lhs.favorite == rhs.favorite && lhs.canFavorite == rhs.canFavorite
     }
@@ -259,6 +280,8 @@ private struct MessageRow: View, Equatable {
                     .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 Spacer()
                 if message.role == "assistant" && message.id > 0 && !message.content.isEmpty {
+                    Button("朗读回答", systemImage: "speaker.wave.2") { onRead?() }
+                        .labelStyle(.iconOnly).accessibilityIdentifier("readMessage-\(message.id)")
                     Button(favorite ? "取消收藏" : "收藏回答", systemImage: favorite ? "star.fill" : "star") { onFavorite?() }
                         .labelStyle(.iconOnly).disabled(!canFavorite).accessibilityIdentifier("favoriteMessage-\(message.id)")
                 }
