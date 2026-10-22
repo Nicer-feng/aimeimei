@@ -120,7 +120,11 @@ final class MeimeiUITests: XCTestCase {
         app.terminate()
         app.launchArguments += ["-appearance", "dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
         app.launch()
-        login(); capture("07-dark-larger-text")
+        login()
+        let tools = app.scrollViews["composerToolsScroll"]
+        XCTAssertTrue(tools.waitForExistence(timeout: 5)); tools.swipeLeft()
+        XCTAssertTrue(app.buttons["documentsButton"].isHittable, "大字模式下应能横向滑动到文件工具")
+        tools.swipeRight(); capture("07-dark-larger-text")
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         let rotated = XCTNSPredicateExpectation(predicate: NSPredicate { [unowned self] _, _ in

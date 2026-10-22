@@ -15,6 +15,7 @@ struct ChatView: View {
     @State private var showCamera = false
     @State private var preparing = false
     @State private var mediaContext = UUID()
+    @ScaledMetric(relativeTo: .caption) private var toolRowHeight = 36.0
     @FocusState private var composing: Bool
     var body: some View {
         VStack(spacing: 0) {
@@ -212,37 +213,40 @@ struct ChatView: View {
                 }
             }
             HStack {
-                Toggle(isOn: Binding(get: { store.draft.webSearch }, set: store.setSearch)) { Label("联网搜索", systemImage: "globe") }
-                    .accessibilityIdentifier("webSearchToggle").toggleStyle(.button).font(.caption).disabled(store.locked || store.pending != nil)
-                Button("提示词", systemImage: "text.book.closed") { composing = false; showPrompts = true }
-                    .font(.caption).disabled(store.locked || store.pending != nil).accessibilityIdentifier("promptsButton")
-                Menu {
-                    Button("从相册选择", systemImage: "photo.on.rectangle") { composing = false; mediaContext = store.attachmentContext; showPhotos = true }
-                    Button("拍照", systemImage: "camera") {
-                        composing = false; mediaContext = store.attachmentContext
-                        Task {
-                            guard UIImagePickerController.isSourceTypeAvailable(.camera) else { store.error = "此设备无法使用相机"; return }
-                            let allowed = await AVCaptureDevice.requestAccess(for: .video)
-                            if allowed, mediaContext == store.attachmentContext { showCamera = true } else { store.error = "请在系统设置中允许槑槑使用相机，或从相册选择图片" }
-                        }
-                    }
-                    #if DEBUG
-                    if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
-                        Button("测试图片") {
-                            let data = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 200)).jpegData(withCompressionQuality: 0.8) { context in
-                                UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 200))
-                                ("图片提问" as NSString).draw(at: CGPoint(x: 30, y: 80), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 30), .foregroundColor: UIColor.white])
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        Toggle(isOn: Binding(get: { store.draft.webSearch }, set: store.setSearch)) { Label("联网搜索", systemImage: "globe") }
+                            .accessibilityIdentifier("webSearchToggle").toggleStyle(.button).font(.caption).disabled(store.locked || store.pending != nil)
+                        Button("提示词", systemImage: "text.book.closed") { composing = false; showPrompts = true }
+                            .font(.caption).disabled(store.locked || store.pending != nil).accessibilityIdentifier("promptsButton")
+                        Menu {
+                            Button("从相册选择", systemImage: "photo.on.rectangle") { composing = false; mediaContext = store.attachmentContext; showPhotos = true }
+                            Button("拍照", systemImage: "camera") {
+                                composing = false; mediaContext = store.attachmentContext
+                                Task {
+                                    guard UIImagePickerController.isSourceTypeAvailable(.camera) else { store.error = "此设备无法使用相机"; return }
+                                    let allowed = await AVCaptureDevice.requestAccess(for: .video)
+                                    if allowed, mediaContext == store.attachmentContext { showCamera = true } else { store.error = "请在系统设置中允许槑槑使用相机，或从相册选择图片" }
+                                }
                             }
-                            let context = store.attachmentContext; Task { await importImage(data, context: context) }
-                        }
-                    }
-                    #endif
-                } label: { Label("图片", systemImage: "photo") }
-                    .font(.caption).disabled(store.locked || store.pending != nil || preparing || store.draft.images.count >= 5 || store.failedImage != nil || store.importingDocuments || store.currentModel?.supportsVision != true)
-                    .accessibilityIdentifier("addImageButton")
-                Button("文件", systemImage: "paperclip") { composing = false; showDocuments = true }
-                    .font(.caption).disabled(store.locked || store.importingDocuments || store.pending != nil || preparing).accessibilityIdentifier("documentsButton")
-                Spacer()
+                            #if DEBUG
+                            if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
+                                Button("测试图片") {
+                                    let data = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 200)).jpegData(withCompressionQuality: 0.8) { context in
+                                        UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 200))
+                                        ("图片提问" as NSString).draw(at: CGPoint(x: 30, y: 80), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 30), .foregroundColor: UIColor.white])
+                                    }
+                                    let context = store.attachmentContext; Task { await importImage(data, context: context) }
+                                }
+                            }
+                            #endif
+                        } label: { Label("图片", systemImage: "photo") }
+                            .font(.caption).disabled(store.locked || store.pending != nil || preparing || store.draft.images.count >= 5 || store.failedImage != nil || store.importingDocuments || store.currentModel?.supportsVision != true)
+                            .accessibilityIdentifier("addImageButton")
+                        Button("文件", systemImage: "paperclip") { composing = false; showDocuments = true }
+                            .font(.caption).disabled(store.locked || store.importingDocuments || store.pending != nil || preparing).accessibilityIdentifier("documentsButton")
+                    }.fixedSize(horizontal: true, vertical: false).frame(maxHeight: .infinity)
+                }.frame(height: toolRowHeight).accessibilityIdentifier("composerToolsScroll")
                 Button("刷新", systemImage: "arrow.clockwise") { Task { await store.refresh() } }
                     .labelStyle(.iconOnly).disabled(store.locked).accessibilityLabel("刷新服务器记录")
             }
