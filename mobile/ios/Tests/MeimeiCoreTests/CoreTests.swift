@@ -150,6 +150,58 @@ final class APITests: XCTestCase {
         XCTAssertEqual(messages.first?.id, 123); XCTAssertEqual(messages.first?.status, "interrupted")
         XCTAssertEqual(messages.first?.attachments, ["材料.pdf"])
     }
+    func testFavoritesUseNumericMessageIDAndIdempotentRemoval() async throws {
+        let raw = #"{"id":"f1","message_id":42,"conversation_id":"c1","conversation_title":"测试会话","content":"收藏正文"}"#
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/favorites"); XCTAssertEqual(request.httpMethod, "POST")
+            let value = try self.body(request)
+            XCTAssertEqual(value["message_id"] as? Int64, 42); XCTAssertEqual(Set(value.keys), ["message_id"])
+            return (201, [:], "{\"favorite\":\(raw)}")
+        }
+        let item = try await api.favorite(messageID: 42); XCTAssertEqual(item.id, "f1")
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET"); XCTAssertEqual(request.url?.path, "/api/favorites")
+            return (200, [:], "{\"favorites\":[\(raw)]}")
+        }
+        let values = try await api.favorites(); XCTAssertEqual(values, [item])
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "DELETE"); XCTAssertEqual(request.url?.path, "/api/favorites/message/42")
+            XCTAssertNil(request.httpBody); return (200, [:], #"{"ok":true}"#)
+        }
+        try await api.unfavorite(messageID: 42)
+    }
+    func testSearchEncodesQueryWithoutChangingLiteralPlusOrQueryBoundaries() async throws {
+        let keyword = "中文 C++ & # ? /"
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET"); XCTAssertEqual(request.url?.path, "/api/search")
+            let components = try XCTUnwrap(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
+            XCTAssertEqual(components.queryItems?.count, 1); XCTAssertEqual(components.queryItems?.first?.value, keyword)
+            XCTAssertTrue(components.percentEncodedQuery?.contains("%2B%2B") == true)
+            return (200, [:], #"{"results":[{"id":"message:42","type":"message","session_id":"c1","message_id":42,"title":"标题","snippet":"正文"},{"id":"media:1","type":"media","session_id":"","message_id":0,"title":"视频","snippet":"摘要"}]}"#)
+        }
+        let results = try await api.search(query: keyword)
+        XCTAssertEqual(results.count, 1); XCTAssertEqual(results.first?.messageID, 42)
+        XCTAssertEqual(results.first?.conversationID, "c1")
+    }
+    func testPromptsAreReadOnlyAndDeletedFavoritesKeepSnapshot() async throws {
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET"); XCTAssertEqual(request.url?.path, "/api/prompts")
+            return (200, [:], #"{"prompts":[{"id":"p1","title":"计划","content":"帮我制定计划"}]}"#)
+        }
+        let prompts = try await api.prompts(); XCTAssertEqual(prompts.first?.content, "帮我制定计划")
+        let item = try JSONDecoder().decode(FavoriteMessage.self, from: Data(#"{"id":"f1","message_id":42,"conversation_id":"deleted","conversation_title":"原会话已删除","content":"保留内容"}"#.utf8))
+        XCTAssertFalse(item.canOpenConversation); XCTAssertEqual(item.content, "保留内容")
+        let message = try JSONDecoder().decode(ChatMessage.self, from: Data(#"{"id":42,"role":"assistant","content":"保留内容","favorite_id":"f1"}"#.utf8))
+        XCTAssertEqual(message.favoriteID, "f1")
+    }
+    func testLibraryFailureIsNotAnEmptySuccessOrRetriedWrite() async throws {
+        var calls = 0
+        StubProtocol.handler = { _ in calls += 1; return (500, ["Content-Type": "text/html"], "<html>upstream unavailable</html>") }
+        do { _ = try await api.favorites(); XCTFail("失败不能伪装为空列表") } catch { XCTAssertEqual(error as? PlatformError, .http(500, "")) }
+        StubProtocol.handler = { _ in calls += 1; throw URLError(.networkConnectionLost) }
+        do { _ = try await api.favorite(messageID: 42); XCTFail("发送失败应明确返回") } catch {}
+        XCTAssertEqual(calls, 2)
+    }
     func testSMSLoginContractAndSessionCookie() async throws {
         StubProtocol.handler = { request in
             XCTAssertEqual(request.httpMethod, "GET"); XCTAssertEqual(request.url?.path, "/api/sms-login/config")

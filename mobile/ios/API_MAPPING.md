@@ -17,11 +17,17 @@
 | 置顶 | POST `/api/conversations/{id}/pin`、`/unpin` | 不修改模型配置 |
 | 删除 | DELETE `/api/conversations/{id}` | 服务端现有归档行为 |
 | 消息历史 | GET `/api/conversations/{id}/messages` | 数字消息 ID、`reasoning_content`、`generation_status`、附件文件名 |
+| 收藏列表 | GET `/api/favorites` | `message_id`、`conversation_id`、`conversation_title`、`content`；保留删除会话的快照 |
+| 收藏回答 | POST `/api/favorites` | 数字 `message_id`，不自动重试；成功后同步本机星标 |
+| 取消收藏 | DELETE `/api/favorites/message/{id}` | 当前用户内幂等删除，允许移除旧会话的收藏 |
+| 提示词库 | GET `/api/prompts` | 仅读取 `id`、`title`、`content`，不调用公共模板编辑接口 |
+| 全文搜索 | GET `/api/search?q=...` | URL 编码关键词，保留字面加号；支持 `conversation/message/favorite`，用 `session_id/message_id` 定位 |
 | 流式发送 | POST `/api/conversations/{id}/messages` | `content`、布尔 `web_search`、布尔 `use_profile: true` |
 
 思考档位为 `fast`、`balanced`、`deep`。所有私有接口由现有后端按账号校验权限。
 短信登录仅限后台已绑定、已启用且未停用的中国大陆手机号，不注册新账号。换号会作废本机旧挑战，切换登录方式不会清零重发倒计时。验证码和挑战不写本地存储或日志。
 模型提供者密钥不进入 App；客户端不使用 Bearer token、不请求 `X-Admin-Key`。
+搜索包含 250ms 防抖及请求版本隔离；过时、已取消或退出账号后的响应不写回界面。服务端音视频分析结果不属于本版原生搜索范围。收藏列表沿用服务端最多 300 项、搜索沿用最多 60 项返回限制。
 
 SSE 解析标准 `data:` 事件及空行，支持多行数据、CRLF、UTF-8、reasoning 三种字段和搜索状态。
 只有有效 `message_saved.message_id` 及历史核对可确认保存；客户端不把 `[DONE]` 当成成功凭证。

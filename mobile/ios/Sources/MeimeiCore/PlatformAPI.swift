@@ -28,6 +28,11 @@ public protocol PlatformServing: Sendable {
     func pinConversation(id: String, pinned: Bool) async throws
     func deleteConversation(id: String) async throws
     func messages(id: String) async throws -> [ChatMessage]
+    func favorites() async throws -> [FavoriteMessage]
+    func favorite(messageID: Int64) async throws -> FavoriteMessage
+    func unfavorite(messageID: Int64) async throws
+    func prompts() async throws -> [PromptTemplate]
+    func search(query: String) async throws -> [GlobalSearchResult]
     func stream(id: String, content: String, webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws
 }
 
@@ -53,9 +58,14 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
     }
     deinit { session.invalidateAndCancel() }
 
-    private func request(_ path: [String], method: String = "GET", body: [String: Any]? = nil) throws -> URLRequest {
+    private func request(_ path: [String], method: String = "GET", body: [String: Any]? = nil, query: [URLQueryItem] = []) throws -> URLRequest {
         let url = path.reduce(base) { $0.appendingPathComponent($1) }
-        var request = URLRequest(url: url)
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { components.queryItems = query }
+        // 服务端按表单规则解析查询串，必须保留关键词中的字面加号。
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        guard let endpoint = components.url else { throw PlatformError.invalidURL }
+        var request = URLRequest(url: endpoint)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let credential = try credentials.read(), credential.expires > Date() {
@@ -76,8 +86,8 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
         }
         return http
     }
-    private func call<T: Decodable>(_ type: T.Type, path: [String], method: String = "GET", body: [String: Any]? = nil) async throws -> T {
-        let (data, response) = try await session.data(for: request(path, method: method, body: body))
+    private func call<T: Decodable>(_ type: T.Type, path: [String], method: String = "GET", body: [String: Any]? = nil, query: [URLQueryItem] = []) async throws -> T {
+        let (data, response) = try await session.data(for: request(path, method: method, body: body, query: query))
         let http = try checked(response, data: data)
         if let header = http.value(forHTTPHeaderField: "Set-Cookie") {
             let cookie = HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": header], for: base).first { $0.name == "ap_session" }
@@ -96,6 +106,10 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
     private struct Messages: Decodable { let messages: [ChatMessage] }
     private struct OK: Decodable { let ok: Bool }
     private struct SMSConfig: Decodable { let sms_auth: SMSLoginConfiguration }
+    private struct Favorites: Decodable { let favorites: [FavoriteMessage] }
+    private struct Favorite: Decodable { let favorite: FavoriteMessage }
+    private struct Prompts: Decodable { let prompts: [PromptTemplate] }
+    private struct Search: Decodable { let results: [GlobalSearchResult] }
 
     public func captcha() async throws -> Captcha { try await call(Captcha.self, path: ["api", "captcha"]) }
     public func currentAccount() async throws -> Account? {
@@ -154,6 +168,17 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
         _ = try await call(OK.self, path: ["api", "conversations", id], method: "DELETE")
     }
     public func messages(id: String) async throws -> [ChatMessage] { try await call(Messages.self, path: ["api", "conversations", id, "messages"]).messages }
+    public func favorites() async throws -> [FavoriteMessage] { try await call(Favorites.self, path: ["api", "favorites"]).favorites }
+    public func favorite(messageID: Int64) async throws -> FavoriteMessage {
+        try await call(Favorite.self, path: ["api", "favorites"], method: "POST", body: ["message_id": messageID]).favorite
+    }
+    public func unfavorite(messageID: Int64) async throws {
+        _ = try await call(OK.self, path: ["api", "favorites", "message", String(messageID)], method: "DELETE")
+    }
+    public func prompts() async throws -> [PromptTemplate] { try await call(Prompts.self, path: ["api", "prompts"]).prompts }
+    public func search(query: String) async throws -> [GlobalSearchResult] {
+        try await call(Search.self, path: ["api", "search"], query: [URLQueryItem(name: "q", value: String(query.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)))]).results.filter(\.supported)
+    }
 
     /// 所有发送只调用一次 POST；EOF、finish_reason、[DONE] 均不代表入库成功。
     public func stream(id: String, content: String, webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {

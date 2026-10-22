@@ -4,6 +4,7 @@ struct RootView: View {
     let store: AppStore
     @State private var showHistory = false
     @State private var showSettings = false
+    @State private var librarySection: LibrarySection?
     var body: some View {
         Group {
             if store.starting { ProgressView("正在恢复账号…") }
@@ -18,6 +19,10 @@ struct RootView: View {
                                 Button("历史", systemImage: "sidebar.left") { showHistory = true }
                                     .accessibilityIdentifier("historyButton").disabled(store.locked)
                             }
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("资料库", systemImage: "square.grid.2x2") { librarySection = .favorites }
+                                    .accessibilityIdentifier("libraryButton").disabled(store.locked)
+                            }
                             ToolbarItemGroup(placement: .topBarTrailing) {
                                 Button("新聊天", systemImage: "square.and.pencil") { store.newChat() }
                                     .accessibilityIdentifier("newChatButton").disabled(store.locked)
@@ -30,8 +35,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $showHistory) { HistoryView(store: store) }
         .sheet(isPresented: $showSettings) { SettingsView(store: store) }
+        .sheet(item: $librarySection) { LibraryView(store: store, initial: $0) }
         .onChange(of: store.account?.id) { _, account in
-            if account == nil { showSettings = false; showHistory = false }
+            if account == nil { showSettings = false; showHistory = false; librarySection = nil }
         }
         .environment(\.openURL, OpenURLAction { url in
             guard ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return .discarded }
@@ -58,7 +64,7 @@ private struct SettingsView: View {
                     }
                 }
                 Section("关于") {
-                    LabeledContent("版本", value: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"))")
+                    LabeledContent("版本", value: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"))")
                     Text("支持 iOS 17 及以上版本").font(.footnote).foregroundStyle(.secondary)
                     Text("切后台会结束接收；返回后核对服务器已保存内容。不会自动重发问题。").font(.footnote).foregroundStyle(.secondary)
                 }

@@ -13,6 +13,15 @@ final class AppStore {
     private(set) var models: [ChatModel] = []
     private(set) var selected: Conversation?
     private(set) var messages: [ChatMessage] = []
+    private(set) var favorites: [FavoriteMessage] = []
+    private(set) var prompts: [PromptTemplate] = []
+    private(set) var searchResults: [GlobalSearchResult] = []
+    private(set) var searching = false
+    private(set) var searchError: String?
+    private(set) var focusedMessageID: Int64?
+    private(set) var focusRequest = UUID()
+    @ObservationIgnored private var searchRequest = UUID()
+    @ObservationIgnored private var favoriteOverrides: [Int64: Bool] = [:]
     private(set) var draft = Draft()
     private(set) var pending: PendingSend?
     private(set) var live: LiveReply?
@@ -113,6 +122,7 @@ final class AppStore {
     private func clearAccount() {
         generation?.cancel(); runID = UUID()
         account = nil; selected = nil; messages = []; conversations = []; models = []
+        favorites = []; prompts = []; favoriteOverrides = [:]; resetSearch(); focusedMessageID = nil
         draft = Draft(); pending = nil; live = nil; streaming = false; captcha = nil
         smsLogin = SMSLoginState(); loginNotice = nil
         do { try api.clearCredential() } catch { self.error = "本机登录凭证未能清除，请重试退出" }
@@ -175,13 +185,14 @@ final class AppStore {
     func newChat() {
         guard !locked else { return }
         generation?.cancel(); runID = UUID()
-        selected = nil; messages = []; live = nil; restoreDraft(); error = nil
+        selected = nil; messages = []; live = nil; restoreDraft(); error = nil; focusedMessageID = nil
     }
     func select(_ item: Conversation) async {
         await work {
             generation?.cancel(); runID = UUID()
             let history = try await api.messages(id: item.id)
-            selected = item; messages = history; live = nil; restoreDraft()
+            selected = item; messages = history; live = nil; focusedMessageID = nil; restoreDraft()
+            for message in history { favoriteOverrides[message.id] = nil }
             try resolvePending()
         }
     }
@@ -200,6 +211,7 @@ final class AppStore {
     private func loadMessages() async throws {
         guard let selected else { return }
         messages = try await api.messages(id: selected.id)
+        for message in messages { favoriteOverrides[message.id] = nil }
         try resolvePending()
     }
     private func resolvePending() throws {
@@ -311,5 +323,105 @@ final class AppStore {
             try local.setPending(nil, accountID: account.id, conversationID: pending.conversationID)
             draft.text = pending.content; saveDraft(); self.pending = nil; live = nil
         } catch { report(error) }
+    }
+}
+
+extension AppStore {
+    func isFavorite(_ message: ChatMessage) -> Bool { favoriteOverrides[message.id] ?? (message.favoriteID != nil) }
+
+    func loadFavorites() async {
+        guard let owner = account?.id else { return }
+        await work {
+            let values = try await api.favorites()
+            guard account?.id == owner else { return }
+            let known = Set(favorites.map(\.messageID)).union(values.map(\.messageID))
+            let active = Set(values.map(\.messageID))
+            for id in known { favoriteOverrides[id] = active.contains(id) }
+            favorites = values
+        }
+    }
+    func toggleFavorite(_ message: ChatMessage) async {
+        guard message.role == "assistant", message.id > 0, !message.content.isEmpty, let owner = account?.id else { return }
+        await work {
+            if isFavorite(message) {
+                try await api.unfavorite(messageID: message.id)
+                guard account?.id == owner else { return }
+                favoriteOverrides[message.id] = false; favorites.removeAll { $0.messageID == message.id }
+            } else {
+                let value = try await api.favorite(messageID: message.id)
+                guard account?.id == owner else { return }
+                favoriteOverrides[message.id] = true
+                favorites.removeAll { $0.messageID == message.id }; favorites.insert(value, at: 0)
+            }
+        }
+    }
+    func removeFavorite(_ item: FavoriteMessage) async {
+        guard let owner = account?.id else { return }
+        await work {
+            try await api.unfavorite(messageID: item.messageID)
+            guard account?.id == owner else { return }
+            favoriteOverrides[item.messageID] = false; favorites.removeAll { $0.id == item.id }
+        }
+    }
+    func loadPrompts() async {
+        guard let owner = account?.id else { return }
+        await work {
+            let values = try await api.prompts()
+            guard account?.id == owner else { return }
+            prompts = values
+        }
+    }
+    @discardableResult func applyPrompt(_ item: PromptTemplate, replace: Bool = false) -> Bool {
+        guard account != nil, !locked, pending == nil, replace || draft.text.isEmpty else { return false }
+        setText(item.content); return true
+    }
+    func resetSearch() {
+        searchRequest = UUID(); searchResults = []; searchError = nil; searching = false
+    }
+    func searchLibrary(_ query: String) async {
+        guard let owner = account?.id else { return }
+        let requestID = UUID(); searchRequest = requestID
+        searchResults = []; searchError = nil; error = nil; searching = true
+        defer { if searchRequest == requestID { searching = false } }
+        do {
+            try await Task.sleep(for: .milliseconds(250))
+            let values = try await api.search(query: query)
+            try Task.checkCancellation()
+            guard searchRequest == requestID, account?.id == owner else { return }
+            searchResults = values
+        } catch {
+            guard searchRequest == requestID, account?.id == owner, !Task.isCancelled else { return }
+            if error is CancellationError { return }
+            if let failure = error as? PlatformError, failure.isUnauthorized { report(failure) }
+            else { searchError = "搜索失败，请检查网络后重试" }
+        }
+    }
+    /// 先取得新数据并核验目标，再切换会话，避免失败时丢失当前草稿和阅读位置。
+    func openMessage(conversationID: String, messageID: Int64 = 0) async -> Bool {
+        guard let owner = account?.id, !conversationID.isEmpty else { return false }
+        var opened = false
+        await work {
+            let list = try await api.conversations()
+            guard account?.id == owner else { return }
+            guard let item = list.first(where: { $0.id == conversationID }) else {
+                error = "原会话已删除或不可访问，收藏内容仍可查看"; return
+            }
+            let history = try await api.messages(id: item.id)
+            guard account?.id == owner else { return }
+            guard messageID == 0 || history.contains(where: { $0.id == messageID }) else {
+                error = "原消息已删除或不在当前返回的历史中"; return
+            }
+            generation?.cancel(); runID = UUID()
+            conversations = list; selected = item; messages = history; live = nil
+            for message in history { favoriteOverrides[message.id] = nil }
+            restoreDraft(); try resolvePending()
+            focusedMessageID = messageID > 0 ? messageID : nil; focusRequest = UUID(); opened = true
+        }
+        return opened
+    }
+    func favoriteSnapshot(resultID: String) async -> FavoriteMessage? {
+        await loadFavorites()
+        let id = resultID.hasPrefix("favorite:") ? String(resultID.dropFirst(9)) : resultID
+        return favorites.first { $0.id == id }
     }
 }

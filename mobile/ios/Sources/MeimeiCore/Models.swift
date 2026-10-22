@@ -51,14 +51,16 @@ public struct ChatMessage: Decodable, Identifiable, Equatable, Sendable {
     public let reasoning: String
     public let status: String
     public let attachments: [String]
+    public let favoriteID: String?
 
-    public init(id: Int64, role: String, content: String, reasoning: String = "", status: String = "", attachments: [String] = []) {
+    public init(id: Int64, role: String, content: String, reasoning: String = "", status: String = "", attachments: [String] = [], favoriteID: String? = nil) {
         self.id = id; self.role = role; self.content = content
         self.reasoning = reasoning; self.status = status; self.attachments = attachments
+        self.favoriteID = favoriteID
     }
     enum CodingKeys: String, CodingKey {
         case id, role, content, documents, images
-        case reasoning = "reasoning_content", status = "generation_status"
+        case reasoning = "reasoning_content", status = "generation_status", favoriteID = "favorite_id"
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -67,6 +69,7 @@ public struct ChatMessage: Decodable, Identifiable, Equatable, Sendable {
         content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
         reasoning = try c.decodeIfPresent(String.self, forKey: .reasoning) ?? ""
         status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        favoriteID = try c.decodeIfPresent(String.self, forKey: .favoriteID)
         struct Attachment: Decodable { let filename: String? }
         let files = try c.decodeIfPresent([Attachment].self, forKey: .documents) ?? []
         let images = try c.decodeIfPresent([Attachment].self, forKey: .images) ?? []
@@ -100,6 +103,8 @@ public enum PlatformError: Error, LocalizedError, Equatable {
              .http(_, "验证码核验失败，请稍后重试"): return "短信服务暂不可用，请稍后重试或使用账号密码登录"
         case .http(_, "captcha incorrect"): return "验证码不正确或已过期，请重新输入"
         case .http(_, "password incorrect"): return "账号或密码不正确"
+        case .http(_, "message not found"), .http(_, "conversation not found"): return "原消息或会话已删除，请刷新后重试"
+        case .http(_, "favorite not found"): return "该收藏已移除，请刷新列表"
         case .http(401, _): return "登录已失效，请重新登录"
         case .http(409, _): return "当前会话仍在生成，请稍后刷新核对"
         case .http(400, _): return "请求未被接受，请检查模型或联网配置"
