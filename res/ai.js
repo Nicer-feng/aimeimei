@@ -1583,7 +1583,7 @@
         const rect = composer.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return;
         const messages = $("messages");
-        const keepAtBottom = Boolean(messages && state.followOutput && isNearBottom(messages));
+        const keepAtBottom = Boolean(messages && state.messages.length && state.followOutput && isNearBottom(messages));
         const style = getComputedStyle(composer);
         const bottom = Math.max(0, Number.parseFloat(style.bottom) || 0);
         const safeSpace = Math.ceil(rect.height + bottom + 28);
@@ -1596,6 +1596,7 @@
 	    schedulePetPositionCorrection();
         if (keepAtBottom) {
           requestAnimationFrame(() => {
+            if (!state.messages.length) return;
             messages.scrollTop = messages.scrollHeight;
             updateScrollLatestButton();
             updateConversationMinimapViewport();
@@ -4401,7 +4402,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.28.7" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.28.8" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -4434,6 +4435,7 @@
 	          insertPromptText(button.dataset.prompt || "");
 	        });
 		      });
+          box.scrollTop = 0;
 	      queueLucideRefresh();
 		    }
 
@@ -6767,7 +6769,7 @@
 	      } else {
 	        const avatar = document.createElement("img");
 	        avatar.className = "role-avatar";
-	        avatar.src = "/res/meimei-avatar.png";
+	        avatar.src = "/res/meimei-avatar.png?brand=20261023";
 	        avatar.alt = "";
 	        role.append(avatar, document.createTextNode(message.thinking ? "槑槑 · 思考中" : "槑槑"));
 	      }
@@ -7069,7 +7071,7 @@
 	        role.replaceChildren();
 	        const avatar = document.createElement("img");
 	        avatar.className = "role-avatar";
-	        avatar.src = "/res/meimei-avatar.png";
+	        avatar.src = "/res/meimei-avatar.png?brand=20261023";
 	        avatar.alt = "";
 	        role.append(avatar, document.createTextNode("槑槑"));
 	      }

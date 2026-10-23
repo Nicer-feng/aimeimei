@@ -41,7 +41,7 @@
     role.className = "share-message-role";
     if (message.role === "assistant") {
       const avatar = document.createElement("img");
-      avatar.src = "/res/meimei-avatar.png";
+      avatar.src = "/res/meimei-avatar.png?brand=20261023";
       avatar.alt = "";
       role.append(avatar, document.createTextNode("槑槑"));
     } else {

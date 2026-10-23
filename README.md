@@ -2,7 +2,7 @@
 
 AI槑槑 是一个自用轻量 AI 平台，使用 Python 标准库和 SQLite 实现。项目保持轻量模块化形态，无 Docker、无前端框架；文件分享产品使用 Argon2 和官方 OSS SDK。
 
-AI槑槑当前版本：`2.28.7`
+AI槑槑当前版本：`2.28.8`
 
 ## 写稿模式
 
@@ -20,7 +20,7 @@ AI槑槑当前版本：`2.28.7`
 
 ## 独立产品：槑槑云
 
-槑槑云独立版本为 `0.5.3`，后台 `/admin/share`，外部分享 `/share/{shareCode}`。与 AI槑槑共仓库，页面、业务、数据表和版本记录独立，复用现有登录、SQLite 和 OSS。基础文件分享已完成真实 OSS 与浏览器验收，各版本新增功能的验证范围分别记录。详见 [产品说明](file_share/README.md)、[验收记录](file_share/ACCEPTANCE.md) 和 [部署清单](file_share/DEPLOYMENT.md)。
+槑槑云独立版本为 `0.7.1`，后台 `/admin/share`，外部分享 `/share/{shareCode}`。与 AI槑槑共仓库，页面、业务、数据表和版本记录独立，复用现有登录、SQLite 和 OSS。基础文件分享已完成真实 OSS 与浏览器验收，各版本新增功能的验证范围分别记录。详见 [产品说明](file_share/README.md)、[验收记录](file_share/ACCEPTANCE.md) 和 [部署清单](file_share/DEPLOYMENT.md)。
 
 ## 多产品共仓管理
 

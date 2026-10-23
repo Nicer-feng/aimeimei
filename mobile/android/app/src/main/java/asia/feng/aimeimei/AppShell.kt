@@ -21,6 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
@@ -151,7 +152,7 @@ private fun HistoryDrawer(model: PlatformViewModel, onNew: () -> Unit, onOpen: (
     val enabled = !model.streaming && !model.busy
     ModalDrawerSheet(modifier = Modifier.widthIn(max = 340.dp).fillMaxHeight()) {
         Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.meimei_avatar), "槑槑", Modifier.size(36.dp))
+            Image(painterResource(R.drawable.meimei_avatar), "槑槑", Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)))
             Text("AI槑槑", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 10.dp).weight(1f))
         }
         FilledTonalButton(onClick = onNew, enabled = enabled, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {

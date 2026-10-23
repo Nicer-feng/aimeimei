@@ -29,6 +29,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
@@ -80,7 +81,7 @@ internal fun LoginForm(model: PlatformViewModel) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Image(painterResource(R.drawable.meimei_avatar), contentDescription = "槑槑", modifier = Modifier.size(48.dp))
+                Image(painterResource(R.drawable.meimei_avatar), contentDescription = "槑槑", modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)))
                 Column { Text("欢迎回来", style = MaterialTheme.typography.titleLarge);Text("登录你的槑槑账号", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
         }

@@ -151,7 +151,7 @@ struct ChatView: View {
     }
     private var welcome: some View {
         VStack(spacing: 18) {
-            Image("Welcome").resizable().scaledToFit().frame(maxWidth: 260).accessibilityHidden(true)
+            Image("Welcome").resizable().scaledToFit().frame(maxWidth: 260, maxHeight: 220).accessibilityHidden(true)
             Text("今天，想聊点什么？").font(.title2.bold())
             Text("一个想法，一点好奇，或是需要一起理清的小事。")
                 .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)

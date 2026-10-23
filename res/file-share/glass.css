@@ -323,3 +323,7 @@ body::before { content:""; position:fixed; inset:0; z-index:-1; pointer-events:n
 #dialogBody { padding:2px; }
 .office-versions>:not(.dialog-head):not(#officeVersionsBody):not(#pdfVersionsBody) { flex-shrink:0; }
 .office-close-card { max-height:calc(100dvh - 40px); overflow:auto; overscroll-behavior:contain; }
+
+/* 全站品牌头像使用完整方图，容器负责统一圆角。 */
+.brand-mark { overflow:hidden; }
+.brand-mark img { display:block; width:100%; height:100%; object-fit:contain; border-radius:inherit; }

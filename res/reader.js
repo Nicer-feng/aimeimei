@@ -90,7 +90,7 @@
     article.className = 'bubble assistant reader-page';
     article.dataset.readerPage = page.page; article.dataset.start = page.start_offset;
     const role = document.createElement('div'); role.className = 'role';
-    const avatar = document.createElement('img'); avatar.src = '/res/meimei-avatar.png'; avatar.alt = ''; avatar.width = 24; avatar.height = 24;
+    const avatar = document.createElement('img'); avatar.src = '/res/meimei-avatar.png?brand=20261023'; avatar.alt = ''; avatar.width = 24; avatar.height = 24;
     role.append(avatar, document.createTextNode('槑槑'));
     const text = document.createElement('p'); text.className = 'markdown reader-text'; text.textContent = page.content;
     article.append(role, text);

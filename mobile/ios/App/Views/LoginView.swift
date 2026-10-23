@@ -15,7 +15,7 @@ struct LoginView: View {
         ScrollView {
             VStack(spacing: 24) {
                 VStack(spacing: 12) {
-                    Image("Avatar").resizable().scaledToFit().frame(width: 88, height: 88).accessibilityHidden(true)
+                    Image("Avatar").resizable().scaledToFit().frame(width: 88, height: 88).clipShape(RoundedRectangle(cornerRadius: 24)).accessibilityHidden(true)
                     Text("你好，我是槑槑").font(.largeTitle.bold())
                     Text("用熟悉的账号，继续你的想法").foregroundStyle(.secondary)
                 }.padding(.top, 44)
