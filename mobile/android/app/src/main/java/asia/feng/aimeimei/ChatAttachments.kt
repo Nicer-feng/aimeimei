@@ -46,6 +46,7 @@ internal fun attachmentRows(array: JSONArray?) = if (array == null) emptyList() 
     (0 until array.length()).mapNotNull { array.optJSONObject(it) }
 
 internal fun attachmentStatus(item: ChatAttachment) = when (item.status) {
+    "local" -> "仅保存在本机 · 发送时上传"
     "copying" -> "正在读取文件…"; "queued" -> "等待上传 · 可先预览"; "uploading" -> "上传 ${item.progress}%"; "failed" -> item.error.ifBlank { "处理失败，请重试或移除" }
     "completed" -> if (item.image) "图片已就绪" else "解析完成${if (item.pages > 0) " · ${item.pages} 页" else ""}"
     else -> "正在解析，可稍后刷新"

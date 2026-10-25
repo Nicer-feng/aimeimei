@@ -41,6 +41,9 @@ import kotlinx.coroutines.flow.first
 
 @Composable
 internal fun ChatScreen(model: PlatformViewModel, openTool: (String) -> Unit) {
+    LaunchedEffect(model.account?.id, model.selected?.id) {
+        if (model.selected != null) model.tools.discussions.refreshAvailability()
+    }
     if (model.selected == null) {
         Column(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -143,7 +146,9 @@ private fun MessageBody(message: ChatMessage, model: PlatformViewModel? = null) 
                     Text(quote, Modifier.padding(10.dp), maxLines = 4, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                 } }
                 MarkdownText(display.second.ifBlank { if (message.status in listOf("failed", "interrupted")) "本次回答已中断" else "暂无正文" },
-                    onQuote = model?.takeIf { !it.streaming && it.pending == null }?.let { viewModel -> { text -> viewModel.tools.quote(message, text) } })
+                    onQuote = model?.takeIf { !it.streaming && it.pending == null }?.let { viewModel -> { text -> viewModel.tools.quote(message, text) } },
+                    onDiscuss = model?.takeIf { !it.streaming && !it.busy && it.pending == null && it.tools.discussions.available && (message.id.toLongOrNull() ?: 0) > 0 }
+                        ?.let { viewModel -> { text -> viewModel.tools.discussions.start(message, text) } })
             }
         }
         if (model != null) message.media.forEach { item -> AttachmentCard(item, onOpen = { model.tools.showPreview(item) }, tools = model.tools) }
@@ -161,6 +166,9 @@ private fun MessageBody(message: ChatMessage, model: PlatformViewModel? = null) 
                     Text("以服务端保存的用量为准，未返回用量不表示没有消耗。", style = MaterialTheme.typography.bodySmall)
                 }
             }, confirmButton = { TextButton(onClick = { details = false }) { Text("关闭") } })
+        }
+        if (model != null && model.tools.discussions.available && (message.id.toLongOrNull() ?: 0) > 0) {
+            TextButton(onClick = { model.tools.discussions.start(message) }, enabled = !model.streaming && !model.busy && model.pending == null) { Text("分支追问") }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { copy(context, message.content) }) { Text("复制") }
@@ -250,7 +258,7 @@ private fun Composer(model: PlatformViewModel, onSend: () -> Unit, openTool: (St
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(model.draft, model::editDraft, enabled = !model.busy, placeholder = { Text("和槑槑聊点什么…") }, modifier = Modifier.weight(1f).heightIn(max = 168.dp), maxLines = 6, shape = RoundedCornerShape(20.dp))
                 if (model.streaming) FilledTonalButton(onClick = model::stop) { Text("停止") }
-                else Button(onClick = onSend, enabled = editable && chosen != null && (!imageAttached || chosen.vision) && (model.draft.isNotBlank() || model.tools.hasContent) && model.tools.ready) { Text("发送") }
+                else Button(onClick = onSend, enabled = editable && chosen != null && (!imageAttached || chosen.vision) && (model.draft.isNotBlank() || model.tools.hasContent) && model.tools.canSend) { Text("发送") }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 AttachmentPicker(model, editable && !model.tools.uploading)

@@ -1,10 +1,9 @@
 package asia.feng.aimeimei
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Bundle
-import android.text.method.LinkMovementMethod
-import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -38,10 +37,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.viewinterop.AndroidView
 import com.caverock.androidsvg.SVG
-import io.noties.markwon.Markwon
-import io.noties.markwon.ext.tables.TablePlugin
 
 class MainActivity : ComponentActivity() {
     private val model get() = (application as MeimeiApplication).chat
@@ -49,6 +45,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        model.incomingShares.accept(intent, model.account?.id.orEmpty())
         if (Build.VERSION.SDK_INT >= 33 && !getPreferences(MODE_PRIVATE).getBoolean("notification_requested", false)) {
             getPreferences(MODE_PRIVATE).edit().putBoolean("notification_requested", true).apply()
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -57,6 +54,10 @@ class MainActivity : ComponentActivity() {
             val preferences = remember { AppPreferences(applicationContext) }
             MeimeiTheme(preferences) { PlatformApp(model, preferences) }
         }
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent); setIntent(intent)
+        model.incomingShares.accept(intent, model.account?.id.orEmpty())
     }
     override fun onStart() { super.onStart(); model.foreground() }
     override fun onStop() { if (!isChangingConfigurations) model.background(); super.onStop() }
@@ -116,29 +117,6 @@ private fun CaptchaImage(captcha: Captcha?, enabled: Boolean, refresh: () -> Uni
 }
 
 @Composable
-internal fun MarkdownText(content: String, onQuote: ((String) -> Unit)? = null) {
-    val color = MaterialTheme.colorScheme.onSurface
-    AndroidView(factory = { context ->
-        TextView(context).apply { textSize = 16f;setTextIsSelectable(true);movementMethod = LinkMovementMethod.getInstance();setLineSpacing(4f, 1.1f) }
-    }, modifier = Modifier.fillMaxWidth(), update = { view ->
-        view.customSelectionActionModeCallback = if (onQuote == null) null else object : android.view.ActionMode.Callback {
-            override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {
-                menu.add(0, 0x613f, 1, "引用提问"); return true
-            }
-            override fun onPrepareActionMode(mode: android.view.ActionMode, menu: android.view.Menu) = false
-            override fun onActionItemClicked(mode: android.view.ActionMode, item: android.view.MenuItem): Boolean {
-                if (item.itemId != 0x613f) return false
-                val start = minOf(view.selectionStart, view.selectionEnd).coerceAtLeast(0)
-                val end = maxOf(view.selectionStart, view.selectionEnd).coerceAtMost(view.text.length)
-                if (end > start) onQuote(view.text.subSequence(start, end).toString())
-                mode.finish(); return true
-            }
-            override fun onDestroyActionMode(mode: android.view.ActionMode) {}
-        }
-        view.setTextColor(android.graphics.Color.argb((color.alpha * 255).toInt(), (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt()))
-        if (view.tag != content) {
-            val renderer = view.getTag(R.id.markdown_renderer) as? Markwon ?: Markwon.builder(view.context).usePlugin(TablePlugin.create(view.context)).build().also { view.setTag(R.id.markdown_renderer, it) }
-            renderer.setMarkdown(view, content);view.tag = content
-        }
-    })
+internal fun MarkdownText(content: String, onQuote: ((String) -> Unit)? = null, onDiscuss: ((String) -> Unit)? = null) {
+    RichMarkdownText(content, onQuote, onDiscuss)
 }

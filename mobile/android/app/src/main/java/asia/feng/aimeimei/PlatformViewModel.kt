@@ -55,6 +55,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     private var buffer: ReplyBuffer? = null
     internal val tools = ChatTools(application, api, viewModelScope) { returnedFromWeb() }
     internal val sms = SmsLoginState(api, viewModelScope)
+    internal val incomingShares = IncomingShareController(application, viewModelScope)
     var focusMessageId by mutableStateOf(""); private set
 
     init { restore() }
@@ -133,6 +134,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     private suspend fun loadWorkspace(ticket: Int) {
         val list = api.conversations(); val available = api.models()
         if (ticket == revision) {
+            incomingShares.bindAccount(account?.id.orEmpty())
             conversations = list; models = available
             if (available.none { it.id == preferredModelId }) preferredModelId = available.firstOrNull()?.id.orEmpty()
         }
@@ -208,13 +210,30 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         }
         forgetPending(); live = null; error = "已解除等待，请先核对聊天记录，再决定是否发送。"
     }
+    internal suspend fun importShared(payload: IncomingSharePayload): Boolean {
+        val owner = account?.id ?: return false
+        if (busy || streaming || pending != null || tools.uploading || payload.owner != owner) return false
+        val ticket = revision
+        busy = true
+        try {
+            if (!tools.stageSharedImages(payload.images) || ticket != revision || account?.id != owner) return false
+            if (payload.text.isNotBlank()) editDraft(if (draft.isBlank()) payload.text else draft + "\n\n" + payload.text)
+            return true
+        } finally { if (ticket == revision) busy = false }
+    }
     fun send() {
         val question = draft.trim()
         val content = quoteMessage(question, tools.quotes).ifBlank {
             if (tools.attachments.any { !it.image }) "请根据这些材料分析。" else if (tools.attachments.isNotEmpty()) "请分析这些图片。" else ""
         }
-        if (streaming || busy || pending != null || content.isEmpty() || !tools.ready) return
+        if (streaming || busy || pending != null || content.isEmpty() || !tools.canSend) return
         if (tools.attachments.any { it.image } && currentModel?.vision != true) { error = "当前模型不支持图片，请先切换支持图片的模型"; return }
+        if (tools.hasStagedImages) {
+            work { ticket ->
+                if (tools.uploadStagedImages() && ticket == revision) { busy = false; send() }
+            }
+            return
+        }
         if (selected == null) {
             if (models.none { it.id == preferredModelId }) return
             val files = tools.attachments; val citations = tools.quotes
@@ -355,6 +374,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     }
     private fun clearAccount() {
         sms.verified()
+        incomingShares.bindAccount("")
         generation++
         streamJob?.cancel(); cookies.clear(); account = null; selected = null; messages = emptyList(); conversations = emptyList(); models = emptyList()
         captcha = null; draft = ""; pending = null; live = null; streaming = false

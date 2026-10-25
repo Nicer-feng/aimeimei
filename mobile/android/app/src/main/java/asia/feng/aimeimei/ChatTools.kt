@@ -33,6 +33,7 @@ import java.util.UUID
 internal class ChatTools(private val app: Application, private val api: PlatformApi, private val scope: CoroutineScope,
                          private val onUnauthorized: () -> Unit) {
     private val store = app.getSharedPreferences("chat_drafts", 0)
+    val discussions = SideDiscussionState(api, scope, onUnauthorized)
     val knowledge = KnowledgeState(api, scope, onUnauthorized)
     val mobile = MobileToolsState(app, api, scope, onUnauthorized)
     private var owner = ""
@@ -43,6 +44,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
     private var poll: Job? = null
     private var uploadTask: Job? = null
     private var uploadRun = 0
+    private var stagedUpload = false
     private val activeUploads = mutableMapOf<String, Job>()
     private val localFiles = mutableStateMapOf<String, File>()
     private val imageLoads = mutableMapOf<String, Deferred<File>>()
@@ -77,6 +79,8 @@ internal class ChatTools(private val app: Application, private val api: Platform
     var menuMessage by mutableStateOf<ChatMessage?>(null)
     val speech = SpeechPlayer(app, api, scope) { notice = it }
     val ready get() = !uploading && attachments.all { it.ready }
+    val hasStagedImages get() = attachments.any { it.id.isBlank() && it.status == "local" }
+    val canSend get() = !uploading && attachments.all { it.ready || it.image && it.status == "local" && localFile(it) != null }
     val hasContent get() = attachments.isNotEmpty() || quotes.isNotEmpty()
     private fun key(kind: String) = draftKey(owner, conversation, kind)
     private fun directory(): File {
@@ -84,12 +88,13 @@ internal class ChatTools(private val app: Application, private val api: Platform
         return File(app.cacheDir, "chat-attachments/$hash").apply { mkdirs() }
     }
     fun bind(accountId: String, conversationId: String) {
+        discussions.bind(accountId, conversationId)
         knowledge.bind(accountId)
         mobile.bind(accountId)
         if (owner == accountId && conversation == conversationId) return
-        persist(); attachments.filter { it.id.isBlank() }.forEach { localFiles.remove(it.clientKey)?.delete() }; val oldOwner = owner
+        persist(); attachments.filter { it.id.isBlank() && stagedFile(it)?.isFile != true }.forEach { localFiles.remove(it.clientKey)?.delete() }; val oldOwner = owner
         revision++; previewRun++; session.cancel(); imageLoads.clear(); previewTask = null; session = newSession(); poll = null; uploadTask = null; activeUploads.clear()
-        uploading = false; speech.stop(); preview = null; previewFile = null; previewBusy = false; previewError = ""
+        uploading = false; stagedUpload = false; speech.stop(); preview = null; previewFile = null; previewBusy = false; previewError = ""
         conversationStats = null; statsOpen = false; statsLoading = false; statsError = ""; promptsLoading = false; promptSaving = false; promptError = ""
         voiceMessage = null; voiceConfig = null; shareMessage = null; shareUrl = ""; shareId = ""; sharing = false; menuMessage = null
         favoritesLoading = false; favoriteBusy = null; notice = null
@@ -100,7 +105,10 @@ internal class ChatTools(private val app: Application, private val api: Platform
         }
         owner = accountId; conversation = conversationId
         attachments = if (owner.isEmpty()) emptyList() else runCatching {
-            attachmentRows(JSONArray(store.getString(key("attachments"), "[]"))).map { ChatAttachment.fromJson(it) }
+            attachmentRows(JSONArray(store.getString(key("attachments"), "[]"))).mapNotNull { row ->
+                val item = ChatAttachment.fromJson(row)
+                if (row.optBoolean("local_only")) item.copy(status = "local", progress = 0).takeIf { stagedFile(it)?.isFile == true } else item
+            }
         }.getOrDefault(emptyList())
         quotes = if (owner.isEmpty()) emptyList() else runCatching {
             attachmentRows(JSONArray(store.getString(key("quotes"), "[]"))).take(3).map { ChatQuote(it.optString("message_id"), it.optString("role"), it.optString("text").take(12000)) }
@@ -118,7 +126,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
     }
     private fun persist() {
         if (owner.isEmpty()) return
-        store.edit().putString(key("attachments"), JSONArray(attachments.filter { it.id.isNotBlank() }.map { it.toJson() }).toString())
+        store.edit().putString(key("attachments"), JSONArray(attachments.filter { it.id.isNotBlank() || stagedFile(it)?.isFile == true }.map { it.toJson().put("local_only", it.id.isBlank()) }).toString())
             .putString(key("quotes"), JSONArray(quotes.map { it.toJson() }).toString()).apply()
     }
     fun restoreDraft(files: List<ChatAttachment>, citations: List<ChatQuote>) { attachments = files; quotes = citations; persist(); pollDocuments() }
@@ -144,13 +152,17 @@ internal class ChatTools(private val app: Application, private val api: Platform
         }
     }
     fun removeAttachment(item: ChatAttachment) {
+        if (stagedUpload) {
+            uploadRun++; uploadTask?.cancel(); uploadTask = null; stagedUpload = false; uploading = false
+            attachments = attachments.map { if (it.id.isBlank() && it.status == "uploading") it.copy(status = "local", progress = 0) else it }
+        }
         activeUploads.remove(item.clientKey)?.cancel()
         if (item.id.isBlank()) localFiles.remove(item.clientKey)?.delete()
         attachments = attachments.filterNot { it.clientKey == item.clientKey }; persist()
     }
     fun cancelUploads() {
         attachments.filter { it.id.isBlank() }.forEach { localFiles.remove(it.clientKey)?.delete() }
-        uploadRun++; uploadTask?.cancel(); uploadTask = null; activeUploads.clear(); uploading = false; attachments = attachments.filter { it.id.isNotBlank() }; persist(); pollDocuments() }
+        uploadRun++; uploadTask?.cancel(); uploadTask = null; stagedUpload = false; activeUploads.clear(); uploading = false; attachments = attachments.filter { it.id.isNotBlank() }; persist(); pollDocuments() }
     fun removeQuote(index: Int) { quotes = quotes.filterIndexed { i, _ -> i != index }; persist() }
     fun quote(message: ChatMessage, text: String = message.content) {
         if (text.trim().length < 2) { notice = "请至少选择两个字"; return }
@@ -162,6 +174,58 @@ internal class ChatTools(private val app: Application, private val api: Platform
             if (quotes.size >= 3) { notice = "一条消息最多引用 3 段内容"; return@action }
             quotes = quotes + ChatQuote(message.id, message.role, text.trim().take(12000)); persist(); menuMessage = null
         }
+    }
+    // 系统分享先保存账号私有草稿，只有点击发送才发起上传。
+    suspend fun stageSharedImages(images: List<IncomingShareImage>): Boolean {
+        if (owner.isEmpty() || uploading || attachments.count { it.image } + images.size > 5) {
+            notice = "一条消息最多添加 5 张图片，请先移除一些图片"; return false
+        }
+        val ticket = revision
+        val directory = directory()
+        val staged = mutableListOf<Pair<ChatAttachment, File>>()
+        try {
+            withContext(Dispatchers.IO) {
+                for (image in images) {
+                    currentCoroutineContext().ensureActive()
+                    val item = ChatAttachment("", image.name, image.mime, image.file.length(), true, "local", 0, clientKey = UUID.randomUUID().toString())
+                    val file = File(directory, "share-${item.clientKey}.local")
+                    staged.add(item to file)
+                    image.file.inputStream().use { input -> file.outputStream().use { output -> input.copyTo(output) } }
+                }
+            }
+            currentCoroutineContext().ensureActive()
+            if (ticket != revision) return false
+            staged.forEach { (item, file) -> localFiles[item.clientKey] = file }
+            attachments = attachments + staged.map { it.first }; persist()
+            return true
+        } finally {
+            if (ticket != revision || staged.any { (item, _) -> attachments.none { it.clientKey == item.clientKey } }) staged.forEach { it.second.delete() }
+        }
+    }
+    suspend fun uploadStagedImages(): Boolean {
+        if (uploading) return false
+        val ticket = revision
+        val run = ++uploadRun
+        uploading = true; stagedUpload = true; uploadTask = currentCoroutineContext()[Job]
+        try {
+            for (item in attachments.filter { it.id.isBlank() && it.status == "local" }) {
+                val file = localFile(item) ?: throw IllegalArgumentException("本地图片已清理，请移除后重新分享")
+                attachments = attachments.map { if (it.clientKey == item.clientKey) it.copy(status = "uploading", progress = 0) else it }
+                try {
+                    val uploaded = api.uploadChatFile(file, item.name, item.mime, true) { progress -> scope.launch {
+                        if (ticket == revision) attachments = attachments.map { if (it.clientKey == item.clientKey) it.copy(progress = progress) else it }
+                    } }.copy(clientKey = item.clientKey)
+                    if (ticket != revision || run != uploadRun || attachments.none { it.clientKey == item.clientKey }) return false
+                    val cached = cacheUploaded(uploaded, file); localFiles[uploaded.id] = cached; localFiles[item.clientKey] = cached
+                    attachments = attachments.map { if (it.clientKey == item.clientKey) uploaded else it }; persist()
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    if (ticket == revision && run == uploadRun) { attachments = attachments.map { if (it.clientKey == item.clientKey) it.copy(status = "failed", error = "上传未完成，确认后可重试上传") else it }; persist() }
+                    throw failure
+                }
+            }
+            return ticket == revision && run == uploadRun && attachments.all { it.ready }
+        } finally { if (ticket == revision && run == uploadRun) { uploading = false; stagedUpload = false; uploadTask = null } }
     }
     fun addFiles(uris: List<Uri>, image: Boolean) {
         if (owner.isEmpty() || uploading || uris.isEmpty()) return
@@ -274,7 +338,8 @@ internal class ChatTools(private val app: Application, private val api: Platform
         val digest = MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString("") { "%02x".format(it) }
         return File(directory(), "image-$digest.cache")
     }
-    fun localFile(item: ChatAttachment): File? = (localFiles[item.clientKey] ?: localFiles[item.id])?.takeIf { it.exists() }
+    private fun stagedFile(item: ChatAttachment): File? = item.clientKey.takeIf { Regex("[a-f0-9-]{36}").matches(it) }?.let { File(directory(), "share-$it.local") }
+    fun localFile(item: ChatAttachment): File? = (localFiles[item.clientKey] ?: localFiles[item.id] ?: if (item.id.isBlank()) stagedFile(item) else null)?.takeIf { it.exists() }
         ?: if (item.image && item.id.isNotBlank()) imageCacheFile(item.id).takeIf { it.isFile && it.length() > 0 } else null
     private fun cacheUploaded(item: ChatAttachment, file: File): File {
         if (!item.image) return file

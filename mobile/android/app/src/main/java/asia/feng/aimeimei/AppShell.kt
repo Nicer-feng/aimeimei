@@ -76,8 +76,9 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
             model.selected != null && !model.streaming -> model.back()
         }
     }
-    LaunchedEffect(model.account?.id) { screen = "chat"; drawer.close() }
+    LaunchedEffect(model.account?.id) { model.incomingShares.bindAccount(model.account?.id.orEmpty()); screen = "chat"; drawer.close() }
     LaunchedEffect(screen) { if (screen != "chat") model.tools.speech.pause() }
+    LaunchedEffect(model.incomingShares.waitingForLogin) { if (model.incomingShares.waitingForLogin) screen = "chat" }
     BackHandler(drawer.isOpen || screen != "chat" || model.selected != null && !model.streaming) { back() }
     ModalNavigationDrawer(
         drawerState = drawer, gesturesEnabled = model.account != null && screen == "chat",
@@ -101,7 +102,10 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
             }, actions = {
                 if (screen == "chat") {
                     if (model.account != null) {
-                        if (model.selected != null) IconButton(onClick = model.tools::showStats, enabled = !model.busy && !model.streaming) { Icon(Icons.Default.Info, "会话统计") }
+                        if (model.selected != null) {
+                            if (model.tools.discussions.available) IconButton(onClick = model.tools.discussions::openHistory, enabled = !model.busy && !model.streaming && model.pending == null) { Icon(Icons.Default.List, "分支讨论记录") }
+                            IconButton(onClick = model.tools::showStats, enabled = !model.busy && !model.streaming) { Icon(Icons.Default.Info, "会话统计") }
+                        }
                         IconButton(onClick = { model.newConversation() }, enabled = !model.streaming && !model.busy) { Icon(Icons.Default.Add, "新聊天") }
                         IconButton(onClick = { screen = "tools" }) { Icon(Icons.Default.MoreVert, "更多工具") }
                     } else IconButton(onClick = { screen = "settings" }) { Icon(Icons.Default.Settings, "设置") }
@@ -110,6 +114,12 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
         }) { padding ->
             Column(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize().imePadding()) {
                 if (model.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (model.incomingShares.deferred && model.incomingShares.pending != null && model.account != null) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("有一份待添加的分享", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = model.incomingShares::resumePreview) { Text("查看") }
+                    }
+                }
                 model.tools.notice?.let { message -> Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(message, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                     TextButton(onClick = model.tools::dismissNotice) { Text("关闭") }
@@ -139,7 +149,20 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
                         else -> if (model.account == null) LoginForm(model) else ChatScreen(model, openTool)
                     }
                 }
+                IncomingSharePreview(model.incomingShares, model.account?.id.orEmpty(),
+                    accountName = model.account?.let { it.displayName.ifBlank { it.username } }.orEmpty(),
+                    canImport = !model.busy && !model.streaming && model.pending == null && !model.tools.uploading,
+                    onDefer = { screen = "chat" },
+                    onImport = { payload -> model.importShared(payload).also { if (it) screen = "chat" } })
                 ChatToolsDialogs(model)
+                SideDiscussionDialog(model.tools.discussions, model.draft, canUseDraft = !model.streaming && !model.busy && model.pending == null, onUseDraft = { text, append ->
+                    if (!model.streaming && !model.busy && model.pending == null) {
+                        model.editDraft(if (append && model.draft.isNotBlank()) model.draft + "\n\n" + text else text)
+                        screen = "chat"; true
+                    } else false
+                }, onSavedConversation = { id ->
+                    model.openSearchResult(ChatSearchResult("branch", "conversation", id, "", "", "", "")) { screen = "chat" }
+                })
             }
         }
     }
