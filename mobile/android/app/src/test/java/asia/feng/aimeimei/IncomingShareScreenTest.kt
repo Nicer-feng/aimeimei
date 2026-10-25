@@ -11,6 +11,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import kotlinx.coroutines.*
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.After
 import org.junit.Assert.*
@@ -32,7 +33,7 @@ import java.io.File
 @OptIn(ExperimentalCoroutinesApi::class, ExperimentalTestApi::class)
 class IncomingShareScreenTest {
     private val dispatcher = UnconfinedTestDispatcher()
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = dispatcher)
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher(dispatcher.scheduler))
     private lateinit var app: Application
     private lateinit var scope: CoroutineScope
     private lateinit var state: IncomingShareController

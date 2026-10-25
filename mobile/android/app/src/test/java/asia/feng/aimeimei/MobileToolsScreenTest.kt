@@ -9,6 +9,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import kotlinx.coroutines.*
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.Dispatcher
@@ -36,7 +37,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class, ExperimentalCoroutinesApi::class)
 class MobileToolsScreenTest {
     private val dispatcher = UnconfinedTestDispatcher()
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = dispatcher)
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher(dispatcher.scheduler))
     private lateinit var app: Application
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
@@ -82,12 +83,40 @@ class MobileToolsScreenTest {
     }
     @After fun close() { model.tools.bind("", ""); model.sms.verified(); server.shutdown() }
     private fun idleModel() = runBlocking { withTimeout(10000) { while (model.busy) { dispatcher.scheduler.runCurrent(); delay(10) } } }
-    private fun await(condition: () -> Boolean) {
-        runBlocking { withTimeout(15000) { while (true) {
-            dispatcher.scheduler.runCurrent(); Shadows.shadowOf(Looper.getMainLooper()).idle(); Snapshot.sendApplyNotifications(); compose.mainClock.advanceTimeByFrame()
-            if (condition()) return@withTimeout
-            delay(10)
-        } } }; compose.waitForIdle()
+    private fun await(stage: String = "ui", detail: () -> String = { "" }, condition: () -> Boolean) {
+        try {
+            runBlocking { withTimeout(15000) { while (true) {
+                dispatcher.scheduler.runCurrent(); Shadows.shadowOf(Looper.getMainLooper()).idle(); Snapshot.sendApplyNotifications(); compose.mainClock.advanceTimeByFrame()
+                if (condition()) return@withTimeout
+                delay(10)
+            } } }; compose.waitForIdle()
+        } catch (timeout: TimeoutCancellationException) {
+            val state = model.tools.mobile
+            val tree = runCatching {
+                val roots = compose.onAllNodes(isRoot(), useUnmergedTree = true)
+                (0 until roots.fetchSemanticsNodes().size).joinToString("\n\n") { index ->
+                    "ROOT $index\n" + roots[index].printToString(maxDepth = Int.MAX_VALUE)
+                }
+            }.getOrElse { "无法读取语义树：$it" }
+            val screenshot = runCatching { capture("native-await-timeout-${stage.replace(Regex("[^a-zA-Z0-9-]"), "-")}") }
+                .exceptionOrNull()?.let { "截图失败：$it" }.orEmpty()
+            val report = """
+                等待阶段：$stage（15000ms）
+                account=${model.account?.id}, busy=${model.busy}, modelError=${model.error}
+                ocrPreparing=${state.preparing}, processing=${state.processing}, ocrError=${state.ocrError}
+                image=${state.image?.let { "${it.name}, mime=${it.mime}, exists=${it.file.isFile}, bytes=${it.file.length()}" }}
+                historyLoading=${state.historyLoading}, historyError=${state.historyError}
+                records=${state.records.map { "${it.id}:${it.status}" }}
+                requests=${requests.map { "${it.method} ${it.requestUrl?.encodedPath}" }}
+                ${detail()}
+                $screenshot
+                完整语义树：
+                $tree
+            """.trimIndent()
+            val folder = File("build/reports/native-ui").apply { mkdirs() }
+            File(folder, "await-timeout-${stage.replace(Regex("[^a-zA-Z0-9-]"), "-")}.txt").writeText(report)
+            throw AssertionError(report).apply { initCause(timeout) }
+        }
     }
     private fun capture(name: String, dialog: Boolean = false) = compose.runOnIdle {
         val view = if (dialog) checkNotNull(ShadowDialog.getLatestDialog()?.window?.decorView) else compose.activity.window.decorView
@@ -132,17 +161,18 @@ class MobileToolsScreenTest {
             var used = false
             compose.setContent { MeimeiTheme(preferences) { OcrScreen(model) { used = true } } }
             // 图片和历史记录独立加载；记录可能在屏外，先确认数据，再滚动让对应列表项进入布局。
-            await { compose.onAllNodesWithContentDescription("待识别图片").fetchSemanticsNodes().isNotEmpty() &&
-                model.tools.mobile.records.any { it.id == "o1" } && !model.tools.mobile.historyLoading }
+            await("ocr-history-data") { model.tools.mobile.records.any { it.id == "o1" } && !model.tools.mobile.historyLoading }
+            await("ocr-preview-semantics") { compose.onAllNodesWithContentDescription("待识别图片").fetchSemanticsNodes().isNotEmpty() }
             capture("native-ocr-preview")
             assertTrue(requests.none { it.requestUrl!!.encodedPath == "/api/ocr/upload-policy" || it.method == "POST" })
             // 网络数据到达后仍需等待 LazyColumn 消费快照并完成布局；只重试滚动断言，不触发网络。
-            await {
+            var lastScrollAssertion = "尚未滚动"
+            await("ocr-record-scroll-layout", detail = { "最后一次滚动断言：$lastScrollAssertion" }) {
                 try {
                     compose.onNodeWithTag("ocr-list").performScrollToNode(hasTestTag("ocr-record-o1"))
                     compose.onNodeWithTag("ocr-record-o1").assertIsDisplayed()
                     true
-                } catch (_: AssertionError) { false }
+                } catch (failure: AssertionError) { lastScrollAssertion = failure.stackTraceToString(); false }
             }
             compose.onNodeWithText("查看结果", substring = false).performClick()
             compose.onNodeWithTag("ocr-result-text").performTextReplacement("修正后的手写内容。")

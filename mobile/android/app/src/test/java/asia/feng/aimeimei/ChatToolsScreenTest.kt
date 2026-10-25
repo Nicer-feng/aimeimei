@@ -11,6 +11,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.withTimeout
 import okhttp3.CookieJar
@@ -41,7 +42,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatToolsScreenTest {
     private val dispatcher = UnconfinedTestDispatcher()
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = dispatcher)
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher(dispatcher.scheduler))
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
     private lateinit var preferences: AppPreferences
@@ -99,6 +100,11 @@ class ChatToolsScreenTest {
             } catch (_: AssertionError) { false }
         }
     }
+    private fun displayed(matcher: SemanticsMatcher, scrollTag: String? = null): Boolean = try {
+        if (scrollTag != null) compose.onNodeWithTag(scrollTag).performScrollToNode(matcher)
+        compose.onNode(matcher).assertIsDisplayed()
+        true
+    } catch (_: AssertionError) { false }
     private fun await(stage: String = "native-ui", condition: () -> Boolean) {
         // 让出测试事件循环并推进实际布局，避免空列表首帧或图片解码完成前就结束等待。
         try { runBlocking { withTimeout(15000) {
@@ -140,7 +146,7 @@ class ChatToolsScreenTest {
     }
     @Test fun quotingAddsTheDraftWithoutSendingAndShowsNativeAttachmentCards() {
         show(); compose.onAllNodesWithText("引用").onLast().performClick()
-        await { model.tools.quotes.size == 1 }
+        await("quoted-draft-visible") { model.tools.quotes.size == 1 && displayed(hasText("引用 · 这是用于原生界面验收的回答，可以引用、收藏、分享和朗读。", substring = false)) }
         compose.onNodeWithText("引用 · 这是用于原生界面验收的回答，可以引用、收藏、分享和朗读。").assertIsDisplayed()
         assertTrue(requests.none { it.method == "POST" })
         capture("native-chat-quote")
@@ -148,9 +154,11 @@ class ChatToolsScreenTest {
     @Test fun favoritesVoiceAndPublicSharingRequireNativeUserActions() {
         show(true)
         compose.onAllNodesWithContentDescription("更多消息操作").onLast().performClick()
-        compose.onNodeWithText("收藏回答").performClick(); await { model.messages.last().favoriteId == "f1" }
+        compose.onNodeWithText("收藏回答").performClick()
+        await("favorite-marker-visible") { model.messages.last().favoriteId == "f1" && displayed(hasText("已收藏", substring = false), "chat-messages") }
         compose.onNodeWithText("已收藏").assertIsDisplayed()
-        compose.onNodeWithText("朗读").performClick(); await { model.tools.voiceMessage != null }
+        compose.onNodeWithText("朗读").performClick()
+        await("voice-options-visible") { model.tools.voiceMessage != null && displayed(hasText("测试音色", substring = false)) }
         compose.onNodeWithText("测试音色").assertIsDisplayed(); assertTrue(requests.none { it.requestUrl!!.encodedPath.endsWith("/tts") })
         capture("native-voice-dialog", true)
         compose.onNodeWithText("取消").performClick()
@@ -159,7 +167,8 @@ class ChatToolsScreenTest {
         compose.onNodeWithText("本轮问答").performClick()
         assertNull(shareBody)
         capture("native-share-dialog", true)
-        compose.onNodeWithText("创建链接").performClick(); await { model.tools.shareUrl.isNotEmpty() }
+        compose.onNodeWithText("创建链接").performClick()
+        await("share-created-visible") { model.tools.shareUrl.isNotEmpty() && displayed(hasText("复制链接", substring = false)) }
         assertEquals("turn", shareBody!!.getString("scope")); assertEquals(86400, shareBody!!.getInt("expires_in"))
         compose.onNodeWithText("复制链接").assertIsDisplayed()
         compose.onNodeWithText("撤销链接").performClick(); compose.onAllNodesWithText("撤销链接").onLast().performClick()
@@ -173,7 +182,7 @@ class ChatToolsScreenTest {
         compose.onNodeWithText("图片 · 照片.jpg").performClick()
         assertEquals("点击历史图片后应打开同一张图片的原生预览", "img1", model.tools.preview?.id)
         await("image-preview-file") { model.tools.preview?.id == "img1" && model.tools.previewFile?.isFile == true && !model.tools.previewBusy }
-        await("image-preview-decoded") { compose.onAllNodesWithContentDescription("照片.jpg").fetchSemanticsNodes().isNotEmpty() }
+        await("image-preview-decoded") { displayed(hasContentDescription("照片.jpg")) }
         compose.onNodeWithContentDescription("照片.jpg").assertIsDisplayed(); capture("native-image-preview", true)
         compose.onNodeWithText("关闭").performClick()
         compose.onNodeWithContentDescription("更多工具").performClick(); compose.onNodeWithText("我的收藏").performClick()
@@ -206,7 +215,8 @@ class ChatToolsScreenTest {
     @Test fun conversationAndAnswerTokenDetailsUseSavedUsage() {
         show()
         compose.onNodeWithContentDescription("会话统计").performClick()
-        await { model.tools.conversationStats != null && !model.tools.statsLoading }
+        await("conversation-statistics-visible") { model.tools.conversationStats != null && !model.tools.statsLoading &&
+            displayed(hasTestTag("conversation-token-total") and hasText("1,289 Token", substring = false)) }
         compose.onNodeWithTag("conversation-token-total").assertTextEquals("1,289 Token").assertIsDisplayed(); compose.onNodeWithText("问答轮数").assertIsDisplayed()
         capture("native-conversation-tokens", true)
         compose.onNodeWithText("关闭").performClick()
@@ -219,7 +229,7 @@ class ChatToolsScreenTest {
         show()
         compose.runOnIdle { model.editDraft("我原来的草稿") }
         compose.onNodeWithText("提示词", substring = false).performClick()
-        await { model.tools.prompts.size == 1 && !model.tools.promptsLoading }
+        await("prompt-library-visible") { model.tools.prompts.size == 1 && !model.tools.promptsLoading && displayed(hasText("文字润色", substring = false)) }
         compose.onNodeWithText("文字润色").assertIsDisplayed(); capture("native-prompt-library")
         compose.onNodeWithText("带入当前聊天").performClick()
         compose.onNodeWithText("输入框里已有草稿").assertIsDisplayed()
@@ -230,14 +240,15 @@ class ChatToolsScreenTest {
     }
     @Test fun sharedPromptEditsAndDeletionRequireExplicitSaveAndConfirmation() {
         show(); compose.onNodeWithText("提示词", substring = false).performClick()
-        await { model.tools.prompts.size == 1 && !model.tools.promptsLoading }
+        await("editable-prompt-library-visible") { model.tools.prompts.size == 1 && !model.tools.promptsLoading && displayed(hasText("文字润色", substring = false)) }
         compose.onNodeWithText("文字润色").performClick(); compose.onNodeWithText("编辑").performClick()
         await { compose.onAllNodesWithTag("prompt-content").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("prompt-content").performTextReplacement("请先检查逻辑，再润色文字。")
         assertTrue(requests.none { it.method == "PUT" })
         capture("native-prompt-editor", true)
         compose.onNodeWithText("保存").performClick()
-        await { !model.tools.promptSaving && model.tools.prompts.single().optString("content") == "请先检查逻辑，再润色文字。" }
+        await("saved-prompt-library-visible") { !model.tools.promptSaving && model.tools.prompts.single().optString("content") == "请先检查逻辑，再润色文字。" &&
+            compose.onAllNodesWithTag("prompt-content").fetchSemanticsNodes().isEmpty() && displayed(hasText("文字润色", substring = false)) }
         compose.onNodeWithText("文字润色").performClick(); compose.onNodeWithText("删除").performClick()
         compose.onNodeWithText("删除这条共享提示词？").assertIsDisplayed()
         assertFalse(promptDeleted)
