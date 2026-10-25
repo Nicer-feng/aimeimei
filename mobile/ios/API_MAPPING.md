@@ -58,3 +58,7 @@ SSE 解析标准 `data:` 事件及空行，支持多行数据、CRLF、UTF-8、r
 - GET/POST `/api/conversations/{id}/shares`；创建 scope=assistant/turn/conversation，单回答或轮次传 message_id，expires_in=3600/21600/86400/604800。
 - DELETE `/api/conversation-shares/{id}` 撤销。只有创建响应有相对 url；只接受本站 `/ai/share/` 后跟安全令牌的链接，历史列表不恢复令牌。分享令牌仅存当前页面内存。
 - 保存和分享写入不自动重试；退出账号丢弃过时响应并清空工具状态。
+
+## 手写识别（0.6.0）
+
+GET `/api/ocr/tasks`、POST `/api/ocr/upload-policy`、POST `/api/ocr/tasks`、DELETE `/api/ocr/tasks/{id}`。上传压缩 JPEG，大小不超过10MB及策略 max_size；OSS 不带平台 Cookie，不跟随重定向。创建为同步识别，completed/failed 均保留记录与 error_message；超时后先刷新，不自动重提。结果编辑只用于草稿，不覆盖服务端原文。

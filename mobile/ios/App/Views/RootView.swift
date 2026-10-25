@@ -58,6 +58,7 @@ private struct SettingsView: View {
                     LabeledContent("当前账号", value: store.account?.label ?? "")
                     Text("与网页版使用同一账号和云端聊天记录").font(.footnote).foregroundStyle(.secondary)
                 }
+                Section("工具") { NavigationLink("手写识别") { OCRView(store: store) }.accessibilityIdentifier("ocrEntry") }
                 Section("个性化") { NavigationLink("AI 档案") { ProfilesView(store: store) }.accessibilityIdentifier("profilesEntry") }
                 Section("外观") {
                     Picker("主题", selection: $appearance) {

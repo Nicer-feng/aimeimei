@@ -28,6 +28,14 @@ final class AppStoreTests: XCTestCase {
         }
         XCTFail("生成或核对未在限定时间内结束")
     }
+    func testOCRResultSyncAndLogoutCleanupDoesNotReplaceDraft() async throws {
+        await login(); store.setText("保留草稿")
+        await store.ocr.upload(Data([255,216,255,217])); XCTAssertEqual(store.ocr.tasks.count, 1)
+        XCTAssertEqual(store.draft.text, "保留草稿")
+        let value = try XCTUnwrap(store.ocr.tasks.first); await store.ocr.load(); XCTAssertEqual(store.ocr.tasks.first, value)
+        await store.ocr.delete(value); XCTAssertTrue(store.ocr.tasks.isEmpty)
+        await store.ocr.upload(Data([255,216,255,217])); await store.logout(); XCTAssertTrue(store.ocr.tasks.isEmpty)
+    }
     func testPersonalToolsCRUDRevocationAndLogoutCleanup() async throws {
         await login(); store.setUseProfile(false)
         XCTAssertFalse(local.draft(accountID: "offline-user", conversationID: "").useProfile)

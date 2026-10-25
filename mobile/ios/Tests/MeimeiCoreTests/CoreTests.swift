@@ -529,3 +529,38 @@ extension APITests {
         let old = try JSONDecoder().decode(Draft.self, from: Data("{}".utf8)); XCTAssertTrue(old.useProfile)
     }
 }
+
+
+extension APITests {
+    func testOCRUploadHasNoCookieAndRegistersOnlyAfterOSS() async throws {
+        try credentials.write(SessionCredential(token: "test-only", expires: Date().addingTimeInterval(600)))
+        var step = 0
+        StubProtocol.handler = { request in
+            step += 1
+            if step == 1 {
+                XCTAssertEqual(request.url?.path, "/api/ocr/upload-policy")
+                return (200, [:], #"{"policy":{"host":"https://oss.invalid/","access_key_id":"test","policy":"test","signature":"test","key_prefix":"ocr/u1/","max_size":10485760,"expires_at":4102444800}}"#)
+            }
+            if step == 2 {
+                XCTAssertEqual(request.url?.host, "oss.invalid"); XCTAssertNil(request.value(forHTTPHeaderField: "Cookie")); XCTAssertEqual(request.httpMethod, "POST")
+                return (204, [:], "")
+            }
+            XCTAssertEqual(request.url?.path, "/api/ocr/tasks"); let value = try self.body(request)
+            XCTAssertEqual(value["mime_type"] as? String, "image/jpeg"); XCTAssertEqual(value["file_size"] as? Int, 4)
+            XCTAssertTrue((value["oss_key"] as? String ?? "").hasPrefix("ocr/u1/"))
+            return (201, [:], #"{"task":{"id":"o1","filename":"handwriting.jpg","status":"failed","recognized_text":"","error_message":"没有识别到文字"}}"#)
+        }
+        let result = try await api.recognizeHandwriting(Data([255,216,255,217])) { _ in }
+        XCTAssertEqual(step, 3); XCTAssertEqual(result.status, "failed"); XCTAssertFalse(result.error_message.isEmpty)
+    }
+    func testOCRHistoryAndDeletionAndRejectInvalidImage() async throws {
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ocr/tasks"); return (200, [:], #"{"tasks":[{"id":"o1","filename":"笔记.jpg","status":"completed","recognized_text":"原文","error_message":""}]}"#)
+        }
+        let values = try await api.ocrTasks(); XCTAssertEqual(values[0].recognized_text, "原文")
+        StubProtocol.handler = { request in XCTAssertEqual(request.httpMethod, "DELETE"); XCTAssertEqual(request.url?.path, "/api/ocr/tasks/o1"); return (200, [:], #"{"ok":true}"#) }
+        try await api.deleteOCRTask(id: "o1")
+        StubProtocol.handler = { _ in XCTFail("不应上传无效图片"); return (500, [:], "") }
+        do { _ = try await api.recognizeHandwriting(Data()) { _ in }; XCTFail() } catch {}
+    }
+}
