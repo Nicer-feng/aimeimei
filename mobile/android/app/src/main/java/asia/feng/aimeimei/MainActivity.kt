@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        restoreIncomingShareReceipt(intent, savedInstanceState)
         model.incomingShares.accept(intent, model.account?.id.orEmpty())
         if (Build.VERSION.SDK_INT >= 33 && !getPreferences(MODE_PRIVATE).getBoolean("notification_requested", false)) {
             getPreferences(MODE_PRIVATE).edit().putBoolean("notification_requested", true).apply()
@@ -58,6 +59,10 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent); setIntent(intent)
         model.incomingShares.accept(intent, model.account?.id.orEmpty())
+    }
+    override fun onSaveInstanceState(outState: Bundle) {
+        saveIncomingShareReceipt(intent, outState)
+        super.onSaveInstanceState(outState)
     }
     override fun onStart() { super.onStart(); model.foreground() }
     override fun onStop() { if (!isChangingConfigurations) model.background(); super.onStop() }

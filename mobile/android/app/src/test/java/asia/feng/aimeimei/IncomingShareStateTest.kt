@@ -10,6 +10,8 @@ import android.database.MatrixCursor
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.os.Bundle
+import android.os.Parcel
 import android.provider.OpenableColumns
 import kotlinx.coroutines.*
 import org.junit.After
@@ -19,10 +21,14 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowContentResolver
 import java.io.File
+import java.io.ByteArrayInputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 internal class IncomingShareFixture(private val app: Application) {
     private data class Entry(val file: File, val name: String, val mime: String, val size: Long)
@@ -154,6 +160,64 @@ class IncomingShareStateTest {
         state.accept(intent, "u1"); await { state.pending != null }; assertEquals(id, state.pending!!.id)
         state.bindAccount("u1"); state.confirm("u1") { true }; await { !state.importing }; assertNull(state.pending)
         state.accept(intent, "u1"); delay(30); assertNull(state.pending)
+    }
+
+    @Test fun originalSystemParcelReceivesSavedReceiptAndCannotReplayAConsumedShare() = runBlocking {
+        val incoming = textIntent("系统保留的原始分享")
+        val parcel = Parcel.obtain()
+        val systemOriginal = try {
+            incoming.writeToParcel(parcel, 0); parcel.setDataPosition(0); Intent.CREATOR.createFromParcel(parcel)
+        } finally { parcel.recycle() }
+        assertFalse(systemOriginal.hasExtra(INCOMING_RECEIPT))
+        state.accept(incoming, "u1"); await { !state.preparing }
+        val saved = Bundle(); saveIncomingShareReceipt(incoming, saved)
+        assertEquals(setOf(INCOMING_RECEIPT), saved.keySet())
+        state.confirm("u1") { true }; await { !state.importing }; assertNull(state.pending)
+        scope.cancel(); scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        state = IncomingShareController(app, scope)
+        restoreIncomingShareReceipt(systemOriginal, saved)
+        assertEquals(incoming.getStringExtra(INCOMING_RECEIPT), systemOriginal.getStringExtra(INCOMING_RECEIPT))
+        state.accept(systemOriginal, "u1"); delay(30)
+        assertNull(state.pending); assertFalse(state.preparing)
+    }
+
+    @Test fun canceledPreviousShareCannotDeleteTheNextShareWhileBothReachEof() = runBlocking {
+        val source = fixture.image(); val bytes = source.readBytes()
+        val oldAtEof = CountDownLatch(1); val newAtEof = CountDownLatch(1)
+        val releaseOld = CountDownLatch(1); val releaseNew = CountDownLatch(1)
+        fun blockedInput(atEof: CountDownLatch, release: CountDownLatch) = object : ByteArrayInputStream(bytes) {
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                val count = super.read(buffer, offset, length)
+                if (count < 0) { atEof.countDown(); check(release.await(5, TimeUnit.SECONDS)) { "EOF was not released" } }
+                return count
+            }
+        }
+        val oldUri = fixture.add(source, "上一张.png"); val newUri = fixture.add(source, "最新图片.png")
+        val resolver = Shadows.shadowOf(app.contentResolver)
+        resolver.registerInputStream(oldUri, blockedInput(oldAtEof, releaseOld))
+        resolver.registerInputStream(newUri, blockedInput(newAtEof, releaseNew))
+        val oldIntent = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, oldUri)
+        val newIntent = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, newUri)
+        try {
+            state.accept(oldIntent, "u1"); assertTrue(oldAtEof.await(5, TimeUnit.SECONDS))
+            state.accept(newIntent, "u1"); assertTrue(newAtEof.await(5, TimeUnit.SECONDS))
+            val oldId = oldIntent.getStringExtra(INCOMING_RECEIPT)!!; val newId = newIntent.getStringExtra(INCOMING_RECEIPT)!!
+            releaseOld.countDown(); await { !File(app.cacheDir, "incoming-shares/$oldId").exists() }
+            assertTrue(File(app.cacheDir, "incoming-shares/$newId").isDirectory)
+            releaseNew.countDown(); await { !state.preparing }
+            assertEquals("最新图片.png", state.pending!!.images.single().name)
+            assertTrue(state.pending!!.images.single().file.isFile); assertEquals("", state.error)
+        } finally { releaseOld.countDown(); releaseNew.countDown(); source.delete() }
+    }
+
+    @Test fun restoreSkipsFreshDirectoriesWithoutManifestAndRemovesExpiredOrphans() = runBlocking {
+        scope.cancel()
+        val root = File(app.cacheDir, "incoming-shares").apply { mkdirs() }
+        val fresh = File(root, "11111111-1111-1111-1111-111111111111").apply { mkdirs() }
+        val old = File(root, "22222222-2222-2222-2222-222222222222").apply { mkdirs(); setLastModified(System.currentTimeMillis() - 7200000) }
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined); state = IncomingShareController(app, scope)
+        await { !old.exists() }
+        assertTrue(fresh.isDirectory); assertNull(state.pending)
     }
 
     @Test fun restoredShareNeverCrossesItsOriginalAccountAndExpiryCleansLocalData() = runBlocking {

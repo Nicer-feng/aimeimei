@@ -115,7 +115,11 @@ internal class ChatTools(private val app: Application, private val api: Platform
         }.getOrDefault(emptyList())
         if (owner.isNotEmpty()) {
             var retained = 0L
-            val keep = attachments.mapNotNull { localFile(it) }.toSet()
+            // 未上传的分享图片无法从服务器恢复，所有会话的私有草稿都应保留。
+            val pendingDraftFiles = store.all.filterKeys { it.startsWith("$owner:") && it.endsWith(":attachments") }.values.flatMap { value ->
+                runCatching { attachmentRows(JSONArray(value as? String ?: "[]")).filter { it.optBoolean("local_only") }.mapNotNull { stagedFile(ChatAttachment.fromJson(it)) } }.getOrDefault(emptyList())
+            }
+            val keep = (attachments.mapNotNull { localFile(it) } + pendingDraftFiles).toSet()
             directory().listFiles()?.sortedByDescending { it.lastModified() }?.forEach { file ->
                 if (file !in keep && (file.lastModified() < System.currentTimeMillis() - 86400000L || retained + file.length() > 300L * 1024 * 1024)) file.delete()
                 else retained += file.length()
@@ -157,11 +161,11 @@ internal class ChatTools(private val app: Application, private val api: Platform
             attachments = attachments.map { if (it.id.isBlank() && it.status == "uploading") it.copy(status = "local", progress = 0) else it }
         }
         activeUploads.remove(item.clientKey)?.cancel()
-        if (item.id.isBlank()) localFiles.remove(item.clientKey)?.delete()
+        if (item.id.isBlank()) { localFile(item)?.delete(); localFiles.remove(item.clientKey) }
         attachments = attachments.filterNot { it.clientKey == item.clientKey }; persist()
     }
     fun cancelUploads() {
-        attachments.filter { it.id.isBlank() }.forEach { localFiles.remove(it.clientKey)?.delete() }
+        attachments.filter { it.id.isBlank() }.forEach { localFile(it)?.delete(); localFiles.remove(it.clientKey) }
         uploadRun++; uploadTask?.cancel(); uploadTask = null; stagedUpload = false; activeUploads.clear(); uploading = false; attachments = attachments.filter { it.id.isNotBlank() }; persist(); pollDocuments() }
     fun removeQuote(index: Int) { quotes = quotes.filterIndexed { i, _ -> i != index }; persist() }
     fun quote(message: ChatMessage, text: String = message.content) {

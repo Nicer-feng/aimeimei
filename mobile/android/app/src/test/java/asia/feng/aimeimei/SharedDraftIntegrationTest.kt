@@ -66,6 +66,7 @@ class SharedDraftIntegrationTest {
             val cached = model.tools.localFile(item)!!
             assertNotEquals(value.images.single().file, cached)
             assertTrue(requests.none { it.method != "GET" })
+            cached.setLastModified(System.currentTimeMillis() - 25L * 60 * 60 * 1000)
             model.tools.bind("u1", "other"); assertTrue(model.tools.attachments.isEmpty())
             model.tools.bind("u1", ""); assertEquals(item.clientKey, model.tools.attachments.single().clientKey)
             assertEquals(cached, model.tools.localFile(model.tools.attachments.single()))
@@ -86,6 +87,16 @@ class SharedDraftIntegrationTest {
             val cached = model.tools.localFile(model.tools.attachments.single())!!
             model.tools.bind("u1", "other"); model.tools.bind("u1", "")
             assertTrue(cached.isFile); assertEquals("local", model.tools.attachments.single().status)
+        } finally { value.images.forEach { it.file.delete() } }
+    }
+    @Test fun removingRestoredLocalDraftDeletesItsFallbackFile() = runBlocking {
+        val value = payload()
+        try {
+            assertTrue(model.importShared(value))
+            val file = model.tools.localFile(model.tools.attachments.single())!!
+            model.tools.bind("u2", ""); model.tools.bind("u1", "")
+            model.tools.removeAttachment(model.tools.attachments.single())
+            assertFalse(file.exists()); assertTrue(model.tools.attachments.isEmpty())
         } finally { value.images.forEach { it.file.delete() } }
     }
     @Test fun cancellingStagedUploadCannotFallThroughToSendingText() = runBlocking {

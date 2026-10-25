@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,11 +26,23 @@ internal data class IncomingShareImage(val file: File, val name: String, val mim
 internal data class IncomingSharePayload(val id: String, val text: String, val images: List<IncomingShareImage>,
                                       val owner: String, val receivedAt: Long)
 
-private const val INCOMING_RECEIPT = "asia.feng.aimeimei.incoming.receipt"
+internal const val INCOMING_RECEIPT = "asia.feng.aimeimei.incoming.receipt"
 private const val INCOMING_TEXT_LIMIT = 100000
 private const val INCOMING_IMAGE_LIMIT = 20L * 1024 * 1024
 private const val INCOMING_EXPIRY = 60L * 60 * 1000
 private val incomingImageTypes = mapOf("image/jpeg" to "jpg", "image/png" to "png", "image/webp" to "webp")
+
+internal fun saveIncomingShareReceipt(intent: Intent?, state: Bundle) {
+    if (intent?.action !in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) return
+    val receipt = runCatching { intent?.getStringExtra(INCOMING_RECEIPT) }.getOrNull() ?: return
+    if (receipt.matches(Regex("[a-fA-F0-9-]{36}"))) state.putString(INCOMING_RECEIPT, receipt)
+}
+
+internal fun restoreIncomingShareReceipt(intent: Intent?, state: Bundle?) {
+    if (intent?.action !in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) return
+    val receipt = runCatching { state?.getString(INCOMING_RECEIPT) }.getOrNull() ?: return
+    if (receipt.matches(Regex("[a-fA-F0-9-]{36}"))) intent?.putExtra(INCOMING_RECEIPT, receipt)
+}
 
 // 只读取本地分享内容；账号确认和显式导入之后，聊天模块才接管自己的草稿副本。
 internal class IncomingShareController(private val app: Application, private val scope: CoroutineScope) {
@@ -56,7 +69,7 @@ internal class IncomingShareController(private val app: Application, private val
                     delete(restored.id)
                 } else {
                     pending = restored?.let { if (currentAccount.isNotBlank()) it.copy(owner = currentAccount) else it }
-                    if (restored != null) persistPending()
+                    if (restored != null) { persistPending(); cleanupOthers(restored.id) }
                 }
             }
         }
@@ -96,7 +109,7 @@ internal class IncomingShareController(private val app: Application, private val
                 if (ticket != revision) return@launch
                 if (row.owner.isNotBlank() && row.owner != currentAccount) return@launch
                 val bound = row.copy(owner = currentAccount)
-                pending = bound; retained = true; persistPending()
+                pending = bound; retained = true; persistPending(); cleanupOthers(id)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
                 if (ticket == revision) error = if (failure is IllegalArgumentException) failure.message.orEmpty() else "无法读取分享内容，请回到原应用重新分享"
@@ -172,10 +185,8 @@ internal class IncomingShareController(private val app: Application, private val
         val directory = File(root, id).apply { mkdirs() }
         try {
             val images = uris.map { copyImage(it, directory) }
-            return IncomingSharePayload(id, text, images, owner, System.currentTimeMillis()).also {
-                save(it)
-                synchronized(diskLock) { root.listFiles().orEmpty().filter { folder -> folder.name != id }.forEach { folder -> folder.deleteRecursively() } }
-            }
+            currentCoroutineContext().ensureActive()
+            return IncomingSharePayload(id, text, images, owner, System.currentTimeMillis()).also { save(it) }
         } catch (failure: Exception) { directory.deleteRecursively(); throw failure }
     }
 
@@ -218,6 +229,7 @@ internal class IncomingShareController(private val app: Application, private val
                 while (true) { currentCoroutineContext().ensureActive(); val size = input.read(bytes); if (size < 0) break
                     count += size; require(count <= INCOMING_IMAGE_LIMIT) { "单张图片不能超过 20MB" }; output.write(bytes, 0, size) }
             } }
+            currentCoroutineContext().ensureActive()
             require(file.length() > 0 && chatImageBoundsValid(file)) { "分享图片无法预览，请更换原图或转换为 JPG" }
             return IncomingShareImage(file, name, mime)
         } catch (failure: Exception) { file.delete(); throw failure }
@@ -239,14 +251,24 @@ internal class IncomingShareController(private val app: Application, private val
         if (!temporary.renameTo(File(folder, "payload.json"))) temporary.delete()
     }
 
-    private fun restore(): IncomingSharePayload? = synchronized(diskLock) {
+    private suspend fun restore(): IncomingSharePayload? {
+        val context = currentCoroutineContext()
+        return synchronized(diskLock) {
         var latest: IncomingSharePayload? = null
         for (folder in root.listFiles().orEmpty().sortedByDescending { it.lastModified() }) {
+            context.ensureActive()
+            // 新分享可能尚未写好清单；取消的恢复扫描不能删除正在复制的目录。
+            if (!File(folder, "payload.json").isFile) {
+                if (folder.lastModified() < System.currentTimeMillis() - INCOMING_EXPIRY) folder.deleteRecursively()
+                continue
+            }
+            var expired = false
             val row = runCatching {
                 require(folder.isDirectory && folder.name.matches(Regex("[a-fA-F0-9-]{36}")))
                 val file = File(folder, "payload.json"); require(file.isFile && file.length() <= 512 * 1024)
                 val json = JSONObject(file.readText()); val received = json.getLong("received_at")
-                require(received <= System.currentTimeMillis() + 60000 && System.currentTimeMillis() - received <= INCOMING_EXPIRY)
+                expired = received > System.currentTimeMillis() + 60000 || System.currentTimeMillis() - received > INCOMING_EXPIRY
+                require(!expired)
                 val text = json.getString("text"); require(text.length <= INCOMING_TEXT_LIMIT)
                 val items = json.getJSONArray("images"); require(items.length() <= 5)
                 val images = (0 until items.length()).map { index ->
@@ -258,9 +280,17 @@ internal class IncomingShareController(private val app: Application, private val
                 require(text.isNotBlank() || images.isNotEmpty())
                 IncomingSharePayload(folder.name, text, images, json.optString("owner"), received)
             }.getOrNull()
-            if (latest == null && row != null) latest = row else folder.deleteRecursively()
+            context.ensureActive()
+            if (row != null && (latest == null || row.receivedAt > latest.receivedAt)) latest = row
+            else if (row == null && (expired || folder.lastModified() < System.currentTimeMillis() - INCOMING_EXPIRY)) folder.deleteRecursively()
         }
         latest
+        }
+    }
+
+    // 只有主线程已确认接收代次的当前分享才清理其他目录。
+    private fun cleanupOthers(id: String) = synchronized(diskLock) {
+        root.listFiles().orEmpty().filter { it.name != id }.forEach { it.deleteRecursively() }
     }
 
     private fun delete(id: String) = synchronized(diskLock) {
