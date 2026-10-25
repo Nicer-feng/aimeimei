@@ -31,7 +31,7 @@ final class MeimeiUITests: XCTestCase {
         for _ in 0..<5 { if save.isHittable { break }; app.swipeUp() }; save.tap()
         let lock = app.buttons["lockWritingDraft"]; XCTAssertTrue(lock.waitForExistence(timeout: 5))
         if !lock.isHittable { app.swipeUp() }; lock.tap()
-        XCTAssertTrue(app.buttons["解锁定稿"].waitForExistence(timeout: 5)); capture("30-writing-locked")
+        XCTAssertTrue(app.buttons["解锁定稿"].waitForExistence(timeout: 5)); XCTAssertFalse(app.keyboards.firstMatch.exists); capture("30-writing-locked")
     }
     func testMediaAnalysisResultsAndConversation() {
         login(); app.buttons["settingsButton"].tap(); app.buttons["mediaEntry"].tap()

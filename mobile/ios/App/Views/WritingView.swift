@@ -4,6 +4,7 @@ import MeimeiCore
 struct WritingView: View {
     let store: AppStore
     let conversationID: String
+    @FocusState private var manuscriptFocused: Bool
     @State private var requirements = WritingRequirements()
     @State private var manuscript = ""
     @State private var version: WritingVersion?
@@ -17,7 +18,7 @@ struct WritingView: View {
                 modeSection
                 if let error = controller.error { Section { Text(error).foregroundStyle(.red) } }
                 if controller.state != nil { requirementsSection; manuscriptSection; versionsSection }
-            }.disabled(controller.busy || store.locked)
+            }.scrollDismissesKeyboard(.interactively).disabled(controller.busy || store.locked)
             .navigationTitle("写稿模式").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("重新加载") { confirmReload = true }.disabled(controller.busy) }
@@ -48,18 +49,18 @@ struct WritingView: View {
             DisclosureGroup("检查词（每行一项）") {
                 listField("必带词", \.required); listField("避用词", \.forbidden); listField("待补信息", \.missing)
             }
-            TextField("最少字数（0 不限）", value: $requirements.min_chars, format: .number).keyboardType(.numberPad)
-            TextField("最多字数（0 不限）", value: $requirements.max_chars, format: .number).keyboardType(.numberPad)
+            LabeledContent("最少字数（0 不限）") { TextField("最少字数", value: $requirements.min_chars, format: .number).keyboardType(.numberPad).multilineTextAlignment(.trailing) }
+            LabeledContent("最多字数（0 不限）") { TextField("最多字数", value: $requirements.max_chars, format: .number).keyboardType(.numberPad).multilineTextAlignment(.trailing) }
             Button("保存本单要求") { Task { _ = await controller.update(.requirements(requirements)) } }.disabled(!requirements.valid).accessibilityIdentifier("saveWritingRequirements")
         }
     }
     private var manuscriptSection: some View {
         Section(controller.state?.locked_version_id == 0 ? "当前底稿" : "已锁定定稿") {
-            TextEditor(text: $manuscript).frame(minHeight: 200).disabled(controller.state?.locked_version_id != 0).accessibilityIdentifier("writingDraft")
+            TextEditor(text: $manuscript).focused($manuscriptFocused).frame(minHeight: 200).disabled(controller.state?.locked_version_id != 0).accessibilityIdentifier("writingDraft")
             Text("手动保存会新增版本；锁定后需先解锁才能编辑。锁定保护由现有服务端执行，检查结果不代表事实已核实或客户验收。").font(.footnote).foregroundStyle(.secondary)
-            Button("保存为新版本") { Task { if await controller.update(.draft(manuscript)) { manuscript = controller.state?.current?.content ?? "" } } }.disabled(manuscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manuscript.count > 100000 || controller.state?.locked_version_id != 0).accessibilityIdentifier("saveWritingDraft")
+            Button("保存为新版本") { manuscriptFocused = false; Task { if await controller.update(.draft(manuscript)) { manuscript = controller.state?.current?.content ?? "" } } }.disabled(manuscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manuscript.count > 100000 || controller.state?.locked_version_id != 0).accessibilityIdentifier("saveWritingDraft")
             if let state = controller.state, state.current_version_id > 0 {
-                Button(state.locked_version_id > 0 ? "解锁定稿" : "锁定定稿") { Task { _ = await controller.update(.locked(state.locked_version_id == 0)) } }
+                Button(state.locked_version_id > 0 ? "解锁定稿" : "锁定定稿") { manuscriptFocused = false; Task { _ = await controller.update(.locked(state.locked_version_id == 0)) } }
                     .disabled(manuscript != (state.current?.content ?? "")).accessibilityIdentifier("lockWritingDraft")
             }
             Button("开始新项目", role: .destructive) { confirmReset = true }
