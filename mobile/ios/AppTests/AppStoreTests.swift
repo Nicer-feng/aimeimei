@@ -28,6 +28,19 @@ final class AppStoreTests: XCTestCase {
         }
         XCTFail("生成或核对未在限定时间内结束")
     }
+    func testPersonalToolsCRUDRevocationAndLogoutCleanup() async throws {
+        await login(); store.setUseProfile(false)
+        XCTAssertFalse(local.draft(accountID: "offline-user", conversationID: "").useProfile)
+        let value = AIProfile(title: "背景", content: "项目背景")
+        let saved = await store.personal.save(value); XCTAssertTrue(saved)
+        XCTAssertEqual(store.personal.profiles.count, 1)
+        let profile = try XCTUnwrap(store.personal.profiles.first)
+        await store.personal.delete(profile); XCTAssertTrue(store.personal.profiles.isEmpty)
+        await store.personal.create(conversationID: "history", scope: .conversation, messageID: nil, expires: 86400)
+        let share = try XCTUnwrap(store.personal.createdShare); XCTAssertTrue(share.active)
+        await store.personal.revoke(share); XCTAssertNil(store.personal.createdShare); XCTAssertFalse(store.personal.shares[0].active)
+        await store.logout(); XCTAssertTrue(store.personal.profiles.isEmpty); XCTAssertTrue(store.personal.shares.isEmpty)
+    }
     func testFavoriteChangesSyncToWebStateAndDoNotChangeDraft() async throws {
         await login(); await store.select(store.conversations[0]); store.setText("保留当前草稿")
         let message = try XCTUnwrap(store.messages.first { $0.id == 2 })

@@ -27,14 +27,16 @@ public struct Draft: Codable, Equatable, Sendable {
     public var documents: [ChatDocument] = []
     public var text = ""
     public var webSearch = false
+    public var useProfile = true
     public var modelID = ""
     public var reasoningMode: ReasoningMode = .balanced
     public init() {}
-    enum CodingKeys: String, CodingKey { case text, webSearch, modelID, reasoningMode, images, documents }
+    enum CodingKeys: String, CodingKey { case text, webSearch, useProfile, modelID, reasoningMode, images, documents }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
         webSearch = try c.decodeIfPresent(Bool.self, forKey: .webSearch) ?? false
+        useProfile = try c.decodeIfPresent(Bool.self, forKey: .useProfile) ?? true
         modelID = try c.decodeIfPresent(String.self, forKey: .modelID) ?? ""
         reasoningMode = try c.decodeIfPresent(ReasoningMode.self, forKey: .reasoningMode) ?? .balanced
         images = try c.decodeIfPresent([ChatImage].self, forKey: .images) ?? []

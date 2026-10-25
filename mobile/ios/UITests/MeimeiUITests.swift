@@ -20,6 +20,22 @@ final class MeimeiUITests: XCTestCase {
         app.buttons["loginButton"].tap()
         XCTAssertTrue(app.buttons["historyButton"].waitForExistence(timeout: 10))
     }
+    func testProfilesAndConversationShareCreationAndRevocation() {
+        login(); app.buttons["settingsButton"].tap(); app.buttons["profilesEntry"].tap()
+        XCTAssertTrue(app.buttons["addProfile"].waitForExistence(timeout: 5)); app.buttons["addProfile"].tap()
+        app.textFields["profileTitle"].tap(); app.textFields["profileTitle"].typeText("Style")
+        app.textViews["profileContent"].tap(); app.textViews["profileContent"].typeText("Keep it concise")
+        app.buttons["saveProfile"].tap()
+        XCTAssertTrue(app.staticTexts["Style"].waitForExistence(timeout: 5)); capture("25-profiles")
+        app.navigationBars.buttons.element(boundBy: 0).tap(); app.buttons["完成"].tap()
+        app.buttons["historyButton"].tap(); app.buttons.containing(.staticText, identifier: "一次小小的好奇").firstMatch.tap()
+        app.buttons["shareMessage-2"].tap(); app.buttons["分享链接"].tap()
+        XCTAssertTrue(app.buttons["createShare"].waitForExistence(timeout: 5)); app.buttons["createShare"].tap()
+        XCTAssertTrue(app.buttons["复制链接"].waitForExistence(timeout: 5)); capture("26-share-link")
+        let revoke = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "revokeShare-")).firstMatch
+        if !revoke.isHittable { app.swipeUp() }; revoke.tap(); app.buttons["确认撤销"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "已失效")).firstMatch.waitForExistence(timeout: 5)); capture("27-share-revoked")
+    }
     func testLoginWelcomeHistoryAndFirstSend() {
         XCTAssertTrue(app.textFields["usernameField"].waitForExistence(timeout: 15)); capture("01-login")
         login(); capture("02-welcome")

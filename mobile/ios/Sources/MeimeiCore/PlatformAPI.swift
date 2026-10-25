@@ -38,6 +38,13 @@ public protocol PlatformServing: Sendable {
     func documents() async throws -> [ChatDocument]
     func uploadDocument(_ data: Data, filename: String, progress: @escaping @Sendable (Double) -> Void) async throws -> ChatDocument
     func refreshDocument(id: String) async throws -> ChatDocument
+    func profiles() async throws -> [AIProfile]
+    func saveProfile(_ profile: AIProfile) async throws -> AIProfile
+    func deleteProfile(id: String) async throws
+    func shares(conversationID: String) async throws -> [ConversationShare]
+    func createShare(conversationID: String, scope: ShareScope, messageID: Int64?, expiresIn: Int) async throws -> ConversationShare
+    func revokeShare(id: String) async throws
+    func stream(id: String, content: String, imageIDs: [String], documentIDs: [String], webSearch: Bool, useProfile: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws
     func speechConfiguration() async throws -> SpeechConfiguration
     func prepareSpeech(messageID: Int64, voice: String, speed: Double) async throws -> PreparedSpeech
     func speechAudio(messageID: Int64, voice: String, speed: Double) async throws -> Data
@@ -45,6 +52,16 @@ public protocol PlatformServing: Sendable {
 }
 
 public extension PlatformServing {
+    func profiles() async throws -> [AIProfile] { throw PlatformError.media("AI 档案暂不可用") }
+    func saveProfile(_ profile: AIProfile) async throws -> AIProfile { throw PlatformError.media("AI 档案暂不可用") }
+    func deleteProfile(id: String) async throws { throw PlatformError.media("AI 档案暂不可用") }
+    func shares(conversationID: String) async throws -> [ConversationShare] { throw PlatformError.media("分享暂不可用") }
+    func createShare(conversationID: String, scope: ShareScope, messageID: Int64?, expiresIn: Int) async throws -> ConversationShare { throw PlatformError.media("分享暂不可用") }
+    func revokeShare(id: String) async throws { throw PlatformError.media("分享暂不可用") }
+    func stream(id: String, content: String, imageIDs: [String], documentIDs: [String], webSearch: Bool, useProfile: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
+        try await stream(id: id, content: content, imageIDs: imageIDs, documentIDs: documentIDs, webSearch: webSearch, onEvent: onEvent)
+    }
+
     func stream(id: String, content: String, imageIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
         try await stream(id: id, content: content, imageIDs: imageIDs, documentIDs: [], webSearch: webSearch, onEvent: onEvent)
     }
@@ -274,6 +291,28 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
             "filename": safeFilename, "mime_type": "application/octet-stream", "file_size": data.count, "oss_key": key
         ]).document
     }
+    private struct Profiles: Decodable { let profiles: [AIProfile] }
+    private struct Profile: Decodable { let profile: AIProfile }
+    private struct Shares: Decodable { let shares: [ConversationShare] }
+    private struct Share: Decodable { let share: ConversationShare }
+    public func profiles() async throws -> [AIProfile] { try await call(Profiles.self, path: ["api", "profiles"]).profiles }
+    public func saveProfile(_ profile: AIProfile) async throws -> AIProfile {
+        guard profile.valid else { throw PlatformError.media("请填写 1–80 字标题、1–12000 字内容及有效排序") }
+        let path = ["api", "profiles"] + (profile.id.isEmpty ? [] : [profile.id])
+        return try await call(Profile.self, path: path, method: profile.id.isEmpty ? "POST" : "PATCH", body: ["title": profile.title, "content": profile.content, "type": profile.type, "sort_order": profile.sort_order, "enabled": profile.enabled]).profile
+    }
+    public func deleteProfile(id: String) async throws { _ = try await call(OK.self, path: ["api", "profiles", id], method: "DELETE") }
+    public func shares(conversationID: String) async throws -> [ConversationShare] { try await call(Shares.self, path: ["api", "conversations", conversationID, "shares"]).shares }
+    public func createShare(conversationID: String, scope: ShareScope, messageID: Int64?, expiresIn: Int) async throws -> ConversationShare {
+        guard [3600,21600,86400,604800].contains(expiresIn), scope == .conversation || (messageID ?? 0) > 0 else { throw PlatformError.media("请选择回答和有效期") }
+        var body: [String: Any] = ["scope": scope.rawValue, "expires_in": expiresIn]
+        if scope != .conversation { body["message_id"] = messageID }
+        let value = try await call(Share.self, path: ["api", "conversations", conversationID, "shares"], method: "POST", body: body).share
+        guard value.publicURL(base: base) != nil else { throw PlatformError.invalidResponse }
+        return value
+    }
+    public func revokeShare(id: String) async throws { _ = try await call(OK.self, path: ["api", "conversation-shares", id], method: "DELETE") }
+
     public func speechConfiguration() async throws -> SpeechConfiguration { try await call(SpeechConfigResponse.self, path: ["api", "tts", "config"]).tts }
     public func prepareSpeech(messageID: Int64, voice: String, speed: Double) async throws -> PreparedSpeech {
         guard messageID > 0, speed.isFinite, (0.5...2).contains(speed) else { throw PlatformError.invalidResponse }
@@ -307,8 +346,11 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
 
     /// 所有发送只调用一次 POST；EOF、finish_reason、[DONE] 均不代表入库成功。
     public func stream(id: String, content: String, imageIDs: [String], documentIDs: [String], webSearch: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
+        try await stream(id: id, content: content, imageIDs: imageIDs, documentIDs: documentIDs, webSearch: webSearch, useProfile: true, onEvent: onEvent)
+    }
+    public func stream(id: String, content: String, imageIDs: [String], documentIDs: [String], webSearch: Bool, useProfile: Bool, onEvent: @escaping @Sendable (StreamEvent) async throws -> Void) async throws {
         var request = try request(["api", "conversations", id, "messages"], method: "POST", body: [
-            "content": content, "document_ids": documentIDs, "image_ids": imageIDs, "web_search": webSearch, "use_profile": true
+            "content": content, "document_ids": documentIDs, "image_ids": imageIDs, "web_search": webSearch, "use_profile": useProfile
         ])
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 300

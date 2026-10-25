@@ -5,6 +5,7 @@ import MeimeiCore
 @MainActor @Observable
 final class AppStore {
     struct FailedDocument { let data: Data; let filename: String }
+    let personal: PersonalToolsController
     let speech: SpeechController
     private(set) var documents: [ChatDocument] = []
     private(set) var importingDocuments = false
@@ -51,7 +52,9 @@ final class AppStore {
 
     init(api: any PlatformServing, local: LocalState, audioOutput: (any AudioOutput)? = nil) {
         self.api = api; self.local = local
+        personal = PersonalToolsController(api: api)
         speech = SpeechController(api: api, output: audioOutput ?? DeviceAudioOutput())
+        personal.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         speech.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
     }
     var locked: Bool { busy || streaming }
@@ -136,7 +139,7 @@ final class AppStore {
     }
     func clearLoginFeedback() { error = nil; loginNotice = nil }
     private func clearAccount() {
-        generation?.cancel(); runID = UUID(); speech.reset()
+        generation?.cancel(); runID = UUID(); speech.reset(); personal.reset()
         documents = []; importingDocuments = false; failedDocument = nil; documentUploadingName = nil
         account = nil; selected = nil; messages = []; conversations = []; models = []
         favorites = []; prompts = []; favoriteOverrides = [:]; resetSearch(); focusedMessageID = nil
@@ -242,6 +245,7 @@ final class AppStore {
         }
     }
     func setText(_ text: String) { draft.text = text; saveDraft() }
+    func setUseProfile(_ enabled: Bool) { guard !locked else { return }; draft.useProfile = enabled; saveDraft() }
     func setSearch(_ enabled: Bool) { draft.webSearch = enabled; saveDraft() }
     func configure(modelID: String, mode: ReasoningMode) async {
         guard pending == nil else { return }
@@ -330,13 +334,13 @@ final class AppStore {
             pending = marker; draft.text = ""; draft.images = []; draft.documents = []; saveDraft()
             accumulator = ReplyAccumulator(); live = accumulator.reply; streaming = true
             let id = UUID(); runID = id
-            let search = draft.webSearch
+            let search = draft.webSearch; let useProfile = draft.useProfile
             generation = Task { [weak self] in
                 guard let self else { return }
                 var failure: Error?
                 do {
                     try Task.checkCancellation()
-                    try await self.api.stream(id: selected.id, content: text, imageIDs: marker.imageIDs ?? [], documentIDs: marker.documentIDs ?? [], webSearch: search) { [weak self] event in
+                    try await self.api.stream(id: selected.id, content: text, imageIDs: marker.imageIDs ?? [], documentIDs: marker.documentIDs ?? [], webSearch: search, useProfile: useProfile) { [weak self] event in
                         guard let self else { throw CancellationError() }
                         try await self.accept(event, conversationID: selected.id, run: id)
                     }

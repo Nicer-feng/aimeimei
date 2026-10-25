@@ -478,3 +478,54 @@ extension APITests {
         do { _ = try await api.speechAudio(messageID: 42, voice: "test", speed: 1); XCTFail("不应接受 HTML") } catch {}
     }
 }
+
+
+extension APITests {
+    func testProfileCRUDPreservesDisabledAndNumericOrder() async throws {
+        let profile = AIProfile(title: "表达风格", content: "简洁中文", type: "style", sort_order: 20, enabled: false)
+        let raw = #"{"id":"p1","title":"表达风格","content":"简洁中文","type":"style","sort_order":20,"enabled":false}"#
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/profiles"); XCTAssertEqual(request.httpMethod, "POST")
+            let payload = try self.body(request); XCTAssertEqual(payload["enabled"] as? Bool, false); XCTAssertEqual(payload["sort_order"] as? Int, 20)
+            return (201, [:], "{\"profile\":\(raw)}")
+        }
+        let value = try await api.saveProfile(profile); XCTAssertFalse(value.enabled)
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "PATCH"); XCTAssertEqual(request.url?.path, "/api/profiles/p1")
+            return (200, [:], "{\"profile\":\(raw)}")
+        }
+        _ = try await api.saveProfile(value)
+        StubProtocol.handler = { request in XCTAssertEqual(request.httpMethod, "GET"); return (200, [:], "{\"profiles\":[\(raw)]}") }
+        let values = try await api.profiles(); XCTAssertEqual(values, [value])
+        StubProtocol.handler = { request in XCTAssertEqual(request.httpMethod, "DELETE"); XCTAssertEqual(request.url?.path, "/api/profiles/p1"); return (200, [:], #"{"ok":true}"#) }
+        try await api.deleteProfile(id: "p1")
+    }
+    func testShareScopeExpiryAndRevocationContract() async throws {
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/conversations/c1/shares"); XCTAssertEqual(request.httpMethod, "POST")
+            let payload = try self.body(request); XCTAssertEqual(payload["scope"] as? String, "turn"); XCTAssertEqual(payload["message_id"] as? Int, 42); XCTAssertEqual(payload["expires_in"] as? Int, 3600)
+            return (201, [:], #"{"share":{"id":"s1","scope":"turn","title":"测试","expires_at":1900000000,"active":true,"access_count":0,"url":"/ai/share/abc_123-"}}"#)
+        }
+        let value = try await api.createShare(conversationID: "c1", scope: .turn, messageID: 42, expiresIn: 3600)
+        XCTAssertEqual(value.publicURL(base: URL(string: "https://test.invalid/")!)?.absoluteString, "https://test.invalid/ai/share/abc_123-")
+        StubProtocol.handler = { request in XCTAssertEqual(request.httpMethod, "DELETE"); XCTAssertEqual(request.url?.path, "/api/conversation-shares/s1"); return (200, [:], #"{"ok":true}"#) }
+        try await api.revokeShare(id: value.id)
+        for url in ["https://evil.invalid/ai/share/x", "/ai/share/../admin", "/ai/share/a?x=1", "/ai/share/"] {
+            XCTAssertNil(ConversationShare(id: "x", scope: "turn", title: "", expires_at: 0, active: true, url: url).publicURL(base: URL(string: "https://test.invalid/")!))
+        }
+    }
+    func testExplicitProfileOptOutIsSentAsBoolean() async throws {
+        StubProtocol.handler = { request in
+            let payload = try self.body(request); XCTAssertEqual(payload["use_profile"] as? Bool, false)
+            return (200, ["Content-Type":"text/event-stream"], "data: [DONE]\n\n")
+        }
+        try await api.stream(id: "c1", content: "测试", imageIDs: [], documentIDs: [], webSearch: false, useProfile: false) { _ in }
+    }
+    func testInvalidProfilesAndShareRequestsNeverReachNetwork() async throws {
+        StubProtocol.handler = { _ in XCTFail("无效数据不应发请求"); return (500, [:], "") }
+        do { _ = try await api.saveProfile(AIProfile()); XCTFail() } catch {}
+        do { _ = try await api.createShare(conversationID: "c1", scope: .assistant, messageID: nil, expiresIn: 3600); XCTFail() } catch {}
+        do { _ = try await api.createShare(conversationID: "c1", scope: .conversation, messageID: nil, expiresIn: 2); XCTFail() } catch {}
+        let old = try JSONDecoder().decode(Draft.self, from: Data("{}".utf8)); XCTAssertTrue(old.useProfile)
+    }
+}
