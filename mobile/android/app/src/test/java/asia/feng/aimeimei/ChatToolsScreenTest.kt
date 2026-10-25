@@ -12,7 +12,6 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.withTimeout
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.Dispatcher
@@ -41,8 +40,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatToolsScreenTest {
-    private val dispatcher = UnconfinedTestDispatcher()
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher(dispatcher.scheduler))
+    private val dispatcher = StandardTestDispatcher()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = dispatcher)
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
     private lateinit var preferences: AppPreferences
@@ -105,6 +104,13 @@ class ChatToolsScreenTest {
         compose.onNode(matcher).assertIsDisplayed()
         true
     } catch (_: AssertionError) { false }
+    private fun assistantAction(label: String) = hasText(label, substring = false) and hasAnyAncestor(hasTestTag("message-2"))
+    private fun openAssistantMenu(expectedAction: String) {
+        val more = hasContentDescription("更多消息操作") and hasAnyAncestor(hasTestTag("message-2"))
+        await("assistant-more-visible-$expectedAction") { displayed(more, "chat-messages") }
+        compose.onNode(more).performClick()
+        await("assistant-menu-visible-$expectedAction") { model.tools.menuMessage?.id == "2" && displayed(hasText(expectedAction, substring = false)) }
+    }
     private fun await(stage: String = "native-ui", condition: () -> Boolean) {
         // 让出测试事件循环并推进实际布局，避免空列表首帧或图片解码完成前就结束等待。
         try { runBlocking { withTimeout(15000) {
@@ -145,7 +151,9 @@ class ChatToolsScreenTest {
         assertTrue(requests.none { it.method == "POST" })
     }
     @Test fun quotingAddsTheDraftWithoutSendingAndShowsNativeAttachmentCards() {
-        show(); compose.onAllNodesWithText("引用").onLast().performClick()
+        show()
+        await("assistant-quote-visible") { displayed(assistantAction("引用"), "chat-messages") }
+        compose.onNode(assistantAction("引用")).performClick()
         await("quoted-draft-visible") { model.tools.quotes.size == 1 && displayed(hasText("引用 · 这是用于原生界面验收的回答，可以引用、收藏、分享和朗读。", substring = false)) }
         compose.onNodeWithText("引用 · 这是用于原生界面验收的回答，可以引用、收藏、分享和朗读。").assertIsDisplayed()
         assertTrue(requests.none { it.method == "POST" })
@@ -153,17 +161,20 @@ class ChatToolsScreenTest {
     }
     @Test fun favoritesVoiceAndPublicSharingRequireNativeUserActions() {
         show(true)
-        compose.onAllNodesWithContentDescription("更多消息操作").onLast().performClick()
+        openAssistantMenu("收藏回答")
         compose.onNodeWithText("收藏回答").performClick()
         await("favorite-marker-visible") { model.messages.last().favoriteId == "f1" && displayed(hasText("已收藏", substring = false), "chat-messages") }
         compose.onNodeWithText("已收藏").assertIsDisplayed()
-        compose.onNodeWithText("朗读").performClick()
-        await("voice-options-visible") { model.tools.voiceMessage != null && displayed(hasText("测试音色", substring = false)) }
+        await("assistant-voice-action-visible") { displayed(assistantAction("朗读"), "chat-messages") }
+        compose.onNode(assistantAction("朗读")).performClick()
+        await("voice-options-visible") { model.tools.voiceMessage?.id == "2" && displayed(hasText("测试音色", substring = false)) }
         compose.onNodeWithText("测试音色").assertIsDisplayed(); assertTrue(requests.none { it.requestUrl!!.encodedPath.endsWith("/tts") })
         capture("native-voice-dialog", true)
         compose.onNodeWithText("取消").performClick()
-        compose.onAllNodesWithContentDescription("更多消息操作").onLast().performClick()
+        await("voice-dialog-closed") { model.tools.voiceMessage == null && compose.onAllNodesWithText("测试音色", substring = false).fetchSemanticsNodes().isEmpty() }
+        openAssistantMenu("创建分享链接")
         compose.onNodeWithText("创建分享链接").performClick()
+        await("share-scope-visible") { model.tools.shareMessage?.id == "2" && displayed(hasText("本轮问答", substring = false)) }
         compose.onNodeWithText("本轮问答").performClick()
         assertNull(shareBody)
         capture("native-share-dialog", true)

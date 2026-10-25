@@ -9,7 +9,6 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -35,8 +34,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(ExperimentalTestApi::class, ExperimentalCoroutinesApi::class)
 class SideDiscussionScreenTest {
-    private val dispatcher = UnconfinedTestDispatcher()
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher(dispatcher.scheduler))
+    private val dispatcher = StandardTestDispatcher()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = dispatcher)
     private lateinit var server: MockWebServer
     private lateinit var scope: CoroutineScope
     private lateinit var state: SideDiscussionState

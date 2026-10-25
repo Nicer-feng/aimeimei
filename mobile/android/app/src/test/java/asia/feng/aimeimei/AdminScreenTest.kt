@@ -13,7 +13,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -39,8 +38,8 @@ import java.util.concurrent.TimeUnit
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class AdminScreenTest {
-    private val effectDispatcher = UnconfinedTestDispatcher()
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher(effectDispatcher.scheduler))
+    private val effectDispatcher = StandardTestDispatcher()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = effectDispatcher)
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
     private lateinit var preferences: AppPreferences
@@ -82,8 +81,8 @@ class AdminScreenTest {
             }
         }
         server.start()
-        model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {}, dispatcher = Dispatchers.Unconfined)
-        runBlocking { withTimeout(10000) { while (model.account == null || model.busy) delay(10) } }
+        model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {}, dispatcher = effectDispatcher)
+        runBlocking { withTimeout(10000) { while (model.account == null || model.busy) { effectDispatcher.scheduler.runCurrent(); delay(10) } } }
         // 预热数字与嵌套 JSON 的平台解析类，避免首次后台加载与 Robolectric 主线程类初始化互相等待。
         org.json.JSONObject(overview)
         preferences = AppPreferences(app).apply { changeMotion(false) }

@@ -11,7 +11,6 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -38,8 +37,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class, ExperimentalCoroutinesApi::class)
 class KnowledgeScreenTest {
-    private val dispatcher = UnconfinedTestDispatcher()
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher(dispatcher.scheduler))
+    private val dispatcher = StandardTestDispatcher()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = dispatcher)
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
     private lateinit var preferences: AppPreferences
@@ -106,6 +105,7 @@ class KnowledgeScreenTest {
     }
     @Test fun savedSourcesOpenInNativeDialogAndExternalBrowser() {
         model.openSearchResult(ChatSearchResult("m", "message", "old", "99", "", "", "assistant")) {}
+        dispatcher.scheduler.runCurrent()
         runBlocking { withTimeout(10000) { while (model.busy) { dispatcher.scheduler.runCurrent(); delay(10) } } }
         compose.setContent { MeimeiTheme(preferences) { ChatScreen(model) {} } }
         compose.onNodeWithTag("chat-messages").performScrollToNode(hasTestTag("sources-99"))

@@ -10,7 +10,6 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import okhttp3.CookieJar
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -36,8 +35,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class, ExperimentalCoroutinesApi::class)
 class MobileToolsScreenTest {
-    private val dispatcher = UnconfinedTestDispatcher()
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = StandardTestDispatcher(dispatcher.scheduler))
+    private val dispatcher = StandardTestDispatcher()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>(effectContext = dispatcher)
     private lateinit var app: Application
     private lateinit var server: MockWebServer
     private lateinit var model: PlatformViewModel
@@ -82,7 +81,7 @@ class MobileToolsScreenTest {
         preferences = AppPreferences(app).apply { changeMotion(false) }
     }
     @After fun close() { model.tools.bind("", ""); model.sms.verified(); server.shutdown() }
-    private fun idleModel() = runBlocking { withTimeout(10000) { while (model.busy) { dispatcher.scheduler.runCurrent(); delay(10) } } }
+    private fun idleModel() = runBlocking { dispatcher.scheduler.runCurrent(); withTimeout(10000) { while (model.busy) { dispatcher.scheduler.runCurrent(); delay(10) } } }
     private fun await(stage: String = "ui", detail: () -> String = { "" }, condition: () -> Boolean) {
         try {
             runBlocking { withTimeout(15000) { while (true) {
