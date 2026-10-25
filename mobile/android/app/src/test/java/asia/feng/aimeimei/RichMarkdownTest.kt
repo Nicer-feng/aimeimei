@@ -51,9 +51,13 @@ class RichMarkdownTest {
         assertEquals("思维导图", mermaidKind("mindmap\n root((计划))"))
         assertEquals("时序图", mermaidKind("sequenceDiagram\n A->>B:Hi"))
         assertNull(mermaidKind("<script>alert(1)</script>"))
-        val html = diagramHtml("</script><img src=x onerror=alert(1)>\u2028'\\", false)
+        val source = "</script><img src=x onerror=alert(1)>\u2028'\\"
+        val html = diagramHtml(source, false)
         assertFalse(html.contains("</script><img"))
-        assertTrue(html.contains("\\u003c/script\\u003e"))
+        // Android 的 JSON 编码器还可能将斜杠写为 \/；检查安全转义和解码结果，而非某一种合法编码形式。
+        assertTrue(html.contains("\\u003c"))
+        assertTrue(html.contains("\\u003e"))
+        assertEquals(source, org.json.JSONTokener(html.substringAfter("const source=")).nextValue())
         assertTrue(html.contains("securityLevel:'strict'"))
         assertTrue(html.contains("connect-src 'none'"))
         assertTrue(html.contains("fallback.textContent=source"))

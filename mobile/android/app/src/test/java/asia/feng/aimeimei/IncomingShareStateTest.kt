@@ -80,7 +80,7 @@ class IncomingShareStateTest {
     private suspend fun await(condition: () -> Boolean) { withTimeout(6000) { while (!condition()) delay(10) } }
     private fun textIntent(text: String) = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
 
-    @Test fun textShareWaitsForExplicitLoginAndAppendsOnlyAfterConfirmation() = runBlocking {
+    @Test fun textShareWaitsForExplicitLoginAndAppendsOnlyAfterConfirmation() = runBlocking<Unit> {
         var imported = 0
         assertTrue(state.accept(textIntent("https://example.com/article\n请帮我整理"), "")); await { !state.preparing }
         assertEquals("https://example.com/article\n请帮我整理", state.pending!!.text)
@@ -91,7 +91,7 @@ class IncomingShareStateTest {
         await { !state.importing }; assertEquals(1, imported); assertNull(state.pending)
     }
 
-    @Test fun clipDataAndStreamsAreDeduplicatedAndCopiedBeforeSourceGrantExpires() = runBlocking {
+    @Test fun clipDataAndStreamsAreDeduplicatedAndCopiedBeforeSourceGrantExpires() = runBlocking<Unit> {
         val source = fixture.image(); val uri = fixture.add(source, "../照片")
         val intent = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri)
             .apply { clipData = ClipData.newUri(app.contentResolver, "图片", uri) }
@@ -104,7 +104,7 @@ class IncomingShareStateTest {
         state.discard(); assertFalse(image.file.exists())
     }
 
-    @Test fun excessiveCountUnsafeUrisAndInvalidImagesNeverBecomePending() = runBlocking {
+    @Test fun excessiveCountUnsafeUrisAndInvalidImagesNeverBecomePending() = runBlocking<Unit> {
         val source = fixture.image(); val uris = ArrayList((0..5).map { fixture.add(source) })
         state.accept(Intent(Intent.ACTION_SEND_MULTIPLE).setType("image/png").putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris), "u1")
         await { !state.preparing }; assertNull(state.pending); assertTrue(state.error.contains("5"))
@@ -116,7 +116,7 @@ class IncomingShareStateTest {
         assertTrue(File(app.cacheDir, "incoming-shares").listFiles().orEmpty().isEmpty()); source.delete(); corrupt.delete()
     }
 
-    @Test fun unsupportedTypeAndOversizedImageAreRejectedUsingAttachmentLimits() = runBlocking {
+    @Test fun unsupportedTypeAndOversizedImageAreRejectedUsingAttachmentLimits() = runBlocking<Unit> {
         val source = fixture.image()
         state.accept(Intent(Intent.ACTION_SEND).setType("image/gif").putExtra(Intent.EXTRA_STREAM, fixture.add(source, "动画.gif", "image/gif")), "u1")
         await { !state.preparing }; assertNull(state.pending); assertTrue(state.error.contains("JPG"))
@@ -124,7 +124,7 @@ class IncomingShareStateTest {
         await { !state.preparing }; assertNull(state.pending); assertTrue(state.error.contains("20MB")); source.delete()
     }
 
-    @Test fun switchingAccountsCancelsAnUnfinishedImportAndRemovesItsFiles() = runBlocking {
+    @Test fun switchingAccountsCancelsAnUnfinishedImportAndRemovesItsFiles() = runBlocking<Unit> {
         val source = fixture.image()
         state.accept(Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, fixture.add(source)), "u1")
         await { !state.preparing }; val copied = state.pending!!.images.single().file
@@ -134,7 +134,7 @@ class IncomingShareStateTest {
         assertFalse(committed); assertNull(state.pending); assertFalse(copied.exists()); source.delete()
     }
 
-    @Test fun failedImportPreservesEditablePreviewAndRetryIsExplicit() = runBlocking {
+    @Test fun failedImportPreservesEditablePreviewAndRetryIsExplicit() = runBlocking<Unit> {
         state.accept(textIntent("原文"), "u1"); await { !state.preparing }; var attempts = 0
         state.confirm("u1") { attempts++; false }; await { !state.importing }
         assertEquals(1, attempts); assertNotNull(state.pending); assertTrue(state.error.isNotBlank())
@@ -143,7 +143,7 @@ class IncomingShareStateTest {
         assertEquals(2, attempts); assertNull(state.pending)
     }
 
-    @Test fun textClipDataLinksStayTextAndCannotReadOurOwnPrivateProviders() = runBlocking {
+    @Test fun textClipDataLinksStayTextAndCannotReadOurOwnPrivateProviders() = runBlocking<Unit> {
         val clipped = Intent(Intent.ACTION_SEND).setType("text/plain").apply { clipData = ClipData.newRawUri("网页", Uri.parse("https://example.com/article")) }
         state.accept(clipped, "u1"); await { !state.preparing }
         assertEquals("https://example.com/article", state.pending!!.text); assertTrue(state.pending!!.images.isEmpty())
@@ -151,7 +151,7 @@ class IncomingShareStateTest {
         await { !state.preparing }; assertNull(state.pending); assertTrue(state.error.contains("重新分享"))
     }
 
-    @Test fun pendingSurvivesProcessRecreationButConsumedIntentCannotReplay() = runBlocking {
+    @Test fun pendingSurvivesProcessRecreationButConsumedIntentCannotReplay() = runBlocking<Unit> {
         val intent = textIntent("待加入草稿")
         state.accept(intent, "u1"); await { !state.preparing }; val id = state.pending!!.id
         await { File(app.cacheDir, "incoming-shares/$id/payload.json").isFile }
@@ -162,7 +162,7 @@ class IncomingShareStateTest {
         state.accept(intent, "u1"); delay(30); assertNull(state.pending)
     }
 
-    @Test fun originalSystemParcelReceivesSavedReceiptAndCannotReplayAConsumedShare() = runBlocking {
+    @Test fun originalSystemParcelReceivesSavedReceiptAndCannotReplayAConsumedShare() = runBlocking<Unit> {
         val incoming = textIntent("系统保留的原始分享")
         val parcel = Parcel.obtain()
         val systemOriginal = try {
@@ -181,7 +181,7 @@ class IncomingShareStateTest {
         assertNull(state.pending); assertFalse(state.preparing)
     }
 
-    @Test fun canceledPreviousShareCannotDeleteTheNextShareWhileBothReachEof() = runBlocking {
+    @Test fun canceledPreviousShareCannotDeleteTheNextShareWhileBothReachEof() = runBlocking<Unit> {
         val source = fixture.image(); val bytes = source.readBytes()
         val oldAtEof = CountDownLatch(1); val newAtEof = CountDownLatch(1)
         val releaseOld = CountDownLatch(1); val releaseNew = CountDownLatch(1)
@@ -210,7 +210,7 @@ class IncomingShareStateTest {
         } finally { releaseOld.countDown(); releaseNew.countDown(); source.delete() }
     }
 
-    @Test fun restoreSkipsFreshDirectoriesWithoutManifestAndRemovesExpiredOrphans() = runBlocking {
+    @Test fun restoreSkipsFreshDirectoriesWithoutManifestAndRemovesExpiredOrphans() = runBlocking<Unit> {
         scope.cancel()
         val root = File(app.cacheDir, "incoming-shares").apply { mkdirs() }
         val fresh = File(root, "11111111-1111-1111-1111-111111111111").apply { mkdirs() }
@@ -220,7 +220,7 @@ class IncomingShareStateTest {
         assertTrue(fresh.isDirectory); assertNull(state.pending)
     }
 
-    @Test fun restoredShareNeverCrossesItsOriginalAccountAndExpiryCleansLocalData() = runBlocking {
+    @Test fun restoredShareNeverCrossesItsOriginalAccountAndExpiryCleansLocalData() = runBlocking<Unit> {
         state.accept(textIntent("账号一的内容"), "u1"); await { !state.preparing }; val id = state.pending!!.id
         await { File(app.cacheDir, "incoming-shares/$id/payload.json").isFile }
         scope.cancel(); scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
