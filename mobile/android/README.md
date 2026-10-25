@@ -82,7 +82,7 @@
 ## 构建环境
 
 - 云端：Ubuntu 24.04、Temurin JDK 17、Gradle 8.13、Android SDK 36、Build Tools 36.0.0。
-- 固定 AGP 8.13.0、Kotlin 2.2.20、Compose BOM 2025.09.01，避免动态依赖版本。
+- 固定 AGP 8.13.0、Kotlin 2.2.20、Compose BOM 2026.01.00，避免动态依赖版本。
 - 初期由 setup-gradle 安装固定版本 Gradle，使用 `gradle -p mobile/android ...`；当前不要求本机 Gradle 或 Wrapper。
 - push 只匹配 `mobile/android/**` 和 Android workflow；普通网站改动不触发构建。也可手动运行。
 - 默认 GITHUB_TOKEN 仅 contents:read，无服务器 SSH 权限，也无生产部署步骤。
