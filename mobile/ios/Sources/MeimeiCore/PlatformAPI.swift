@@ -38,6 +38,13 @@ public protocol PlatformServing: Sendable {
     func documents() async throws -> [ChatDocument]
     func uploadDocument(_ data: Data, filename: String, progress: @escaping @Sendable (Double) -> Void) async throws -> ChatDocument
     func refreshDocument(id: String) async throws -> ChatDocument
+    func writing(conversationID: String, versionID: Int64?) async throws -> WritingResponse
+    func updateWriting(conversationID: String, revision: Int, command: WritingCommand) async throws -> WritingResponse
+    func mediaTasks() async throws -> [MediaTask]
+    func uploadMedia(file: URL, filename: String, progress: @escaping @Sendable (Double) -> Void) async throws -> MediaTask
+    func refreshMedia(id: String) async throws -> MediaTask
+    func deleteMedia(id: String) async throws
+    func mediaConversation(id: String, modelID: String) async throws -> MediaConversation
     func ocrTasks() async throws -> [OCRTask]
     func recognizeHandwriting(_ jpeg: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> OCRTask
     func deleteOCRTask(id: String) async throws
@@ -55,6 +62,14 @@ public protocol PlatformServing: Sendable {
 }
 
 public extension PlatformServing {
+    func writing(conversationID: String, versionID: Int64?) async throws -> WritingResponse { throw PlatformError.media("写稿暂不可用") }
+    func updateWriting(conversationID: String, revision: Int, command: WritingCommand) async throws -> WritingResponse { throw PlatformError.media("写稿暂不可用") }
+    func mediaTasks() async throws -> [MediaTask] { throw PlatformError.media("音视频暂不可用") }
+    func uploadMedia(file: URL, filename: String, progress: @escaping @Sendable (Double) -> Void) async throws -> MediaTask { throw PlatformError.media("音视频暂不可用") }
+    func refreshMedia(id: String) async throws -> MediaTask { throw PlatformError.media("音视频暂不可用") }
+    func deleteMedia(id: String) async throws { throw PlatformError.media("音视频暂不可用") }
+    func mediaConversation(id: String, modelID: String) async throws -> MediaConversation { throw PlatformError.media("音视频暂不可用") }
+
     func ocrTasks() async throws -> [OCRTask] { throw PlatformError.media("手写识别暂不可用") }
     func recognizeHandwriting(_ jpeg: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> OCRTask { throw PlatformError.media("手写识别暂不可用") }
     func deleteOCRTask(id: String) async throws { throw PlatformError.media("手写识别暂不可用") }
@@ -297,6 +312,42 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
         return try await call(DocumentResponse.self, path: ["api", "documents"], method: "POST", body: [
             "filename": safeFilename, "mime_type": "application/octet-stream", "file_size": data.count, "oss_key": key
         ]).document
+    }
+    public func writing(conversationID: String, versionID: Int64? = nil) async throws -> WritingResponse {
+        try await call(WritingResponse.self, path: ["api", "conversations", conversationID, "writing"], query: versionID.map { [URLQueryItem(name: "version_id", value: String($0))] } ?? [])
+    }
+    public func updateWriting(conversationID: String, revision: Int, command: WritingCommand) async throws -> WritingResponse {
+        try await call(WritingResponse.self, path: ["api", "conversations", conversationID, "writing"], method: "PATCH", body: command.body(revision: revision))
+    }
+    private struct MediaTasks: Decodable { let tasks: [MediaTask] }
+    private struct MediaResponse: Decodable { let task: MediaTask }
+    public func mediaTasks() async throws -> [MediaTask] { try await call(MediaTasks.self, path: ["api", "media", "tasks"]).tasks }
+    public func refreshMedia(id: String) async throws -> MediaTask { try await call(MediaResponse.self, path: ["api", "media", "tasks", id, "refresh"], method: "POST", body: [:]).task }
+    public func deleteMedia(id: String) async throws { _ = try await call(OK.self, path: ["api", "media", "tasks", id], method: "DELETE") }
+    public func mediaConversation(id: String, modelID: String) async throws -> MediaConversation {
+        try await call(MediaConversation.self, path: ["api", "media", "tasks", id, "conversation"], method: "POST", body: ["model_id": modelID])
+    }
+    public func uploadMedia(file: URL, filename: String, progress: @escaping @Sendable (Double) -> Void) async throws -> MediaTask {
+        let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+        let size = (attrs[.size] as? NSNumber)?.intValue ?? 0
+        try MediaLimits.validate(filename: filename, size: size)
+        let policy = try await call(PolicyResponse.self, path: ["api", "media", "upload-policy"], method: "POST", body: [:]).policy
+        let ext = (filename as NSString).pathExtension.lowercased()
+        let safeName = String((filename as NSString).deletingPathExtension.prefix(179 - ext.count)) + "." + ext
+        let key = policy.keyPrefix + UUID().uuidString.lowercased() + "." + ext
+        let boundary = "Meimei-" + UUID().uuidString
+        let form = FileManager.default.temporaryDirectory.appendingPathComponent("media-form-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: form) }
+        try await Task.detached { try policy.writeMediaForm(file: file, key: key, boundary: boundary, output: form) }.value
+        try Task.checkCancellation()
+        var req = URLRequest(url: try externalURL(policy.host)); req.httpMethod = "POST"; req.timeoutInterval = 900
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        let external = URLSession(configuration: session.configuration, delegate: NoRedirects(progress: progress), delegateQueue: nil)
+        defer { external.invalidateAndCancel() }
+        let (_, response) = try await external.upload(for: req, fromFile: form)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw PlatformError.media("音视频上传失败，请先核对记录再重试") }
+        progress(1)
+        return try await call(MediaResponse.self, path: ["api", "media", "tasks"], method: "POST", body: ["filename":safeName, "mime_type":"application/octet-stream", "file_size":size, "oss_key":key, "source_language":"cn"]).task
     }
     private struct OCRTasks: Decodable { let tasks: [OCRTask] }
     private struct OCRResponse: Decodable { let task: OCRTask }

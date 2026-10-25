@@ -63,15 +63,17 @@ public struct ChatMessage: Decodable, Identifiable, Equatable, Sendable {
     public let documents: [ChatDocument]
     public let images: [ChatImage]
     public let sources: [ChatSource]
+    public let writingCheck: WritingCheck?
 
-    public init(id: Int64, role: String, content: String, reasoning: String = "", status: String = "", attachments: [String] = [], favoriteID: String? = nil, images: [ChatImage] = [], sources: [ChatSource] = [], documents: [ChatDocument] = []) {
+    public init(id: Int64, role: String, content: String, reasoning: String = "", status: String = "", attachments: [String] = [], favoriteID: String? = nil, images: [ChatImage] = [], sources: [ChatSource] = [], documents: [ChatDocument] = [], writingCheck: WritingCheck? = nil) {
         self.id = id; self.role = role; self.content = content
         self.reasoning = reasoning; self.status = status
         self.attachments = attachments.isEmpty ? documents.map(\.filename) : attachments
-        self.favoriteID = favoriteID; self.images = images; self.sources = sources; self.documents = documents
+        self.favoriteID = favoriteID; self.images = images; self.sources = sources; self.documents = documents; self.writingCheck = writingCheck
     }
     enum CodingKeys: String, CodingKey {
         case id, role, content, documents, images, sources
+        case writingCheck = "writing_check"
         case reasoning = "reasoning_content", status = "generation_status", favoriteID = "favorite_id"
     }
     public init(from decoder: Decoder) throws {
@@ -85,6 +87,7 @@ public struct ChatMessage: Decodable, Identifiable, Equatable, Sendable {
         documents = try c.decodeIfPresent([ChatDocument].self, forKey: .documents) ?? []
         images = try c.decodeIfPresent([ChatImage].self, forKey: .images) ?? []
         sources = try c.decodeIfPresent([ChatSource].self, forKey: .sources) ?? []
+        writingCheck = try c.decodeIfPresent(WritingCheck.self, forKey: .writingCheck)
         attachments = documents.map(\.filename)
     }
 }

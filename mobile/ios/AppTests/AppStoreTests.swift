@@ -28,6 +28,35 @@ final class AppStoreTests: XCTestCase {
         }
         XCTFail("生成或核对未在限定时间内结束")
     }
+    func testWritingVersionsLockAndStaleRevisionPreserveDraft() async throws {
+        await login(); store.setText("聊天草稿")
+        let prepared = await store.prepareWritingConversation(); XCTAssertTrue(prepared)
+        let cid = try XCTUnwrap(store.selected?.id)
+        let loaded = await store.writing.load(conversationID: cid); XCTAssertTrue(loaded)
+        let enabled = await store.writing.update(.enabled(true)); XCTAssertTrue(enabled)
+        let saved = await store.writing.update(.draft("最终正文，不要改动。")); XCTAssertTrue(saved)
+        let locked = await store.writing.update(.locked(true)); XCTAssertTrue(locked)
+        XCTAssertEqual(store.writing.state?.locked_version_id, store.writing.state?.current_version_id)
+        let revision = try XCTUnwrap(store.writing.state?.revision)
+        _ = try await api.updateWriting(conversationID: cid, revision: revision, command: .enabled(false))
+        let stale = await store.writing.update(.draft("不能覆盖")); XCTAssertFalse(stale)
+        XCTAssertTrue(store.writing.error?.contains("重新加载") == true)
+        XCTAssertEqual(store.writing.state?.current?.content, "最终正文，不要改动。")
+        XCTAssertEqual(store.draft.text, "聊天草稿")
+        await store.logout(); XCTAssertNil(store.writing.state)
+    }
+    func testMediaPendingRefreshAndReusableAnalysisConversation() async throws {
+        await login()
+        let file = directory.appendingPathComponent("test.m4a"); try Data("offline".utf8).write(to: file)
+        await store.media.upload(file: file, filename: "test.m4a")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        let id = try XCTUnwrap(store.media.tasks.first?.id); XCTAssertTrue(store.media.tasks[0].pending)
+        let early = await store.media.conversation(id: id, modelID: "m1"); XCTAssertNil(early)
+        await store.media.refresh(id); XCTAssertEqual(store.media.tasks[0].status, "completed")
+        let first = await store.media.conversation(id: id, modelID: "m1")
+        let second = await store.media.conversation(id: id, modelID: "m1"); XCTAssertEqual(first?.id, second?.id)
+        await store.logout(); XCTAssertTrue(store.media.tasks.isEmpty)
+    }
     func testOCRResultSyncAndLogoutCleanupDoesNotReplaceDraft() async throws {
         await login(); store.setText("保留草稿")
         await store.ocr.upload(Data([255,216,255,217])); XCTAssertEqual(store.ocr.tasks.count, 1)
