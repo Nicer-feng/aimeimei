@@ -77,7 +77,8 @@ class MobileToolsScreenTest {
             }
         }; start() }
         model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {}, dispatcher = dispatcher)
-        idleModel(); preferences = AppPreferences(app).apply { changeMotion(false) }
+        runBlocking { withTimeout(10000) { while (model.account == null || model.busy) { dispatcher.scheduler.runCurrent(); delay(10) } } }
+        preferences = AppPreferences(app).apply { changeMotion(false) }
     }
     @After fun close() { model.tools.bind("", ""); model.sms.verified(); server.shutdown() }
     private fun idleModel() = runBlocking { withTimeout(10000) { while (model.busy) { dispatcher.scheduler.runCurrent(); delay(10) } } }
@@ -124,7 +125,9 @@ class MobileToolsScreenTest {
         val source = ocrBitmapFixture(app)
         try {
             model.tools.mobile.select(ocrSelectionFixture(app, source))
+            dispatcher.scheduler.runCurrent()
             runBlocking { withTimeout(10000) { while (model.tools.mobile.preparing) { dispatcher.scheduler.runCurrent(); delay(10) } } }
+            assertNotNull("所选图片准备失败：${model.tools.mobile.ocrError}", model.tools.mobile.image)
             model.editDraft("原来的草稿")
             var used = false
             compose.setContent { MeimeiTheme(preferences) { OcrScreen(model) { used = true } } }
@@ -133,8 +136,14 @@ class MobileToolsScreenTest {
                 model.tools.mobile.records.any { it.id == "o1" } && !model.tools.mobile.historyLoading }
             capture("native-ocr-preview")
             assertTrue(requests.none { it.requestUrl!!.encodedPath == "/api/ocr/upload-policy" || it.method == "POST" })
-            compose.onNodeWithTag("ocr-list").performScrollToNode(hasTestTag("ocr-record-o1"))
-            compose.onNodeWithTag("ocr-record-o1").assertIsDisplayed()
+            // 网络数据到达后仍需等待 LazyColumn 消费快照并完成布局；只重试滚动断言，不触发网络。
+            await {
+                try {
+                    compose.onNodeWithTag("ocr-list").performScrollToNode(hasTestTag("ocr-record-o1"))
+                    compose.onNodeWithTag("ocr-record-o1").assertIsDisplayed()
+                    true
+                } catch (_: AssertionError) { false }
+            }
             compose.onNodeWithText("查看结果", substring = false).performClick()
             compose.onNodeWithTag("ocr-result-text").performTextReplacement("修正后的手写内容。")
             capture("native-ocr-result", true)

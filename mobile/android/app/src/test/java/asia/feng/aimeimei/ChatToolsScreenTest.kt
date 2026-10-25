@@ -8,7 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -81,28 +81,47 @@ class ChatToolsScreenTest {
             }
         }
         server.start()
-        model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {}, dispatcher = Dispatchers.Unconfined)
-        runBlocking { withTimeout(5000) { while (model.account == null || model.busy) delay(10) } }
+        model = PlatformViewModel(app, PlatformApi(server.url("/"), CookieJar.NO_COOKIES), {}, {}, dispatcher = dispatcher)
+        runBlocking { withTimeout(5000) { while (model.account == null || model.busy) { dispatcher.scheduler.runCurrent(); delay(10) } } }
         model.open(model.conversations.single())
-        runBlocking { withTimeout(5000) { while (model.busy || model.messages.size != 2) delay(10) } }
+        runBlocking { withTimeout(5000) { while (model.busy || model.messages.size != 2) { dispatcher.scheduler.runCurrent(); delay(10) } } }
         preferences = AppPreferences(app).apply { changeMotion(false) }
     }
     @After fun close() { model.tools.bind("", ""); server.shutdown() }
     private fun show(dark: Boolean = false) {
         if (dark) preferences.changeTheme("dark")
         compose.setContent { MeimeiTheme(preferences) { PlatformApp(model, preferences) } }
-        await { compose.onAllNodesWithText("朗读").fetchSemanticsNodes().isNotEmpty() }
+        await("chat-initial-actions") {
+            try {
+                compose.onNodeWithTag("chat-messages").performScrollToNode(hasText("朗读", substring = false))
+                compose.onNodeWithText("朗读", substring = false).assertIsDisplayed()
+                true
+            } catch (_: AssertionError) { false }
+        }
     }
-    private fun await(condition: () -> Boolean) {
+    private fun await(stage: String = "native-ui", condition: () -> Boolean) {
         // 让出测试事件循环并推进实际布局，避免空列表首帧或图片解码完成前就结束等待。
-        runBlocking { withTimeout(15000) {
+        try { runBlocking { withTimeout(15000) {
             while (true) {
                 dispatcher.scheduler.runCurrent(); Shadows.shadowOf(Looper.getMainLooper()).idle(); Snapshot.sendApplyNotifications()
                 compose.mainClock.advanceTimeByFrame()
                 if (condition()) return@withTimeout
                 delay(10)
             }
-        } }
+        } } } catch (failure: TimeoutCancellationException) {
+            val state = "stage=$stage busy=${model.busy} selected=${model.selected?.id} focus=${model.focusMessageId} " +
+                "messages=${model.messages.map { it.id }} preview=${model.tools.preview?.id} previewFile=${model.tools.previewFile?.isFile} " +
+                "previewBytes=${model.tools.previewFile?.length()} previewBounds=${model.tools.previewFile?.let { runCatching { chatImageBoundsValid(it) }.getOrNull() }} " +
+                "previewBusy=${model.tools.previewBusy} previewError=${model.tools.previewError} " +
+                "favoritesLoading=${model.tools.favoritesLoading} favorites=${model.tools.favorites.map { it.optString("id") }} " +
+                "requests=${requests.map { it.method + " " + it.requestUrl!!.encodedPath }}"
+            val tree = runCatching {
+                val roots = compose.onAllNodes(isRoot(), useUnmergedTree = true)
+                roots.fetchSemanticsNodes().indices.joinToString("\n") { roots[it].printToString() }
+            }.getOrElse { "无法读取语义树：${it.message}" }
+            runCatching { capture("native-wait-timeout-$stage", dialog = model.tools.preview != null) }
+            throw AssertionError("等待原生界面阶段超时：$state\n$tree", failure)
+        }
         compose.waitForIdle()
     }
     private fun capture(name: String, dialog: Boolean = false) {
@@ -152,15 +171,23 @@ class ChatToolsScreenTest {
         // 历史内容较长时主动滚动，避免把屏幕外的附件当作已显示。
         compose.onNodeWithTag("chat-messages").performScrollToNode(hasText("图片 · 照片.jpg"))
         compose.onNodeWithText("图片 · 照片.jpg").performClick()
-        await { model.tools.previewFile != null }
-        await { compose.onAllNodesWithContentDescription("照片.jpg").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("点击历史图片后应打开同一张图片的原生预览", "img1", model.tools.preview?.id)
+        await("image-preview-file") { model.tools.preview?.id == "img1" && model.tools.previewFile?.isFile == true && !model.tools.previewBusy }
+        await("image-preview-decoded") { compose.onAllNodesWithContentDescription("照片.jpg").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithContentDescription("照片.jpg").assertIsDisplayed(); capture("native-image-preview", true)
         compose.onNodeWithText("关闭").performClick()
         compose.onNodeWithContentDescription("更多工具").performClick(); compose.onNodeWithText("我的收藏").performClick()
-        await { !model.tools.favoritesLoading && compose.onAllNodesWithText("这是收藏的原生验收回答。").fetchSemanticsNodes().isNotEmpty() }
+        await("favorites-loaded") { !model.tools.favoritesLoading && model.tools.favorites.any { it.optString("id") == "f1" } &&
+            compose.onAllNodesWithTag("favorites-list").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("favorites-list").performScrollToNode(hasText("这是收藏的原生验收回答。"))
         compose.onNodeWithText("这是收藏的原生验收回答。").assertIsDisplayed(); capture("native-favorites")
         compose.onNodeWithText("查看原消息").performClick()
-        await { compose.onAllNodesWithText("朗读").fetchSemanticsNodes().isNotEmpty() }
+        await("favorite-original-loaded") { !model.busy && model.messages.any { it.id == "2" } &&
+            compose.onAllNodesWithTag("chat-messages").fetchSemanticsNodes().isNotEmpty() }
+        // 返回原消息的定位和懒列表布局独立进行；主动把验收操作滚入可见区域后再断言。
+        compose.onNodeWithTag("chat-messages").performScrollToNode(hasText("朗读", substring = false))
+        compose.onNodeWithText("朗读", substring = false).assertIsDisplayed()
+        compose.onNodeWithTag("message-2").assertIsDisplayed()
         assertEquals("c1", model.selected?.id)
     }
     @Test fun historyShowsThumbnailAndModelPickerCanFilterImageCapableModels() {
