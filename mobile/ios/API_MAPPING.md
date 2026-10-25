@@ -62,3 +62,10 @@ SSE 解析标准 `data:` 事件及空行，支持多行数据、CRLF、UTF-8、r
 ## 手写识别（0.6.0）
 
 GET `/api/ocr/tasks`、POST `/api/ocr/upload-policy`、POST `/api/ocr/tasks`、DELETE `/api/ocr/tasks/{id}`。上传压缩 JPEG，大小不超过10MB及策略 max_size；OSS 不带平台 Cookie，不跟随重定向。创建为同步识别，completed/failed 均保留记录与 error_message；超时后先刷新，不自动重提。结果编辑只用于草稿，不覆盖服务端原文。
+
+## 写稿及音视频（0.7.0）
+
+- GET `/api/conversations/{id}/writing` 可传 version_id 预览版本；PATCH 同路径必须携带当前 revision，按操作只传 enabled/requirements/draft/version_id/locked/action=reset。409 不重试不覆盖，要求手动重新加载核对。启用后直接复用现有聊天生成和定稿保护，历史消息 writing_check 展示字数、问题及范围说明。
+- GET `/api/media/tasks`；POST `/api/media/upload-policy` 获取策略；经独立无 Cookie 会话从临时文件上传 OSS 后，POST `/api/media/tasks` 携带 filename/mime_type/file_size/oss_key/source_language=cn。最多500MB且不超过策略 max_size，上传表单按64KB分块写入临时文件，结束后删除。
+- POST `/api/media/tasks/{id}/refresh` 只查询原任务，保留临时上游错误与已有结果，前台详情最多12轮每5秒查询，离开或后台取消轮询；仍可手动刷新。
+- POST `/api/media/tasks/{id}/conversation` 传 model_id，复用服务端分析会话；不自动发送模型问题。DELETE `/api/media/tasks/{id}` 删除记录前确认，已创建会话和OSS源文件保留。

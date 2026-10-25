@@ -5,6 +5,8 @@ import MeimeiCore
 @MainActor @Observable
 final class AppStore {
     struct FailedDocument { let data: Data; let filename: String }
+    let writing: WritingController
+    let media: MediaController
     let ocr: OCRController
     let personal: PersonalToolsController
     let speech: SpeechController
@@ -53,9 +55,11 @@ final class AppStore {
 
     init(api: any PlatformServing, local: LocalState, audioOutput: (any AudioOutput)? = nil) {
         self.api = api; self.local = local
+        writing = WritingController(api: api); media = MediaController(api: api)
         ocr = OCRController(api: api)
         personal = PersonalToolsController(api: api)
         speech = SpeechController(api: api, output: audioOutput ?? DeviceAudioOutput())
+        writing.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }; media.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         ocr.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         personal.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         speech.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
@@ -142,7 +146,7 @@ final class AppStore {
     }
     func clearLoginFeedback() { error = nil; loginNotice = nil }
     private func clearAccount() {
-        generation?.cancel(); runID = UUID(); speech.reset(); personal.reset(); ocr.reset()
+        generation?.cancel(); runID = UUID(); speech.reset(); personal.reset(); ocr.reset(); writing.reset(); media.reset()
         documents = []; importingDocuments = false; failedDocument = nil; documentUploadingName = nil
         account = nil; selected = nil; messages = []; conversations = []; models = []
         favorites = []; prompts = []; favoriteOverrides = [:]; resetSearch(); focusedMessageID = nil
@@ -173,6 +177,7 @@ final class AppStore {
         }
     }
     private func restoreDraft() {
+        writing.reset()
         importingDocuments = false
         failedDocument = nil; documentUploadingName = nil
         uploadingImage = nil; failedImage = nil; attachmentContext = UUID()
@@ -315,6 +320,19 @@ final class AppStore {
             if selected?.id == item.id { speech.stop(); selected = nil; messages = []; live = nil; restoreDraft() }
             try await loadWorkspace()
         }
+    }
+    func prepareWritingConversation() async -> Bool {
+        guard !locked, account != nil else { return false }
+        if selected != nil { return true }
+        await work {
+            guard let account else { return }
+            let welcome = draft
+            let item = try await api.createConversation(modelID: draft.modelID, mode: draft.reasoningMode)
+            selected = item; conversations.insert(item, at: 0)
+            try local.setDraft(welcome, accountID: account.id, conversationID: item.id)
+            try local.setDraft(Draft(), accountID: account.id, conversationID: ""); restoreDraft()
+        }
+        return selected != nil
     }
     func send() async {
         guard canSend, foreground, let account else { return }
