@@ -50,3 +50,11 @@ SSE 解析标准 `data:` 事件及空行，支持多行数据、CRLF、UTF-8、r
 - GET `/api/tts/config` 读取 `tts.enabled/configured/voices/default_voice/default_speed`。POST `/api/messages/{id}/tts` 只准备播放，检查 `cached/long_text` 后再按用户确认 GET `/api/messages/{id}/tts/audio?voice=...&speed=...`。
 - 音频接口可返回 200 `audio/*` 或 302 OSS HTTPS 签名地址；OSS 不携带平台 Cookie，不跟随进一步重定向。客户端自行构造固定消息路径，不使用任意返回的 `audio_url`。
 - 音频不落盘，暂停/继续不请求后端；取消、页面关闭、会话切换、后台和退出使过时响应失效。无自动生成/下载重试，缓存由现有后端管理。
+
+## 档案与分享（0.5.0）
+
+- GET/POST `/api/profiles`，PATCH/DELETE `/api/profiles/{id}`；字段 title/content/type/sort_order/enabled，布尔启用与数字排序保持类型。客户端同服务端限制标题80字、正文12000字。
+- 草稿 `useProfile` 缺省 true，按账号和会话保存；发送时显式传布尔 `use_profile`，只影响后续提问。
+- GET/POST `/api/conversations/{id}/shares`；创建 scope=assistant/turn/conversation，单回答或轮次传 message_id，expires_in=3600/21600/86400/604800。
+- DELETE `/api/conversation-shares/{id}` 撤销。只有创建响应有相对 url；只接受本站 `/ai/share/` 后跟安全令牌的链接，历史列表不恢复令牌。分享令牌仅存当前页面内存。
+- 保存和分享写入不自动重试；退出账号丢弃过时响应并清空工具状态。

@@ -9,6 +9,7 @@ struct ChatView: View {
     @State private var confirmRestore = false
     @State private var showPrompts = false
     @State private var showDocuments = false
+    @State private var shareMessage: ChatMessage?
     @State private var speechMessage: ChatMessage?
     @State private var photos: [PhotosPickerItem] = []
     @State private var showPhotos = false
@@ -27,7 +28,7 @@ struct ChatView: View {
                         if store.messages.isEmpty && store.pending == nil { welcome }
                         ForEach(store.messages) { message in
                             MessageRow(store: store, message: message, favorite: store.isFavorite(message), canFavorite: !store.locked,
-                                       onFavorite: { Task { await store.toggleFavorite(message) } }, onRead: { speechMessage = message }).equatable()
+                                       onFavorite: { Task { await store.toggleFavorite(message) } }, onRead: { speechMessage = message }, onShare: { shareMessage = message }).equatable()
                                 .id(message.id)
                                 .overlay { RoundedRectangle(cornerRadius: 18).stroke(store.focusedMessageID == message.id ? Brand.accent : .clear, lineWidth: 2).allowsHitTesting(false) }
                         }
@@ -83,6 +84,9 @@ struct ChatView: View {
         }
         .background(Brand.background)
         .sheet(isPresented: $showDocuments) { DocumentsView(store: store) }
+        .sheet(item: $shareMessage) { message in
+            if let selected = store.selected { ConversationShareView(controller: store.personal, conversationID: selected.id, messageID: message.id) }
+        }
         .sheet(item: $speechMessage) { message in SpeechView(controller: store.speech, message: message) }
         .task(id: store.documentPollKey) {
             for _ in 0..<12 {
@@ -270,6 +274,7 @@ private struct MessageRow: View, Equatable {
     var canFavorite = false
     var onFavorite: (() -> Void)?
     var onRead: (() -> Void)?
+    var onShare: (() -> Void)?
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.message == rhs.message && lhs.favorite == rhs.favorite && lhs.canFavorite == rhs.canFavorite
     }
@@ -286,7 +291,10 @@ private struct MessageRow: View, Equatable {
                         .labelStyle(.iconOnly).disabled(!canFavorite).accessibilityIdentifier("favoriteMessage-\(message.id)")
                 }
                 if !message.content.isEmpty {
-                    ShareLink(item: message.content) { Image(systemName: "square.and.arrow.up") }.accessibilityLabel("分享消息")
+                    Menu {
+                        ShareLink("分享文本", item: message.content)
+                        if message.role == "assistant", message.id > 0 { Button("分享链接") { onShare?() }.disabled(store.locked) }
+                    } label: { Image(systemName: "square.and.arrow.up") }.accessibilityLabel("分享消息").accessibilityIdentifier("shareMessage-\(message.id)")
                     Button("复制", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.content }
                         .labelStyle(.iconOnly).accessibilityLabel("复制消息")
                 }

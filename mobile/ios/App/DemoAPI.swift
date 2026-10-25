@@ -4,6 +4,23 @@ import MeimeiCore
 
 /// 仅 Debug 的 UI 测试注入离线数据；不会生成登录凭证或调用真实模型。
 actor DemoAPI: PlatformServing {
+    private var personalProfiles: [AIProfile] = []
+    private var personalShares: [ConversationShare] = []
+    func profiles() async throws -> [AIProfile] { personalProfiles }
+    func saveProfile(_ profile: AIProfile) async throws -> AIProfile {
+        guard profile.valid else { throw PlatformError.media("档案格式不正确") }
+        var value = profile; if value.id.isEmpty { value.id = UUID().uuidString }
+        personalProfiles.removeAll { $0.id == value.id }; personalProfiles.append(value); return value
+    }
+    func deleteProfile(id: String) async throws { personalProfiles.removeAll { $0.id == id } }
+    func shares(conversationID: String) async throws -> [ConversationShare] { personalShares }
+    func createShare(conversationID: String, scope: ShareScope, messageID: Int64?, expiresIn: Int) async throws -> ConversationShare {
+        let value = ConversationShare(id: UUID().uuidString, scope: scope.rawValue, title: "测试对话", expires_at: Date().timeIntervalSince1970 + Double(expiresIn), active: true, url: "/ai/share/offline-test-token")
+        personalShares.insert(value, at: 0); return value
+    }
+    func revokeShare(id: String) async throws {
+        personalShares = personalShares.map { $0.id == id ? ConversationShare(id: $0.id, scope: $0.scope, title: $0.title, expires_at: $0.expires_at, active: false) : $0 }
+    }
     private var loggedIn = false
     private var created = 1
     private var smsSends = 0
