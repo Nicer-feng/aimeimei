@@ -26,8 +26,8 @@ android {
         applicationId = "asia.feng.aimeimei"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.6.4"
+        versionCode = 13
+        versionName = "0.6.5"
         resValue("string", "app_name", "AI槑槑")
         buildConfigField("String", "API_BASE_URL", "\"${server.toASCIIString().trimEnd('/')}/\"")
     }
