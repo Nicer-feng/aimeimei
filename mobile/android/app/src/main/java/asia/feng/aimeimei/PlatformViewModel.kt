@@ -54,6 +54,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     internal val activeGeneration get() = generation
     private var buffer: ReplyBuffer? = null
     internal val tools = ChatTools(application, api, viewModelScope) { returnedFromWeb() }
+    internal val sms = SmsLoginState(api, viewModelScope)
     var focusMessageId by mutableStateOf(""); private set
 
     init { restore() }
@@ -97,11 +98,20 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
             try {
                 val user = api.login(username, password, challenge, answer)
                 if (ticket != revision) return@work
-                account = user; captcha = null; loadWorkspace(ticket); restoreWelcomeDraft()
+                account = user; captcha = null; sms.verified(); loadWorkspace(ticket); restoreWelcomeDraft()
             } catch (failure: ApiFailure) {
                 if (ticket == revision && account == null) captcha = runCatching { api.captcha() }.getOrNull()
                 throw failure
             }
+        }
+    }
+    internal fun loginSms(code: String) {
+        val phone = normalizedPhone(sms.phone); val challenge = sms.challenge
+        if (account != null || busy || sms.sending || phone.isBlank() || challenge.isBlank() || !Regex("\\d{6}").matches(code)) return
+        work { ticket ->
+            val user = api.loginSms(phone, code, challenge)
+            if (ticket != revision) return@work
+            account = user; captcha = null; sms.verified(); loadWorkspace(ticket); restoreWelcomeDraft()
         }
     }
     fun refresh() {
@@ -344,6 +354,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         work { ticket -> try { api.logout() } finally { if (ticket == revision) { clearAccount(); captcha = runCatching { api.captcha() }.getOrNull() } } }
     }
     private fun clearAccount() {
+        sms.verified()
         generation++
         streamJob?.cancel(); cookies.clear(); account = null; selected = null; messages = emptyList(); conversations = emptyList(); models = emptyList()
         captcha = null; draft = ""; pending = null; live = null; streaming = false
