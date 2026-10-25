@@ -199,7 +199,10 @@ class AdminScreenTest {
     }
     @Test fun familyAccountCannotCallNativeAdminGateway() {
         role = "family"; model.restore()
-        runBlocking { withTimeout(10000) { while(model.busy || model.account?.role != "family") delay(10) } }
+        runBlocking { withTimeout(10000) { while(model.busy || model.account?.role != "family") {
+            effectDispatcher.scheduler.runCurrent()
+            delay(10)
+        } } }
         val before = server.requestCount
         runBlocking {
             try { model.adminRequest(listOf("users")); fail("Expected permission rejection") }
