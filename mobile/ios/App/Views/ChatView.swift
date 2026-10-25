@@ -9,6 +9,7 @@ struct ChatView: View {
     @State private var confirmRestore = false
     @State private var showPrompts = false
     @State private var showDocuments = false
+    @State private var showWriting = false
     @State private var shareMessage: ChatMessage?
     @State private var speechMessage: ChatMessage?
     @State private var photos: [PhotosPickerItem] = []
@@ -84,6 +85,7 @@ struct ChatView: View {
         }
         .background(Brand.background)
         .sheet(isPresented: $showDocuments) { DocumentsView(store: store) }
+        .sheet(isPresented: $showWriting) { if let selected = store.selected { WritingView(store: store, conversationID: selected.id) } }
         .sheet(item: $shareMessage) { message in
             if let selected = store.selected { ConversationShareView(controller: store.personal, conversationID: selected.id, messageID: message.id) }
         }
@@ -249,6 +251,7 @@ struct ChatView: View {
                             .accessibilityIdentifier("addImageButton")
                         Button("文件", systemImage: "paperclip") { composing = false; showDocuments = true }
                             .font(.caption).disabled(store.locked || store.importingDocuments || store.pending != nil || preparing).accessibilityIdentifier("documentsButton")
+                        Button("写稿", systemImage: "pencil.and.outline") { Task { if await store.prepareWritingConversation() { showWriting = true } } }.font(.caption).disabled(store.locked || store.pending != nil).accessibilityIdentifier("writingButton")
                     }.fixedSize(horizontal: true, vertical: false).frame(maxHeight: .infinity)
                 }.frame(height: toolRowHeight).accessibilityIdentifier("composerToolsScroll")
                 Button("刷新", systemImage: "arrow.clockwise") { Task { await store.refresh() } }
@@ -304,6 +307,14 @@ private struct MessageRow: View, Equatable {
             }
             if message.role == "user" { Text(message.content).textSelection(.enabled) }
             else { MarkdownView(content: message.content) }
+            if let check = message.writingCheck {
+                DisclosureGroup("写稿检查") {
+                    Text("正文字数：" + check.body_chars.map(String.init).joined(separator: "、")).font(.footnote)
+                    Text(check.count_note).font(.caption).foregroundStyle(.secondary)
+                    ForEach(Array(check.issues.enumerated()), id: \.offset) { _, issue in Text(issue).font(.footnote).foregroundStyle(.orange) }
+                    Text(check.scope).font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if !message.images.isEmpty {
                 ScrollView(.horizontal) { HStack { ForEach(message.images) { image in ChatImageTile(store: store, image: image) } } }
             }

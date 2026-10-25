@@ -4,6 +4,58 @@ import MeimeiCore
 
 /// 仅 Debug 的 UI 测试注入离线数据；不会生成登录凭证或调用真实模型。
 actor DemoAPI: PlatformServing {
+    private struct WritingRecord {
+        var enabled = false; var requirements = WritingRequirements(); var revision = 0
+        var versions: [[String: Any]] = []; var current: Int64 = 0; var locked: Int64 = 0
+    }
+    private var writingRecords: [String: WritingRecord] = [:]
+    func writing(conversationID: String, versionID: Int64?) async throws -> WritingResponse {
+        let record = writingRecords[conversationID] ?? WritingRecord()
+        var state: [String: Any] = ["requirements": try JSONSerialization.jsonObject(with: JSONEncoder().encode(record.requirements)), "revision":record.revision, "current_version_id":record.current, "locked_version_id":record.locked, "versions":record.versions, "notice":""]
+        state["current"] = record.versions.first { ($0["id"] as? Int64) == record.current }
+        if let versionID { state["selected"] = record.versions.first { ($0["id"] as? Int64) == versionID } }
+        return try JSONDecoder().decode(WritingResponse.self, from: JSONSerialization.data(withJSONObject: ["writing":state,"enabled":record.enabled]))
+    }
+    func updateWriting(conversationID: String, revision: Int, command: WritingCommand) async throws -> WritingResponse {
+        var record = writingRecords[conversationID] ?? WritingRecord()
+        guard record.revision == revision else { throw PlatformError.http(409, "版本已变化") }
+        _ = try command.body(revision: revision)
+        switch command {
+        case .enabled(let value): record.enabled = value
+        case .requirements(let value): record.requirements = value
+        case .draft(let text):
+            let id = Int64(record.versions.count + 1); record.versions.insert(["id":id,"label":"手动保存","content":text], at: 0); record.current = id; record.locked = 0
+        case .version(let id): record.current = id; record.locked = 0
+        case .locked(let flag): record.locked = flag ? record.current : 0
+        case .reset: record.requirements = WritingRequirements(); record.current = 0; record.locked = 0
+        }
+        record.revision += 1; writingRecords[conversationID] = record
+        return try await writing(conversationID: conversationID, versionID: nil)
+    }
+    private var analysisTasks: [MediaTask] = []
+    private var analysisConversations: [String: String] = [:]
+    private static func analysis(_ id: String, status: String) -> MediaTask {
+        var value: [String: Any] = ["id":id,"filename":"会议录音.m4a","status":status]
+        for key in ["transcript_text","summary_text","outline_text","enhanced_summary","key_points","mindmap_text","copywriting_text","error_message"] { value[key] = "" }
+        if status == "completed" { value["transcript_text"] = "会议讨论了项目安排与下一步计划。"; value["summary_text"] = "完成项目计划，并安排下次会议。" }
+        return try! JSONDecoder().decode(MediaTask.self, from: JSONSerialization.data(withJSONObject: value))
+    }
+    func mediaTasks() async throws -> [MediaTask] { analysisTasks }
+    func uploadMedia(file: URL, filename: String, progress: @escaping @Sendable (Double) -> Void) async throws -> MediaTask {
+        progress(1); let value = Self.analysis(UUID().uuidString, status: "submitted"); analysisTasks.insert(value, at: 0); return value
+    }
+    func refreshMedia(id: String) async throws -> MediaTask {
+        let value = Self.analysis(id, status: "completed"); analysisTasks.removeAll { $0.id == id }; analysisTasks.insert(value, at: 0); return value
+    }
+    func deleteMedia(id: String) async throws { analysisTasks.removeAll { $0.id == id } }
+    func mediaConversation(id: String, modelID: String) async throws -> MediaConversation {
+        guard let task = analysisTasks.first(where: { $0.id == id }), task.status == "completed" else { throw PlatformError.media("分析尚未完成") }
+        let cid = analysisConversations[id] ?? "media-" + id; analysisConversations[id] = cid
+        let item = Self.conversation(cid, "音视频分析：会议录音", modelID)
+        if !items.contains(where: { $0.id == cid }) { items.insert(item, at: 0); history[cid] = [ChatMessage(id: 100, role: "assistant", content: "材料已就绪，可以继续提问。", status: "completed")] }
+        let raw = #"{"conversation":{"id":"\#(cid)","title":"音视频分析：会议录音","model_id":"\#(modelID)","model_name":"槑槑","reasoning_mode":"balanced","pinned":false},"task":{"id":"\#(id)","filename":"会议录音.m4a","status":"completed","transcript_text":"会议原文","summary_text":"项目计划","outline_text":"","enhanced_summary":"","key_points":"","mindmap_text":"","copywriting_text":"","error_message":""}}"#
+        return Self.decode(MediaConversation.self, raw)
+    }
     private var handwritingTasks: [OCRTask] = []
     func ocrTasks() async throws -> [OCRTask] { handwritingTasks }
     func recognizeHandwriting(_ jpeg: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> OCRTask {
@@ -108,7 +160,7 @@ actor DemoAPI: PlatformServing {
         (history[id] ?? []).map { message in
             ChatMessage(id: message.id, role: message.role, content: message.content, reasoning: message.reasoning,
                         status: message.status, attachments: message.attachments,
-                        favoriteID: savedFavorites.first { $0.messageID == message.id }?.id, images: message.images, sources: message.sources, documents: message.documents)
+                        favoriteID: savedFavorites.first { $0.messageID == message.id }?.id, images: message.images, sources: message.sources, documents: message.documents, writingCheck: message.writingCheck)
         }
     }
     func favorites() async throws -> [FavoriteMessage] { savedFavorites }

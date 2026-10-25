@@ -564,3 +564,70 @@ extension APITests {
         do { _ = try await api.recognizeHandwriting(Data()) { _ in }; XCTFail() } catch {}
     }
 }
+
+
+extension APITests {
+    func testWritingRevisionBooleanAndVersionSelectionContract() async throws {
+        let raw = #"{"writing":{"requirements":{},"revision":3,"current_version_id":0,"locked_version_id":0,"current":null,"versions":[],"notice":""},"enabled":true}"#
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/conversations/c1/writing"); XCTAssertEqual(request.httpMethod, "PATCH")
+            let payload = try self.body(request); XCTAssertEqual(payload["revision"] as? Int, 2); XCTAssertEqual(payload["enabled"] as? Bool, true)
+            return (200, [:], raw)
+        }
+        let result = try await api.updateWriting(conversationID: "c1", revision: 2, command: .enabled(true)); XCTAssertEqual(result.writing.revision, 3)
+        StubProtocol.handler = { request in
+            XCTAssertEqual(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, "12")
+            return (200, [:], raw)
+        }
+        _ = try await api.writing(conversationID: "c1", versionID: 12)
+        StubProtocol.handler = { _ in (409, [:], #"{"error":"本单要求已更新"}"#) }
+        do { _ = try await api.updateWriting(conversationID: "c1", revision: 2, command: .locked(true)); XCTFail() } catch let error as PlatformError { if case .http(409, _) = error {} else { XCTFail() } }
+    }
+    func testWritingRequirementsAndDraftValidationAndMessageChecks() throws {
+        var requirements = WritingRequirements(); requirements.min_chars = 500; requirements.max_chars = 100
+        XCTAssertThrowsError(try WritingCommand.requirements(requirements).body(revision: 0))
+        XCTAssertThrowsError(try WritingCommand.draft(" ").body(revision: 0))
+        requirements.max_chars = 1000; requirements.required = ["产品名"]
+        let body = try WritingCommand.requirements(requirements).body(revision: 7)
+        let payload = try XCTUnwrap(body["requirements"] as? [String: Any]); XCTAssertEqual(payload["min_chars"] as? Int, 500); XCTAssertEqual(payload["required"] as? [String], ["产品名"])
+        let message = try JSONDecoder().decode(ChatMessage.self, from: Data(#"{"id":42,"role":"assistant","content":"正文","writing_check":{"issues":["缺少本单必带词"],"body_chars":[2],"count_note":"不计空白","scope":"不代表事实核实"}}"#.utf8))
+        XCTAssertEqual(message.writingCheck?.issues.count, 1)
+    }
+    func testMediaMultipartStreamsFileAndRejectsExpiredPolicy() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("source"); let output = directory.appendingPathComponent("form")
+        let content = Data(repeating: 7, count: 150000); try content.write(to: file)
+        let policy = try JSONDecoder().decode(ImageUploadPolicy.self, from: Data(#"{"host":"https://oss.invalid","access_key_id":"test","policy":"test","signature":"test","key_prefix":"media/u1/","max_size":200000,"expires_at":4102444800}"#.utf8))
+        try policy.writeMediaForm(file: file, key: "media/u1/test.mp4", boundary: "test-boundary", output: output)
+        let form = try Data(contentsOf: output); XCTAssertNotNil(form.range(of: content)); XCTAssertTrue(String(decoding: form.suffix(30), as: UTF8.self).contains("--test-boundary--"))
+        XCTAssertThrowsError(try policy.writeMediaForm(file: file, key: "other/test.mp4", boundary: "test", output: output))
+        XCTAssertThrowsError(try MediaLimits.validate(filename: "test.txt", size: 1)); XCTAssertThrowsError(try MediaLimits.validate(filename: "test.mp4", size: 0))
+    }
+    func testMediaRefreshQueriesExistingTaskWithoutRecreating() async throws {
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/media/tasks/task-1/refresh"); XCTAssertEqual(request.httpMethod, "POST")
+            return (200, [:], #"{"task":{"id":"task-1","filename":"会议.mp4","status":"processing","transcript_text":"","summary_text":"","outline_text":"","enhanced_summary":"","key_points":"","mindmap_text":"","copywriting_text":"","error_message":"暂时无法获取，请稍后刷新"}}"#)
+        }
+        let value = try await api.refreshMedia(id: "task-1"); XCTAssertTrue(value.pending); XCTAssertFalse(value.error_message.isEmpty)
+    }
+}
+
+
+extension APITests {
+    func testMediaUploadUsesDiskBodyAndPlatformRegistration() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); try Data("media-test".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        try credentials.write(SessionCredential(token: "test-only", expires: Date().addingTimeInterval(600)))
+        var step = 0
+        StubProtocol.handler = { request in
+            step += 1
+            if step == 1 { XCTAssertEqual(request.url?.path, "/api/media/upload-policy"); return (200, [:], #"{"policy":{"host":"https://oss.invalid/","access_key_id":"test","policy":"test","signature":"test","key_prefix":"media/u1/","max_size":200000,"expires_at":4102444800}}"#) }
+            if step == 2 { XCTAssertEqual(request.url?.host, "oss.invalid"); XCTAssertNil(request.value(forHTTPHeaderField: "Cookie")); return (204, [:], "") }
+            XCTAssertEqual(request.url?.path, "/api/media/tasks"); let payload = try self.body(request)
+            XCTAssertEqual(payload["filename"] as? String, "会议.m4a"); XCTAssertEqual(payload["source_language"] as? String, "cn"); XCTAssertEqual(payload["file_size"] as? Int, 10)
+            return (201, [:], #"{"task":{"id":"m1","filename":"会议.m4a","status":"submitted","transcript_text":"","summary_text":"","outline_text":"","enhanced_summary":"","key_points":"","mindmap_text":"","copywriting_text":"","error_message":""}}"#)
+        }
+        let value = try await api.uploadMedia(file: file, filename: "会议.m4a") { _ in }; XCTAssertEqual(step, 3); XCTAssertTrue(value.pending)
+    }
+}

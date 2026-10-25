@@ -20,6 +20,28 @@ final class MeimeiUITests: XCTestCase {
         app.buttons["loginButton"].tap()
         XCTAssertTrue(app.buttons["historyButton"].waitForExistence(timeout: 10))
     }
+    func testWritingDraftSaveAndLock() {
+        login(); let tools = app.scrollViews["composerToolsScroll"]; tools.swipeLeft()
+        XCTAssertTrue(app.buttons["writingButton"].waitForExistence(timeout: 5)); app.buttons["writingButton"].tap()
+        XCTAssertTrue(app.switches["writingEnabled"].waitForExistence(timeout: 5)); app.switches["writingEnabled"].tap()
+        let editor = app.textViews["writingDraft"]
+        for _ in 0..<8 { if editor.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(editor.isHittable); editor.tap(); editor.typeText("Approved manuscript")
+        let save = app.buttons["saveWritingDraft"]
+        for _ in 0..<5 { if save.isHittable { break }; app.swipeUp() }; save.tap()
+        let lock = app.buttons["lockWritingDraft"]; XCTAssertTrue(lock.waitForExistence(timeout: 5))
+        if !lock.isHittable { app.swipeUp() }; lock.tap()
+        XCTAssertTrue(app.buttons["解锁定稿"].waitForExistence(timeout: 5)); capture("30-writing-locked")
+    }
+    func testMediaAnalysisResultsAndConversation() {
+        login(); app.buttons["settingsButton"].tap(); app.buttons["mediaEntry"].tap()
+        XCTAssertTrue(app.buttons["testMedia"].waitForExistence(timeout: 5)); app.buttons["testMedia"].tap(); app.buttons["uploadMedia"].tap()
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "mediaTask-")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
+        XCTAssertTrue(app.staticTexts["分析完成"].waitForExistence(timeout: 15)); capture("31-media-result")
+        let open = app.buttons["openMediaConversation"]; if !open.isHittable { app.swipeUp() }; open.tap()
+        XCTAssertTrue(app.staticTexts["已打开分析会话，关闭工具返回聊天即可继续提问。"].waitForExistence(timeout: 10))
+    }
     func testHandwritingRecognitionAndDraftFill() {
         login(); app.buttons["settingsButton"].tap(); app.buttons["ocrEntry"].tap()
         XCTAssertTrue(app.buttons["testOCRImage"].waitForExistence(timeout: 5)); app.buttons["testOCRImage"].tap(); app.buttons["startOCR"].tap()
