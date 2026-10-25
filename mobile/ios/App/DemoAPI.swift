@@ -4,6 +4,13 @@ import MeimeiCore
 
 /// 仅 Debug 的 UI 测试注入离线数据；不会生成登录凭证或调用真实模型。
 actor DemoAPI: PlatformServing {
+    private var handwritingTasks: [OCRTask] = []
+    func ocrTasks() async throws -> [OCRTask] { handwritingTasks }
+    func recognizeHandwriting(_ jpeg: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> OCRTask {
+        progress(1); let value = OCRTask(id: UUID().uuidString, filename: "handwriting.jpg", status: "completed", recognized_text: "今天完成项目计划，明天继续。")
+        handwritingTasks.insert(value, at: 0); return value
+    }
+    func deleteOCRTask(id: String) async throws { handwritingTasks.removeAll { $0.id == id } }
     private var personalProfiles: [AIProfile] = []
     private var personalShares: [ConversationShare] = []
     func profiles() async throws -> [AIProfile] { personalProfiles }

@@ -38,6 +38,9 @@ public protocol PlatformServing: Sendable {
     func documents() async throws -> [ChatDocument]
     func uploadDocument(_ data: Data, filename: String, progress: @escaping @Sendable (Double) -> Void) async throws -> ChatDocument
     func refreshDocument(id: String) async throws -> ChatDocument
+    func ocrTasks() async throws -> [OCRTask]
+    func recognizeHandwriting(_ jpeg: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> OCRTask
+    func deleteOCRTask(id: String) async throws
     func profiles() async throws -> [AIProfile]
     func saveProfile(_ profile: AIProfile) async throws -> AIProfile
     func deleteProfile(id: String) async throws
@@ -52,6 +55,10 @@ public protocol PlatformServing: Sendable {
 }
 
 public extension PlatformServing {
+    func ocrTasks() async throws -> [OCRTask] { throw PlatformError.media("手写识别暂不可用") }
+    func recognizeHandwriting(_ jpeg: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> OCRTask { throw PlatformError.media("手写识别暂不可用") }
+    func deleteOCRTask(id: String) async throws { throw PlatformError.media("手写识别暂不可用") }
+
     func profiles() async throws -> [AIProfile] { throw PlatformError.media("AI 档案暂不可用") }
     func saveProfile(_ profile: AIProfile) async throws -> AIProfile { throw PlatformError.media("AI 档案暂不可用") }
     func deleteProfile(id: String) async throws { throw PlatformError.media("AI 档案暂不可用") }
@@ -290,6 +297,25 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
         return try await call(DocumentResponse.self, path: ["api", "documents"], method: "POST", body: [
             "filename": safeFilename, "mime_type": "application/octet-stream", "file_size": data.count, "oss_key": key
         ]).document
+    }
+    private struct OCRTasks: Decodable { let tasks: [OCRTask] }
+    private struct OCRResponse: Decodable { let task: OCRTask }
+    public func ocrTasks() async throws -> [OCRTask] { try await call(OCRTasks.self, path: ["api", "ocr", "tasks"]).tasks }
+    public func deleteOCRTask(id: String) async throws { _ = try await call(OK.self, path: ["api", "ocr", "tasks", id], method: "DELETE") }
+    public func recognizeHandwriting(_ jpeg: Data, progress: @escaping @Sendable (Double) -> Void) async throws -> OCRTask {
+        guard !jpeg.isEmpty, jpeg.count <= 10 * 1024 * 1024, jpeg.starts(with: [0xff,0xd8]) else { throw PlatformError.media("请选择不超过 10MB 的 JPEG 图片") }
+        let policy = try await call(PolicyResponse.self, path: ["api", "ocr", "upload-policy"], method: "POST", body: [:]).policy
+        let key = policy.keyPrefix + UUID().uuidString.lowercased() + ".jpg"
+        let boundary = "Meimei-" + UUID().uuidString
+        let form = try policy.form(image: jpeg, key: key, boundary: boundary)
+        var req = URLRequest(url: try externalURL(policy.host)); req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        let external = URLSession(configuration: session.configuration, delegate: NoRedirects(progress: progress), delegateQueue: nil)
+        defer { external.invalidateAndCancel() }
+        let (_, response) = try await external.upload(for: req, from: form)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw PlatformError.media("图片上传失败，请重新选择") }
+        progress(1)
+        return try await call(OCRResponse.self, path: ["api", "ocr", "tasks"], method: "POST", body: ["filename":"handwriting.jpg", "mime_type":"image/jpeg", "file_size":jpeg.count, "oss_key":key]).task
     }
     private struct Profiles: Decodable { let profiles: [AIProfile] }
     private struct Profile: Decodable { let profile: AIProfile }

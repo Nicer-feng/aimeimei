@@ -20,6 +20,16 @@ final class MeimeiUITests: XCTestCase {
         app.buttons["loginButton"].tap()
         XCTAssertTrue(app.buttons["historyButton"].waitForExistence(timeout: 10))
     }
+    func testHandwritingRecognitionAndDraftFill() {
+        login(); app.buttons["settingsButton"].tap(); app.buttons["ocrEntry"].tap()
+        XCTAssertTrue(app.buttons["testOCRImage"].waitForExistence(timeout: 5)); app.buttons["testOCRImage"].tap(); app.buttons["startOCR"].tap()
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "ocrTask-")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5)); capture("28-ocr-history"); row.tap()
+        XCTAssertTrue(app.textViews["ocrResultText"].waitForExistence(timeout: 5)); capture("29-ocr-result")
+        app.buttons["applyOCR"].tap(); app.navigationBars.buttons.element(boundBy: 0).tap(); app.buttons["完成"].tap()
+        let composer = app.textViews["composerField"].exists ? app.textViews["composerField"] : app.textFields["composerField"]
+        XCTAssertEqual(composer.value as? String, "今天完成项目计划，明天继续。")
+    }
     func testProfilesAndConversationShareCreationAndRevocation() {
         login(); app.buttons["settingsButton"].tap(); app.buttons["profilesEntry"].tap()
         XCTAssertTrue(app.buttons["addProfile"].waitForExistence(timeout: 5)); app.buttons["addProfile"].tap()

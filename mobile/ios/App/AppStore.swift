@@ -5,6 +5,7 @@ import MeimeiCore
 @MainActor @Observable
 final class AppStore {
     struct FailedDocument { let data: Data; let filename: String }
+    let ocr: OCRController
     let personal: PersonalToolsController
     let speech: SpeechController
     private(set) var documents: [ChatDocument] = []
@@ -52,8 +53,10 @@ final class AppStore {
 
     init(api: any PlatformServing, local: LocalState, audioOutput: (any AudioOutput)? = nil) {
         self.api = api; self.local = local
+        ocr = OCRController(api: api)
         personal = PersonalToolsController(api: api)
         speech = SpeechController(api: api, output: audioOutput ?? DeviceAudioOutput())
+        ocr.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         personal.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         speech.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
     }
@@ -139,7 +142,7 @@ final class AppStore {
     }
     func clearLoginFeedback() { error = nil; loginNotice = nil }
     private func clearAccount() {
-        generation?.cancel(); runID = UUID(); speech.reset(); personal.reset()
+        generation?.cancel(); runID = UUID(); speech.reset(); personal.reset(); ocr.reset()
         documents = []; importingDocuments = false; failedDocument = nil; documentUploadingName = nil
         account = nil; selected = nil; messages = []; conversations = []; models = []
         favorites = []; prompts = []; favoriteOverrides = [:]; resetSearch(); focusedMessageID = nil
