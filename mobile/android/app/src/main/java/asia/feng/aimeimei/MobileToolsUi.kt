@@ -132,7 +132,7 @@ internal fun OcrScreen(model: PlatformViewModel, onUse: () -> Unit) {
 @Composable
 private fun OcrResultDialog(model: PlatformViewModel, row: OcrRecord, onUse: () -> Unit) {
     val state = model.tools.mobile; val context = LocalContext.current
-    var text by remember(row.id) { mutableStateOf(row.text) }
+    var text by rememberSaveable(model.account?.id, row.id) { mutableStateOf(row.text) }
     var importing by remember { mutableStateOf(false) }
     fun apply(replace: Boolean) { model.editDraft(if (replace || model.draft.isBlank()) text else model.draft + "\n\n" + text); state.view(null); importing = false; onUse() }
     Dialog(onDismissRequest = { state.view(null) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {

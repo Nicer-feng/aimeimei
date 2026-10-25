@@ -107,7 +107,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     }
     internal fun loginSms(code: String) {
         val phone = normalizedPhone(sms.phone); val challenge = sms.challenge
-        if (account != null || busy || sms.sending || phone.isBlank() || challenge.isBlank() || !Regex("\\d{6}").matches(code)) return
+        if (account != null || busy || sms.loading || sms.sending || sms.config?.available != true || phone.isBlank() || challenge.isBlank() || !Regex("\\d{6}").matches(code)) return
         work { ticket ->
             val user = api.loginSms(phone, code, challenge)
             if (ticket != revision) return@work

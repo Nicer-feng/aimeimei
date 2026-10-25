@@ -34,7 +34,7 @@ private fun SmsLoginFields(model: PlatformViewModel) {
     val sms = model.sms
     var code by remember(sms.challenge, sms.phone) { mutableStateOf("") }
     var remaining by remember { mutableLongStateOf(sms.remaining) }
-    LaunchedEffect(Unit) { sms.load() }
+    LaunchedEffect(Unit) { sms.load(force = true) }
     LaunchedEffect(sms.sending, sms.challenge) { while (true) { remaining = sms.remaining; delay(1000) } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("手机号登录", style = MaterialTheme.typography.headlineSmall)
@@ -47,15 +47,15 @@ private fun SmsLoginFields(model: PlatformViewModel) {
             OutlinedTextField(code, { code = it.filter(Char::isDigit).take(6) }, label = { Text("6 位验证码") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), enabled = !model.busy && !sms.sending,
                 modifier = Modifier.weight(1f).testTag("sms-code"))
-            TextButton(onClick = sms::send, enabled = !model.busy && !sms.sending && sms.config?.available == true && normalizedPhone(sms.phone).isNotBlank() && remaining == 0L,
+            TextButton(onClick = sms::send, enabled = !model.busy && !sms.loading && !sms.sending && sms.config?.available == true && normalizedPhone(sms.phone).isNotBlank() && remaining == 0L,
                 modifier = Modifier.testTag("sms-send")) { Text(if (sms.sending) "发送中…" else if (remaining > 0) "${remaining}秒后重发" else "获取验证码") }
         }
         if (sms.notice.isNotBlank()) Text(sms.notice, style = MaterialTheme.typography.bodySmall)
         if (sms.error.isNotBlank()) {
             Text(sms.error, color = MaterialTheme.colorScheme.error)
-            if (sms.config == null) TextButton(onClick = sms::load, enabled = !sms.loading) { Text("刷新配置") }
+            TextButton(onClick = { sms.load(force = true) }, enabled = !sms.loading) { Text("刷新配置") }
         }
-        Button(onClick = { model.loginSms(code) }, enabled = !model.busy && !sms.sending && sms.config?.available == true && sms.challenge.isNotBlank() && code.length == 6,
+        Button(onClick = { model.loginSms(code) }, enabled = !model.busy && !sms.loading && !sms.sending && sms.config?.available == true && sms.challenge.isNotBlank() && code.length == 6,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("sms-login")) { Text("验证并登录") }
     }
 }

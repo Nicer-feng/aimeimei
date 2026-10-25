@@ -116,9 +116,9 @@ internal class MobileToolsState(private val app: Application, private val api: P
         processJob = scope.launch {
             processing = true; attempted = true; ocrError = ""; phase = "正在上传图片"; progress = 0
             try {
-                val row = api.recognizeOcr(selected) { percent -> scope.launch {
+                val row = api.recognizeOcr(selected, progress = { percent -> scope.launch {
                     if (ticket == revision && processing) { progress = percent; if (percent >= 99) phase = "正在识别文字" }
-                } }
+                } })
                 if (ticket == revision) {
                     records = listOf(row) + records.filterNot { it.id == row.id }; result = row; progress = 100; phase = if (row.status == "completed") "识别完成" else "识别未成功"
                     if (row.status != "completed") ocrError = "没有识别出有效文字，请查看记录或更换清晰原图"

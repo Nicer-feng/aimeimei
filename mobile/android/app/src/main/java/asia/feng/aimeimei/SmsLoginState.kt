@@ -35,8 +35,8 @@ internal class SmsLoginState(private val api: PlatformApi, private val scope: Co
     var challenge by mutableStateOf(""); private set
     private var resendAt = 0L
     val remaining get() = ((resendAt - clock() + 999) / 1000).coerceAtLeast(0)
-    fun load() {
-        if (loading || config != null) return
+    fun load(force: Boolean = false) {
+        if (loading || (!force && config != null)) return
         val ticket = generation
         configJob = scope.launch {
             loading = true; error = ""
@@ -55,7 +55,7 @@ internal class SmsLoginState(private val api: PlatformApi, private val scope: Co
     }
     fun send() {
         val requested = normalizedPhone(phone)
-        if (sending || remaining > 0 || config?.available != true || requested.isBlank()) return
+        if (loading || sending || remaining > 0 || config?.available != true || requested.isBlank()) return
         val ticket = generation; phone = requested
         // 即使网络断开，也先保留冷却，防止用户反复点击造成重复发送。
         resendAt = clock() + (config?.interval ?: 60) * 1000
