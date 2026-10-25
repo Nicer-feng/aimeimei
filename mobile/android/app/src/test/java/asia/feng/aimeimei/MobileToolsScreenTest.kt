@@ -128,12 +128,14 @@ class MobileToolsScreenTest {
             model.editDraft("原来的草稿")
             var used = false
             compose.setContent { MeimeiTheme(preferences) { OcrScreen(model) { used = true } } }
-            // 图片和历史记录独立加载，等到记录真实出现在页面后再操作，避免把首帧空列表当作加载完成。
+            // 图片和历史记录独立加载；记录可能在屏外，先确认数据，再滚动让对应列表项进入布局。
             await { compose.onAllNodesWithContentDescription("待识别图片").fetchSemanticsNodes().isNotEmpty() &&
-                compose.onAllNodesWithTag("ocr-record-o1").fetchSemanticsNodes().isNotEmpty() && !model.tools.mobile.historyLoading }
+                model.tools.mobile.records.any { it.id == "o1" } && !model.tools.mobile.historyLoading }
             capture("native-ocr-preview")
             assertTrue(requests.none { it.requestUrl!!.encodedPath == "/api/ocr/upload-policy" || it.method == "POST" })
-            compose.onNodeWithTag("ocr-list").performScrollToNode(hasTestTag("ocr-record-o1")); compose.onNodeWithText("查看结果", substring = false).performClick()
+            compose.onNodeWithTag("ocr-list").performScrollToNode(hasTestTag("ocr-record-o1"))
+            compose.onNodeWithTag("ocr-record-o1").assertIsDisplayed()
+            compose.onNodeWithText("查看结果", substring = false).performClick()
             compose.onNodeWithTag("ocr-result-text").performTextReplacement("修正后的手写内容。")
             capture("native-ocr-result", true)
             compose.onNodeWithText("带入聊天", substring = false).performClick(); assertFalse(used); assertEquals("原来的草稿", model.draft)
