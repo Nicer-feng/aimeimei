@@ -128,7 +128,9 @@ class MobileToolsScreenTest {
             model.editDraft("原来的草稿")
             var used = false
             compose.setContent { MeimeiTheme(preferences) { OcrScreen(model) { used = true } } }
-            await { compose.onAllNodesWithContentDescription("待识别图片").fetchSemanticsNodes().isNotEmpty() && !model.tools.mobile.historyLoading }
+            // 图片和历史记录独立加载，等到记录真实出现在页面后再操作，避免把首帧空列表当作加载完成。
+            await { compose.onAllNodesWithContentDescription("待识别图片").fetchSemanticsNodes().isNotEmpty() &&
+                compose.onAllNodesWithTag("ocr-record-o1").fetchSemanticsNodes().isNotEmpty() && !model.tools.mobile.historyLoading }
             capture("native-ocr-preview")
             assertTrue(requests.none { it.requestUrl!!.encodedPath == "/api/ocr/upload-policy" || it.method == "POST" })
             compose.onNodeWithTag("ocr-list").performScrollToNode(hasTestTag("ocr-record-o1")); compose.onNodeWithText("查看结果", substring = false).performClick()
@@ -142,7 +144,7 @@ class MobileToolsScreenTest {
     }
     @Test fun personalUsageShowsDailyDetailsAndRecalculatesSelectedRangeWithoutAdminCalls() {
         compose.setContent { MeimeiTheme(preferences) { PersonalUsageScreen(model) {} } }
-        await { model.tools.mobile.usage != null && !model.tools.mobile.usageLoading }
+        await { compose.onAllNodesWithTag("personal-usage-total").fetchSemanticsNodes().isNotEmpty() && !model.tools.mobile.usageLoading }
         compose.onNodeWithTag("personal-usage-total").assertTextEquals("4,900 Token")
         capture("native-personal-usage")
         compose.onNodeWithTag("personal-usage-list").performScrollToNode(hasTestTag("usage-day-2026-10-25"))
