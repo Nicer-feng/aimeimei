@@ -74,7 +74,7 @@ internal fun MeimeiTheme(preferences: AppPreferences, content: @Composable () ->
 }
 
 @Composable
-internal fun LoginForm(model: PlatformViewModel) {
+internal fun PasswordLoginForm(model: PlatformViewModel) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var answer by remember(model.captcha?.id) { mutableStateOf("") }

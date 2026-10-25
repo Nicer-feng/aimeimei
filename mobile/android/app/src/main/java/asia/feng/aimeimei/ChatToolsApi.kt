@@ -85,6 +85,17 @@ private fun attachmentRowsOrStrings(row: JSONObject, key: String): List<String> 
 internal suspend fun PlatformApi.documentStatus(id: String) = ChatAttachment.fromJson(
     request(listOf("api", "documents", id, "refresh"), JSONObject()).getJSONObject("document"), false)
 
+internal suspend fun PlatformApi.ocrRecords(): List<OcrRecord> = attachmentRows(request(listOf("api", "ocr", "tasks")).optJSONArray("tasks")).map(OcrRecord::parse)
+internal suspend fun PlatformApi.recognizeOcr(image: OcrImage, progress: (Int) -> Unit, uploadClient: OkHttpClient = objectClient): OcrRecord {
+    require(uploadClient.cookieJar === CookieJar.NO_COOKIES) { "上传客户端不能携带登录信息" }
+    val policy = request(listOf("api", "ocr", "upload-policy"), JSONObject()).getJSONObject("policy")
+    val plan = chatUploadRequest(policy, image.file, image.name, image.mime, true, progress)
+    uploadClient.newCall(plan.request).awaitResponse().use { require(it.isSuccessful) { "图片上传未完成，请稍后重试" } }
+    progress(99)
+    return OcrRecord.parse(request(listOf("api", "ocr", "tasks"), JSONObject().put("filename", image.name).put("mime_type", image.mime)
+        .put("file_size", image.file.length()).put("oss_key", plan.key), timeoutSeconds = 180).getJSONObject("task"))
+}
+
 internal suspend fun PlatformApi.downloadPrivate(segments: List<String>, destination: File,
                                                query: Map<String, String> = emptyMap(), limit: Long = 100L * 1024 * 1024,
                                                objectDownloadClient: OkHttpClient = objectClient): File = withContext(Dispatchers.IO) {

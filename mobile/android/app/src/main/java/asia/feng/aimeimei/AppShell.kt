@@ -41,8 +41,8 @@ internal val webTools = listOf(
     WebTool("search", "搜索聊天", "查找标题、提问、回答与收藏"),
     WebTool("profiles", "AI档案", "原生管理长期偏好与聊天背景"),
     WebTool("media", "音视频分析", "上传媒体、转写与总结"),
-    WebTool("ocr", "手写识别", "图片识别与文字提取"),
-    WebTool("activity", "Token活动", "查看个人使用统计"),
+    WebTool("ocr", "手写识别", "拍照预览、识别文字与带入聊天"),
+    WebTool("activity", "个人用量", "每日 Token、估算费用与模型使用"),
     WebTool("reading", "摸鱼阅读", "TXT 小说、书库与阅读进度"),
     WebTool("cloud", "槑槑云", "文件分享与在线文档"),
     WebTool("gifts", "槑槑送礼", "礼物与人情往来记录")
@@ -63,7 +63,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
     val openTool: (String) -> Unit = { id ->
         if (!model.streaming && !model.busy) {
             webParent = screen
-            if (id in listOf("admin", "favorites", "prompts", "profiles", "search")) screen = id
+            if (id in listOf("admin", "favorites", "prompts", "profiles", "search", "ocr", "activity")) screen = id
             else { webParent = screen; toolId = id; webConversation = model.selected?.id.orEmpty(); screen = "web" }
         }
     }
@@ -91,7 +91,7 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
         Scaffold(topBar = {
             if (screen != "admin") TopAppBar(title = {
                 Column {
-                    Text(when (screen) { "search" -> "搜索聊天"; "profiles" -> "AI 档案"; "settings" -> "设置"; "tools" -> "更多工具"; "favorites" -> "我的收藏"; "prompts" -> "提示词库"; "web" -> if (toolId == "admin") "后台管理" else webTools.firstOrNull { it.id == toolId }?.title ?: "AI槑槑"; else -> model.selected?.title ?: "AI槑槑" },
+                    Text(when (screen) { "ocr" -> "手写识别"; "activity" -> "个人用量"; "search" -> "搜索聊天"; "profiles" -> "AI 档案"; "settings" -> "设置"; "tools" -> "更多工具"; "favorites" -> "我的收藏"; "prompts" -> "提示词库"; "web" -> if (toolId == "admin") "后台管理" else webTools.firstOrNull { it.id == toolId }?.title ?: "AI槑槑"; else -> model.selected?.title ?: "AI槑槑" },
                         maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                     if (screen == "chat" && model.account != null) Text(model.currentModel?.name ?: "新聊天", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -132,6 +132,8 @@ internal fun PlatformApp(model: PlatformViewModel, preferences: AppPreferences) 
                         "favorites" -> FavoritesScreen(model) { screen = "chat" }
                         "prompts" -> PromptsScreen(model) { screen = "chat" }
                         "profiles" -> ProfilesScreen(model)
+                        "ocr" -> OcrScreen(model) { screen = "chat" }
+                        "activity" -> PersonalUsageScreen(model) { screen = "chat" }
                         "search" -> ChatSearchScreen(model, onOpen = { screen = "chat" }, onFavorites = { screen = "favorites" })
                         "web" -> WebToolScreen(model, toolId, webConversation)
                         else -> if (model.account == null) LoginForm(model) else ChatScreen(model, openTool)
@@ -222,6 +224,7 @@ private fun SettingsScreen(model: PlatformViewModel, preferences: AppPreferences
         if (model.account != null) {
             item { SectionLabel("聊天与工具") }
             item { SettingsRow("AI档案与偏好", "原生管理长期偏好和聊天背景", enabled = !model.streaming && !model.busy, onClick = { openTool("profiles") }) }
+            item { SettingsRow("个人用量", "每日 Token、估算费用与模型使用", enabled = !model.streaming && !model.busy, onClick = { openTool("activity") }) }
             item { SettingsRow("语音与完整聊天", "朗读、文件、图片、分享和引用", enabled = !model.streaming && !model.busy, onClick = { openTool("chat") }) }
             if (model.account?.role == "admin") item { SettingsRow("后台管理", "管理账号与系统功能", enabled = !model.streaming && !model.busy, onClick = { openTool("admin") }) }
         }

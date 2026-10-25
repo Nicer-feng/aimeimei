@@ -43,17 +43,19 @@ class PlatformApi(internal val base: HttpUrl, cookies: CookieJar) {
 
     private val streamClient = client.newBuilder().readTimeout(5, TimeUnit.MINUTES).callTimeout(15, TimeUnit.MINUTES).build()
 
-    internal suspend fun request(segments: List<String>, body: JSONObject? = null, method: String = "POST", query: Map<String, String> = emptyMap()): JSONObject = withContext(Dispatchers.IO) {
+    internal suspend fun request(segments: List<String>, body: JSONObject? = null, method: String = "POST", query: Map<String, String> = emptyMap(), timeoutSeconds: Long = 40): JSONObject = withContext(Dispatchers.IO) {
         val url = base.newBuilder().apply { segments.forEach { addPathSegment(it) }; query.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
         val builder = Request.Builder().url(url).header("Accept", "application/json")
         if (body != null) builder.method(method, body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-        client.newCall(builder.build()).awaitResponse().use { response ->
+        val transport = if (timeoutSeconds == 40L) client else client.newBuilder().readTimeout(timeoutSeconds, TimeUnit.SECONDS).callTimeout(timeoutSeconds + 10, TimeUnit.SECONDS).build()
+        transport.newCall(builder.build()).awaitResponse().use { response ->
             val raw = response.body?.string().orEmpty()
             val data = try { JSONObject(raw) } catch (_: Exception) {
                 throw ApiFailure(response.code, "服务器响应异常，请稍后重试")
             }
             if (!response.isSuccessful) {
-                val hint = if (segments.getOrNull(1) in setOf("admin", "usage-time")) adminFailureHint(response.code, data.optString("error")) else when (data.optString("error")) {
+                val hint = if (segments.getOrNull(1) == "sms-login") smsFailureHint(response.code, data.optString("error"))
+                else if (segments.getOrNull(1) in setOf("admin", "usage-time")) adminFailureHint(response.code, data.optString("error")) else when (data.optString("error")) {
                     "captcha incorrect" -> "验证码不正确或已过期，请重新输入"
                     "password incorrect" -> "账号或密码不正确"
                     else -> if (response.code == 401) "登录已失效，请重新登录" else "请求失败，请稍后重试（${response.code}）"
@@ -90,6 +92,8 @@ class PlatformApi(internal val base: HttpUrl, cookies: CookieJar) {
         return account(request(listOf("api", "login"), body).getJSONObject("user"))
     }
     suspend fun logout() { request(listOf("api", "logout"), JSONObject()) }
+    internal suspend fun loginSms(phone: String, code: String, challenge: String): Account = account(request(
+        listOf("api", "sms-login", "verify"), JSONObject().put("phone", phone).put("code", code).put("challenge_id", challenge)).getJSONObject("user"))
     suspend fun models(): List<ChatModel> = objects(request(listOf("api", "models")).optJSONArray("models")).map {
         ChatModel(it.getString("id"), it.optString("name"), it.optString("model"), it.optString("provider"),
             it.optBoolean("supports_reasoning_control"), it.optBoolean("supports_native_web_search"), it.optBoolean("supports_vision"))

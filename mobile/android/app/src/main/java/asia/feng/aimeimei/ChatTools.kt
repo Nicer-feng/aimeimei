@@ -34,6 +34,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
                          private val onUnauthorized: () -> Unit) {
     private val store = app.getSharedPreferences("chat_drafts", 0)
     val knowledge = KnowledgeState(api, scope, onUnauthorized)
+    val mobile = MobileToolsState(app, api, scope, onUnauthorized)
     private var owner = ""
     private var conversation = ""
     private var revision = 0
@@ -84,6 +85,7 @@ internal class ChatTools(private val app: Application, private val api: Platform
     }
     fun bind(accountId: String, conversationId: String) {
         knowledge.bind(accountId)
+        mobile.bind(accountId)
         if (owner == accountId && conversation == conversationId) return
         persist(); attachments.filter { it.id.isBlank() }.forEach { localFiles.remove(it.clientKey)?.delete() }; val oldOwner = owner
         revision++; previewRun++; session.cancel(); imageLoads.clear(); previewTask = null; session = newSession(); poll = null; uploadTask = null; activeUploads.clear()

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
@@ -215,6 +216,8 @@ private fun LiveMessage(model: PlatformViewModel, follow: () -> Boolean, scroll:
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Composer(model: PlatformViewModel, onSend: () -> Unit, openTool: (String) -> Unit) {
+    var fullEditor by rememberSaveable(model.account?.id, model.selected?.id) { mutableStateOf(false) }
+    if (fullEditor) DraftEditor(model) { fullEditor = false }
     val chosen = model.currentModel
     var showModels by remember { mutableStateOf(false) }
     var showModes by remember { mutableStateOf(false) }
@@ -267,6 +270,7 @@ private fun Composer(model: PlatformViewModel, onSend: () -> Unit, openTool: (St
             }
             if (imageAttached && chosen?.vision != true) Text("当前模型不支持图片，请切换到标有「支持图片」的模型。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             Row {
+                TextButton(onClick = { fullEditor = true }, enabled = !model.busy) { Text("展开编辑") }
                 TextButton(onClick = { openTool("prompts") }, enabled = editable && !model.tools.uploading) { Text("提示词") }
                 TextButton(onClick = { openTool("chat") }, enabled = editable && !model.tools.uploading) { Text("更多聊天工具") }
             }
