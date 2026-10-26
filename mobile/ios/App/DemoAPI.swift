@@ -86,7 +86,11 @@ actor DemoAPI: PlatformServing {
     private var dailyRegistered = false
     func dailyReports(before: Int64?) async throws -> DailyReportsPage {
         guard loginName == "feng" else { throw PlatformError.http(404, "") }
-        return Self.decode(DailyReportsPage.self, #"{"reports":[{"id":1,"report_date":"2026-10-26","title":"前端研发日报","content":"## 今日前端更新\n\n- 桌面客户端：音频转换器更新至 1.7.1。\n- 后台前端：新增代理发码审核。\n- Flutter：今日未见新提交。","created_at":1792980000,"read_at":\#(dailyRead ? 1 : 0),"simulation":true}],"unread":\#(dailyRead ? 0 : 1),"next_before":null}"#)
+        let report: [String: Any] = ["id": 1, "report_date": "2026-10-26", "title": "前端研发日报",
+            "content": "## 今日前端更新\n\n- 桌面客户端：音频转换器更新至 1.7.1。\n- 后台前端：新增代理发码审核。\n- Flutter：今日未见新提交。",
+            "created_at": 1792980000, "read_at": dailyRead ? 1 : 0, "simulation": true]
+        return try JSONDecoder().decode(DailyReportsPage.self, from: JSONSerialization.data(withJSONObject:
+            ["reports": [report], "unread": dailyRead ? 0 : 1, "next_before": NSNull()]))
     }
     func dailyReport(id: Int64) async throws -> DailyReport { try await dailyReports(before: nil).reports[0] }
     func readDailyReport(id: Int64) async throws { dailyRead = true }
