@@ -13,6 +13,8 @@ struct RootView: View {
             else {
                 NavigationStack {
                     ChatView(store: store)
+                        .disabled(store.daily.presented)
+                        .accessibilityHidden(store.daily.presented)
                         .navigationTitle("AI槑槑")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {

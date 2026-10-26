@@ -18,7 +18,7 @@ final class DailyReportsController {
     @ObservationIgnored private var revision = UUID()
     @ObservationIgnored private var savedToken: String?
     @ObservationIgnored private var registeredOwner: String?
-    @ObservationIgnored private var readIDs = Set<Int64>()
+    private var readIDs = Set<Int64>()
     let installationID: String
 
     init(api: any PlatformServing) {
@@ -66,6 +66,7 @@ final class DailyReportsController {
             unread = max(0, unread - 1)
         } catch { if ticket == revision { readIDs.remove(report.id) } }
     }
+    func isUnread(_ report: DailyReport) -> Bool { report.readAt == 0 && !readIDs.contains(report.id) }
     func register(token: String) async {
         guard let owner, savedToken != token || registeredOwner != owner else { return }
         let ticket = revision

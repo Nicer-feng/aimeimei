@@ -11,11 +11,12 @@ struct HistoryView: View {
     private var filtered: [Conversation] {
         store.conversations.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }
     }
+    private var showDaily: Bool { store.daily.owner != nil && (query.isEmpty || "前端研发日报".localizedCaseInsensitiveContains(query)) }
     var body: some View {
         NavigationStack {
             List {
                 if let error = store.error { ErrorNotice(text: error).listRowSeparator(.hidden) }
-                if store.daily.owner != nil && (query.isEmpty || "前端研发日报".localizedCaseInsensitiveContains(query)) {
+                if showDaily {
                     Button {
                         dismiss()
                         Task { try? await Task.sleep(for: .milliseconds(350)); store.daily.open() }
@@ -59,7 +60,7 @@ struct HistoryView: View {
                 }
             }
             .overlay {
-                if filtered.isEmpty && !store.busy && store.daily.owner == nil {
+                if filtered.isEmpty && !store.busy && !showDaily {
                     ContentUnavailableView(query.isEmpty ? "还没有聊天" : "没有找到聊天", systemImage: "bubble.left.and.bubble.right", description: Text(query.isEmpty ? "发送第一条消息后，对话会出现在这里" : "换个关键词试试"))
                         .allowsHitTesting(false)
                 }

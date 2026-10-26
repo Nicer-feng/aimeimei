@@ -26,7 +26,7 @@ struct DailyReportsView: View {
                                         Text(report.reportDate + (report.simulation ? " · 模拟" : "")).font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
-                                    if report.readAt == 0 { Image(systemName: "circle.fill").font(.system(size: 7)).foregroundStyle(Brand.accent) }
+                                    if controller.isUnread(report) { Image(systemName: "circle.fill").font(.system(size: 7)).foregroundStyle(Brand.accent) }
                                 }
                                 MarkdownView(content: report.content).padding(14)
                                     .background(Brand.background, in: RoundedRectangle(cornerRadius: 8))
