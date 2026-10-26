@@ -1518,6 +1518,14 @@
     .status { min-height: 18px; color: var(--muted); font-size: 12px; }
     .status.err { color: var(--red); }
     .status.ok { color: var(--green); }
+    #imageModelWarning,
+    #fullComposerImageWarning {
+      display: block;
+      grid-column: 1 / -1;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    #attachmentPreviewRow { grid-column: 1 / -1; }
     .drawer-mask {
       position: fixed;
       inset: 0;

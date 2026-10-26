@@ -2426,9 +2426,21 @@
       if (!button) return;
       const model = selectedModel();
       const supported = Boolean(model?.supports_vision);
-      button.disabled = !supported || state.uploadingImages || state.sending;
-      button.title = supported ? "上传图片" : "当前模型不支持图片理解，请切换支持图片的模型。";
+      button.disabled = state.uploadingImages || state.sending;
+      button.title = supported ? "上传图片" : "可先上传图片，发送前请切换支持图片的模型";
       button.setAttribute("aria-label", button.title);
+      const blocked = state.attachments.length > 0 && !supported;
+      const warning = "图片已保留。当前模型不支持图片，请切换支持图片的模型，或移除图片后发送。";
+      for (const id of ["imageModelWarning", "fullComposerImageWarning"]) {
+        const notice = $(id);
+        if (notice) { notice.hidden = !blocked; notice.textContent = blocked ? warning : ""; }
+      }
+      const send = $("send");
+      if (send) {
+        send.disabled = !state.sending && blocked;
+        send.title = state.sending ? "停止生成" : blocked ? "请切换支持图片的模型，或移除图片" : "发送";
+        send.setAttribute("aria-label", send.title);
+      }
     }
 
 	    async function loadPrompts() {
@@ -4402,7 +4414,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.29.0" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.29.1" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -7443,8 +7455,8 @@
     }
 
     function renderAttachmentPreviews() {
-	      const row = $("attachmentPreviewRow");
-	      if (!row) return;
+          for (const row of [$("attachmentPreviewRow"), $("fullComposerAttachmentPreviewRow")]) {
+	      if (!row) continue;
 	      row.replaceChildren();
 	      row.hidden = !state.attachments.length;
 	      for (const item of state.attachments) {
@@ -7478,6 +7490,7 @@
 		        row.appendChild(card);
 		      }
 		      queueLucideRefresh();
+          }
 		      syncComposerLayout();
 		    }
 
@@ -7485,6 +7498,7 @@
 	      const item = state.attachments.find((entry) => entry.client_id === clientId);
 	      if (item?.preview_url) URL.revokeObjectURL(item.preview_url);
 	      state.attachments = state.attachments.filter((entry) => entry.client_id !== clientId);
+          state.uploadingImages = state.attachments.some((entry) => entry.status === "uploading");
 	      renderAttachmentPreviews();
 	      updateVisionUI();
 	    }
@@ -7494,6 +7508,7 @@
 	        if (item.preview_url) URL.revokeObjectURL(item.preview_url);
 	      }
 	      state.attachments = [];
+          state.uploadingImages = false;
 	      renderAttachmentPreviews();
 	      updateVisionUI();
 	    }
@@ -7724,10 +7739,9 @@
       const visionFiles = [];
       const documentFiles = [];
       const unsupported = [];
-      const supportsVision = selectedModelSupportsVision();
       for (const file of files) {
         const name = String(file.name || "");
-        if (composerVisionImagePattern.test(name) && supportsVision) visionFiles.push(file);
+        if (composerVisionImagePattern.test(name)) visionFiles.push(file);
         else if (composerDocumentPattern.test(name)) documentFiles.push(file);
         else unsupported.push(name || "未命名文件");
       }
@@ -7810,9 +7824,11 @@
 	    }
 
 	    async function uploadChatImageAttachment(item) {
+	      const owner = state.user;
 	      const policyRes = await api("/api/chat-images/upload-policy", { method: "POST" });
 	      if (!policyRes.ok) throw new Error(await readError(policyRes, "图片上传配置不可用。"));
 	      const { policy } = await policyRes.json();
+          if (state.user !== owner || !state.authed) throw new Error("账号已切换，请重新上传图片。");
 	      if (item.file.size > policy.max_size) throw new Error("单张图片不能超过 20MB");
 	      const key = policy.key_prefix + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + "-" + safeImageFilename(item.file.name);
 	      const form = new FormData();
@@ -7825,8 +7841,10 @@
 	      form.append("file", item.file);
 	      await uploadFormWithProgress(policy.host, form, (progress) => {
 	        item.progress = progress;
-	        renderAttachmentPreviews();
+	        if (state.attachments.includes(item)) renderAttachmentPreviews();
 	      });
+          if (state.user !== owner || !state.authed) throw new Error("账号已切换，请重新上传图片。");
+          if (!state.attachments.includes(item)) throw new Error("图片已移除。");
 	      const saveRes = await api("/api/chat-images", {
 	        method: "POST",
 	        body: JSON.stringify({
@@ -7842,13 +7860,37 @@
 	      return data.image;
 	    }
 
+        function handleComposerImagePaste(event) {
+          const clipboard = event.clipboardData;
+          if (!clipboard || !state.authed || event.defaultPrevented) return;
+          let files = Array.from(clipboard.items || [])
+            .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+            .map((item) => item.getAsFile()).filter(Boolean);
+          if (!files.length) files = Array.from(clipboard.files || []).filter((file) => file.type.startsWith("image/") || composerVisionImagePattern.test(file.name));
+          if (!files.length) return;
+          event.preventDefault();
+          const text = clipboard.getData("text/plain");
+          const input = event.currentTarget;
+          if (text) {
+            input.setRangeText(text, input.selectionStart, input.selectionEnd, "end");
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          const extensions = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+          files = files.map((file, index) => {
+            const extension = extensions[file.type];
+            if (!extension || composerVisionImagePattern.test(file.name)) return file;
+            return new File([file], `pasted-${Date.now()}-${index + 1}.${extension}`, { type: file.type, lastModified: file.lastModified });
+          });
+          handleImageFiles(files).catch((error) => setStatus("chatStatus", friendlyError(error, "图片上传失败。"), "err"));
+        }
+
 	    async function handleImageFiles(fileList) {
 	      const input = $("imageInput");
 	      const files = Array.from(fileList || []);
 	      if (input) input.value = "";
 	      if (!files.length) return;
-	      if (!selectedModelSupportsVision()) {
-	        setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
+          if (!state.authed || state.sending) {
+            setStatus("chatStatus", state.sending ? "槑槑还在回复，请稍后再添加图片。" : "请先登录再上传图片。", "err");
 	        return;
 	      }
 	      if (state.attachments.length + files.length > 5) {
@@ -7857,7 +7899,6 @@
 	      }
 	      const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 	      const allowedExts = [".jpg", ".jpeg", ".png", ".webp"];
-	      const items = [];
 	      for (const file of files) {
 	        const lowerName = file.name.toLowerCase();
 	        const extOk = allowedExts.some((ext) => lowerName.endsWith(ext));
@@ -7869,15 +7910,16 @@
 	          setStatus("chatStatus", "单张图片不能超过 20MB。", "err");
 	          return;
 	        }
-	        items.push({
+          }
+          const owner = state.user;
+          const items = files.map((file) => ({
 	          client_id: attachmentClientId(),
 	          file,
 	          filename: file.name,
 	          preview_url: URL.createObjectURL(file),
 	          progress: 1,
 	          status: "uploading"
-	        });
-	      }
+	        }));
 	      state.attachments.push(...items);
 	      state.uploadingImages = true;
 	      updateVisionUI();
@@ -7885,8 +7927,10 @@
 	      setStatus("chatStatus", "正在上传图片...", "");
 	      try {
 	        for (const item of items) {
+              if (state.user !== owner || !state.attachments.includes(item)) continue;
 	          try {
 	            const image = await uploadChatImageAttachment(item);
+                if (state.user !== owner || !state.attachments.includes(item)) continue;
 	            item.id = image.id;
 	            item.view_url = image.view_url;
 	            item.filename = image.filename || item.filename;
@@ -7895,23 +7939,26 @@
 	            item.justUploaded = true;
 	            setTimeout(() => {
 	              item.justUploaded = false;
-	              renderAttachmentPreviews();
+	              if (state.attachments.includes(item)) renderAttachmentPreviews();
 	            }, 650);
 	          } catch (err) {
 	            item.status = "error";
 	            item.progress = 100;
 	            item.error = friendlyError(err, "图片上传失败。");
 	          }
-	          renderAttachmentPreviews();
+	          if (state.user === owner && state.attachments.includes(item)) renderAttachmentPreviews();
 	        }
-	        const failed = items.filter((item) => item.status === "error");
+            if (state.user !== owner) return;
+            const remaining = items.filter((item) => state.attachments.includes(item));
+            if (!remaining.length) return;
+	        const failed = remaining.filter((item) => item.status === "error");
 	        if (failed.length) {
 	          setStatus("chatStatus", failed[0].error || "有图片上传失败，请移除后重试。", "err");
 	        } else {
-	          setStatus("chatStatus", "图片已添加，输入问题后发送。", "ok");
+	          setStatus("chatStatus", selectedModelSupportsVision() ? "图片已添加，输入问题后发送。" : "图片已上传，请切换支持图片的模型后发送。", selectedModelSupportsVision() ? "ok" : "err");
 	        }
 	      } finally {
-	        state.uploadingImages = false;
+	        state.uploadingImages = state.attachments.some((item) => item.status === "uploading");
 	        updateVisionUI();
 	      }
 	    }
@@ -10438,10 +10485,6 @@
 	      else sendMessage();
 	    });
 	    $("attachImage").addEventListener("click", () => {
-	      if (!selectedModelSupportsVision()) {
-	        setStatus("chatStatus", "当前模型不支持图片理解，请切换支持图片的模型。", "err");
-	        return;
-	      }
 	      $("imageInput").click();
 	    });
 	    $("imageInput").addEventListener("change", (event) => {
@@ -10506,12 +10549,14 @@
 	    document.addEventListener("pointerdown", handleMinimapOutsidePointer);
     $("scrollLatest").addEventListener("click", () => scrollToLatest("smooth"));
 	    $("prompt").addEventListener("input", handlePromptInput);
+        $("prompt").addEventListener("paste", handleComposerImagePaste);
         $("prompt").addEventListener("paste", handleLongPromptPaste);
         $("openFullComposer").addEventListener("click", openFullComposer);
         $("closeFullComposer").addEventListener("click", () => closeFullComposer());
         $("acceptFullComposerSuggestion").addEventListener("click", openFullComposer);
         $("dismissFullComposerSuggestion").addEventListener("click", dismissFullComposerSuggestion);
         $("fullComposerPrompt").addEventListener("input", handleFullComposerInput);
+        $("fullComposerPrompt").addEventListener("paste", handleComposerImagePaste);
         $("fullComposerPrompt").addEventListener("keydown", (event) => {
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.isComposing) {
             event.preventDefault();
