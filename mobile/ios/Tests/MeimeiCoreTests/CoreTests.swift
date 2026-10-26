@@ -103,6 +103,29 @@ private final class StubProtocol: URLProtocol, @unchecked Sendable {
 }
 
 final class APITests: XCTestCase {
+    func testDailyReportsUseReadOnlyFeedAndScopedDeviceRegistration() async throws {
+        let record = #"{"id":7,"report_date":"2026-10-26","title":"日报","content":"正文","created_at":1,"read_at":0,"simulation":false}"#
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/daily-reports")
+            XCTAssertEqual(request.httpMethod, "GET")
+            return (200, [:], "{\"reports\":[\(record)],\"unread\":1,\"next_before\":7}")
+        }
+        let page = try await api.dailyReports(before: nil)
+        XCTAssertEqual(page.reports.first?.id, 7)
+        XCTAssertEqual(page.nextBefore, 7)
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/daily-reports/7/read")
+            XCTAssertEqual(request.httpMethod, "POST")
+            return (200, [:], #"{"ok":true}"#)
+        }
+        try await api.readDailyReport(id: 7)
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/daily-reports/device")
+            XCTAssertEqual(request.httpMethod, "POST")
+            return (200, [:], #"{"ok":true}"#)
+        }
+        try await api.registerDailyDevice(installationID: "test-installation", token: String(repeating: "a", count: 64))
+    }
     private var credentials: MemoryCredentials!
     private var api: PlatformAPI!
     override func setUpWithError() throws {

@@ -85,6 +85,9 @@ jobs:
             -exportPath "$RUNNER_TEMP/meimei-signed-export" \
             > "$RUNNER_TEMP/meimei-signed-export.log" 2>&1 || { tail -80 "$RUNNER_TEMP/meimei-signed-export.log"; exit 1; }
           codesign --verify --deep --strict "$RUNNER_TEMP/meimei-signed.xcarchive/Products/Applications/Meimei.app"
+          codesign -d --entitlements :- "$RUNNER_TEMP/meimei-signed.xcarchive/Products/Applications/Meimei.app" \
+            > "$RUNNER_TEMP/meimei-push-entitlements.plist" 2>/dev/null
+          test "$(plutil -extract aps-environment raw -o - "$RUNNER_TEMP/meimei-push-entitlements.plist")" = production
           python3 mobile/ios/scripts/signing-config.py verify-ipa
       - name: 安装云端上传工具
         if: github.event_name == 'push' || inputs.upload

@@ -11,14 +11,30 @@ final class MeimeiUITests: XCTestCase {
         let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
     }
-    private func login() {
+    private func login(_ username: String = "family") {
         XCTAssertTrue(app.textFields["usernameField"].waitForExistence(timeout: 15))
-        app.textFields["usernameField"].tap(); app.textFields["usernameField"].typeText("family")
+        app.textFields["usernameField"].tap(); app.textFields["usernameField"].typeText(username)
         app.secureTextFields["passwordField"].tap(); app.secureTextFields["passwordField"].typeText("test-only")
         app.textFields["captchaField"].tap(); app.textFields["captchaField"].typeText("AB23")
         if !app.buttons["loginButton"].isHittable { app.swipeUp() }
         app.buttons["loginButton"].tap()
         XCTAssertTrue(app.buttons["historyButton"].waitForExistence(timeout: 10))
+    }
+    func testPinnedDailyReportHasNoChatComposer() {
+        login("feng")
+        app.buttons["historyButton"].tap()
+        XCTAssertTrue(app.buttons["dailyReportEntry"].waitForExistence(timeout: 5))
+        capture("40-daily-report-pinned")
+        app.buttons["dailyReportEntry"].tap()
+        XCTAssertTrue(app.staticTexts["今日前端更新"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.textViews["composerField"].exists)
+        XCTAssertFalse(app.buttons["sendButton"].exists)
+        capture("41-daily-report-read-only")
+    }
+    func testOtherAccountsDoNotHaveDailyReportEntry() {
+        login()
+        app.buttons["historyButton"].tap()
+        XCTAssertFalse(app.buttons["dailyReportEntry"].exists)
     }
     func testWritingDraftSaveAndLock() {
         login(); let tools = app.scrollViews["composerToolsScroll"]; tools.swipeLeft()

@@ -5,6 +5,25 @@ import MeimeiCore
 
 @MainActor
 final class AppStoreTests: XCTestCase {
+    func testDailyReportsOnlyBindFengAndResetOnLogout() async throws {
+        await store.start()
+        await store.login(username: "feng", password: "test-only", answer: "AB23")
+        XCTAssertNotNil(store.daily.owner)
+        XCTAssertEqual(store.daily.reports.count, 1)
+        let report = try XCTUnwrap(store.daily.reports.first)
+        XCTAssertEqual(store.daily.unread, 1)
+        await store.daily.read(report)
+        await store.daily.read(report)
+        XCTAssertEqual(store.daily.unread, 0)
+        store.daily.open(id: report.id)
+        XCTAssertTrue(store.daily.presented)
+        await store.logout()
+        XCTAssertNil(store.daily.owner)
+        XCTAssertTrue(store.daily.reports.isEmpty)
+        XCTAssertFalse(store.daily.presented)
+        await store.login(username: "family", password: "test-only", answer: "AB23")
+        XCTAssertNil(store.daily.owner)
+    }
     private var directory: URL!
     private var local: LocalState!
     private var api: DemoAPI!

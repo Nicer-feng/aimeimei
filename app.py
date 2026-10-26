@@ -17,6 +17,7 @@ from file_share.database import init_share_db
 from ai_platform.database import db, init_db
 from ai_platform.handlers.reading import ReadingHandlersMixin
 from ai_platform.handlers.usage_time import UsageTimeHandlersMixin
+from ai_platform.handlers.daily_reports import DailyReportHandlersMixin
 from ai_platform.handlers import (
     AdminHandlersMixin,
     AuthHandlersMixin,
@@ -54,6 +55,7 @@ from ai_platform.settings import (
 
 
 class AppHandler(
+    DailyReportHandlersMixin,
     UsageTimeHandlersMixin,
     ReadingHandlersMixin,
     GiftHandlersMixin,
@@ -78,6 +80,8 @@ class AppHandler(
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
+            return self.require_user(self.handle_daily_reports)
         if path.startswith('/api/usage-time/'):
             return self.require_user(self.handle_usage_time)
         if path.startswith("/api/reading/"):
@@ -231,6 +235,8 @@ class AppHandler(
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
+            return self.require_user(self.handle_daily_reports)
         if path.startswith('/api/usage-time/'):
             return self.require_user(self.handle_usage_time)
         if path.startswith("/api/reading/"):
@@ -333,6 +339,8 @@ class AppHandler(
 
     def do_PUT(self):
         path = urlparse(self.path).path
+        if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
+            return self.require_user(self.handle_daily_reports)
         if path.startswith("/cat/api/cats/"):
             return self.require_cat_user(self.handle_cat_item)
         if path.startswith("/cat/api/admin/users/"):
@@ -349,6 +357,8 @@ class AppHandler(
 
     def do_PATCH(self):
         path = urlparse(self.path).path
+        if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
+            return self.require_user(self.handle_daily_reports)
         if path.startswith("/api/gifts/"):
             return self.gift_dispatch()
         if path.startswith("/api/profiles/"):
@@ -361,6 +371,8 @@ class AppHandler(
 
     def do_DELETE(self):
         path = urlparse(self.path).path
+        if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
+            return self.require_user(self.handle_daily_reports)
         if path.startswith("/api/reading/"):
             return self.require_user(self.handle_reading)
         if path.startswith("/api/gifts/"):

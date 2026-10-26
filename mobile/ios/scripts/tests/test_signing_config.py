@@ -29,6 +29,7 @@ class SigningConfigTests(unittest.TestCase):
                 "application-identifier": "LEGACYPFX1.asia.feng.aimeimei",
                 "com.apple.developer.team-identifier": self.team,
                 "get-task-allow": False, "beta-reports-active": True,
+                "aps-environment": "production",
             },
         }
 
@@ -46,6 +47,12 @@ class SigningConfigTests(unittest.TestCase):
         self.profile["TeamIdentifier"] = ["OTHERTEAM1"]
         with self.assertRaisesRegex(ValueError, "Team"):
             self.validate()
+
+    def test_rejects_missing_or_sandbox_push_permission(self):
+        for value in (None, "development"):
+            self.profile["Entitlements"]["aps-environment"] = value
+            with self.assertRaisesRegex(ValueError, "推送权限"):
+                self.validate()
 
     def test_rejects_wrong_entitlement_team(self):
         self.profile["Entitlements"]["com.apple.developer.team-identifier"] = "OTHERTEAM1"

@@ -81,6 +81,17 @@ actor DemoAPI: PlatformServing {
         personalShares = personalShares.map { $0.id == id ? ConversationShare(id: $0.id, scope: $0.scope, title: $0.title, expires_at: $0.expires_at, active: false) : $0 }
     }
     private var loggedIn = false
+    private var loginName = "family"
+    private var dailyRead = false
+    private var dailyRegistered = false
+    func dailyReports(before: Int64?) async throws -> DailyReportsPage {
+        guard loginName == "feng" else { throw PlatformError.http(404, "") }
+        return Self.decode(DailyReportsPage.self, #"{"reports":[{"id":1,"report_date":"2026-10-26","title":"前端研发日报","content":"## 今日前端更新\n\n- 桌面客户端：音频转换器更新至 1.7.1。\n- 后台前端：新增代理发码审核。\n- Flutter：今日未见新提交。","created_at":1792980000,"read_at":\#(dailyRead ? 1 : 0),"simulation":true}],"unread":\#(dailyRead ? 0 : 1),"next_before":null}"#)
+    }
+    func dailyReport(id: Int64) async throws -> DailyReport { try await dailyReports(before: nil).reports[0] }
+    func readDailyReport(id: Int64) async throws { dailyRead = true }
+    func registerDailyDevice(installationID: String, token: String) async throws { dailyRegistered = true }
+    func removeDailyDevice(installationID: String) async throws { dailyRegistered = false }
     private var created = 1
     private var smsSends = 0
     private var smsVerifications = 0
@@ -110,9 +121,10 @@ actor DemoAPI: PlatformServing {
         Self.decode(Captcha.self, #"{"captcha_id":"offline","image_svg":"<svg><rect width='128' height='48' rx='14' fill='#fffaf6'/><text x='16' y='34' fill='#6F594B' font-size='24'>AB23</text></svg>"}"#)
     }
     func currentAccount() async throws -> Account? {
-        loggedIn ? Self.decode(Account.self, #"{"id":"offline-user","username":"family","display_name":"家人"}"#) : nil
+        loggedIn ? Self.decode(Account.self, #"{"id":"offline-user","username":"\#(loginName)","display_name":"家人"}"#) : nil
     }
     func login(username: String, password: String, captcha: Captcha, answer: String) async throws -> Account {
+        loginName = username == "feng" ? "feng" : "family"
         loggedIn = true; return try await currentAccount()!
     }
     func smsLoginConfig() async throws -> SMSLoginConfiguration {
@@ -130,7 +142,7 @@ actor DemoAPI: PlatformServing {
         guard code == "123456", challengeID == "offline-sms" else { throw PlatformError.smsLogin("验证码不正确或已过期") }
         loggedIn = true; return try await currentAccount()!
     }
-    func logout() async throws { loggedIn = false }
+    func logout() async throws { loggedIn = false; loginName = "family" }
     nonisolated func clearCredential() throws {}
     func models() async throws -> [ChatModel] {
         Self.decode([ChatModel].self, #"[{"id":"m1","name":"槑槑 · 思考","supports_reasoning_control":true,"supports_vision":true},{"id":"m2","name":"槑槑 · 轻快","supports_reasoning_control":false}]"#)

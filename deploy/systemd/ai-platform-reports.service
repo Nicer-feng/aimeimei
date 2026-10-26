@@ -1,0 +1,13 @@
+[Unit]
+Description=Retry pending frontend daily report notifications
+After=network-online.target ai-platform.service
+
+[Service]
+Type=oneshot
+User=ai-platform
+Group=ai-platform
+WorkingDirectory=/opt/ai-platform
+Environment=AI_PLATFORM_DATA=/opt/ai-platform
+ExecStart=/opt/ai-platform/.venv/bin/python /opt/ai-platform/scripts/publish_frontend_report.py --retry
+NoNewPrivileges=true
+PrivateTmp=true

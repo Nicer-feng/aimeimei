@@ -10,6 +10,7 @@ final class AppStore {
     let ocr: OCRController
     let personal: PersonalToolsController
     let speech: SpeechController
+    let daily: DailyReportsController
     private(set) var documents: [ChatDocument] = []
     private(set) var importingDocuments = false
     private(set) var documentUploadingName: String?
@@ -59,10 +60,12 @@ final class AppStore {
         ocr = OCRController(api: api)
         personal = PersonalToolsController(api: api)
         speech = SpeechController(api: api, output: audioOutput ?? DeviceAudioOutput())
+        daily = DailyReportsController(api: api)
         writing.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }; media.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         ocr.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         personal.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         speech.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
+        daily.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
     }
     var locked: Bool { busy || streaming }
     var currentModel: ChatModel? { models.first { $0.id == draft.modelID } }
@@ -146,6 +149,7 @@ final class AppStore {
     }
     func clearLoginFeedback() { error = nil; loginNotice = nil }
     private func clearAccount() {
+        daily.bind(nil)
         generation?.cancel(); runID = UUID(); speech.reset(); personal.reset(); ocr.reset(); writing.reset(); media.reset()
         documents = []; importingDocuments = false; failedDocument = nil; documentUploadingName = nil
         account = nil; selected = nil; messages = []; conversations = []; models = []
@@ -157,6 +161,7 @@ final class AppStore {
     }
     func logout() async {
         await work {
+            await daily.unregister()
             do { try await api.logout() }
             catch { self.error = "网络未能确认服务器退出；本机登录状态已清除" }
             clearAccount()
@@ -165,9 +170,11 @@ final class AppStore {
         }
     }
     private func loadWorkspace() async throws {
+        daily.bind(account)
         let list = try await api.conversations()
         let available = try await api.models()
         conversations = list; models = available
+        if daily.owner != nil { await daily.refresh() }
         if let selected {
             self.selected = list.first { $0.id == selected.id }
             if let current = self.selected {

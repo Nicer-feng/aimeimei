@@ -46,6 +46,8 @@ def decode_secret(name):
 def validate_profile(profile, team_id, now=None):
     now = now or dt.datetime.now(dt.timezone.utc)
     entitlements = profile.get("Entitlements", {})
+    if entitlements.get("aps-environment") != "production":
+        raise ValueError("描述文件缺少 production 推送权限，请启用 Push Notifications 后重新生成并更新 IOS_PROFILE_BASE64")
     if profile.get("TeamIdentifier") != [team_id] or entitlements.get("com.apple.developer.team-identifier") != team_id:
         raise ValueError("描述文件的 Team 与 IOS_TEAM_ID 不一致")
     prefixes = profile.get("ApplicationIdentifierPrefix", [])

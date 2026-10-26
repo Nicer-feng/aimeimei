@@ -12,6 +12,11 @@ public protocol CredentialStore: Sendable {
 }
 
 public protocol PlatformServing: Sendable {
+    func dailyReports(before: Int64?) async throws -> DailyReportsPage
+    func dailyReport(id: Int64) async throws -> DailyReport
+    func readDailyReport(id: Int64) async throws
+    func registerDailyDevice(installationID: String, token: String) async throws
+    func removeDailyDevice(installationID: String) async throws
     func captcha() async throws -> Captcha
     func currentAccount() async throws -> Account?
     func login(username: String, password: String, captcha: Captcha, answer: String) async throws -> Account
@@ -62,6 +67,11 @@ public protocol PlatformServing: Sendable {
 }
 
 public extension PlatformServing {
+    func dailyReports(before: Int64?) async throws -> DailyReportsPage { throw PlatformError.http(404, "") }
+    func dailyReport(id: Int64) async throws -> DailyReport { throw PlatformError.http(404, "") }
+    func readDailyReport(id: Int64) async throws { throw PlatformError.http(404, "") }
+    func registerDailyDevice(installationID: String, token: String) async throws { throw PlatformError.http(404, "") }
+    func removeDailyDevice(installationID: String) async throws { throw PlatformError.http(404, "") }
     func writing(conversationID: String, versionID: Int64?) async throws -> WritingResponse { throw PlatformError.media("写稿暂不可用") }
     func updateWriting(conversationID: String, revision: Int, command: WritingCommand) async throws -> WritingResponse { throw PlatformError.media("写稿暂不可用") }
     func mediaTasks() async throws -> [MediaTask] { throw PlatformError.media("音视频暂不可用") }
@@ -172,6 +182,23 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
     private struct Favorite: Decodable { let favorite: FavoriteMessage }
     private struct Prompts: Decodable { let prompts: [PromptTemplate] }
     private struct Search: Decodable { let results: [GlobalSearchResult] }
+    private struct DailyItem: Decodable { let report: DailyReport }
+
+    public func dailyReports(before: Int64? = nil) async throws -> DailyReportsPage {
+        try await call(DailyReportsPage.self, path: ["api", "daily-reports"], query: before.map { [URLQueryItem(name: "before", value: String($0))] } ?? [])
+    }
+    public func dailyReport(id: Int64) async throws -> DailyReport {
+        try await call(DailyItem.self, path: ["api", "daily-reports", String(id)]).report
+    }
+    public func readDailyReport(id: Int64) async throws {
+        _ = try await call(OK.self, path: ["api", "daily-reports", String(id), "read"], method: "POST", body: [:])
+    }
+    public func registerDailyDevice(installationID: String, token: String) async throws {
+        _ = try await call(OK.self, path: ["api", "daily-reports", "device"], method: "POST", body: ["installation_id": installationID, "token": token])
+    }
+    public func removeDailyDevice(installationID: String) async throws {
+        _ = try await call(OK.self, path: ["api", "daily-reports", "device"], method: "DELETE", body: ["installation_id": installationID])
+    }
 
     public func captcha() async throws -> Captcha { try await call(Captcha.self, path: ["api", "captcha"]) }
     public func currentAccount() async throws -> Account? {

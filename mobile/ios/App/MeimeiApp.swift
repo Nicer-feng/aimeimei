@@ -3,6 +3,7 @@ import MeimeiCore
 
 @main
 struct MeimeiApp: App {
+    @UIApplicationDelegateAdaptor(PushNotifications.self) private var push
     @Environment(\.scenePhase) private var scenePhase
     @State private var store: AppStore?
     @State private var launchError: String?
@@ -11,7 +12,7 @@ struct MeimeiApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let store { RootView(store: store) }
+                if let store { RootView(store: store, push: push) }
                 else if let launchError {
                     ContentUnavailableView("无法准备本机存储", systemImage: "externaldrive.badge.exclamationmark", description: Text(launchError))
                 } else { ProgressView("正在准备槑槑…") }
@@ -51,6 +52,7 @@ struct MeimeiApp: App {
             .onChange(of: scenePhase) { _, phase in
                 guard phase != .inactive else { return }
                 Task { await store?.sceneActive(phase == .active) }
+                if phase == .active, let store { Task { await push.configure(store.daily) } }
             }
         }
     }

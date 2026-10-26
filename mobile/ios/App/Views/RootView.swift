@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     let store: AppStore
+    var push: PushNotifications? = nil
     @State private var showHistory = false
     @State private var showSettings = false
     @State private var librarySection: LibrarySection?
@@ -36,6 +37,13 @@ struct RootView: View {
         .sheet(isPresented: $showHistory) { HistoryView(store: store) }
         .sheet(isPresented: $showSettings) { SettingsView(store: store) }
         .sheet(item: $librarySection) { LibraryView(store: store, initial: $0) }
+        .sheet(isPresented: Binding(get: { store.daily.presented && store.daily.owner != nil }, set: { store.daily.presented = $0 })) {
+            DailyReportsView(controller: store.daily)
+        }
+        .task(id: store.account?.id) { await push?.configure(store.daily) }
+        .onChange(of: store.daily.presented) { _, shown in
+            if shown { showHistory = false; showSettings = false; librarySection = nil }
+        }
         .onChange(of: store.account?.id) { _, account in
             if account == nil { showSettings = false; showHistory = false; librarySection = nil }
         }
@@ -66,6 +74,15 @@ private struct SettingsView: View {
                 Section("外观") {
                     Picker("主题", selection: $appearance) {
                         Text("跟随系统").tag("system"); Text("浅色").tag("light"); Text("深色").tag("dark")
+                    }
+                }
+                if store.daily.owner != nil {
+                    Section("日报通知") {
+                        Button("前端研发日报", systemImage: "doc.text") { dismiss(); Task { try? await Task.sleep(for: .milliseconds(350)); store.daily.open() } }
+                        Button("系统通知设置", systemImage: "bell") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                        }
+                        if let notice = store.daily.notificationNotice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
                     }
                 }
                 Section("关于") {

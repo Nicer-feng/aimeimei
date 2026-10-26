@@ -15,6 +15,22 @@ struct HistoryView: View {
         NavigationStack {
             List {
                 if let error = store.error { ErrorNotice(text: error).listRowSeparator(.hidden) }
+                if store.daily.owner != nil && (query.isEmpty || "前端研发日报".localizedCaseInsensitiveContains(query)) {
+                    Button {
+                        dismiss()
+                        Task { try? await Task.sleep(for: .milliseconds(350)); store.daily.open() }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image("Avatar").resizable().scaledToFit().frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("前端研发日报").foregroundStyle(.primary)
+                                Label("已置顶", systemImage: "pin.fill").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if store.daily.unread > 0 { Text(String(store.daily.unread)).font(.caption.bold()).foregroundStyle(Brand.accent) }
+                        }.padding(.vertical, 6)
+                    }.accessibilityIdentifier("dailyReportEntry")
+                }
                 ForEach(filtered) { item in
                     Button {
                         Task { await store.select(item); if store.selected?.id == item.id { dismiss() } }
@@ -43,7 +59,7 @@ struct HistoryView: View {
                 }
             }
             .overlay {
-                if filtered.isEmpty && !store.busy {
+                if filtered.isEmpty && !store.busy && store.daily.owner == nil {
                     ContentUnavailableView(query.isEmpty ? "还没有聊天" : "没有找到聊天", systemImage: "bubble.left.and.bubble.right", description: Text(query.isEmpty ? "发送第一条消息后，对话会出现在这里" : "换个关键词试试"))
                         .allowsHitTesting(false)
                 }

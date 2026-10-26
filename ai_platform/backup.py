@@ -109,7 +109,7 @@ def create_database_snapshot(source_path, snapshot_path, mode="sanitized"):
             _execute_if_column(destination, "chat_message_images", "oss_url", "UPDATE chat_message_images SET oss_url='' ")
             _execute_if_column(destination, "message_tts", "error_message", "UPDATE message_tts SET error_message='' ")
 
-            for table_name in ("sessions", "cat_sessions", "conversation_shares", "login_captchas",
+            for table_name in ("report_push_deliveries", "report_push_devices", "sessions", "cat_sessions", "conversation_shares", "login_captchas",
                                "sms_login_challenges", "share_sessions", "share_office_participants", "share_office_rooms", "share_office_collaborators", "share_office_sessions", "share_pdf_uploads", "share_files_relation", "share_access_logs",
                                "shares", "share_rate_limits", "infrastructure_ip_locations"):
                 if _table_exists(destination, table_name):
