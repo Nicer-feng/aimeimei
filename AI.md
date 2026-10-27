@@ -237,6 +237,7 @@ python3 app.py
 当前联网有两条路径：
 
 - Qwen 百炼原生联网：模型后台开启 `supports_native_web_search`，使用 Responses API 的 `web_search`。从 v2.21.11 起同时尝试百炼官方 `web_extractor`；若上游不支持该工具，则自动退回只有 `web_search` 的请求。
+- 从 v2.29.2 起，Qwen3.8-Omni 只传 `web_search`，系统工具说明同步匹配。其它模型遇到 HTTP 200 后的流内工具不支持错误时，也可降级一次；已有正文、思考、工具工作或用量后禁止自动重放。回归：`scripts/test_chat_stream.py` 与 `scripts/test_native_search_http.py`（后者仅回环 HTTP、临时库和假密钥）。
 - 其它模型：Tavily 或 Brave，由后台联网设置控制自动/手动/强制策略。
 
 来源展示：最终回答只显示 favicon 聚合入口和 `N 个网页`，点击后打开右侧 Reference Sources Panel。来源保存在 `message_sources`，历史会话可恢复。

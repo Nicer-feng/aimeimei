@@ -48,6 +48,20 @@ def upstream_error_detail(error):
             pass
 
 
+def upstream_stream_failure(detail):
+    # 只返回固定分类和文案，不把供应商原始错误或凭据发给前端、写入日志。
+    text = str(detail or "").lower()
+    if web_extractor_option_rejected(text):
+        return "unsupported_web_extractor", "当前模型不支持网页正文抽取，请重新生成或切换模型。"
+    if any(value in text for value in ("rate_limit", "rate limit", "throttl")):
+        return "rate_limited", "当前模型请求过于频繁，请稍后重试。"
+    if any(value in text for value in ("quota", "insufficient_balance", "insufficient balance", "arrearage")):
+        return "quota_unavailable", "当前模型额度或余额不足，请联系管理员检查。"
+    if any(value in text for value in ("invalidapikey", "invalid_api_key", "unauthorized", "accessdenied")):
+        return "authorization_failed", "当前模型服务授权失败，请联系管理员检查。"
+    return "upstream_error", "模型服务返回错误，请稍后重新生成或切换模型。"
+
+
 CONTEXT_RECENT_MESSAGE_LIMIT = 18
 CONTEXT_COMPACT_TRIGGER_MESSAGE_COUNT = 24
 CONTEXT_COMPACT_TRIGGER_CHARACTERS = 28000
@@ -1257,6 +1271,9 @@ class ChatHandlersMixin:
                 runtime_context += (
                     "\n本次请求已启用百炼 web_search 与 web_extractor 工具。必须先检索最新资料，"
                     "并优先抽取最相关网页的正文后再回答；不要跳过搜索，也不要假装已经搜索。"
+                ) if native_extractor_enabled else (
+                    "\n本次请求已启用百炼 web_search 工具。必须先检索最新资料后再回答；"
+                    "不要跳过搜索，也不要假装已经搜索。"
                 )
             upstream_messages = [
                 {"role": "system", "content": runtime_context}
@@ -1342,7 +1359,10 @@ class ChatHandlersMixin:
                     exc.url, exc.code, exc.reason, exc.headers, io.BytesIO(detail.encode())
                 )
 
-        native_extractor_enabled = bool(use_native_search)
+        native_extractor_enabled = bool(
+            use_native_search
+            and not str(convo["model"]).strip().lower().startswith("qwen3.8-omni-")
+        )
         payload = (
             make_native_search_payload(native_extractor_enabled)
             if use_native_search
@@ -1415,6 +1435,8 @@ class ChatHandlersMixin:
         writing_completion = False
         client_connected = True
         stream_failed = False
+        stream_failure_message = ""
+        native_work_started = False
         protect_storyboard = bool(writing_run and writing_run[0]["locked_version_id"] and writing_run[1] and writing_run[2]["intent"] == "storyboard")
 
         def emit_client_event(event):
@@ -1450,8 +1472,11 @@ class ChatHandlersMixin:
             emit_client_event({"choices": [{"index": 0, "delta": {"content": search_fallback_notice},
                                             "finish_reason": None}]})
         try:
-            payloads = sse_payloads(response) if client_connected else ()
-            for data_text in payloads:
+            payloads = iter(sse_payloads(response)) if client_connected else iter(())
+            while client_connected:
+                data_text = next(payloads, None)
+                if data_text is None:
+                    break
                 if data_text.strip() == "[DONE]":
                     break
                 try:
@@ -1460,11 +1485,46 @@ class ChatHandlersMixin:
                     continue
                 if not isinstance(event, dict):
                     continue
-                if event.get("error"):
-                    stream_failed = True
+                event_type = str(event.get("type") or "")
+                error_response = event.get("response")
+                error_response = error_response if isinstance(error_response, dict) else {}
+                error = event.get("error") or error_response.get("error")
+                if not error and event_type == "error":
+                    error = event
+                if error:
+                    if isinstance(error_response.get("usage"), dict):
+                        usage_data = error_response["usage"]
+                    if isinstance(event.get("usage"), dict):
+                        usage_data = event["usage"]
+                    detail = json.dumps(error, ensure_ascii=False)
+                    # HTTP 200 也可能携带流内参数错误；仅在上游尚未产生工作时降级一次。
+                    if (use_native_search and native_extractor_enabled
+                            and event_type != "response.incomplete"
+                            and not (assistant_parts or reasoning_parts or search_results or native_work_started)
+                            and usage_data is None and web_extractor_option_rejected(detail)):
+                        native_extractor_enabled = False
+                        response.close()
+                        self.log_message("chat native search retry without web_extractor")
+                        try:
+                            response = open_upstream(make_native_search_payload(False), native_search=True)
+                        except urllib.error.HTTPError as exc:
+                            reason, stream_failure_message = upstream_stream_failure(upstream_error_detail(exc))
+                            self.log_message("chat native search retry failed (%s)", reason)
+                            stream_failed = True
+                            break
+                        payloads = iter(sse_payloads(response))
+                        continue
+                    reason, stream_failure_message = upstream_stream_failure(detail)
+                    self.log_message("chat upstream stream failed (%s)", reason)
+                    stream_failed = event_type != "response.incomplete"
                     break
                 if use_native_search:
-                    event_type = str(event.get("type") or "")
+                    if event_type.startswith(("response.web_search_call.", "response.web_extractor_call.")):
+                        native_work_started = True
+                    if event_type in ("response.output_item.added", "response.output_item.done"):
+                        item_type = str((event.get("item") or {}).get("type") or "")
+                        if item_type.endswith("_call"):
+                            native_work_started = True
                     if event_type == "response.output_text.delta":
                         piece = str(event.get("delta") or "")
                         if piece:
@@ -1743,4 +1803,4 @@ class ChatHandlersMixin:
             if generation_status != "completed":
                 emit_client_event({"type": "message.failed", "status": generation_status,
                                    "message_id": message_id, "conversation_id": conversation_id,
-                                   "message": "生成未完成，已保存收到的内容，可继续追问。"})
+                                   "message": stream_failure_message or "生成未完成，已保存收到的内容，可继续追问。"})
