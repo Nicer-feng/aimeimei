@@ -1,6 +1,7 @@
 """隔离 HTTP、SQLite 与模拟 APNs 服务回归，不读取真实密钥或发送真实通知。"""
 import json
 import threading
+import time
 import unittest
 from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,17 +11,43 @@ from unittest.mock import patch
 from test_reading import ReadingTests
 from ai_platform.database import db
 from ai_platform.runtime import now, token_hash
-from ai_platform.daily_reports import publish_report, deliver_pending
+from ai_platform.daily_reports import publish_report, deliver_pending, notification_preview
+
+
+class DailyReportPreviewTests(unittest.TestCase):
+    def test_plain_text_and_wrapped_list_items(self):
+        content = "## 今日前端更新\n\n- **PDF**：[阅读位置](https://example.invalid)与 `sunwoo_flutter`\n  跨行说明\n- __录屏__：*布局*优化\n- 后台：~~旧版~~新版\n- 不展示第四条"
+        self.assertEqual(notification_preview(content), "- PDF：阅读位置与 sunwoo_flutter 跨行说明\n- 录屏：布局优化\n- 后台：旧版新版\n点击查看完整日报")
+
+    def test_long_items_do_not_hide_later_modules(self):
+        preview = notification_preview("1. " + "甲" * 500 + "\n2. 第二模块\n3. 第三模块\n4. 第四模块")
+        self.assertIn("甲" * 89 + "…", preview)
+        self.assertIn("第二模块", preview)
+        self.assertIn("第三模块", preview)
+        self.assertNotIn("第四模块", preview)
+        self.assertLessEqual(len(preview), 300)
+
+    def test_empty_formatting_and_code_use_fallback(self):
+        fallback = "今日日报已更新，点击查看详情"
+        for content in ("", "## 标题\n---", "```python\n不应预览的代码\n```", "~~~\n```\n仍在代码内\n~~~", "- ![](image.png)"):
+            with self.subTest(content=content):
+                self.assertEqual(notification_preview(content), fallback)
+
+    def test_paragraphs_and_quotes_are_readable(self):
+        self.assertEqual(notification_preview("> **PDF** 更新\n\n下一段正文"), "- PDF 更新\n- 下一段正文\n点击查看完整日报")
 
 
 class FakeAPNs(BaseHTTPRequestHandler):
     status = 200
     reason = ""
     requests = []
+    payload_sizes = []
     def log_message(self, *args):
         pass
     def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        raw = self.rfile.read(int(self.headers["Content-Length"]))
+        type(self).payload_sizes.append(len(raw))
+        body = json.loads(raw)
         type(self).requests.append((dict(self.headers), body, self.path))
         self.send_response(type(self).status)
         self.send_header("Content-Type", "application/json")
@@ -57,6 +84,7 @@ class DailyReportTests(unittest.TestCase):
 
     def setUp(self):
         FakeAPNs.requests = []; FakeAPNs.status = 200; FakeAPNs.reason = ""
+        FakeAPNs.payload_sizes = []
         with db() as conn:
             conn.execute("DELETE FROM report_push_deliveries")
             conn.execute("DELETE FROM report_push_devices")
@@ -92,7 +120,13 @@ class DailyReportTests(unittest.TestCase):
         self.assertEqual(self.req("", "POST", {"content":"no chat"})[0],405)
         self.assertEqual(self.req(f"/{rid}/messages", "POST", {"content":"no model"})[0],405)
         self.assertEqual(self.req(f"/{rid}/read", "POST", {})[0],200)
-        self.assertGreater(self.req(f"/{rid}")[1]["report"]["read_at"],0)
+        # 现有处理器在 SQLite 上下文退出前写出响应，等待工作线程完成提交。
+        deadline = time.monotonic() + 1
+        read_at = self.req(f"/{rid}")[1]["report"]["read_at"]
+        while not read_at and time.monotonic() < deadline:
+            time.sleep(0.01)
+            read_at = self.req(f"/{rid}")[1]["report"]["read_at"]
+        self.assertGreater(read_at,0)
 
     def test_idempotency_and_real_apns_http_request(self):
         report = self.publish()
@@ -102,7 +136,9 @@ class DailyReportTests(unittest.TestCase):
         headers,payload,path = FakeAPNs.requests[0]
         self.assertEqual(headers["apns-topic"],"asia.feng.aimeimei")
         self.assertEqual(headers["apns-push-type"],"alert")
-        self.assertNotIn("私有正文",json.dumps(payload,ensure_ascii=False))
+        self.assertEqual(payload["aps"]["alert"]["body"], notification_preview("测试日报 **私有正文**"))
+        self.assertEqual(payload["kind"], "frontend_daily")
+        self.assertEqual(payload["aps"]["thread-id"], "frontend-daily")
         self.assertEqual(payload["report_id"],report["report_id"])
         import jwt
         auth = headers["authorization"].split(" ",1)[1]
@@ -113,6 +149,20 @@ class DailyReportTests(unittest.TestCase):
         self.publish(simulation=True)
         self.assertEqual(len(self.req()[1]["reports"]),2)
 
+    def test_preview_payload_size_and_full_report_preserved(self):
+        self.register()
+        for content in ("## 日报\n" + "\n".join("- " + "😀" * 500 for _ in range(4)),
+                        "## 日报\n" + "\n".join("- " + "中文摘要" * 100 for _ in range(4))):
+            with self.subTest(content_type=content[10:20]):
+                report = self.publish(content=content, simulation="中文" in content)
+                headers, payload, path = FakeAPNs.requests[-1]
+                self.assertEqual(payload["report_id"], report["report_id"])
+                self.assertLessEqual(FakeAPNs.payload_sizes[-1], 4096)
+                self.assertLessEqual(len(payload["aps"]["alert"]["body"]), 300)
+                self.assertLessEqual(len(json.dumps(payload, ensure_ascii=False).encode("utf-8")), 4096)
+                self.assertLessEqual(len(json.dumps(payload, ensure_ascii=True).encode("ascii")), 4096)
+                self.assertEqual(self.req(f"/{report['report_id']}")[1]["report"]["content"], content)
+
     def test_transient_retry_and_invalid_token(self):
         self.register()
         FakeAPNs.status=503; FakeAPNs.reason="ServiceUnavailable"
@@ -120,6 +170,7 @@ class DailyReportTests(unittest.TestCase):
         self.assertEqual(result["delivery"]["pending"],1)
         FakeAPNs.status=200
         self.assertEqual(deliver_pending()["accepted"],1)
+        self.assertEqual(FakeAPNs.requests[0][1], FakeAPNs.requests[1][1])
         self.assertEqual(deliver_pending()["accepted"],0)
         FakeAPNs.status=410; FakeAPNs.reason="Unregistered"
         self.publish(simulation=True)
