@@ -158,6 +158,18 @@ class DailyReportTests(unittest.TestCase):
         self.publish()
         self.assertEqual(len(FakeAPNs.requests), 3)
 
+    def test_first_device_registration_and_same_body_retry_do_not_backfill_notifications(self):
+        original=self.publish()
+        self.assertEqual(original['registered_devices'],0)
+        self.assertEqual(self.register()[0],200)
+        self.assertEqual(FakeAPNs.requests,[])
+        repeated=self.publish()
+        self.assertEqual(repeated['delivery']['accepted'],0)
+        with db() as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM report_push_deliveries').fetchone()[0],0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM daily_reports').fetchone()[0],2)
+        self.assertEqual(self.publish(simulation=True)['delivery']['accepted'],1)
+
     def test_conflict_rolls_back_all_recipients(self):
         original = self.publish()
         with db() as conn:
@@ -313,8 +325,8 @@ class DailyReportTests(unittest.TestCase):
         self.assertGreater(read_at,0)
 
     def test_idempotency_and_real_apns_http_request(self):
-        report = self.publish()
         self.assertEqual(self.register()[0],200)
+        report = self.publish()
         self.assertEqual(self.publish()["report_id"],report["report_id"])
         self.assertEqual(len(FakeAPNs.requests),1)
         headers,payload,path = FakeAPNs.requests[0]

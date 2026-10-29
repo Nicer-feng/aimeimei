@@ -162,7 +162,7 @@ def publish_report(data):
             row = conn.execute("SELECT * FROM daily_reports WHERE user_id=? AND report_date=? AND simulation=?", (uid, day, int(simulation))).fetchone()
             if row["content_hash"] != digest:
                 raise ValueError("当日日报已存在且正文不同，未覆盖旧记录")
-            if push_allowed(conn, uid, row["id"]):
+            if inserted.rowcount == 1 and push_allowed(conn, uid, row["id"]):
                 conn.execute("INSERT OR IGNORE INTO report_push_deliveries(report_id,device_id) SELECT ?,id FROM report_push_devices WHERE user_id=?", (row["id"], uid))
             devices = conn.execute("SELECT COUNT(*) FROM report_push_devices WHERE user_id=?", (uid,)).fetchone()[0]
             push = bool(conn.execute("SELECT daily_push_enabled FROM users WHERE id=?", (uid,)).fetchone()[0])

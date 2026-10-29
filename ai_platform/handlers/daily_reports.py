@@ -70,9 +70,7 @@ class DailyReportHandlersMixin:
                 device = conn.execute("SELECT id FROM report_push_devices WHERE user_id=? AND installation_id=?", (uid,data["installation_id"])).fetchone()[0]
                 if old and old["token"] != data["token"].lower():
                     conn.execute("DELETE FROM report_push_deliveries WHERE device_id=? AND state='invalid'", (device,))
-                for report in conn.execute("SELECT id FROM daily_reports WHERE user_id=? AND read_at=0 AND created_at>?", (uid,now()-86400)).fetchall():
-                    if push_allowed(conn, uid, report["id"]):
-                        conn.execute("INSERT OR IGNORE INTO report_push_deliveries(report_id,device_id) VALUES(?,?)", (report["id"],device))
+                # 注册只绑定后续通知，不为安装前保存的日报补建投递。
             deliver_pending()
             return self.json({"ok": True})
         parts = path.split("/")
