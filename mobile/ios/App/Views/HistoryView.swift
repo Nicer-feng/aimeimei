@@ -11,7 +11,7 @@ struct HistoryView: View {
     private var filtered: [Conversation] {
         store.conversations.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }
     }
-    private var showDaily: Bool { store.daily.owner != nil && (query.isEmpty || "前端研发日报".localizedCaseInsensitiveContains(query)) }
+    private var showDaily: Bool { store.daily.owner != nil && (query.isEmpty || "研发日报".localizedCaseInsensitiveContains(query)) }
     var body: some View {
         NavigationStack {
             List {
@@ -24,7 +24,7 @@ struct HistoryView: View {
                         HStack(spacing: 12) {
                             Image("Avatar").resizable().scaledToFit().frame(width: 36, height: 36)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("前端研发日报").foregroundStyle(.primary)
+                                Text("研发日报").foregroundStyle(.primary)
                                 Label("已置顶", systemImage: "pin.fill").font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()

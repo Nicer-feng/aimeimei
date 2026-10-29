@@ -28,7 +28,7 @@ final class DailyReportsController {
         UserDefaults.standard.set(installationID, forKey: key)
     }
     func bind(_ account: Account?) {
-        let id = account?.username == "feng" ? account?.id : nil
+        let id = account.flatMap { ["feng", "czq"].contains($0.username) ? $0.id : nil }
         guard id != owner else { return }
         revision = UUID(); owner = id; reports = []; unread = 0; nextBefore = nil
         busy = false; presented = false; focusID = nil; error = nil

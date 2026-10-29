@@ -82,18 +82,25 @@ actor DemoAPI: PlatformServing {
     }
     private var loggedIn = false
     private var loginName = "family"
-    private var dailyRead = false
+    private var dailyReadUsers: Set<String> = []
     private var dailyRegistered = false
     func dailyReports(before: Int64?) async throws -> DailyReportsPage {
-        guard loginName == "feng" else { throw PlatformError.http(404, "") }
-        let report: [String: Any] = ["id": 1, "report_date": "2026-10-26", "title": "前端研发日报",
-            "content": "## 今日前端更新\n\n- 桌面客户端：音频转换器更新至 1.7.1。\n- 后台前端：新增代理发码审核。\n- Flutter：今日未见新提交。",
+        guard ["feng", "czq"].contains(loginName) else { throw PlatformError.http(404, "") }
+        let dailyRead = dailyReadUsers.contains(loginName)
+        let report: [String: Any] = ["id": loginName == "czq" ? 2 : 1, "report_date": "2026-10-29", "title": "研发日报",
+            "content": "## 今日研发更新\n\n- 桌面客户端：音频转换器更新至 1.7.1。\n- 后台前端：新增代理发码审核。\n- Flutter：今日未见新提交。\n- 后端：优化账号与会员接口。\n- 官网：更新产品展示。",
             "created_at": 1792980000, "read_at": dailyRead ? 1 : 0, "simulation": true]
         return try JSONDecoder().decode(DailyReportsPage.self, from: JSONSerialization.data(withJSONObject:
             ["reports": [report], "unread": dailyRead ? 0 : 1, "next_before": NSNull()]))
     }
-    func dailyReport(id: Int64) async throws -> DailyReport { try await dailyReports(before: nil).reports[0] }
-    func readDailyReport(id: Int64) async throws { dailyRead = true }
+    func dailyReport(id: Int64) async throws -> DailyReport {
+        let report = try await dailyReports(before: nil).reports[0]
+        guard report.id == id else { throw PlatformError.http(404, "") }
+        return report
+    }
+    func readDailyReport(id: Int64) async throws {
+        _ = try await dailyReport(id: id); dailyReadUsers.insert(loginName)
+    }
     func registerDailyDevice(installationID: String, token: String) async throws { dailyRegistered = true }
     func removeDailyDevice(installationID: String) async throws { dailyRegistered = false }
     private var created = 1
@@ -125,10 +132,10 @@ actor DemoAPI: PlatformServing {
         Self.decode(Captcha.self, #"{"captcha_id":"offline","image_svg":"<svg><rect width='128' height='48' rx='14' fill='#fffaf6'/><text x='16' y='34' fill='#6F594B' font-size='24'>AB23</text></svg>"}"#)
     }
     func currentAccount() async throws -> Account? {
-        loggedIn ? Self.decode(Account.self, #"{"id":"offline-user","username":"\#(loginName)","display_name":"家人"}"#) : nil
+        loggedIn ? Self.decode(Account.self, #"{"id":"\#(loginName == "czq" ? "offline-czq" : "offline-user")","username":"\#(loginName)","display_name":"家人"}"#) : nil
     }
     func login(username: String, password: String, captcha: Captcha, answer: String) async throws -> Account {
-        loginName = username == "feng" ? "feng" : "family"
+        loginName = ["feng", "czq"].contains(username) ? username : "family"
         loggedIn = true; return try await currentAccount()!
     }
     func smsLoginConfig() async throws -> SMSLoginConfiguration {

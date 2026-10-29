@@ -2,14 +2,14 @@ from http import HTTPStatus
 from urllib.parse import parse_qs, urlparse
 
 from ..database import db
-from ..daily_reports import OWNER, report_row, valid_device, deliver_pending
+from ..daily_reports import OWNERS, report_row, valid_device, deliver_pending
 from ..runtime import now, token_hash
 
 
 class DailyReportHandlersMixin:
     def handle_daily_reports(self):
         user = self.current_user()
-        if user["username"] != OWNER:
+        if user["username"] not in OWNERS:
             return self.error(HTTPStatus.NOT_FOUND, "not found")
         uid, path = user["id"], urlparse(self.path).path.rstrip("/")
         if path == "/api/daily-reports" and self.command == "GET":
@@ -43,7 +43,8 @@ class DailyReportHandlersMixin:
                 old = conn.execute("SELECT * FROM report_push_devices WHERE user_id=? AND installation_id=?", (uid,data["installation_id"])).fetchone()
                 if not old and conn.execute("SELECT COUNT(*) FROM report_push_devices WHERE user_id=?", (uid,)).fetchone()[0] >= 10:
                     return self.error(HTTPStatus.CONFLICT, "too many devices")
-                conn.execute("DELETE FROM report_push_devices WHERE user_id=? AND token=? AND installation_id<>?", (uid,data["token"].lower(),data["installation_id"]))
+                # 同一设备切换账号后只通知当前登录者，不按可伪造的安装 ID 清理其他账号。
+                conn.execute("DELETE FROM report_push_devices WHERE token=? AND NOT (user_id=? AND installation_id=?)", (data["token"].lower(),uid,data["installation_id"]))
                 conn.execute("INSERT INTO report_push_devices(user_id,installation_id,token,session_hash,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,installation_id) DO UPDATE SET token=excluded.token,session_hash=excluded.session_hash,updated_at=excluded.updated_at", (uid,data["installation_id"],data["token"].lower(),token_hash(self.session_token()),now()))
                 device = conn.execute("SELECT id FROM report_push_devices WHERE user_id=? AND installation_id=?", (uid,data["installation_id"])).fetchone()[0]
                 if old and old["token"] != data["token"].lower():

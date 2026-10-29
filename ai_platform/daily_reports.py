@@ -9,7 +9,7 @@ from pathlib import Path
 from .runtime import now, read_json
 from .settings import DATA_DIR
 
-OWNER = "feng"
+OWNERS = ("feng", "czq")
 TOPIC = "asia.feng.aimeimei"
 APNS_ORIGIN = "https://api.push.apple.com"
 _delivery_lock = threading.Lock()
@@ -104,21 +104,35 @@ def publish_report(data):
         raise ValueError("正文必须为 1 至 30000 字，simulation 必须为布尔值")
     content = content.strip()
     digest = hashlib.sha256(content.encode()).hexdigest()
-    title = f"前端研发日报{' · 模拟' if simulation else ''} · {day}"
+    title = f"研发日报{' · 模拟' if simulation else ''} · {day}"
+    reports, unavailable = [], []
     with db() as conn:
-        owner = conn.execute("SELECT id FROM users WHERE username=? AND is_active=1", (OWNER,)).fetchone()
-        if not owner:
+        owners = []
+        for username in OWNERS:
+            owner = conn.execute("SELECT id FROM users WHERE username=? AND is_active=1", (username,)).fetchone()
+            if owner:
+                owners.append((username, owner["id"]))
+            else:
+                unavailable.append(username)
+        if not owners:
             raise ValueError("目标账号不存在或已停用")
-        uid = owner["id"]
-        conn.execute("INSERT OR IGNORE INTO daily_reports(user_id,report_date,simulation,title,content,content_hash,created_at) VALUES(?,?,?,?,?,?,?)",
-                     (uid, day, int(simulation), title, content, digest, now()))
-        row = conn.execute("SELECT * FROM daily_reports WHERE user_id=? AND report_date=? AND simulation=?", (uid, day, int(simulation))).fetchone()
-        if row["content_hash"] != digest:
-            raise ValueError("当日日报已存在且正文不同，未覆盖旧记录")
-        conn.execute("INSERT OR IGNORE INTO report_push_deliveries(report_id,device_id) SELECT ?,id FROM report_push_devices WHERE user_id=?", (row["id"], uid))
-        rid = row["id"]
-        devices = conn.execute("SELECT COUNT(*) FROM report_push_devices WHERE user_id=?", (uid,)).fetchone()[0]
-    return {"report_id": rid, "registered_devices": devices, "delivery": deliver_pending(rid)}
+        # 所有账号共用一次事务；任一正文冲突时，不给其他账号留下部分发布。
+        for username, uid in owners:
+            conn.execute("INSERT OR IGNORE INTO daily_reports(user_id,report_date,simulation,title,content,content_hash,created_at) VALUES(?,?,?,?,?,?,?)",
+                         (uid, day, int(simulation), title, content, digest, now()))
+            row = conn.execute("SELECT * FROM daily_reports WHERE user_id=? AND report_date=? AND simulation=?", (uid, day, int(simulation))).fetchone()
+            if row["content_hash"] != digest:
+                raise ValueError("当日日报已存在且正文不同，未覆盖旧记录")
+            conn.execute("INSERT OR IGNORE INTO report_push_deliveries(report_id,device_id) SELECT ?,id FROM report_push_devices WHERE user_id=?", (row["id"], uid))
+            devices = conn.execute("SELECT COUNT(*) FROM report_push_devices WHERE user_id=?", (uid,)).fetchone()[0]
+            reports.append({"username": username, "report_id": row["id"], "registered_devices": devices})
+    totals = {"accepted": 0, "pending": 0, "invalid": 0}
+    for report in reports:
+        report["delivery"] = deliver_pending(report["report_id"])
+        for state in totals:
+            totals[state] += report["delivery"][state]
+    return {"report_id": reports[0]["report_id"], "registered_devices": sum(r["registered_devices"] for r in reports),
+            "delivery": totals, "reports": reports, "unavailable_recipients": unavailable}
 
 
 def send_apns(token, payload, collapse_id):
@@ -158,9 +172,9 @@ def deliver_pending(report_id=None):
                 JOIN users u ON u.id=r.user_id
                 JOIN sessions s ON s.token_hash=d.session_hash AND s.user_id=d.user_id AND s.expires_at>strftime('%s','now')
                 WHERE (p.state='pending' OR (p.state='sending' AND p.updated_at<?))
-                  AND r.created_at>? AND u.username=? AND u.is_active=1
+                  AND r.created_at>? AND u.username IN (?,?) AND u.is_active=1 AND d.user_id=r.user_id
                   AND (? IS NULL OR r.id=?) ORDER BY r.id LIMIT 20""",
-                (now()-120, now()-86400, OWNER, report_id, report_id)).fetchall()
+                (now()-120, now()-86400, *OWNERS, report_id, report_id)).fetchall()
         for row in rows:
             with db() as conn:
                 changed = conn.execute("UPDATE report_push_deliveries SET state='sending',updated_at=?,attempts=attempts+1 WHERE report_id=? AND device_id=? AND (state='pending' OR (state='sending' AND updated_at<?))",

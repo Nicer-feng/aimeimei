@@ -42,6 +42,7 @@ class FakeAPNs(BaseHTTPRequestHandler):
     reason = ""
     requests = []
     payload_sizes = []
+    responses = {}
     def log_message(self, *args):
         pass
     def do_POST(self):
@@ -49,10 +50,11 @@ class FakeAPNs(BaseHTTPRequestHandler):
         type(self).payload_sizes.append(len(raw))
         body = json.loads(raw)
         type(self).requests.append((dict(self.headers), body, self.path))
-        self.send_response(type(self).status)
+        status, reason = type(self).responses.get(self.path, (type(self).status, type(self).reason))
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(json.dumps({"reason": type(self).reason}).encode())
+        self.wfile.write(json.dumps({"reason": reason}).encode())
 
 
 class DailyReportTests(unittest.TestCase):
@@ -74,6 +76,8 @@ class DailyReportTests(unittest.TestCase):
         with db() as conn:
             conn.execute("INSERT INTO users(id,username,display_name,password_hash,created_at,updated_at) VALUES('daily-feng','feng','test','x',?,?)", (now(),now()))
             conn.execute("INSERT INTO sessions VALUES(?,?,?,?)", (token_hash("daily-feng"),"daily-feng",now(),now()+3600))
+            conn.execute("INSERT INTO users(id,username,display_name,password_hash,created_at,updated_at) VALUES('daily-czq','czq','test','x',?,?)", (now(),now()))
+            conn.execute("INSERT INTO sessions VALUES(?,?,?,?)", (token_hash("daily-czq"),"daily-czq",now(),now()+3600))
 
     @classmethod
     def tearDownClass(cls):
@@ -85,10 +89,12 @@ class DailyReportTests(unittest.TestCase):
     def setUp(self):
         FakeAPNs.requests = []; FakeAPNs.status = 200; FakeAPNs.reason = ""
         FakeAPNs.payload_sizes = []
+        FakeAPNs.responses = {}
         with db() as conn:
             conn.execute("DELETE FROM report_push_deliveries")
             conn.execute("DELETE FROM report_push_devices")
             conn.execute("DELETE FROM daily_reports")
+            conn.execute("UPDATE users SET is_active=1 WHERE username IN ('feng','czq')")
 
     def req(self, path="", method="GET", body=None, user="daily-feng"):
         import urllib.request
@@ -107,8 +113,80 @@ class DailyReportTests(unittest.TestCase):
     def publish(self, day=None, content="测试日报 **私有正文**", simulation=False):
         return publish_report({"date": day or date.today().isoformat(), "content": content, "simulation": simulation})
 
-    def register(self, token="a"*64, installation="test-installation-1234"):
-        return self.req("/device", "POST", {"token":token,"installation_id":installation})
+    def register(self, token="a"*64, installation="test-installation-1234", user="daily-feng"):
+        return self.req("/device", "POST", {"token":token,"installation_id":installation}, user=user)
+
+    def test_two_recipients_have_same_content_and_isolated_read_state(self):
+        self.register()
+        self.register(token="b"*64, user="daily-czq")
+        with db() as conn:
+            before = tuple(conn.execute("SELECT (SELECT COUNT(*) FROM conversations),(SELECT COUNT(*) FROM messages)").fetchone())
+        result = self.publish()
+        self.assertEqual(result["registered_devices"], 2)
+        self.assertEqual(result["delivery"]["accepted"], 2)
+        self.assertEqual([r["username"] for r in result["reports"]], ["feng", "czq"])
+        first, second = result["reports"]
+        self.assertNotEqual(first["report_id"], second["report_id"])
+        feng = self.req()[1]["reports"][0]
+        czq = self.req(user="daily-czq")[1]["reports"][0]
+        self.assertEqual(feng["content"], czq["content"])
+        self.assertTrue(czq["title"].startswith("研发日报"))
+        self.assertEqual(self.req(f"/{feng['id']}", user="daily-czq")[0], 404)
+        self.assertEqual(self.req(f"/{czq['id']}/read", "POST", {})[0], 404)
+        self.assertEqual(self.req(f"/{feng['id']}/read", "POST", {})[0], 200)
+        self.assertEqual(self.req(user="daily-czq")[1]["unread"], 1)
+        self.publish()
+        self.assertEqual(len(FakeAPNs.requests), 2)
+        with db() as conn:
+            after = tuple(conn.execute("SELECT (SELECT COUNT(*) FROM conversations),(SELECT COUNT(*) FROM messages)").fetchone())
+        self.assertEqual(before, after)
+
+    def test_retry_only_failed_recipient(self):
+        self.register()
+        self.register(token="b"*64, user="daily-czq")
+        FakeAPNs.responses["/3/device/" + "b"*64] = (503, "ServiceUnavailable")
+        result = self.publish()
+        self.assertEqual(result["reports"][0]["delivery"]["accepted"], 1)
+        self.assertEqual(result["reports"][1]["delivery"]["pending"], 1)
+        FakeAPNs.responses = {}
+        self.assertEqual(deliver_pending()["accepted"], 1)
+        self.assertEqual(len(FakeAPNs.requests), 3)
+        self.assertTrue(FakeAPNs.requests[-1][2].endswith("b"*64))
+        self.publish()
+        self.assertEqual(len(FakeAPNs.requests), 3)
+
+    def test_conflict_rolls_back_all_recipients(self):
+        original = self.publish()
+        with db() as conn:
+            conn.execute("DELETE FROM daily_reports WHERE user_id='daily-feng'")
+        with self.assertRaisesRegex(ValueError, "未覆盖"):
+            self.publish(content="不允许部分覆盖")
+        self.assertEqual(self.req()[1]["reports"], [])
+        other = self.req(user="daily-czq")[1]["reports"]
+        self.assertEqual(other[0]["id"], original["reports"][1]["report_id"])
+        self.assertEqual(other[0]["content"], "测试日报 **私有正文**")
+
+    def test_inactive_recipient_does_not_block_other_account(self):
+        with db() as conn:
+            conn.execute("UPDATE users SET is_active=0 WHERE username='czq'")
+        self.register()
+        result = self.publish()
+        self.assertEqual(result["unavailable_recipients"], ["czq"])
+        self.assertEqual(len(result["reports"]), 1)
+        self.assertEqual(result["delivery"]["accepted"], 1)
+
+    def test_device_token_follows_current_account_not_installation_id(self):
+        self.register()
+        # 同安装 ID、不同 token 的其他手机不被误删。
+        self.register(token="b"*64, user="daily-czq")
+        self.register(user="daily-czq", installation="switched-installation-1234")
+        self.req("/device", "DELETE", {"installation_id":"switched-installation-1234"})
+        with db() as conn:
+            users = conn.execute("SELECT user_id,COUNT(*) FROM report_push_devices GROUP BY user_id").fetchall()
+        self.assertEqual([tuple(row) for row in users], [("daily-czq", 2)])
+        result = self.publish()
+        self.assertEqual(result["reports"][0]["registered_devices"], 0)
+        self.assertEqual(result["reports"][1]["delivery"]["accepted"], 2)
 
     def test_account_isolation_and_read_only_contract(self):
         rid = self.publish()["report_id"]

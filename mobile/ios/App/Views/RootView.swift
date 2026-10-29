@@ -80,7 +80,7 @@ private struct SettingsView: View {
                 }
                 if store.daily.owner != nil {
                     Section("日报通知") {
-                        Button("前端研发日报", systemImage: "doc.text") { dismiss(); Task { try? await Task.sleep(for: .milliseconds(350)); store.daily.open() } }
+                        Button("研发日报", systemImage: "doc.text") { dismiss(); Task { try? await Task.sleep(for: .milliseconds(350)); store.daily.open() } }
                         Button("系统通知设置", systemImage: "bell") {
                             if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                         }

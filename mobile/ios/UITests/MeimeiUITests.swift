@@ -26,13 +26,24 @@ final class MeimeiUITests: XCTestCase {
         XCTAssertTrue(app.buttons["dailyReportEntry"].waitForExistence(timeout: 5))
         capture("40-daily-report-pinned")
         app.buttons["dailyReportEntry"].tap()
-        XCTAssertTrue(app.staticTexts["今日前端更新"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["今日研发更新"].waitForExistence(timeout: 10))
         capture("41-daily-report-read-only")
         // 模态页下的原聊天仍保留草稿，检查用户能否交互，不把后台视图误判成日报输入。
         let composer = app.textViews["composerField"]
         let send = app.buttons["sendButton"]
         XCTAssertFalse(composer.exists && composer.isHittable)
         XCTAssertFalse(send.exists && send.isHittable)
+    }
+    func testCzqPinnedDailyReportHasNoChatComposer() {
+        login("czq")
+        app.buttons["historyButton"].tap()
+        XCTAssertTrue(app.buttons["dailyReportEntry"].waitForExistence(timeout: 5))
+        capture("42-czq-daily-report-pinned")
+        app.buttons["dailyReportEntry"].tap()
+        XCTAssertTrue(app.staticTexts["今日研发更新"].waitForExistence(timeout: 10))
+        capture("43-czq-daily-report-read-only")
+        XCTAssertFalse(app.textViews["composerField"].exists && app.textViews["composerField"].isHittable)
+        XCTAssertFalse(app.buttons["sendButton"].exists && app.buttons["sendButton"].isHittable)
     }
     func testOtherAccountsDoNotHaveDailyReportEntry() {
         login()

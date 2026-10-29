@@ -22,7 +22,7 @@ struct DailyReportsView: View {
                                 HStack(spacing: 10) {
                                     Image("Avatar").resizable().scaledToFit().frame(width: 32, height: 32)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("槑槑 · 前端研发日报").font(.subheadline.bold())
+                                        Text("槑槑 · 研发日报").font(.subheadline.bold())
                                         Text(report.reportDate + (report.simulation ? " · 模拟" : "")).font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
@@ -48,7 +48,7 @@ struct DailyReportsView: View {
                     Task { await controller.refresh(); if let id { proxy.scrollTo(id, anchor: .top) } }
                 }
             }
-            .navigationTitle("前端研发日报").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("研发日报").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
         }
     }

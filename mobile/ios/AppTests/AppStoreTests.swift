@@ -5,7 +5,7 @@ import MeimeiCore
 
 @MainActor
 final class AppStoreTests: XCTestCase {
-    func testDailyReportsOnlyBindFengAndResetOnLogout() async throws {
+    func testDailyReportsResetOnLogoutAndExcludeOtherAccounts() async throws {
         await store.start()
         await store.login(username: "feng", password: "test-only", answer: "AB23")
         XCTAssertNotNil(store.daily.owner)
@@ -23,6 +23,30 @@ final class AppStoreTests: XCTestCase {
         XCTAssertFalse(store.daily.presented)
         await store.login(username: "family", password: "test-only", answer: "AB23")
         XCTAssertNil(store.daily.owner)
+    }
+    func testDailyReportsCzqHasIndependentReadState() async throws {
+        await store.start()
+        await store.login(username: "feng", password: "test-only", answer: "AB23")
+        let fengReport = try XCTUnwrap(store.daily.reports.first)
+        await store.daily.read(fengReport)
+        XCTAssertEqual(store.daily.unread, 0)
+        await store.logout()
+        await store.login(username: "czq", password: "test-only", answer: "AB23")
+        XCTAssertEqual(store.daily.owner, "offline-czq")
+        XCTAssertEqual(store.daily.unread, 1)
+        let czqReport = try XCTUnwrap(store.daily.reports.first)
+        XCTAssertNotEqual(czqReport.id, fengReport.id)
+        XCTAssertEqual(czqReport.content, fengReport.content)
+        store.daily.open(id: czqReport.id)
+        XCTAssertTrue(store.daily.presented)
+        await store.daily.read(czqReport)
+        XCTAssertEqual(store.daily.unread, 0)
+        await store.logout()
+        XCTAssertNil(store.daily.owner)
+        XCTAssertFalse(store.daily.presented)
+        await store.login(username: "feng", password: "test-only", answer: "AB23")
+        XCTAssertEqual(store.daily.unread, 0)
+        XCTAssertEqual(store.daily.reports.first?.id, fengReport.id)
     }
     private var directory: URL!
     private var local: LocalState!
