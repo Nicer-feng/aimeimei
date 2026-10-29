@@ -3,6 +3,8 @@ import hmac
 import json
 import mimetypes
 import re
+import sqlite3
+import time
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +20,8 @@ from ai_platform.database import db, init_db
 from ai_platform.handlers.reading import ReadingHandlersMixin
 from ai_platform.handlers.usage_time import UsageTimeHandlersMixin
 from ai_platform.handlers.daily_reports import DailyReportHandlersMixin
+from ai_platform.handlers.login_history import LoginHistoryHandlersMixin
+from ai_platform.login_history import cleanup_history, request_ip, touch_session
 from ai_platform.handlers import (
     AdminHandlersMixin,
     AuthHandlersMixin,
@@ -55,6 +59,7 @@ from ai_platform.settings import (
 
 
 class AppHandler(
+    LoginHistoryHandlersMixin,
     DailyReportHandlersMixin,
     UsageTimeHandlersMixin,
     ReadingHandlersMixin,
@@ -80,6 +85,10 @@ class AppHandler(
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/api/admin/login-records":
+            return self.require_admin(self.handle_admin_login_records)
+        if re.fullmatch(r"/api/admin/users/[^/]+/devices", path):
+            return self.require_admin(self.handle_admin_user_devices)
         if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
             return self.require_user(self.handle_daily_reports)
         if path.startswith('/api/usage-time/'):
@@ -237,6 +246,8 @@ class AppHandler(
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/session/device-info":
+            return self.require_user(self.handle_client_device_info)
         if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
             return self.require_user(self.handle_daily_reports)
         if path.startswith('/api/usage-time/'):
@@ -556,18 +567,34 @@ class AppHandler(
         self._current_user_cache = row
         return row
 
+    def record_user_activity(self, user):
+        if not user or getattr(self, "_activity_recorded", False):
+            return
+        self._activity_recorded = True
+        # 活跃统计在路由入口尽力写入，不能因锁等待阻断业务或嵌套写事务。
+        try:
+            with db() as conn:
+                conn.execute("PRAGMA busy_timeout=50")
+                touch_session(conn, user["id"], token_hash(self.session_token()), request_ip(self)[0])
+        except sqlite3.Error:
+            pass
+
     def require_user(self, handler):
-        if not self.current_user():
+        user = self.current_user()
+        if not user:
             return self.error(HTTPStatus.UNAUTHORIZED, "unauthorized")
+        self.record_user_activity(user)
         return handler()
 
     def require_admin(self, handler):
         got = self.headers.get("X-Admin-Key", "").strip()
         expected = self.server.secrets["admin_key"]
         if got and hmac.compare_digest(got, expected):
+            self.record_user_activity(self.current_user())
             return handler()
         user = self.current_user()
         if user and user["role"] == "admin":
+            self.record_user_activity(user)
             return handler()
         return self.error(HTTPStatus.UNAUTHORIZED, "admin unauthorized")
 
@@ -575,6 +602,17 @@ class AIPlatformServer(ThreadingHTTPServer):
     def __init__(self, server_address, handler, secrets_data):
         super().__init__(server_address, handler)
         self.secrets = secrets_data
+        self._next_auth_cleanup = time.monotonic() + 300
+
+    def service_actions(self):
+        if time.monotonic() < self._next_auth_cleanup:
+            return
+        self._next_auth_cleanup = time.monotonic() + 300
+        try:
+            with db() as conn:
+                cleanup_history(conn)
+        except Exception:
+            print("client login history maintenance deferred")
 
 
 def parse_listen(value):

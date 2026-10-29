@@ -164,6 +164,36 @@ final class APITests: XCTestCase {
         let current = try await api.currentAccount()
         XCTAssertNil(current); XCTAssertNil(try credentials.read())
     }
+    func testDeviceMetadataIsLimitedToLoginAndSupplementalReport() async throws {
+        let info = ClientDeviceInfo(installationID: "test-installation-1000", platform: "ios", manufacturer: "Apple",
+            model: "iPhone99,9", osVersion: "18.0", appVersion: "0.8.3", appBuild: "1.16.1")
+        let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [StubProtocol.self]
+        let client = try PlatformAPI(baseURL: URL(string: "https://test.invalid/")!, credentials: credentials, configuration: configuration, clientInfo: info)
+        StubProtocol.handler = { request in
+            let value = try self.body(request)
+            XCTAssertEqual((value["client"] as? [String: String])?["model"], "iPhone99,9")
+            XCTAssertNil(value["user_id"])
+            return (200, [:], #"{"user":{"id":"u1","username":"family","display_name":"家人"}}"#)
+        }
+        let captcha = try JSONDecoder().decode(Captcha.self, from: Data(#"{"captcha_id":"challenge","image_svg":"<svg/>"}"#.utf8))
+        _ = try await client.login(username: "family", password: "test-only", captcha: captcha, answer: "AB23")
+        _ = try await client.loginSMS(phone: "13800000000", code: "123456", challengeID: "test-only")
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/session/device-info")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let value = try self.body(request)
+            XCTAssertEqual(value["installation_id"] as? String, info.installationID)
+            XCTAssertNil(value["password"]); XCTAssertNil(value["token"])
+            return (200, [:], #"{"ok":true}"#)
+        }
+        try await client.reportClientDevice(info)
+        StubProtocol.handler = { request in
+            XCTAssertNil(request.httpBody)
+            XCTAssertNil(request.value(forHTTPHeaderField: "X-Client-Info"))
+            return (200, [:], #"{"models":[]}"#)
+        }
+        _ = try await client.models()
+    }
     func testHistoryAcceptsIntegerIDsAndKeepsInterruptedAnswer() async throws {
         StubProtocol.handler = { request in
             XCTAssertEqual(request.url?.path, "/api/conversations/c1/messages")

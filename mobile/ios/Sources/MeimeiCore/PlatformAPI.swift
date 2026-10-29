@@ -12,6 +12,7 @@ public protocol CredentialStore: Sendable {
 }
 
 public protocol PlatformServing: Sendable {
+    func reportClientDevice(_ info: ClientDeviceInfo) async throws
     func dailyReports(before: Int64?) async throws -> DailyReportsPage
     func dailyReport(id: Int64) async throws -> DailyReport
     func readDailyReport(id: Int64) async throws
@@ -67,6 +68,7 @@ public protocol PlatformServing: Sendable {
 }
 
 public extension PlatformServing {
+    func reportClientDevice(_ info: ClientDeviceInfo) async throws {}
     func dailyReports(before: Int64?) async throws -> DailyReportsPage { throw PlatformError.http(404, "") }
     func dailyReport(id: Int64) async throws -> DailyReport { throw PlatformError.http(404, "") }
     func readDailyReport(id: Int64) async throws { throw PlatformError.http(404, "") }
@@ -119,10 +121,12 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
     private let base: URL
     private let credentials: any CredentialStore
     private let session: URLSession
-    public init(baseURL: URL, credentials: any CredentialStore, configuration: URLSessionConfiguration = .ephemeral) throws {
+    private let clientInfo: ClientDeviceInfo?
+    public init(baseURL: URL, credentials: any CredentialStore, configuration: URLSessionConfiguration = .ephemeral, clientInfo: ClientDeviceInfo? = nil) throws {
         guard baseURL.scheme == "https", baseURL.host != nil, baseURL.user == nil, baseURL.password == nil,
               baseURL.query == nil, baseURL.fragment == nil, ["", "/"].contains(baseURL.path) else { throw PlatformError.invalidURL }
         base = baseURL; self.credentials = credentials
+        self.clientInfo = clientInfo
         configuration.httpShouldSetCookies = false; configuration.httpCookieStorage = nil
         configuration.urlCache = nil; configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.timeoutIntervalForRequest = 60; configuration.timeoutIntervalForResource = 900
@@ -207,10 +211,12 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
         return value.authenticated ? value.user : nil
     }
     public func login(username: String, password: String, captcha: Captcha, answer: String) async throws -> Account {
-        try await call(Login.self, path: ["api", "login"], method: "POST", body: [
+        var body: [String: Any] = [
             "username": username.trimmingCharacters(in: .whitespacesAndNewlines), "password": password,
             "captcha_id": captcha.id, "captcha": answer.trimmingCharacters(in: .whitespacesAndNewlines)
-        ]).user
+        ]
+        if let clientInfo { body["client"] = clientInfo.payload }
+        return try await call(Login.self, path: ["api", "login"], method: "POST", body: body).user
     }
     public func smsLoginConfig() async throws -> SMSLoginConfiguration {
         try await call(SMSConfig.self, path: ["api", "sms-login", "config"]).sms_auth
@@ -225,9 +231,9 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
     }
     public func loginSMS(phone: String, code: String, challengeID: String) async throws -> Account {
         do {
-            return try await call(Login.self, path: ["api", "sms-login", "verify"], method: "POST", body: [
-                "phone": phone, "code": code, "challenge_id": challengeID
-            ]).user
+            var body: [String: Any] = ["phone": phone, "code": code, "challenge_id": challengeID]
+            if let clientInfo { body["client"] = clientInfo.payload }
+            return try await call(Login.self, path: ["api", "sms-login", "verify"], method: "POST", body: body).user
         } catch let failure as PlatformError {
             // 仅映射此接口的已知文案，避免把验证码错误误报为已有会话失效。
             if case .http(401, let message) = failure,
@@ -238,6 +244,9 @@ public final class PlatformAPI: PlatformServing, @unchecked Sendable {
         }
     }
     public func logout() async throws { _ = try await call(OK.self, path: ["api", "logout"], method: "POST", body: [:]) }
+    public func reportClientDevice(_ info: ClientDeviceInfo) async throws {
+        _ = try await call(OK.self, path: ["api", "session", "device-info"], method: "POST", body: info.payload)
+    }
     public func clearCredential() throws { try credentials.write(nil) }
     public func models() async throws -> [ChatModel] { try await call(Models.self, path: ["api", "models"]).models }
     public func conversations() async throws -> [Conversation] { try await call(Conversations.self, path: ["api", "conversations"]).conversations }

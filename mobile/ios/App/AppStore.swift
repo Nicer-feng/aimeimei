@@ -53,6 +53,7 @@ final class AppStore {
     @ObservationIgnored private var accumulator = ReplyAccumulator()
     @ObservationIgnored private var lastRender = Date.distantPast
     @ObservationIgnored private var foreground = true
+    @ObservationIgnored private var deviceReport: Task<Void, Never>?
 
     init(api: any PlatformServing, local: LocalState, audioOutput: (any AudioOutput)? = nil) {
         self.api = api; self.local = local
@@ -149,6 +150,7 @@ final class AppStore {
     }
     func clearLoginFeedback() { error = nil; loginNotice = nil }
     private func clearAccount() {
+        deviceReport?.cancel(); deviceReport = nil
         daily.bind(nil)
         generation?.cancel(); runID = UUID(); speech.reset(); personal.reset(); ocr.reset(); writing.reset(); media.reset()
         documents = []; importingDocuments = false; failedDocument = nil; documentUploadingName = nil
@@ -170,6 +172,7 @@ final class AppStore {
         }
     }
     private func loadWorkspace() async throws {
+        reportCurrentDevice()
         daily.bind(account)
         let list = try await api.conversations()
         let available = try await api.models()
@@ -429,6 +432,15 @@ final class AppStore {
             account = user; daily.bind(user)
         } catch {
             if (error as? PlatformError)?.isUnauthorized == true { clearAccount() }
+        }
+    }
+    private func reportCurrentDevice() {
+        guard let owner = account?.id else { return }
+        deviceReport?.cancel()
+        deviceReport = Task { [weak self] in
+            let info = await NativeClientDevice.current()
+            guard let self, self.account?.id == owner, !Task.isCancelled else { return }
+            try? await self.api.reportClientDevice(info)
         }
     }
     /// 只在用户明确确认已核对后解锁；不触发任何发送请求。

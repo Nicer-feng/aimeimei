@@ -36,9 +36,9 @@ struct MeimeiApp: App {
                     let api: any PlatformServing
                     #if DEBUG
                     if testing { api = DemoAPI() }
-                    else { api = try PlatformAPI(baseURL: URL(string: "https://feng.asia/")!, credentials: SessionVault()) }
+                    else { api = try PlatformAPI(baseURL: URL(string: "https://feng.asia/")!, credentials: SessionVault(), clientInfo: NativeClientDevice.info()) }
                     #else
-                    api = try PlatformAPI(baseURL: URL(string: "https://feng.asia/")!, credentials: SessionVault())
+                    api = try PlatformAPI(baseURL: URL(string: "https://feng.asia/")!, credentials: SessionVault(), clientInfo: NativeClientDevice.info())
                     #endif
                     #if DEBUG
                     let output: (any AudioOutput)? = testing ? DemoAudioOutput() : nil

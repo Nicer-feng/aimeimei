@@ -37,6 +37,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: Install local client-history parser
+        run: python3 -m pip install -r deploy/client-history-requirements.txt
       - name: Prepare Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -71,6 +76,7 @@ jobs:
         run: |
           python3 -m unittest discover -s mobile/android/scripts/tests -p 'test_*.py'
           python3 scripts/test_native_knowledge.py
+          python3 scripts/test_login_history.py
           task=assembleDebug
           if [ "$BUILD_TYPE" = release ]; then task=assembleRelease; fi
           gradle --no-daemon -p mobile/android -PapiBaseUrl="$API_BASE_URL" :app:testDebugUnitTest :app:lintDebug ":app:$task"

@@ -29,6 +29,7 @@ final class PushNotifications: NSObject, UIApplicationDelegate, UNUserNotificati
             _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
             settings = await center.notificationSettings()
         }
+        reports.reportNotificationStatus(NativeClientDevice.authorizationName(settings.authorizationStatus))
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
             reports.notificationNotice = "通知未开启，可在系统设置中允许日报通知"
             return

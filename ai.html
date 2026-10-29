@@ -58,10 +58,10 @@
   <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.29.5">
-  <link rel="stylesheet" href="/res/reader.css?v=2.29.5">
-  <link rel="stylesheet" href="/res/usage-time.css?v=2.29.5">
-  <link rel="stylesheet" href="/res/ui-motion.css?v=2.29.5">
+  <link rel="stylesheet" href="/res/ai.css?v=2.30.0">
+  <link rel="stylesheet" href="/res/reader.css?v=2.30.0">
+  <link rel="stylesheet" href="/res/usage-time.css?v=2.30.0">
+  <link rel="stylesheet" href="/res/ui-motion.css?v=2.30.0">
 
   <link rel="stylesheet" href="/res/markdown.css">
 <link rel="apple-touch-icon" sizes="180x180" href="/res/apple-touch-icon.png?brand=20261023">
@@ -73,7 +73,7 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.29.5</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.30.0</button>
       </div>
       <div class="login-mode-tabs" role="tablist" aria-label="登录方式">
         <button class="login-mode-tab active" id="loginPasswordMode" type="button" role="tab" aria-selected="true"><i data-lucide="key-round" aria-hidden="true"></i><span>密码登录</span></button>
@@ -107,7 +107,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.29.5</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.30.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -120,7 +120,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png?brand=20261023" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.29.5</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.30.0</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -179,7 +179,7 @@
 	          </a>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.29.5</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.30.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -751,6 +751,7 @@
 	      <div class="admin-nav-list">
 	        <button class="admin-nav-item active" type="button" data-admin-section="overview"><i data-lucide="layout-dashboard" aria-hidden="true"></i><span>概览</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="accounts"><i data-lucide="users" aria-hidden="true"></i><span>账号管理</span></button>
+                <button class="admin-nav-item" type="button" data-admin-section="logins"><i data-lucide="history" aria-hidden="true"></i><span>登录记录</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="models"><i data-lucide="bot" aria-hidden="true"></i><span>模型管理</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="keys"><i data-lucide="key-round" aria-hidden="true"></i><span>密钥管理</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="search"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></button>
@@ -812,7 +813,29 @@
 	          </section>
 	        </section>
 
-	        <section class="admin-page" data-admin-page="models">
+                <section class="admin-page" data-admin-page="logins">
+                  <section class="panel">
+                    <div class="token-tabs" role="tablist" aria-label="登录管理视图">
+                      <button class="token-tab active" data-history-mode="records" type="button" role="tab">登录记录</button>
+                      <button class="token-tab" data-history-mode="devices" type="button" role="tab">设备记录</button>
+                    </div>
+                    <div class="grid2">
+                      <label>账号<select id="loginHistoryUser"><option value="">全部账号</option></select></label>
+                      <div class="library-actions" style="align-items:end"><button class="ui-btn ui-btn-secondary" style="width:40px;height:40px;padding:0;display:inline-grid;place-items:center" id="loginHistoryRefresh" type="button" title="刷新记录" aria-label="刷新记录"><i data-lucide="refresh-cw" aria-hidden="true"></i></button></div>
+                    </div>
+                    <div id="loginHistoryEventFilters" class="grid2">
+                      <label>客户端<select id="loginHistoryPlatform"><option value="">全部平台</option><option value="web_desktop">PC Web</option><option value="web_mobile">手机浏览器</option><option value="ios">iOS App</option><option value="android">安卓 App</option><option value="unknown">未识别</option></select></label>
+                      <div class="grid2"><label>开始日期<input id="loginHistoryFrom" type="date"></label><label>结束日期<input id="loginHistoryTo" type="date"></label></div>
+                    </div>
+                    <div class="status" id="loginHistoryStatus" role="status"></div>
+                    <div style="overflow-x:auto;max-width:100%"><table id="loginHistoryTable" style="width:100%;min-width:1120px;table-layout:fixed;text-align:left;font-size:12px"><thead id="loginHistoryHead"></thead><tbody id="loginHistoryRows"></tbody></table></div>
+                    <div class="library-actions">
+                      <button class="ui-btn ui-btn-secondary" id="loginHistoryPrev" type="button" title="上一页" aria-label="上一页" disabled><i data-lucide="chevron-left" aria-hidden="true"></i></button>
+                      <button class="ui-btn ui-btn-secondary" id="loginHistoryNext" type="button" title="下一页" aria-label="下一页" disabled><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+                    </div>
+                  </section>
+                </section>
+                <section class="admin-page" data-admin-page="models">
 	          <section class="panel">
 	            <h2 class="panel-title"><i data-lucide="bot" aria-hidden="true"></i><span>新增/编辑模型</span></h2>
 	            <input id="editingModelId" type="hidden">
@@ -1094,7 +1117,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.29.5</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.30.0</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -1176,12 +1199,14 @@
       <p id="writingDraftState" class="writing-help"></p><button type="button" id="saveWritingDraft">保存稿件与定稿状态</button>
     </details>
   </dialog>
-      <script src="/res/ui-motion.js?v=2.29.5"></script>
-	  <script src="/res/ai.js?v=2.29.5"></script>
-      <script src="/res/ai-motion.js?v=2.29.5"></script>
-      <script src="/res/reader.js?v=2.29.5"></script>
-      <script src="/res/usage-clock.js?v=2.29.5"></script>
-      <script src="/res/usage-time.js?v=2.29.5"></script>
+      <script src="/res/ui-motion.js?v=2.30.0"></script>
+      <script src="/res/client-device.js?v=2.30.0"></script>
+      <script src="/res/login-history.js?v=2.30.0"></script>
+	  <script src="/res/ai.js?v=2.30.0"></script>
+      <script src="/res/ai-motion.js?v=2.30.0"></script>
+      <script src="/res/reader.js?v=2.30.0"></script>
+      <script src="/res/usage-clock.js?v=2.30.0"></script>
+      <script src="/res/usage-time.js?v=2.30.0"></script>
 
 </body>
 </html>

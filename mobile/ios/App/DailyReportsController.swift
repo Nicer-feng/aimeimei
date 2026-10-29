@@ -19,6 +19,7 @@ final class DailyReportsController {
     @ObservationIgnored private var revision = UUID()
     @ObservationIgnored private var savedToken: String?
     @ObservationIgnored private var registeredOwner: String?
+    @ObservationIgnored private var deviceReport: Task<Void, Never>?
     private var readIDs = Set<Int64>()
     let installationID: String
 
@@ -34,6 +35,7 @@ final class DailyReportsController {
         if push != pushEnabled { savedToken = nil; registeredOwner = nil; notificationNotice = nil }
         pushEnabled = push
         guard id != owner else { return }
+        deviceReport?.cancel(); deviceReport = nil
         revision = UUID(); owner = id; reports = []; unread = 0; nextBefore = nil
         busy = false; presented = false; focusID = nil; error = nil
         registeredOwner = nil; savedToken = nil; notificationNotice = nil
@@ -92,6 +94,15 @@ final class DailyReportsController {
         guard owner != nil else { return }
         try? await api.removeDailyDevice(installationID: installationID)
         savedToken = nil; registeredOwner = nil
+    }
+    func reportNotificationStatus(_ status: String) {
+        deviceReport?.cancel()
+        let ticket = revision
+        let info = NativeClientDevice.info(authorization: status)
+        deviceReport = Task { [weak self] in
+            guard let self, self.revision == ticket, !Task.isCancelled else { return }
+            try? await self.api.reportClientDevice(info)
+        }
     }
     func open(id: Int64? = nil) {
         guard owner != nil else { return }

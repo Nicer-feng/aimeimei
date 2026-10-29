@@ -467,6 +467,7 @@
         }
 
 	    function applyCurrentUser(user) {
+          if (state.user?.id !== user?.id || user?.role !== 'admin') globalThis.MeimeiLoginHistory?.clear();
           if (state.user?.id !== user?.id) resetTokenStats();
 	      state.user = user || null;
           globalThis.MeimeiUsage?.accountChanged();
@@ -1707,6 +1708,7 @@
 	        applyCurrentUser(data.user || null);
 	        loadUserPreferences();
 		        state.authed = true;
+                globalThis.MeimeiClientDevice?.report(state.user?.id);
 		        showApp();
 		        await Promise.all([loadModels(), loadSearchConfig(), loadFeatureFlags(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
 		        await openAndroidToolLink();
@@ -1761,6 +1763,7 @@
       applyCurrentUser(data.user || null);
       loadUserPreferences();
       state.authed = true;
+      globalThis.MeimeiClientDevice?.report(state.user?.id);
       showApp();
       await Promise.all([loadModels(), loadSearchConfig(), loadFeatureFlags(), loadTtsConfig(), loadPrompts(), loadProfiles(), loadFavorites(), loadConversations(), health()]);
       await openAndroidToolLink();
@@ -1842,7 +1845,7 @@
           return;
         }
         try {
-          const res = await request("/api/sms-login/verify", { method: "POST", body: JSON.stringify({ phone, code, challenge_id }) });
+          const res = await request("/api/sms-login/verify", { method: "POST", body: JSON.stringify({ phone, code, challenge_id, client: globalThis.MeimeiClientDevice?.metadata() }) });
           if (!res.ok) throw new Error(await readError(res, "验证码不正确或已过期。"));
           await finishLogin(await res.json());
         } catch (err) {
@@ -1866,7 +1869,7 @@
         return;
       }
       try {
-        const res = await request("/api/login", { method: "POST", body: JSON.stringify({ username, password, captcha_id, captcha }) });
+        const res = await request("/api/login", { method: "POST", body: JSON.stringify({ username, password, captcha_id, captcha, client: globalThis.MeimeiClientDevice?.metadata() }) });
         if (!res.ok) throw new Error(await readError(res, "密码或验证码不对，再检查一下。"));
         await finishLogin(await res.json());
       } catch (err) {
@@ -4414,7 +4417,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.29.5" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.0" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8610,6 +8613,7 @@
 	    const adminSections = {
 	      overview: { title: "概览", desc: "查看平台状态、用量和关键配置。" },
 	      accounts: { title: "账号管理", desc: "创建、编辑和禁用家庭账号。" },
+          logins: { title: "登录记录", desc: "设备、成功登录与会话状态 · 北京时间" },
 	      models: { title: "模型管理", desc: "维护模型名称、供应商、Endpoint、System Prompt 和能力标签。" },
 	      keys: { title: "密钥管理", desc: "集中维护管理密钥、模型 API Key 和搜索 API Key。" },
 	      search: { title: "联网搜索", desc: "配置 Tavily/Brave、搜索策略、搜索深度和结果数量。" },
@@ -8636,6 +8640,7 @@
           window.MeimeiMotion?.admin();
 	      if (key === "overview") loadAdminOverview();
 	      if (key === "accounts") loadAdminUsers();
+          if (key === "logins") globalThis.MeimeiLoginHistory?.open();
 	      if (key === "models") loadAdminModels();
           if (key === "keys") {
             loadAdminModels();
@@ -10262,6 +10267,9 @@
 		        const edit = createIconButton("pencil", "编辑", { fallback: "✎" });
 		        edit.addEventListener("click", () => fillAccountForm(user));
 	        actions.append(edit);
+            const devices = createIconButton('smartphone', '设备记录');
+            devices.addEventListener('click', () => { switchAdminSection('logins'); globalThis.MeimeiLoginHistory?.open(user.id, 'devices'); });
+            actions.append(devices);
 	        row.append(info, actions);
 	        box.appendChild(row);
 	      }

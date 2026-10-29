@@ -49,6 +49,16 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.daily.reports.first?.id, fengReport.id)
     }
     private var directory: URL!
+    func testNativeClientInfoUsesRandomInstallationAndNoCredentials() {
+        let first = NativeClientDevice.info(authorization: "denied")
+        let second = NativeClientDevice.info()
+        XCTAssertEqual(first.installationID, second.installationID)
+        XCTAssertEqual(first.platform, "ios")
+        XCTAssertEqual(first.manufacturer, "Apple")
+        XCTAssertFalse(first.model.isEmpty)
+        XCTAssertEqual(first.notificationAuthorization, "denied")
+        XCTAssertEqual(Set(first.payload.keys), Set(["installation_id","platform","manufacturer","model","os_version","app_version","app_build","notification_authorization"]))
+    }
     func testDailyPermissionRevocationAndDynamicGrant() async throws {
         await login()
         XCTAssertNil(store.daily.owner)

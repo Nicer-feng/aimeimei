@@ -33,6 +33,29 @@ class PlatformApiTest {
         assertEquals("/api/login", request.path);assertEquals("POST", request.method)
         assertEquals("family", body.getString("username"));assertEquals("c1", body.getString("captcha_id"));assertEquals("AB23", body.getString("captcha"))
     }
+    @Test fun clientDeviceInfoOnlyAccompaniesAuthenticationAndSupplement() = runBlocking {
+        val info = org.json.JSONObject().put("installation_id", "test-installation-1000").put("platform", "android")
+            .put("manufacturer", "OPPO").put("model", "internal-model").put("app_version", "0.6.8")
+        val client = PlatformApi(server.url("/"), CookieJar.NO_COOKIES) { info }
+        val user = """{"user":{"id":"u1","username":"family","display_name":"家人"}}"""
+        server.enqueue(MockResponse().setBody(user))
+        client.login("family", "test-only-password", Captcha("c1", ""), "AB23")
+        val login = org.json.JSONObject(server.takeRequest().body.readUtf8())
+        assertEquals("internal-model", login.getJSONObject("client").getString("model"))
+        server.enqueue(MockResponse().setBody(user))
+        client.loginSms("13800000000", "123456", "test-only")
+        assertEquals("android", org.json.JSONObject(server.takeRequest().body.readUtf8()).getJSONObject("client").getString("platform"))
+        server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+        client.reportClientDevice()
+        val report = server.takeRequest()
+        assertEquals("/api/session/device-info", report.path)
+        assertFalse(org.json.JSONObject(report.body.readUtf8()).has("password"))
+        server.enqueue(MockResponse().setBody("""{"models":[]}"""))
+        client.models()
+        val ordinary = server.takeRequest()
+        assertEquals(0L, ordinary.bodySize)
+        assertNull(ordinary.getHeader("X-Client-Info"))
+    }
     @Test fun expiredSessionHasAnExplicitError() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"unauthorized"}"""))
         try { api.conversations();fail("Expected authentication failure") } catch (failure: ApiFailure) { assertEquals(401, failure.status) }

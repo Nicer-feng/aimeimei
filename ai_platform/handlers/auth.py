@@ -1,4 +1,5 @@
 from .shared import *
+from ..login_history import record_login, request_ip
 
 
 CAPTCHA_TTL_SECONDS = 300
@@ -86,20 +87,22 @@ class AuthHandlersMixin:
             return ok
 
     def login_client_ip_hash(self):
-        forwarded = str(self.headers.get("X-Forwarded-For") or "").split(",", 1)[0].strip()
-        remote = forwarded or str(self.client_address[0] if self.client_address else "")
-        return token_hash(remote or "unknown")
+        return token_hash(request_ip(self)[0] or "unknown")
 
-    def send_login_success(self, user):
+    def send_login_success(self, user, client=None):
         token = b64_token(32)
-        created = now()
-        expires = created + SESSION_TTL_SECONDS
         with db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            created = now()
+            expires = created + SESSION_TTL_SECONDS
             conn.execute("DELETE FROM sessions WHERE expires_at<=?", (created,))
             conn.execute(
                 "INSERT INTO sessions(token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
                 (token_hash(token), user["id"], created, expires),
             )
+            ip, source = request_ip(self)
+            record_login(conn, user["id"], token_hash(token), created, expires, client,
+                self.headers.get("User-Agent", ""), ip, source)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header(
@@ -221,7 +224,7 @@ class AuthHandlersMixin:
             return self.error(HTTPStatus.UNAUTHORIZED, "验证码不正确或已过期")
         with db() as conn:
             conn.execute("DELETE FROM sms_login_challenges WHERE id=?", (challenge_id,))
-        return self.send_login_success(user)
+        return self.send_login_success(user, data.get("client"))
 
     def handle_login(self):
         try:
@@ -244,12 +247,13 @@ class AuthHandlersMixin:
             or not verify_password(password, user["password_hash"])
         ):
             return self.error(HTTPStatus.UNAUTHORIZED, "password incorrect")
-        return self.send_login_success(user)
+        return self.send_login_success(user, data.get("client"))
 
     def handle_logout(self):
         token = self.session_token()
         if token:
             with db() as conn:
+                conn.execute("UPDATE auth_session_history SET logout_at=? WHERE token_hash=? AND logout_at=0", (now(),token_hash(token)))
                 conn.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash(token),))
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -264,6 +268,7 @@ class AuthHandlersMixin:
 
     def handle_me(self):
         user = self.current_user()
+        self.record_user_activity(user)
         return self.json(
             {"authenticated": bool(user), "user": ai_user_public(user) if user else None}
         )

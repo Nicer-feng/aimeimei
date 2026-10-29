@@ -4,6 +4,7 @@ from .runtime import b64_token, now, password_hash, read_json
 from .reading import init_reading_tables
 from .usage_time import init_usage_time_tables
 from .daily_reports import init_daily_report_tables
+from .login_history import init_login_history_tables
 from .settings import (
     DATA_DIR,
     DB_PATH,
@@ -505,6 +506,7 @@ def init_db(secrets_data=None):
         init_reading_tables(conn)
         init_usage_time_tables(conn)
         init_daily_report_tables(conn)
+        init_login_history_tables(conn)
         default_user_id = ensure_default_ai_user(conn, secrets_data)
 
         model_columns = table_columns(conn, "models")

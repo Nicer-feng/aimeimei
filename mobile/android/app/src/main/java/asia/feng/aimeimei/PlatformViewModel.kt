@@ -26,7 +26,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     private val viewModelScope = CoroutineScope(SupervisorJob() + dispatcher)
     private var visible = true
     internal val cookies = SessionCookies(application, BuildConfig.API_BASE_URL.toHttpUrl())
-    private val api = apiOverride ?: PlatformApi(BuildConfig.API_BASE_URL.toHttpUrl(), cookies)
+    private val api = apiOverride ?: PlatformApi(BuildConfig.API_BASE_URL.toHttpUrl(), cookies) { ClientDeviceInfo.payload(application) }
     private val drafts = application.getSharedPreferences("chat_drafts", Application.MODE_PRIVATE)
     var account by mutableStateOf<Account?>(null); private set
     var captcha by mutableStateOf<Captcha?>(null); private set
@@ -47,6 +47,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     var live by mutableStateOf<LiveReply?>(null); private set
     var pending by mutableStateOf<PendingSend?>(null); private set
     private var operation: Job? = null
+    private var deviceReport: Job? = null
     private var streamJob: Job? = null
     private var revision = 0
     private var generation = 0
@@ -132,11 +133,22 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         }
     }
     private suspend fun loadWorkspace(ticket: Int) {
+        reportCurrentDevice(ticket)
         val list = api.conversations(); val available = api.models()
         if (ticket == revision) {
             incomingShares.bindAccount(account?.id.orEmpty())
             conversations = list; models = available
             if (available.none { it.id == preferredModelId }) preferredModelId = available.firstOrNull()?.id.orEmpty()
+        }
+    }
+    private fun reportCurrentDevice(ticket: Int = revision) {
+        deviceReport?.cancel()
+        val owner = account?.id
+        deviceReport = viewModelScope.launch {
+            if (owner == null || owner != account?.id || ticket != revision) return@launch
+            try { api.reportClientDevice() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* 补报不阻断登录和原有功能。 */ }
         }
     }
     private fun restoreWelcomeDraft() {
@@ -306,6 +318,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
     fun background() { visible = false; tools.speech.pause() }
     fun foreground() {
         visible = true
+        if (account != null) reportCurrentDevice()
         if (streaming) live = buffer?.snapshot(finish = true)
         else if (account != null && !busy && selected != null) refresh()
     }
@@ -373,6 +386,7 @@ class PlatformViewModel(private val application: Application, apiOverride: Platf
         work { ticket -> try { api.logout() } finally { if (ticket == revision) { clearAccount(); captcha = runCatching { api.captcha() }.getOrNull() } } }
     }
     private fun clearAccount() {
+        deviceReport?.cancel(); deviceReport = null
         sms.verified()
         incomingShares.bindAccount("")
         generation++

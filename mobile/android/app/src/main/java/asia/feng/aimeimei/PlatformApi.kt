@@ -36,7 +36,7 @@ data class ChatMessage(val id: String, val role: String, val content: String, va
                        val favoriteId: String = "", val usage: ChatUsage? = null, val sources: List<ChatSource> = emptyList())
 class ApiFailure(val status: Int, message: String) : IOException(message)
 
-class PlatformApi(internal val base: HttpUrl, cookies: CookieJar) {
+class PlatformApi(internal val base: HttpUrl, cookies: CookieJar, private val clientInfo: (() -> JSONObject)? = null) {
     internal val client = OkHttpClient.Builder().cookieJar(cookies)
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(40, TimeUnit.SECONDS).followRedirects(false).retryOnConnectionFailure(false).build()
@@ -89,11 +89,18 @@ class PlatformApi(internal val base: HttpUrl, cookies: CookieJar) {
     suspend fun login(username: String, password: String, challenge: Captcha, answer: String): Account {
         val body = JSONObject().put("username", username.trim()).put("password", password)
             .put("captcha_id", challenge.id).put("captcha", answer.trim())
+        clientInfo?.invoke()?.let { body.put("client", it) }
         return account(request(listOf("api", "login"), body).getJSONObject("user"))
     }
     suspend fun logout() { request(listOf("api", "logout"), JSONObject()) }
     internal suspend fun loginSms(phone: String, code: String, challenge: String): Account = account(request(
-        listOf("api", "sms-login", "verify"), JSONObject().put("phone", phone).put("code", code).put("challenge_id", challenge)).getJSONObject("user"))
+        listOf("api", "sms-login", "verify"), JSONObject().put("phone", phone).put("code", code).put("challenge_id", challenge).apply {
+            clientInfo?.invoke()?.let { put("client", it) }
+        }).getJSONObject("user"))
+    internal suspend fun reportClientDevice() {
+        val payload = clientInfo?.invoke() ?: return
+        request(listOf("api", "session", "device-info"), payload)
+    }
     suspend fun models(): List<ChatModel> = objects(request(listOf("api", "models")).optJSONArray("models")).map {
         ChatModel(it.getString("id"), it.optString("name"), it.optString("model"), it.optString("provider"),
             it.optBoolean("supports_reasoning_control"), it.optBoolean("supports_native_web_search"), it.optBoolean("supports_vision"))
