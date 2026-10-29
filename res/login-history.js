@@ -41,12 +41,12 @@
       ['设备资料（客户端声明）', '登录时间（北京）', '最近活跃（北京）', '会话记录', '通知状态（分别核对）']);
     const body = $('loginHistoryRows'); body.replaceChildren();
     for (const item of items) {
-      const c = item.client || {}, native = ['ios', 'android'].includes(c.platform), row = document.createElement('tr');
+      const c = item.client || {}, native = ['ios', 'android'].includes(c.platform), web = ['web_desktop', 'web_mobile'].includes(c.platform), row = document.createElement('tr');
       let values;
       if (mode === 'records') {
         values = [item.username, stamp(item.logged_at), item.source_ip || '未记录', platform[c.platform] || '未识别',
           text([c.os_name,c.os_version].filter(Boolean).join(' ')), native ? '不适用' : text([c.browser,c.browser_version].filter(Boolean).join(' ')),
-          native ? text([c.manufacturer,c.model].filter(Boolean).join(' ')) : '不适用', native ? app(c) : '不适用', session[item.session_state] || '未记录'];
+          native ? text([c.manufacturer,c.model].filter(Boolean).join(' ')) : web ? '不适用' : '未上报', native ? app(c) : web ? '不适用' : '未上报', session[item.session_state] || '未记录'];
       } else {
         const n = item.notification || {};
         const notifications = [
@@ -57,8 +57,8 @@
         ];
         if (n.last_apns_state === 'accepted') notifications.push('苹果已接受（非送达确认）');
         else if (n.last_apns_state) notifications.push('投递记录：' + ({ pending:'待重试', sending:'投递中', invalid:'无效设备', cancelled:'已取消' }[n.last_apns_state] || '未确认'));
-        values = [lines([platform[c.platform] || '未识别', native ? text([c.manufacturer,c.model].filter(Boolean).join(' ')) : '硬件型号：不适用',
-          text([c.os_name,c.os_version].filter(Boolean).join(' ')), native ? 'App：' + app(c) : text([c.browser,c.browser_version].filter(Boolean).join(' ')),
+        values = [lines([platform[c.platform] || '未识别', native ? text([c.manufacturer,c.model].filter(Boolean).join(' ')) : web ? '硬件型号：不适用' : '硬件型号：未上报',
+          text([c.os_name,c.os_version].filter(Boolean).join(' ')), native ? 'App：' + app(c) : web ? text([c.browser,c.browser_version].filter(Boolean).join(' ')) : 'App/浏览器：未上报',
           '资料上报：' + stamp(item.reported_at), item.installation_known ? '随机安装实例' : '安装实例未上报']),
           lines(['首次：' + stamp(item.first_login_at), '最近：' + stamp(item.last_login_at)]),
           lines([stamp(item.last_active_at), '活跃 IP：' + (item.last_active_ip || '未记录')]),

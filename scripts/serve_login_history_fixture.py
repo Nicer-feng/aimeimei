@@ -19,6 +19,7 @@ with db() as conn:
         if i in (2,3):
             meta.update(platform='web')
             ua='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36' if i==2 else 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'
+        if i==4: meta=None
         record_login(conn,uid,token_hash(session),ts,now()+3600,meta,ua,'198.51.100.7','trusted_forwarded')
 print('FIXTURE_URL='+ReadingTests.url,flush=True)
 try: threading.Event().wait()
