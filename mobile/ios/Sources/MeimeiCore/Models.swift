@@ -4,8 +4,20 @@ public struct Account: Codable, Equatable, Sendable {
     public let id: String
     public let username: String
     public let displayName: String
+    public let dailyReportsEnabled: Bool
+    public let dailyPushEnabled: Bool
     public var label: String { displayName.isEmpty ? username : displayName }
-    enum CodingKeys: String, CodingKey { case id, username; case displayName = "display_name" }
+    enum CodingKeys: String, CodingKey {
+        case id, username; case displayName = "display_name"
+        case dailyReportsEnabled = "daily_reports_enabled", dailyPushEnabled = "daily_push_enabled"
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id); username = try c.decode(String.self, forKey: .username)
+        displayName = try c.decode(String.self, forKey: .displayName)
+        dailyReportsEnabled = try c.decodeIfPresent(Bool.self, forKey: .dailyReportsEnabled) ?? false
+        dailyPushEnabled = try c.decodeIfPresent(Bool.self, forKey: .dailyPushEnabled) ?? false
+    }
 }
 
 public struct Captcha: Decodable, Sendable {

@@ -78,6 +78,7 @@ class DailyReportTests(unittest.TestCase):
             conn.execute("INSERT INTO sessions VALUES(?,?,?,?)", (token_hash("daily-feng"),"daily-feng",now(),now()+3600))
             conn.execute("INSERT INTO users(id,username,display_name,password_hash,created_at,updated_at) VALUES('daily-czq','czq','test','x',?,?)", (now(),now()))
             conn.execute("INSERT INTO sessions VALUES(?,?,?,?)", (token_hash("daily-czq"),"daily-czq",now(),now()+3600))
+            conn.execute("UPDATE users SET daily_reports_enabled=1,daily_push_enabled=1 WHERE username IN ('feng','czq')")
 
     @classmethod
     def tearDownClass(cls):
@@ -95,6 +96,8 @@ class DailyReportTests(unittest.TestCase):
             conn.execute("DELETE FROM report_push_devices")
             conn.execute("DELETE FROM daily_reports")
             conn.execute("UPDATE users SET is_active=1 WHERE username IN ('feng','czq')")
+            conn.execute("UPDATE users SET daily_reports_enabled=CASE WHEN username IN ('feng','czq') THEN 1 ELSE 0 END,daily_push_enabled=CASE WHEN username IN ('feng','czq') THEN 1 ELSE 0 END,daily_push_after_id=0")
+            conn.execute("UPDATE daily_report_settings SET paused=0,push_after_id=0")
 
     def req(self, path="", method="GET", body=None, user="daily-feng"):
         import urllib.request
@@ -171,7 +174,7 @@ class DailyReportTests(unittest.TestCase):
             conn.execute("UPDATE users SET is_active=0 WHERE username='czq'")
         self.register()
         result = self.publish()
-        self.assertEqual(result["unavailable_recipients"], ["czq"])
+        self.assertEqual([r["username"] for r in result["reports"]], ["feng"])
         self.assertEqual(len(result["reports"]), 1)
         self.assertEqual(result["delivery"]["accepted"], 1)
 
@@ -187,6 +190,109 @@ class DailyReportTests(unittest.TestCase):
         result = self.publish()
         self.assertEqual(result["reports"][0]["registered_devices"], 0)
         self.assertEqual(result["reports"][1]["delivery"]["accepted"], 2)
+
+    def admin(self, path, data=None, method=None, authorized=True):
+        import urllib.request
+        import urllib.error
+        headers = {"X-Admin-Key": "test-only"} if authorized else {"Authorization": "Bearer reader-a"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(ReadingTests.url + path, method=method,
+            headers=headers, data=json.dumps(data).encode() if data is not None else None)
+        try:
+            with urllib.request.urlopen(req) as response: return response.status, json.load(response)
+        except urllib.error.HTTPError as error: return error.code, json.load(error)
+
+    def flags(self, uid, read=True, push=True, **extra):
+        result = self.admin('/api/admin/users/' + uid, {"daily_reports_enabled":read,"daily_push_enabled":push,**extra}, 'PUT')
+        self.assertEqual(result[0], 200)
+        return result[1]
+
+    def test_admin_only_dynamic_recipient_and_independent_switches(self):
+        self.assertEqual(self.admin('/api/admin/users/reader-a', {"daily_reports_enabled":True}, 'PUT', False)[0], 401)
+        self.assertEqual(self.admin('/api/admin/daily-report-settings', {"paused":True}, authorized=False)[0], 401)
+        self.assertEqual(self.admin('/api/admin/users/reader-a', {"daily_push_enabled":"false"}, 'PUT')[0], 400)
+        self.flags('reader-a', push=False)
+        result = self.publish()
+        self.assertEqual(result['recipient_count'], 3)
+        own = self.req(user='reader-a')[1]
+        self.assertEqual(own['unread'], 1)
+        self.assertEqual(self.register(user='reader-a')[0], 403)
+        other = next(r for r in result['reports'] if r['username'] == 'feng')
+        self.assertEqual(self.req('/'+str(other['report_id']), user='reader-a')[0], 404)
+        self.flags('reader-a', read=False, push=True)
+        self.assertEqual(self.req(user='reader-a')[0], 404)
+
+    def test_push_disable_and_reenable_do_not_replay_history(self):
+        self.register()
+        FakeAPNs.status=503; FakeAPNs.reason='ServiceUnavailable'
+        old = self.publish()
+        self.assertEqual(old['delivery']['pending'], 1)
+        self.flags('daily-feng', push=False)
+        FakeAPNs.status=200
+        self.assertEqual(deliver_pending()['accepted'], 0)
+        self.assertEqual(self.req()[0], 200)
+        self.flags('daily-feng')
+        self.publish()
+        self.register()
+        self.assertEqual(len(FakeAPNs.requests), 1)
+        self.assertEqual(self.publish(simulation=True)['delivery']['accepted'], 1)
+
+    def test_global_pause_saves_reports_without_replaying_notifications(self):
+        self.register()
+        self.assertEqual(self.admin('/api/admin/daily-report-settings', {'paused':True})[0], 200)
+        result = self.publish()
+        self.assertEqual(result['recipient_count'], 2)
+        self.assertEqual(result['delivery']['accepted'], 0)
+        self.assertEqual(self.req()[1]['unread'], 1)
+        self.admin('/api/admin/daily-report-settings', {'paused':False})
+        self.publish(); self.register()
+        self.assertEqual(len(FakeAPNs.requests), 0)
+        self.assertEqual(self.publish(simulation=True)['delivery']['accepted'], 1)
+
+    def test_deactivation_stops_pending_retry_and_revokes_access(self):
+        self.register()
+        FakeAPNs.status=503; FakeAPNs.reason='ServiceUnavailable'
+        self.publish()
+        self.flags('daily-feng', is_active=False)
+        FakeAPNs.status=200
+        self.assertEqual(deliver_pending()['accepted'], 0)
+        self.assertEqual(self.req()[0], 401)
+        with db() as conn:
+            conn.execute('INSERT OR REPLACE INTO sessions VALUES(?,?,?,?)', (token_hash('daily-feng'),'daily-feng',now(),now()+3600))
+
+    def test_permission_migration_seeds_only_once(self):
+        import sqlite3
+        from ai_platform.daily_reports import init_daily_report_tables
+        with sqlite3.connect(':memory:') as conn:
+            conn.execute('CREATE TABLE users(id TEXT PRIMARY KEY,username TEXT)')
+            conn.executemany('INSERT INTO users VALUES(?,?)', [('1','feng'),('2','czq'),('3','other')])
+            init_daily_report_tables(conn)
+            self.assertEqual(list(conn.execute('SELECT daily_reports_enabled,daily_push_enabled FROM users ORDER BY id')), [(1,1),(1,1),(0,0)])
+            conn.execute('UPDATE users SET daily_reports_enabled=0,daily_push_enabled=0')
+            init_daily_report_tables(conn)
+            self.assertEqual(conn.execute('SELECT SUM(daily_reports_enabled) FROM users').fetchone()[0], 0)
+
+    def test_enabling_new_recipient_does_not_backfill_published_day(self):
+        self.publish()
+        self.flags('reader-a')
+        again = self.publish()
+        self.assertEqual(again['skipped_new_recipients'], ['reader-a'])
+        self.assertEqual(self.req(user='reader-a')[1]['reports'], [])
+        self.assertEqual(self.publish(simulation=True)['recipient_count'], 3)
+
+    def test_all_permission_and_pause_combinations(self):
+        self.flags('daily-feng', read=False, push=False)
+        self.flags('daily-czq', read=False, push=False)
+        for i, (read, push, paused) in enumerate((r,p,g) for r in (False,True) for p in (False,True) for g in (False,True)):
+            with self.subTest(read=read, push=push, paused=paused):
+                self.flags('reader-a', read, push)
+                self.admin('/api/admin/daily-report-settings', {'paused':paused})
+                code = self.register(user='reader-a')[0]
+                self.assertEqual(code, 404 if not read else 403 if not push else 200)
+                result = self.publish(day=(date.today()+timedelta(days=i+1)).isoformat())
+                self.assertEqual(result['recipient_count'], int(read))
+                self.assertEqual(result['delivery']['accepted'], int(read and push and not paused))
 
     def test_account_isolation_and_read_only_contract(self):
         rid = self.publish()["report_id"]

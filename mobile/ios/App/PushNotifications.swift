@@ -6,14 +6,20 @@ final class PushNotifications: NSObject, UIApplicationDelegate, UNUserNotificati
     private weak var reports: DailyReportsController?
     private var token: String?
     private var pendingID: Int64?
+    private var boundOwner: String?
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         return true
     }
     func configure(_ reports: DailyReportsController) async {
         self.reports = reports
+        if boundOwner != reports.owner {
+            if boundOwner != nil { pendingID = nil }
+            boundOwner = reports.owner
+        }
         guard reports.owner != nil else { return }
         openPending()
+        guard reports.pushEnabled else { return }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") { return }
         #endif

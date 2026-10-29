@@ -83,9 +83,11 @@ actor DemoAPI: PlatformServing {
     private var loggedIn = false
     private var loginName = "family"
     private var dailyReadUsers: Set<String> = []
+    private var reportPermissions = ["feng": true, "czq": true]
+    func setDailyPermission(_ enabled: Bool, username: String) { reportPermissions[username] = enabled }
     private var dailyRegistered = false
     func dailyReports(before: Int64?) async throws -> DailyReportsPage {
-        guard ["feng", "czq"].contains(loginName) else { throw PlatformError.http(404, "") }
+        guard reportPermissions[loginName] == true else { throw PlatformError.http(404, "") }
         let dailyRead = dailyReadUsers.contains(loginName)
         let report: [String: Any] = ["id": loginName == "czq" ? 2 : 1, "report_date": "2026-10-29", "title": "研发日报",
             "content": "## 今日研发更新\n\n- 桌面客户端：音频转换器更新至 1.7.1。\n- 后台前端：新增代理发码审核。\n- Flutter：今日未见新提交。\n- 后端：优化账号与会员接口。\n- 官网：更新产品展示。",
@@ -132,7 +134,7 @@ actor DemoAPI: PlatformServing {
         Self.decode(Captcha.self, #"{"captcha_id":"offline","image_svg":"<svg><rect width='128' height='48' rx='14' fill='#fffaf6'/><text x='16' y='34' fill='#6F594B' font-size='24'>AB23</text></svg>"}"#)
     }
     func currentAccount() async throws -> Account? {
-        loggedIn ? Self.decode(Account.self, #"{"id":"\#(loginName == "czq" ? "offline-czq" : "offline-user")","username":"\#(loginName)","display_name":"家人"}"#) : nil
+        loggedIn ? Self.decode(Account.self, #"{"id":"\#(loginName == "czq" ? "offline-czq" : "offline-user")","username":"\#(loginName)","display_name":"家人","daily_reports_enabled":\#(reportPermissions[loginName] == true),"daily_push_enabled":\#(reportPermissions[loginName] == true)}"#) : nil
     }
     func login(username: String, password: String, captcha: Captcha, answer: String) async throws -> Account {
         loginName = ["feng", "czq"].contains(username) ? username : "family"

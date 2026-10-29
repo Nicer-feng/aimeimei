@@ -194,6 +194,8 @@ class AppHandler(
             return self.require_admin(self.handle_admin_daily_token_details)
         if path == "/api/admin/features":
             return self.require_admin(self.handle_admin_features)
+        if path == "/api/admin/daily-report-settings":
+            return self.require_admin(self.handle_admin_daily_report_settings)
         if path == "/api/admin/token-stats":
             return self.require_admin(self.handle_admin_token_stats)
         if path == "/api/admin/token-stats/details":
@@ -277,6 +279,8 @@ class AppHandler(
             return self.require_admin(self.handle_admin_search)
         if path == "/api/admin/features":
             return self.require_admin(self.handle_admin_features)
+        if path == "/api/admin/daily-report-settings":
+            return self.require_admin(self.handle_admin_daily_report_settings)
         if path == "/api/admin/cost-recalculate":
             return self.require_admin(self.handle_admin_cost_recalculate)
         if path == "/api/admin/password":

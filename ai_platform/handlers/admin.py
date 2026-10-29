@@ -1,6 +1,7 @@
 from datetime import date, datetime, time as day_time, timedelta
 
 from .shared import *
+from ..daily_reports import configure_user_reports
 
 
 class AdminHandlersMixin:
@@ -1445,6 +1446,8 @@ class AdminHandlersMixin:
             return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
 
         username = str(data.get("username") or "").strip().lower()
+        if any(key in data and not isinstance(data[key], bool) for key in ("daily_reports_enabled", "daily_push_enabled")):
+            return self.error(HTTPStatus.BAD_REQUEST, "日报开关必须为布尔值")
         display_name = str(data.get("display_name") or username).strip()[:40]
         password = str(data.get("password") or "")
         phone_raw = str(data.get("phone") or "").strip()
@@ -1487,6 +1490,7 @@ class AdminHandlersMixin:
                         ts,
                     ),
                 )
+                configure_user_reports(conn, user_id, data)
                 row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         except sqlite3.IntegrityError:
             return self.error(HTTPStatus.CONFLICT, "账号或手机号已被绑定")
@@ -1501,6 +1505,8 @@ class AdminHandlersMixin:
             data = self.read_body()
         except Exception:
             return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+        if any(key in data and not isinstance(data[key], bool) for key in ("daily_reports_enabled", "daily_push_enabled")):
+            return self.error(HTTPStatus.BAD_REQUEST, "日报开关必须为布尔值")
 
         with db() as conn:
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
@@ -1547,5 +1553,6 @@ class AdminHandlersMixin:
             )
             if not is_active:
                 conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            configure_user_reports(conn, user_id, data, reactivated=bool(is_active and not row["is_active"]))
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         return self.json({"user": ai_user_admin(row)})

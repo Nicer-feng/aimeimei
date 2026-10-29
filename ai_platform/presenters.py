@@ -38,6 +38,8 @@ def ai_user_public(row):
         "display_name": row["display_name"],
         "role": row["role"],
         "is_active": bool(row["is_active"]),
+        "daily_reports_enabled": bool(row["daily_reports_enabled"]) if "daily_reports_enabled" in row.keys() else False,
+        "daily_push_enabled": bool(row["daily_push_enabled"]) if "daily_push_enabled" in row.keys() else False,
         "phone_masked": mask_phone(phone),
         "phone_verified": bool(verified_at),
         "created_at": row["created_at"],

@@ -9,14 +9,25 @@ from pathlib import Path
 from .runtime import now, read_json
 from .settings import DATA_DIR
 
-OWNERS = ("feng", "czq")
 TOPIC = "asia.feng.aimeimei"
 APNS_ORIGIN = "https://api.push.apple.com"
 _delivery_lock = threading.Lock()
 
 
 def init_daily_report_tables(conn):
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+    for name in ("daily_reports_enabled", "daily_push_enabled", "daily_push_after_id"):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0")
+    if "daily_reports_enabled" not in columns:
+        # 只迁移已有接收人一次，后续完全由管理员配置。
+        conn.execute("UPDATE users SET daily_reports_enabled=1,daily_push_enabled=1 WHERE username IN ('feng','czq')")
     conn.executescript("""
+      CREATE TABLE IF NOT EXISTS daily_report_settings (
+        id INTEGER PRIMARY KEY CHECK(id=1), paused INTEGER NOT NULL DEFAULT 0,
+        push_after_id INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT OR IGNORE INTO daily_report_settings(id) VALUES(1);
       CREATE TABLE IF NOT EXISTS daily_reports (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL REFERENCES users(id),
@@ -40,6 +51,32 @@ def init_daily_report_tables(conn):
       );
       CREATE INDEX IF NOT EXISTS idx_daily_reports_user ON daily_reports(user_id,id DESC);
     """)
+
+
+def configure_user_reports(conn, uid, data, reactivated=False):
+    row = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    values = []
+    for key in ("daily_reports_enabled", "daily_push_enabled"):
+        value = data.get(key, bool(row[key]))
+        if not isinstance(value, bool):
+            raise ValueError("日报开关必须为布尔值")
+        values.append(int(value))
+    enabled, push = values
+    effective = bool(enabled and push and row["is_active"])
+    changed = (enabled != row["daily_reports_enabled"] or push != row["daily_push_enabled"]
+               or not row["is_active"])
+    if changed or reactivated:
+        cutoff = conn.execute("SELECT COALESCE(MAX(id),0) FROM daily_reports").fetchone()[0]
+        conn.execute("UPDATE users SET daily_push_after_id=? WHERE id=?", (cutoff, uid))
+    conn.execute("UPDATE users SET daily_reports_enabled=?,daily_push_enabled=? WHERE id=?", (enabled,push,uid))
+    if changed or not effective:
+        conn.execute("UPDATE report_push_deliveries SET state='cancelled',reason='PermissionChanged' WHERE report_id IN (SELECT id FROM daily_reports WHERE user_id=?) AND state IN ('pending','sending')", (uid,))
+
+
+def push_allowed(conn, uid, rid):
+    return bool(conn.execute("""SELECT 1 FROM users u,daily_report_settings g
+        WHERE u.id=? AND u.is_active=1 AND u.daily_reports_enabled=1 AND u.daily_push_enabled=1
+        AND g.id=1 AND g.paused=0 AND ?>u.daily_push_after_id AND ?>g.push_after_id""", (uid,rid,rid)).fetchone())
 
 
 def report_row(row):
@@ -105,34 +142,42 @@ def publish_report(data):
     content = content.strip()
     digest = hashlib.sha256(content.encode()).hexdigest()
     title = f"研发日报{' · 模拟' if simulation else ''} · {day}"
-    reports, unavailable = [], []
+    reports, skipped = [], []
     with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        previous = conn.execute("SELECT user_id,content_hash FROM daily_reports WHERE report_date=? AND simulation=?", (day,int(simulation))).fetchall()
+        if any(row["content_hash"] != digest for row in previous):
+            raise ValueError("当日日报已存在且正文不同，未覆盖旧记录")
+        audience = {row["user_id"] for row in previous}
         owners = []
-        for username in OWNERS:
-            owner = conn.execute("SELECT id FROM users WHERE username=? AND is_active=1", (username,)).fetchone()
-            if owner:
-                owners.append((username, owner["id"]))
+        for row in conn.execute("SELECT id,username FROM users WHERE is_active=1 AND daily_reports_enabled=1 ORDER BY created_at,rowid"):
+            if previous and row["id"] not in audience:
+                skipped.append(row["username"])
             else:
-                unavailable.append(username)
-        if not owners:
-            raise ValueError("目标账号不存在或已停用")
+                owners.append((row["username"],row["id"]))
         # 所有账号共用一次事务；任一正文冲突时，不给其他账号留下部分发布。
         for username, uid in owners:
-            conn.execute("INSERT OR IGNORE INTO daily_reports(user_id,report_date,simulation,title,content,content_hash,created_at) VALUES(?,?,?,?,?,?,?)",
+            inserted = conn.execute("INSERT OR IGNORE INTO daily_reports(user_id,report_date,simulation,title,content,content_hash,created_at) VALUES(?,?,?,?,?,?,?)",
                          (uid, day, int(simulation), title, content, digest, now()))
             row = conn.execute("SELECT * FROM daily_reports WHERE user_id=? AND report_date=? AND simulation=?", (uid, day, int(simulation))).fetchone()
             if row["content_hash"] != digest:
                 raise ValueError("当日日报已存在且正文不同，未覆盖旧记录")
-            conn.execute("INSERT OR IGNORE INTO report_push_deliveries(report_id,device_id) SELECT ?,id FROM report_push_devices WHERE user_id=?", (row["id"], uid))
+            if push_allowed(conn, uid, row["id"]):
+                conn.execute("INSERT OR IGNORE INTO report_push_deliveries(report_id,device_id) SELECT ?,id FROM report_push_devices WHERE user_id=?", (row["id"], uid))
             devices = conn.execute("SELECT COUNT(*) FROM report_push_devices WHERE user_id=?", (uid,)).fetchone()[0]
-            reports.append({"username": username, "report_id": row["id"], "registered_devices": devices})
+            push = bool(conn.execute("SELECT daily_push_enabled FROM users WHERE id=?", (uid,)).fetchone()[0])
+            paused = bool(conn.execute("SELECT paused FROM daily_report_settings WHERE id=1").fetchone()[0])
+            reports.append({"username": username, "report_id": row["id"], "registered_devices": devices,
+                            "created": inserted.rowcount == 1, "push_enabled": push, "push_paused": paused})
     totals = {"accepted": 0, "pending": 0, "invalid": 0}
     for report in reports:
         report["delivery"] = deliver_pending(report["report_id"])
+        with db() as conn:
+            report["delivery_totals"] = {row[0]: row[1] for row in conn.execute("SELECT state,COUNT(*) FROM report_push_deliveries WHERE report_id=? GROUP BY state", (report["report_id"],))}
         for state in totals:
             totals[state] += report["delivery"][state]
-    return {"report_id": reports[0]["report_id"], "registered_devices": sum(r["registered_devices"] for r in reports),
-            "delivery": totals, "reports": reports, "unavailable_recipients": unavailable}
+    return {"report_id": reports[0]["report_id"] if reports else None, "registered_devices": sum(r["registered_devices"] for r in reports),
+            "delivery": totals, "reports": reports, "recipient_count": len(reports), "skipped_new_recipients": skipped}
 
 
 def send_apns(token, payload, collapse_id):
@@ -172,11 +217,14 @@ def deliver_pending(report_id=None):
                 JOIN users u ON u.id=r.user_id
                 JOIN sessions s ON s.token_hash=d.session_hash AND s.user_id=d.user_id AND s.expires_at>strftime('%s','now')
                 WHERE (p.state='pending' OR (p.state='sending' AND p.updated_at<?))
-                  AND r.created_at>? AND u.username IN (?,?) AND u.is_active=1 AND d.user_id=r.user_id
+                  AND r.created_at>? AND u.is_active=1 AND u.daily_reports_enabled=1 AND u.daily_push_enabled=1 AND d.user_id=r.user_id
+                  AND r.id>u.daily_push_after_id AND EXISTS(SELECT 1 FROM daily_report_settings g WHERE g.id=1 AND g.paused=0 AND r.id>g.push_after_id)
                   AND (? IS NULL OR r.id=?) ORDER BY r.id LIMIT 20""",
-                (now()-120, now()-86400, *OWNERS, report_id, report_id)).fetchall()
+                (now()-120, now()-86400, report_id, report_id)).fetchall()
         for row in rows:
             with db() as conn:
+                if not push_allowed(conn, row["user_id"], row["report_id"]):
+                    continue
                 changed = conn.execute("UPDATE report_push_deliveries SET state='sending',updated_at=?,attempts=attempts+1 WHERE report_id=? AND device_id=? AND (state='pending' OR (state='sending' AND updated_at<?))",
                     (now(), row["report_id"], row["device_id"], now()-120)).rowcount
             if not changed:
@@ -187,7 +235,7 @@ def deliver_pending(report_id=None):
             except Exception:
                 state, reason = "pending", "TransportFailure"
             with db() as conn:
-                conn.execute("UPDATE report_push_deliveries SET state=?,reason=?,updated_at=? WHERE report_id=? AND device_id=?", (state, reason, now(), row["report_id"], row["device_id"]))
+                conn.execute("UPDATE report_push_deliveries SET state=?,reason=?,updated_at=? WHERE report_id=? AND device_id=? AND state='sending'", (state, reason, now(), row["report_id"], row["device_id"]))
             counts[state] += 1
     return counts
 

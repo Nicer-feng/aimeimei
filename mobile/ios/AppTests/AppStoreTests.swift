@@ -49,6 +49,21 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.daily.reports.first?.id, fengReport.id)
     }
     private var directory: URL!
+    func testDailyPermissionRevocationAndDynamicGrant() async throws {
+        await login()
+        XCTAssertNil(store.daily.owner)
+        await api.setDailyPermission(true, username: "family")
+        await store.refreshDailyPermissions()
+        XCTAssertNotNil(store.daily.owner)
+        await store.daily.refresh()
+        let report = try XCTUnwrap(store.daily.reports.first)
+        store.daily.open(id: report.id)
+        await api.setDailyPermission(false, username: "family")
+        await store.refreshDailyPermissions()
+        XCTAssertNil(store.daily.owner)
+        XCTAssertFalse(store.daily.presented)
+        XCTAssertTrue(store.daily.reports.isEmpty)
+    }
     private var local: LocalState!
     private var api: DemoAPI!
     private var store: AppStore!

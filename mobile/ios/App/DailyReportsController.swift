@@ -13,6 +13,7 @@ final class DailyReportsController {
     var presented = false
     var focusID: Int64?
     private(set) var owner: String?
+    private(set) var pushEnabled = false
     var onUnauthorized: (() -> Void)?
     @ObservationIgnored private let api: any PlatformServing
     @ObservationIgnored private var revision = UUID()
@@ -28,7 +29,10 @@ final class DailyReportsController {
         UserDefaults.standard.set(installationID, forKey: key)
     }
     func bind(_ account: Account?) {
-        let id = account.flatMap { ["feng", "czq"].contains($0.username) ? $0.id : nil }
+        let id = account.flatMap { $0.dailyReportsEnabled ? $0.id : nil }
+        let push = id != nil && account?.dailyPushEnabled == true
+        if push != pushEnabled { savedToken = nil; registeredOwner = nil; notificationNotice = nil }
+        pushEnabled = push
         guard id != owner else { return }
         revision = UUID(); owner = id; reports = []; unread = 0; nextBefore = nil
         busy = false; presented = false; focusID = nil; error = nil
@@ -52,6 +56,11 @@ final class DailyReportsController {
             }
         } catch {
             guard ticket == revision else { return }
+            if let platform = error as? PlatformError, case .http(404, _) = platform {
+                let account = try? await api.currentAccount()
+                guard ticket == revision else { return }
+                bind(account); focusID = nil; presented = false
+            }
             if (error as? PlatformError)?.isUnauthorized == true { onUnauthorized?() }
             self.error = "日报暂时无法加载，请稍后重试"
         }
@@ -68,7 +77,7 @@ final class DailyReportsController {
     }
     func isUnread(_ report: DailyReport) -> Bool { report.readAt == 0 && !readIDs.contains(report.id) }
     func register(token: String) async {
-        guard let owner, savedToken != token || registeredOwner != owner else { return }
+        guard pushEnabled, let owner, savedToken != token || registeredOwner != owner else { return }
         let ticket = revision
         do {
             try await api.registerDailyDevice(installationID: installationID, token: token)

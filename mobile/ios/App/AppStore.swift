@@ -291,6 +291,7 @@ final class AppStore {
             guard let user = try await api.currentAccount(), user.id == account?.id else {
                 clearAccount(); captcha = try await api.captcha(); return
             }
+            account = user
             let oldID = selected?.id
             try await loadWorkspace()
             if selected != nil { try await loadMessages() }
@@ -418,6 +419,17 @@ final class AppStore {
             // iOS 不保证普通聊天长连接在后台存活，保留标记并结束接收。
             if streaming { stop() }
         } else if !starting && account != nil && !locked { await refresh() }
+    }
+    func refreshDailyPermissions() async {
+        guard foreground, let owner = account?.id else { return }
+        do {
+            let user = try await api.currentAccount()
+            guard owner == account?.id else { return }
+            guard let user, user.id == owner else { clearAccount(); return }
+            account = user; daily.bind(user)
+        } catch {
+            if (error as? PlatformError)?.isUnauthorized == true { clearAccount() }
+        }
     }
     /// 只在用户明确确认已核对后解锁；不触发任何发送请求。
     func restorePendingDraft() {

@@ -4414,7 +4414,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.29.4" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.29.5" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8651,7 +8651,7 @@
 	      if (key === "tokens") { loadTokenStats(); loadUsageTrend(); }
           if (key === "usage") globalThis.MeimeiUsage?.openAdmin();
 	      if (key === "costs") loadCostStats();
-      if (key === "system") loadAdminSmsAuth();
+      if (key === "system") { loadAdminSmsAuth(); loadDailyReportSettings(); }
 	      queueLucideRefresh();
 	    }
 
@@ -10269,6 +10269,8 @@
 	    }
 
 	    function fillAccountForm(user) {
+          $("accountDailyReports").checked = user.daily_reports_enabled === true;
+          $("accountDailyPush").checked = user.daily_push_enabled === true;
 	      $("editingUserId").value = user.id || "";
 	      $("accountUsername").value = user.username || "";
 	      $("accountUsername").disabled = true;
@@ -10283,6 +10285,8 @@
 	    }
 
 	    function resetAccountForm() {
+          $("accountDailyReports").checked = false;
+          $("accountDailyPush").checked = false;
 	      $("editingUserId").value = "";
 	      $("accountUsername").value = "";
 	      $("accountUsername").disabled = false;
@@ -10303,6 +10307,8 @@
 	      }
 	      const id = $("editingUserId").value;
 	      const body = {
+            daily_reports_enabled: $("accountDailyReports").checked,
+            daily_push_enabled: $("accountDailyPush").checked,
 	        username: $("accountUsername").value.trim(),
 	        display_name: $("accountDisplayName").value.trim(),
 	        role: $("accountRole").value,
@@ -10324,6 +10330,21 @@
 	      setStatus("accountStatus", "账号已保存", "ok");
 	    }
 
+    async function loadDailyReportSettings() {
+      const res = await adminApi("/api/admin/daily-report-settings");
+      if (!res.ok) { setStatus("dailyReportsPauseStatus", "日报设置读取失败", "err"); return; }
+      $("dailyReportsPaused").checked = (await res.json()).paused === true;
+    }
+    async function saveDailyReportSettings() {
+      const input = $("dailyReportsPaused"); input.disabled = true;
+      try {
+        const res = await adminApi("/api/admin/daily-report-settings", { method: "POST", body: JSON.stringify({ paused: input.checked }) });
+        if (!res.ok) throw new Error("save failed");
+        input.checked = (await res.json()).paused === true;
+        setStatus("dailyReportsPauseStatus", input.checked ? "日报推送已暂停" : "日报推送已恢复", "ok");
+      } catch (_) { input.checked = !input.checked; setStatus("dailyReportsPauseStatus", "日报设置保存失败", "err"); }
+      finally { input.disabled = false; }
+    }
 	function applySidebarToolsState(open, options = {}) {
 	  const popover = $("sidebarToolsPopover");
 	  const trigger = $("toggleSidebarTools");
@@ -10704,6 +10725,7 @@
 	    $("outputPricePerMillion").addEventListener("input", syncCostEnabledFromPrices);
 		    $("changePassword").addEventListener("click", changePassword);
     $("saveSmsAuthConfig")?.addEventListener("click", saveAdminSmsAuth);
+    $("dailyReportsPaused")?.addEventListener("change", saveDailyReportSettings);
 		    $("saveAccount").addEventListener("click", saveAccount);
 		    $("resetAccountForm").addEventListener("click", resetAccountForm);
         $("adminKey").addEventListener("change", () => {

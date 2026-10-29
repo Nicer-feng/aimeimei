@@ -2,14 +2,33 @@ from http import HTTPStatus
 from urllib.parse import parse_qs, urlparse
 
 from ..database import db
-from ..daily_reports import OWNERS, report_row, valid_device, deliver_pending
+from ..daily_reports import report_row, valid_device, deliver_pending, push_allowed
 from ..runtime import now, token_hash
 
 
 class DailyReportHandlersMixin:
+    def handle_admin_daily_report_settings(self):
+        if self.command == "GET":
+            with db() as conn:
+                paused = bool(conn.execute("SELECT paused FROM daily_report_settings WHERE id=1").fetchone()[0])
+            return self.json({"paused": paused})
+        try:
+            data = self.read_body(limit=4096)
+        except Exception:
+            return self.error(HTTPStatus.BAD_REQUEST, "invalid json")
+        if not isinstance(data, dict) or set(data) != {"paused"} or not isinstance(data["paused"], bool):
+            return self.error(HTTPStatus.BAD_REQUEST, "paused 必须为布尔值")
+        with db() as conn:
+            previous = bool(conn.execute("SELECT paused FROM daily_report_settings WHERE id=1").fetchone()[0])
+            if previous != data["paused"]:
+                cutoff = conn.execute("SELECT COALESCE(MAX(id),0) FROM daily_reports").fetchone()[0]
+                conn.execute("UPDATE daily_report_settings SET paused=?,push_after_id=? WHERE id=1", (int(data["paused"]),cutoff))
+                conn.execute("UPDATE report_push_deliveries SET state='cancelled',reason='GlobalPause' WHERE state IN ('pending','sending')")
+        return self.json({"ok": True, "paused": data["paused"]})
+
     def handle_daily_reports(self):
         user = self.current_user()
-        if user["username"] not in OWNERS:
+        if not user["daily_reports_enabled"]:
             return self.error(HTTPStatus.NOT_FOUND, "not found")
         uid, path = user["id"], urlparse(self.path).path.rstrip("/")
         if path == "/api/daily-reports" and self.command == "GET":
@@ -39,6 +58,8 @@ class DailyReportHandlersMixin:
                 return self.error(HTTPStatus.METHOD_NOT_ALLOWED, "read only")
             if not valid_device(data):
                 return self.error(HTTPStatus.BAD_REQUEST, "invalid device")
+            if not user["daily_push_enabled"]:
+                return self.error(HTTPStatus.FORBIDDEN, "日报通知已关闭")
             with db() as conn:
                 old = conn.execute("SELECT * FROM report_push_devices WHERE user_id=? AND installation_id=?", (uid,data["installation_id"])).fetchone()
                 if not old and conn.execute("SELECT COUNT(*) FROM report_push_devices WHERE user_id=?", (uid,)).fetchone()[0] >= 10:
@@ -49,7 +70,9 @@ class DailyReportHandlersMixin:
                 device = conn.execute("SELECT id FROM report_push_devices WHERE user_id=? AND installation_id=?", (uid,data["installation_id"])).fetchone()[0]
                 if old and old["token"] != data["token"].lower():
                     conn.execute("DELETE FROM report_push_deliveries WHERE device_id=? AND state='invalid'", (device,))
-                conn.execute("INSERT OR IGNORE INTO report_push_deliveries(report_id,device_id) SELECT id,? FROM daily_reports WHERE user_id=? AND read_at=0 AND created_at>?", (device,uid,now()-86400))
+                for report in conn.execute("SELECT id FROM daily_reports WHERE user_id=? AND read_at=0 AND created_at>?", (uid,now()-86400)).fetchall():
+                    if push_allowed(conn, uid, report["id"]):
+                        conn.execute("INSERT OR IGNORE INTO report_push_deliveries(report_id,device_id) VALUES(?,?)", (report["id"],device))
             deliver_pending()
             return self.json({"ok": True})
         parts = path.split("/")

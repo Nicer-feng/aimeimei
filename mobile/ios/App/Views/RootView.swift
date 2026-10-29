@@ -42,7 +42,13 @@ struct RootView: View {
         .sheet(isPresented: Binding(get: { store.daily.presented && store.daily.owner != nil }, set: { store.daily.presented = $0 })) {
             DailyReportsView(controller: store.daily)
         }
-        .task(id: store.account?.id) { await push?.configure(store.daily) }
+        .task(id: store.account?.id) {
+            while store.account != nil && !Task.isCancelled {
+                await store.refreshDailyPermissions()
+                await push?.configure(store.daily)
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
+        }
         .onChange(of: store.daily.presented) { _, shown in
             if shown { showHistory = false; showSettings = false; librarySection = nil }
         }
