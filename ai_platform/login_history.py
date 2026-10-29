@@ -98,8 +98,13 @@ def client_metadata(client, user_agent):
     version = lambda item: ".".join(str(getattr(item, key, "") or "") for key in ("major", "minor", "patch", "patch_minor") if getattr(item, key, None))
     platform = client.get("platform")
     if platform not in ("ios", "android"):
+        # HTTP 库和旧 App 的 UA 也可能有 family，不能因此冒充浏览器。
+        web = client.get("platform") == "web" or bool(re.search(r"Mozilla/\d|AppleWebKit/|Gecko/", agent))
+        web = web and not bool(re.search(r"CFNetwork/|\bokhttp/", agent, re.I))
         mobile = bool(re.search(r"Mobile|Android|iPhone|iPad|iPod", agent, re.I))
-        platform = "web_mobile" if mobile else "web_desktop" if browser else "unknown"
+        platform = ("web_mobile" if mobile else "web_desktop") if web else "unknown"
+        if not web:
+            browser = None
     native = platform in ("ios", "android")
     authorization = client.get("notification_authorization", "unknown")
     meta = {"platform": platform, "manufacturer": clean_text(client.get("manufacturer")) if native else "",

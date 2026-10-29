@@ -115,6 +115,14 @@ class LoginHistoryTests(unittest.TestCase):
                 for item in value: check(item)
         check(self.events()); check(self.devices())
 
+    def test_legacy_native_user_agents_are_not_mislabeled_as_browsers(self):
+        for agent in ('Meimei/16 CFNetwork/1568.100.1.2.1 Darwin/24.0.0', 'okhttp/4.12.0', ''):
+            self.assertEqual(self.login(client=None,ua=agent)[0],200)
+            item=self.events()['records'][0]['client']
+            self.assertEqual(item['platform'],'unknown')
+            self.assertEqual(item['browser'],'')
+            self.assertEqual(item['model'],'')
+
     def test_repeated_login_same_installation_and_account_switch(self):
         self.login(); self.login(); self.login(username='reader-a')
         self.assertEqual(len(self.events()['records']),3)
