@@ -91,10 +91,12 @@ class AuthHandlersMixin:
 
     def send_login_success(self, user, client=None):
         token = b64_token(32)
+        # 平台声明只选择会话期限，不授予权限；浏览器和旧客户端仍使用默认期限。
+        ttl = MOBILE_SESSION_TTL_SECONDS if isinstance(client, dict) and client.get("platform") in ("ios", "android") else SESSION_TTL_SECONDS
         with db() as conn:
             conn.execute("BEGIN IMMEDIATE")
             created = now()
-            expires = created + SESSION_TTL_SECONDS
+            expires = created + ttl
             conn.execute("DELETE FROM sessions WHERE expires_at<=?", (created,))
             conn.execute(
                 "INSERT INTO sessions(token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
@@ -107,7 +109,7 @@ class AuthHandlersMixin:
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header(
             "Set-Cookie",
-            f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}",
+            f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={ttl}",
         )
         raw = json.dumps(
             {"ok": True, "expires_at": expires, "user": ai_user_public(user)},

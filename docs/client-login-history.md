@@ -20,6 +20,12 @@
 
 登录 JSON 可选 `client` 对象；补报接口直接接收该对象。字段为 `installation_id`、`platform`（ios/android/web）、`manufacturer`、`model`、`os_version`、`app_version`、`app_build`、`notification_authorization`。缺失或损坏的可选登录资料不影响旧版登录；服务端只保存白名单字段。
 
+## 登录有效期
+
+从 AI槑槑 2.30.3 起，成功密码/短信登录时 `client.platform` 为 `ios` 或 `android` 的原生 App 会话固定有效90天；Web（包括手机浏览器）、缺失或无法识别平台的旧客户端仍为14天。Cookie 的 `Max-Age`、登录响应的 `expires_at`、服务端会话与登录历史的到期时间保持一致。当前 iOS 0.8.3、Android 0.6.8 已上报该字段，无需为期限调整重新发包；更旧客户端未上报时仍可登录，但不根据 User-Agent 猜测为原生 App。
+
+平台资料为客户端声明，只影响期限策略，不作为身份或授权依据。每次登录独立创建会话，不删除其他未过期设备的会话；退出仅撤销当前会话，账号停用等原有服务端校验不变。普通请求和设备补报不续期，不改写已有到期时间；部署前已签发的会话不批量延期，重新登录后使用新期限。会话到期后绑定该会话的通知仍停止发送，不绕过登录状态校验。
+
 ## 来源与保留
 
 实际 Caddy 上游为 127.0.0.1:8000，无额外可信上游或 header_up 覆写。应用通过 `AI_PLATFORM_TRUSTED_PROXIES` 明确配置可信 CIDR，生产只信任本机 Caddy。非可信连接忽略 X-Forwarded-For；可信链从右向左解析 IPv4/IPv6，缺失或损坏时显示未记录，不用代理地址冒充来源。Caddy 默认丢弃不可信传入的转发值：[官方说明](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#headers)。IP 是服务端观测来源，不推断住址或身份。
