@@ -89,6 +89,8 @@ class AppHandler(
         path = urlparse(self.path).path
         if path == "/api/admin/openai-egress":
             return self.require_admin(self.handle_admin_openai_egress)
+        if path == "/api/admin/openai-budget":
+            return self.require_admin(self.handle_admin_openai_budget)
         if re.fullmatch(r"/api/models/[^/]+/availability", path):
             return self.require_user(self.handle_model_availability)
         if path == "/api/admin/login-records":
@@ -254,6 +256,8 @@ class AppHandler(
         path = urlparse(self.path).path
         if path == "/api/admin/openai-egress":
             return self.require_admin(self.handle_admin_openai_egress)
+        if path == "/api/admin/openai-budget":
+            return self.require_admin(self.handle_admin_openai_budget)
         if path == "/api/admin/openai-egress/test":
             return self.require_admin(self.handle_admin_openai_test)
         if path == "/api/session/device-info":

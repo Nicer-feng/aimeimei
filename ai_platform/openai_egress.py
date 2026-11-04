@@ -345,10 +345,16 @@ def open_model_request(request, timeout=120, allow_disabled=False):
         _active += 1
     finally:
         _lock.release()
+    ticket = None
     try:
+        from . import openai_budget as budget
+        ticket = budget.begin(request)
         opener = urllib.request.build_opener(ScopedProxy({"https": client["proxy_url"]}), NoRedirect())
-        return TrackedResponse(opener.open(request, timeout=timeout))
-    except Exception:
+        response = opener.open(request, timeout=timeout)
+        return TrackedResponse(budget.BudgetResponse(response, ticket) if ticket else response)
+    except Exception as exc:
+        if ticket:
+            budget.settle(ticket, rejected=isinstance(exc, urllib.error.HTTPError) and 400 <= exc.code < 500)
         with _lock:
             _active -= 1
         raise

@@ -1,8 +1,20 @@
 from .shared import *
 from .. import openai_egress as egress
+from .. import openai_budget as budget
 
 
 class OpenAIEgressHandlersMixin:
+    def handle_admin_openai_budget(self):
+        try:
+            if self.command == 'GET':
+                return self.json({'budget': budget.summary()})
+            data = self.read_body(limit=4096)
+            return self.json({'ok': True, 'budget': budget.configure(data)})
+        except (ValueError, TypeError):
+            return self.error(HTTPStatus.BAD_REQUEST, '请检查月度额度、开关和美元折算汇率')
+        except (sqlite3.Error, budget.BudgetError):
+            return self.error(HTTPStatus.SERVICE_UNAVAILABLE, 'OpenAI 额度配置暂不可用，请稍后重试')
+
     def handle_admin_openai_egress(self):
         if self.command == "GET":
             data = {"egress": egress.public_config(), "nodes": []}
@@ -61,4 +73,8 @@ class OpenAIEgressHandlersMixin:
             return self.error(HTTPStatus.NOT_FOUND, "model not found")
         if not egress.is_openai_url(row["base_url"]):
             return self.json({"model_id": model_id, "status": "not_applicable"})
+        try:
+            budget.check()
+        except budget.BudgetError as exc:
+            return self.json({"model_id": model_id, **egress.result("unavailable", exc.code, exc.message)})
         return self.json({"model_id": model_id, **egress.availability(row)})

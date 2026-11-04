@@ -118,7 +118,7 @@ class EgressTests(unittest.TestCase):
                       "runtime_path": str(e.RUNTIME_PATH)}
         init_db({"family_password_hash": "fixture-only"})
         with db() as conn:
-            conn.execute("INSERT INTO models(id,name,provider,base_url,api_key,model,created_at,updated_at) VALUES('official','test','OpenAI','https://api.openai.com/v1','sk-fixture-only','gpt-fixture',0,0)")
+            conn.execute("INSERT INTO models(id,name,provider,base_url,api_key,model,input_price_per_million,output_price_per_million,created_at,updated_at) VALUES('official','test','OpenAI','https://api.openai.com/v1','sk-fixture-only','gpt-fixture',13.436,67.18,0,0)")
 
         class Handler(AppHandler):
             def log_message(self, *args):

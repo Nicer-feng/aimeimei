@@ -2,6 +2,7 @@ from .shared import *
 from ..docmind import build_document_context
 from .. import writing
 from ..openai_egress import is_openai_url
+from .. import openai_budget
 
 import codecs
 import threading
@@ -454,6 +455,11 @@ class ChatHandlersMixin:
                 return self.error(HTTPStatus.BAD_REQUEST, "当前讨论使用的模型已停用")
             if not str(discussion["api_key"] or "").strip():
                 return self.error(HTTPStatus.BAD_REQUEST, "当前模型尚未配置 API Key")
+            if is_openai_url(discussion["base_url"]):
+                try:
+                    openai_budget.check()
+                except openai_budget.BudgetError as exc:
+                    return self.error(HTTPStatus.TOO_MANY_REQUESTS, exc.message)
             ts = now()
             conn.execute(
                 """
@@ -1093,6 +1099,11 @@ class ChatHandlersMixin:
                 return self.error(HTTPStatus.BAD_REQUEST, "model disabled")
             if not convo["api_key"].strip():
                 return self.error(HTTPStatus.BAD_REQUEST, "model api key is not configured")
+            if is_openai_url(convo["base_url"]):
+                try:
+                    openai_budget.check()
+                except openai_budget.BudgetError as exc:
+                    return self.error(HTTPStatus.TOO_MANY_REQUESTS, exc.message)
             image_rows = []
             if image_ids:
                 if not convo["supports_vision"]:

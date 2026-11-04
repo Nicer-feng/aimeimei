@@ -15,5 +15,19 @@
 .admin-key-row.openai-key-row > label { flex:1 1 240px; min-width:0; }
 .admin-key-row.openai-key-row > button { flex:none; }
 [data-egress-action][aria-busy="true"] { opacity:.65; cursor:progress; }
+.openai-budget-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:16px 0 12px; }
+.openai-budget-summary dl { margin:0; min-width:0; }
+.openai-budget-summary dt { color:var(--muted); font-size:12px; margin-bottom:6px; }
+.openai-budget-summary dd { margin:0; font-size:22px; font-weight:650; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+#openaiBudgetProgress { display:block; width:100%; height:6px; accent-color:var(--accent-strong,#c87391); border:0; border-radius:3px; overflow:hidden; }
+#openaiBudgetProgress::-webkit-progress-bar { background:var(--surface-soft,#f6e9d6); }
+#openaiBudgetProgress::-webkit-progress-value { background:var(--accent-strong,#c87391); }
+#openaiBudgetProgress[data-exhausted="true"] { accent-color:#d66066; }
+#openaiBudgetProgress[data-exhausted="true"]::-webkit-progress-value { background:#d66066; }
+@media (max-width:600px) {
+  .openai-budget-summary { gap:10px; }
+  .openai-budget-summary dt { line-height:1.5; min-height:3em; }
+  .openai-budget-summary dd { font-size:18px; }
+}
 @keyframes openai-check { 50% { opacity:.4; } }
 @media (prefers-reduced-motion:reduce) { .openai-health[data-health="checking"] { animation:none; } }

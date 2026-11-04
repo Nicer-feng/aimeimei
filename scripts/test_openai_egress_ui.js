@@ -12,12 +12,23 @@ const models = [
     reasoning_mode_options: { fast: { title: '快速：关闭思考（none）', description: '关闭思考，优先响应速度' } } }
 ];
 const counts = { check: 0, test: [], saves: [] };
+let budget = { enabled: true, limit_usd: 50, cny_per_usd: 6.718, period: '2026-11', spent_usd: 12.5, reserved_usd: .1, remaining_usd: 37.4, exhausted: false, warning: false, uncertain_requests: 0 };
+const budgetSaves = [];
 let base, reachable = true, cfg = { installed: true, enabled: false, subscription_configured: false, selected_node: '' };
 const json = (res, data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
 const server = http.createServer(async (req, res) => {
   const p = new URL(req.url, base).pathname, chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const body = chunks.length ? JSON.parse(Buffer.concat(chunks)) : {};
+  if (p === '/api/admin/openai-budget') {
+    if (req.method === 'POST') {
+      budgetSaves.push(body); budget = { ...budget, ...body };
+      budget.exhausted = budget.enabled && budget.spent_usd >= budget.limit_usd;
+      budget.warning = budget.enabled && budget.spent_usd >= budget.limit_usd * .8;
+      budget.remaining_usd = Math.max(0, budget.limit_usd - budget.spent_usd - budget.reserved_usd);
+    }
+    return json(res, { budget });
+  }
   if (/^\/api\/models\/[^/]+\/availability$/.test(p)) {
     counts.check++; await new Promise(resolve => setTimeout(resolve, 100));
     return json(res, { status: reachable ? 'reachable' : 'unavailable', message: '本地模拟检查', checked_at: Date.now() / 1000, expires_at: Date.now() / 1000 + 90 });
@@ -102,6 +113,18 @@ const server = http.createServer(async (req, res) => {
     assert.equal(counts.check, 2);
     await page.evaluate(() => { Date.now = originalDateNow; openSettings(); switchAdminSection('egress'); });
     await page.waitForFunction(() => document.querySelector('#openaiTestModel').options.length === 3);
+    await page.waitForFunction(() => !document.querySelector('#openaiBudgetSave').disabled);
+    assert.equal(await page.locator('#openaiBudgetSpent').textContent(), '$12.50');
+    assert.equal(await page.locator('#openaiBudgetLimit').inputValue(), '50');
+    await page.locator('#openaiBudgetLimit').fill('10'); await page.locator('#openaiBudgetSave').click();
+    await page.waitForFunction(() => document.querySelector('#openaiBudgetSummary').textContent.includes('新请求已暂停'));
+    assert.equal(budgetSaves.length, 1);
+    assert.equal(await page.locator('#openaiBudgetProgress').getAttribute('data-exhausted'), 'true');
+    await page.screenshot({ path: '/private/tmp/meimei-openai-budget-exhausted.png' });
+    await page.locator('#openaiBudgetLimit').fill('50'); await page.locator('#openaiBudgetSave').click();
+    await page.waitForFunction(() => document.querySelector('#openaiBudgetSummary').textContent.includes('额度正常'));
+    await page.locator('#openaiBudgetTitle').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: '/private/tmp/meimei-openai-budget-desktop.png' });
     await page.locator('#openaiSubscription').fill('https://subscription.example/fixture-only'); await page.locator('#openaiEgressReload').click();
     await page.waitForFunction(() => document.querySelector('#openaiEgressStatus').textContent.includes('订阅已更新'));
     assert.equal(await page.locator('#openaiSubscription').inputValue(), '');
@@ -119,10 +142,16 @@ const server = http.createServer(async (req, res) => {
     await page.evaluate(() => applyTheme('dark'));
     await page.waitForTimeout(250);
     await page.screenshot({ path: '/private/tmp/meimei-openai-egress-dark.png' });
+    await page.locator('#openaiBudgetTitle').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: '/private/tmp/meimei-openai-budget-dark.png' });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.evaluate(() => { closeSidebar(); openSettings(); switchAdminSection('egress'); });
     await page.waitForTimeout(350);
     await page.screenshot({ path: '/private/tmp/meimei-openai-egress-mobile.png' });
+    await page.locator('#openaiBudgetTitle').scrollIntoViewIfNeeded();
+    const amounts = await page.locator('.openai-budget-summary dd').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().y));
+    assert.ok(Math.max(...amounts) - Math.min(...amounts) < 2, 'mobile budget amounts align');
+    await page.screenshot({ path: '/private/tmp/meimei-openai-budget-mobile.png' });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.evaluate(() => switchAdminSection('keys'));
     await page.waitForFunction(() => document.querySelectorAll('.admin-key-row [data-egress-action]').length === 2);

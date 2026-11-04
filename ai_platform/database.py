@@ -5,6 +5,7 @@ from .reading import init_reading_tables
 from .usage_time import init_usage_time_tables
 from .daily_reports import init_daily_report_tables
 from .login_history import init_login_history_tables
+from .openai_budget import init_tables as init_openai_budget_tables
 from .settings import (
     DATA_DIR,
     DB_PATH,
@@ -782,3 +783,5 @@ def init_db(secrets_data=None):
                     """,
                     (b64_token(10), title, content, index * 10, ts, ts),
                 )
+
+        init_openai_budget_tables(conn)

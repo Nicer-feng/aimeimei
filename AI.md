@@ -7,8 +7,8 @@
 - 项目名称：AI槑槑。
 - GitHub：`git@github.com:Nicer-feng/aimeimei.git`。
 - 主分支：`main`。
-- 当前基线版本：`2.30.8`。
-- 当前基线构建：`20261104-132243`。
+- 当前基线版本：`2.30.9`。
+- 当前基线构建：`20261104-150153`。
 - 当前材料附件行为：新上传材料默认只绑定本条用户消息；通过聊天顶部“当前对话文件”可显式设为持续参考，旧 `conversation_documents` 仍代表持续参考材料。
 - 当前基线提交：以 `git log -1 --oneline` 为准（发布后需同步本段）。
 - 本地实际仓库：`/Users/feng/Documents/文稿 - Unknown/aliyun3129`。
@@ -25,6 +25,8 @@
 `VERSION`、`BUILD_ID`、线上接口 `/api/version` 才是版本事实来源。本文件中的版本只表示编写本手册时的基线，未来发布后应同步更新本节。
 
 ## 2. 产品范围
+
+OpenAI 全平台月度额度见 `docs/openai-monthly-budget.md`：默认开启 50 美元，所有账号/客户端合计，固定北京时间自然月、次月自动恢复，不更改模型手动启用状态。后台 OpenAI 代理页设置上限/汇率并按需读取；统一 `open_model_request` 为当前 Chat Completions/Responses 付费调用预留与计费，覆盖摘要/写稿/媒体辅助调用；GET 连通测试和非官方接口不受影响。`openai_budget_settings/events` 由 init_db 幂等创建，首次按尚存当前月记录导入；后续删除会话不减预算。价格从已有人民币单价按可配置汇率折算、缓存保守按普通输入计入；不是官方账单，不含平台外消费及额外工具费用。缺 usage/结果不明保留保守预留、死进程启动恢复，不自动重试；在途请求可完成，允许少量超额。响应包装必须保留 HTTPResponse.read() 无参数语义和 SSE 原字节；额度失败不写入空白用户消息，出口仍二次检查防并发绕过。回归 `test_openai_budget.py`、`test_openai_egress.py`、`test_openai_egress_ui.js`，全为本地隔离测试；部署需在空闲窗口备份并重启共享服务，不自动回滚数据库。
 
 Markdown 中文加粗的标点相邻兼容在 `res/markdown-renderer.js` 的局部 inline 规则中完成，沿用 markdown-it 分隔符配对，不正则改写原文或代码。列表显式恢复 disc/decimal，任务列表仍无圆点。最终 assistant 的 `[n]` 仅在已保存来源存在有效 HTTP(S) 对应项时转成小型引用链接；普通点击复用右侧来源栏并仅滚动该栏，Ctrl/Cmd 点击和分享页跳原网页。未知编号、用户消息、思考、流式中正文、代码、数学与既有链接保持原样。源码缓存需连同来源编号/标题/URL一起失效，不重绘历史；来源 normalize 必须保留 citationIndex，不能二次处理时重排。`scripts/test_markdown_citations_ui.js` 覆盖中文标点、连续引用、脚注/HTML/代码隔离、缓存、历史/分享与深浅主题手机布局；`markdown-test.html` 保留人工回归样例。聊天和分享页的 renderer/CSS 都带版本缓存标识。v2.30.8 纯静态发布，不改后端、搜索、prompt 或数据库。
 

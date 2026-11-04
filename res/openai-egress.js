@@ -1,7 +1,7 @@
 (() => {
   const byId = id => document.getElementById(id);
   const cache = new Map(), pending = new Map();
-  let epoch = 0, current = null, selected = '', adminRevision = 0, busy = false;
+  let epoch = 0, current = null, selected = '', adminRevision = 0, busy = false, budgetRevision = 0, budgetBusy = false;
   const isOfficial = model => Boolean(model?.uses_openai_egress);
   function paint() {
     document.querySelectorAll('[data-openai-health]').forEach(dot => {
@@ -50,10 +50,11 @@
     if (id !== selected) { selected = id; check(model); }
   }
   function accountChanged() {
-    epoch++; adminRevision++; current = null; selected = '';
+    epoch++; adminRevision++; budgetRevision++; current = null; selected = '';
     for (const abort of pending.values()) abort.abort();
     pending.clear(); cache.clear();
     if (byId('openaiSubscription')) byId('openaiSubscription').value = '';
+    if (byId('openaiBudgetSave')) byId('openaiBudgetSave').disabled = true;
     paint();
   }
   function message(value, error = false) {
@@ -76,6 +77,7 @@
     return data;
   }
   async function open() {
+    loadBudget();
     const ticket = ++adminRevision;
     message('读取代理配置…');
     try {
@@ -88,6 +90,60 @@
       for (const model of models.models || []) if (isOfficial(model)) picker.add(new Option(model.name + ' · ' + model.model, model.id));
     } catch (error) { if (ticket === adminRevision) message(error.message, true); }
   }
+  function budgetMessage(value, error = false) {
+    const node = byId('openaiBudgetStatus');
+    if (node) { node.textContent = value; node.classList.toggle('err', error); }
+  }
+  function renderBudget(cfg) {
+    const usd = value => '$' + Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    byId('openaiBudgetEnabled').checked = Boolean(cfg.enabled);
+    byId('openaiBudgetLimit').value = cfg.limit_usd;
+    byId('openaiBudgetRate').value = cfg.cny_per_usd;
+    byId('openaiBudgetSpent').textContent = usd(cfg.spent_usd);
+    byId('openaiBudgetCap').textContent = usd(cfg.limit_usd);
+    byId('openaiBudgetRemaining').textContent = usd(cfg.remaining_usd);
+    const progress = byId('openaiBudgetProgress');
+    progress.value = cfg.limit_usd > 0 ? Math.min(100, cfg.spent_usd / cfg.limit_usd * 100) : 0;
+    progress.dataset.exhausted = String(Boolean(cfg.exhausted));
+    const status = !cfg.enabled ? '额度保护已关闭' : cfg.exhausted ? '本月额度已用完，OpenAI 新请求已暂停' : cfg.pending_limit ? '剩余额度已预留，等待当前请求结算' : cfg.warning ? '本月已使用超过 80% 的额度' : '额度正常';
+    const pending = cfg.reserved_usd ? ' · 进行中预留 ' + usd(cfg.reserved_usd) : '';
+    const uncertain = cfg.uncertain_requests ? ' · ' + cfg.uncertain_requests + ' 次缺少完整用量，已按预留保守计入' : '';
+    const unpriced = cfg.unpriced_requests ? ' · ' + cfg.unpriced_requests + ' 次未配置单价，费用未计入' : '';
+    byId('openaiBudgetSummary').textContent = cfg.period + ' · ' + status + pending + uncertain + unpriced + ' · 次月 1 日 00:00（北京时间）重置';
+    byId('openaiBudgetSave').disabled = false;
+  }
+  async function loadBudget() {
+    if (!byId('openaiBudgetSave') || budgetBusy) return;
+    const ticket = ++budgetRevision;
+    byId('openaiBudgetSave').disabled = true;
+    budgetMessage('读取本月额度…');
+    try {
+      const data = await readResponse(await adminApi('/api/admin/openai-budget'));
+      if (ticket !== budgetRevision) return;
+      renderBudget(data.budget); budgetMessage('');
+    } catch (error) { if (ticket === budgetRevision) budgetMessage(error.message, true); }
+  }
+  async function saveBudget() {
+    if (budgetBusy || byId('openaiBudgetSave').disabled) return;
+    const limit = Number(byId('openaiBudgetLimit').value), rate = Number(byId('openaiBudgetRate').value);
+    if (!Number.isFinite(limit) || limit < .01 || limit > 1000000 || !Number.isFinite(rate) || rate < .01 || rate > 1000) {
+      budgetMessage('请检查月度额度和美元折算汇率', true); return;
+    }
+    budgetBusy = true;
+    const ticket = ++budgetRevision, button = byId('openaiBudgetSave');
+    button.disabled = true; button.setAttribute('aria-busy', 'true'); budgetMessage('正在保存额度…');
+    try {
+      const data = await readResponse(await adminApi('/api/admin/openai-budget', { method: 'POST', body: JSON.stringify({
+        enabled: byId('openaiBudgetEnabled').checked, limit_usd: limit, cny_per_usd: rate
+      }) }));
+      if (ticket !== budgetRevision) return;
+      renderBudget(data.budget); cache.clear(); paint(); budgetMessage('额度已保存，后续 OpenAI 请求立即生效');
+    } catch (error) {
+      if (ticket === budgetRevision) { button.disabled = false; budgetMessage(error.message, true); }
+    } finally { budgetBusy = false; button.removeAttribute('aria-busy'); }
+  }
+  byId('openaiBudgetSave')?.addEventListener('click', saveBudget);
+  byId('openaiBudgetRefresh')?.addEventListener('click', loadBudget);
   async function action(button, fn) {
     if (busy) return;
     busy = true; const ticket = epoch;
