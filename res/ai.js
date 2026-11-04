@@ -2040,7 +2040,8 @@
         item.classList.toggle("selected", item.dataset.reasoningMode === mode);
         item.querySelector('small').textContent = reasoningModeMeta(item.dataset.reasoningMode).description;
       });
-      if (state.reasoningPickerOpen) { menu.hidden = false; button.setAttribute("aria-expanded", "true"); }
+      menu.hidden = !state.reasoningPickerOpen;
+      button.setAttribute("aria-expanded", String(state.reasoningPickerOpen));
       queueLucideRefresh();
     }
     function positionReasoningPicker() {
@@ -2066,7 +2067,8 @@
     function toggleReasoningPicker(event) {
       event?.stopPropagation();
       if (!selectedModelSupportsReasoningControl()) return;
-      state.reasoningPickerOpen = !state.reasoningPickerOpen;
+      if (state.reasoningPickerOpen) { closeReasoningPicker(); return; }
+      state.reasoningPickerOpen = true;
       renderReasoningControl();
       positionReasoningPicker();
     }
@@ -2210,6 +2212,7 @@
 
     function openModelPicker() {
       if (!state.models.length) return;
+      closeReasoningPicker();
       closeInterfaceSettings();
       const dialog = $("modelPickerDialog");
       const button = $("modelPickerButton");
@@ -4435,7 +4438,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.6" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.7" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -10529,7 +10532,7 @@
 	      if (event.target?.matches?.("[data-feature-toggle]")) saveAdminFeatures();
 	    });
 	    document.addEventListener("pointerdown", handleSidebarToolsOutsidePointer);
-    document.addEventListener("pointerdown", handleReasoningPickerOutsidePointer);
+    document.addEventListener("pointerdown", handleReasoningPickerOutsidePointer, true);
 	    $("closeTokenActivity").addEventListener("click", closeTokenActivity);
 	    $("tokenActivityDialog").addEventListener("click", (event) => {
 	      if (event.target === $("tokenActivityDialog")) closeTokenActivity();

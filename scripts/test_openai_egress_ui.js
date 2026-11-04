@@ -53,6 +53,40 @@ const server = http.createServer(async (req, res) => {
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(String(error)));
     await page.goto(base); await page.waitForFunction(() => state.authed && state.models.length === 3);
+    const reasoningButton = page.locator('#reasoningPickerButton');
+    async function assertReasoningOpen(open, label, target = page) {
+      const actual = await target.evaluate(() => ({
+        state: state.reasoningPickerOpen,
+        hidden: document.querySelector('#reasoningPickerMenu').hidden,
+        expanded: document.querySelector('#reasoningPickerButton').getAttribute('aria-expanded')
+      }));
+      assert.deepEqual(actual, { state: open, hidden: !open, expanded: String(open) }, label);
+    }
+    await reasoningButton.click(); await assertReasoningOpen(true, 'first open');
+    await reasoningButton.click(); await assertReasoningOpen(false, 'same button closes the menu');
+    await reasoningButton.click(); await page.locator('#prompt').click({ position: { x: 12, y: 12 } }); await assertReasoningOpen(false, 'outside composer click closes');
+    await reasoningButton.click(); await page.locator('.empty-copy h2').click(); await assertReasoningOpen(false, 'outside chat click closes');
+    await page.evaluate(() => document.querySelector('#prompt').addEventListener('pointerdown', event => event.stopPropagation(), { once: true }));
+    await reasoningButton.click(); await page.locator('#prompt').click({ position: { x: 12, y: 12 } }); await assertReasoningOpen(false, 'outside click still closes when target stops bubbling');
+    await reasoningButton.click(); await page.keyboard.press('Escape'); await assertReasoningOpen(false, 'Escape closes');
+    for (let i = 0; i < 4; i++) {
+      await reasoningButton.click(); await assertReasoningOpen(true, 'repeat open');
+      await reasoningButton.click(); await assertReasoningOpen(false, 'repeat close');
+    }
+    await reasoningButton.focus(); await page.keyboard.press('Enter'); await assertReasoningOpen(true, 'keyboard open');
+    await page.keyboard.press('Enter'); await assertReasoningOpen(false, 'keyboard toggle closes');
+    await reasoningButton.click();
+    await page.locator('[data-reasoning-mode="balanced"]').click(); await assertReasoningOpen(false, 'select current mode closes');
+    await page.locator('#prompt').fill('菜单开关不应清空的草稿');
+    await page.evaluate(() => { state.sending = true; });
+    await reasoningButton.click(); await assertReasoningOpen(true, 'menu can open while generating');
+    await reasoningButton.click(); await assertReasoningOpen(false, 'menu can close while generating');
+    await page.evaluate(() => { state.sending = false; });
+    assert.equal(await page.locator('#prompt').inputValue(), '菜单开关不应清空的草稿');
+    await page.locator('#prompt').fill('');
+    await reasoningButton.click(); await page.evaluate(() => openModelPicker());
+    await assertReasoningOpen(false, 'opening model picker closes reasoning menu');
+    await page.evaluate(() => closeModelPicker());
     assert.equal(counts.check, 0); await page.evaluate(() => openModelPicker());
     await page.waitForTimeout(200); assert.equal(counts.check, 0);
     assert.equal(await page.locator('#modelPickerList [data-openai-health]').count(), 2);
@@ -116,6 +150,25 @@ const server = http.createServer(async (req, res) => {
     await page.evaluate(async () => { await chooseModel('qwen'); await chooseReasoningMode('fast'); });
     assert.match(await page.locator('#reasoningPickerButton').getAttribute('title'), /关闭思考/);
     assert.equal(counts.test.at(-1).api_key, 'sk-local-fixture'); assert.deepEqual(errors, []);
+    const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    await touch.route('https://**', route => route.abort());
+    const phone = await touch.newPage();
+    phone.on('pageerror', error => errors.push(String(error)));
+    await phone.goto(base); await phone.waitForFunction(() => state.authed && state.models.length === 3);
+    await phone.evaluate(() => closeSidebar());
+    const touchButton = phone.locator('#reasoningPickerButton');
+    await touchButton.tap(); await assertReasoningOpen(true, 'touch open', phone);
+    await phone.waitForTimeout(220);
+    const touchMenu = await phone.locator('#reasoningPickerMenu').boundingBox();
+    assert.ok(touchMenu && touchMenu.y >= 0 && touchMenu.y + touchMenu.height <= 844, 'touch menu stays in viewport');
+    await phone.screenshot({ path: '/private/tmp/meimei-reasoning-menu-touch-open.png' });
+    await touchButton.tap(); await assertReasoningOpen(false, 'touch same button closes', phone);
+    await touchButton.tap(); await phone.locator('.empty-copy h2').tap(); await assertReasoningOpen(false, 'touch outside closes', phone);
+    await touchButton.tap(); await phone.locator('[data-reasoning-mode="fast"]').tap();
+    await assertReasoningOpen(false, 'touch selection closes', phone);
+    assert.equal(await phone.locator('#reasoningPickerLabel').textContent(), '快速');
+    assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await touch.close(); assert.deepEqual(errors, []);
     console.log(JSON.stringify({ passed: true, availability_checks: counts.check, tests: counts.test.length, automatic_polling: false }));
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); server.close(); process.exitCode = 1; });
