@@ -21,6 +21,7 @@ from ai_platform.handlers.reading import ReadingHandlersMixin
 from ai_platform.handlers.usage_time import UsageTimeHandlersMixin
 from ai_platform.handlers.daily_reports import DailyReportHandlersMixin
 from ai_platform.handlers.login_history import LoginHistoryHandlersMixin
+from ai_platform.handlers.openai_egress import OpenAIEgressHandlersMixin
 from ai_platform.login_history import cleanup_history, request_ip, touch_session
 from ai_platform.handlers import (
     AdminHandlersMixin,
@@ -59,6 +60,7 @@ from ai_platform.settings import (
 
 
 class AppHandler(
+    OpenAIEgressHandlersMixin,
     LoginHistoryHandlersMixin,
     DailyReportHandlersMixin,
     UsageTimeHandlersMixin,
@@ -85,6 +87,10 @@ class AppHandler(
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/api/admin/openai-egress":
+            return self.require_admin(self.handle_admin_openai_egress)
+        if re.fullmatch(r"/api/models/[^/]+/availability", path):
+            return self.require_user(self.handle_model_availability)
         if path == "/api/admin/login-records":
             return self.require_admin(self.handle_admin_login_records)
         if re.fullmatch(r"/api/admin/users/[^/]+/devices", path):
@@ -246,6 +252,10 @@ class AppHandler(
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/admin/openai-egress":
+            return self.require_admin(self.handle_admin_openai_egress)
+        if path == "/api/admin/openai-egress/test":
+            return self.require_admin(self.handle_admin_openai_test)
         if path == "/api/session/device-info":
             return self.require_user(self.handle_client_device_info)
         if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):

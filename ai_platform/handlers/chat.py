@@ -183,7 +183,7 @@ class ChatHandlersMixin:
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(request, timeout=CONTEXT_SUMMARY_REQUEST_TIMEOUT) as response:
+            with open_model_request(request, timeout=CONTEXT_SUMMARY_REQUEST_TIMEOUT) as response:
                 result = json.loads(response.read(2 * 1024 * 1024).decode(errors="replace"))
             choice = (result.get("choices") or [{}])[0]
             message = choice.get("message") or {}
@@ -517,7 +517,7 @@ class ChatHandlersMixin:
                 },
                 method="POST",
             )
-            return urllib.request.urlopen(request, timeout=120)
+            return open_model_request(request, timeout=120)
 
         def upstream_failure(message, detail):
             saved = self.save_side_discussion_reply(discussion, "", "", None, "failed")
@@ -1344,7 +1344,7 @@ class ChatHandlersMixin:
                 },
                 method="POST",
             )
-            return urllib.request.urlopen(request, timeout=120)
+            return open_model_request(request, timeout=120)
 
         def open_upstream_with_usage_fallback(results):
             payload = make_payload(results, include_usage=True)

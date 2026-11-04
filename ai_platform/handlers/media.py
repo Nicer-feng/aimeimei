@@ -475,7 +475,7 @@ mindmap_text 要求：
             },
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=180) as response:
+        with open_model_request(request, timeout=180) as response:
             raw = response.read().decode()
         data = json.loads(raw or "{}")
         choice = (data.get("choices") or [{}])[0]

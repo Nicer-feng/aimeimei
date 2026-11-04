@@ -1,0 +1,16 @@
+.openai-health { display:inline-block; width:8px; height:8px; min-width:8px; border-radius:50%; background:var(--muted,#a8a29e); align-self:center; box-shadow:0 0 0 2px var(--surface,#fffaf7); }
+.openai-health[hidden] { display:none; }
+.openai-health[data-health="reachable"] { background:#369b70; }
+.openai-health[data-health="unavailable"] { background:#d66066; }
+.openai-health[data-health="checking"] { background:#c79a58; animation:openai-check 1s ease-in-out infinite; }
+.model-option-top .openai-health { margin-left:6px; }
+.openai-egress-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.drawer .panel label.openai-egress-switch { display:flex; flex-direction:row; align-items:center; gap:10px; margin-bottom:16px; }
+.drawer .panel .openai-egress-switch input { width:18px; height:18px; min-height:18px; flex:none; margin:0; box-shadow:none; }
+.openai-egress-test { display:flex; align-items:end; gap:8px; flex-wrap:wrap; }
+.drawer .panel .openai-egress-test label { flex:1; min-width:180px; margin:0; }
+.openai-egress-test > button { margin:0; min-height:44px; }
+.openai-key-status { font-size:12px; color:var(--muted); overflow-wrap:anywhere; }
+[data-egress-action][aria-busy="true"] { opacity:.65; cursor:progress; }
+@keyframes openai-check { 50% { opacity:.4; } }
+@media (prefers-reduced-motion:reduce) { .openai-health[data-health="checking"] { animation:none; } }

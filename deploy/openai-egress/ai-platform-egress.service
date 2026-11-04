@@ -1,0 +1,38 @@
+[Unit]
+Description=AI Meimei scoped OpenAI egress
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-platform-egress
+Group=ai-platform-egress
+WorkingDirectory=/var/lib/ai-platform-egress
+ExecStart=/usr/local/lib/ai-platform-egress/mihomo -d /var/lib/ai-platform-egress -f /var/lib/ai-platform-egress/config.json
+Restart=on-failure
+RestartSec=5
+UMask=0027
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/ai-platform-egress
+InaccessiblePaths=/opt/ai-platform
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=64
+LimitNOFILE=4096
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target

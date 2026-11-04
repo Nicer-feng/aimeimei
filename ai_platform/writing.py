@@ -4,6 +4,7 @@ import json
 import re
 import threading
 import urllib.request
+from .openai_egress import open_model_request
 
 
 # Fixed stripes bound memory and serialize edits with in-flight generation.
@@ -117,7 +118,7 @@ facts保留材料中明确的数据、限定条件及出处线索，missing保�
         payload["enable_thinking"] = False
     request = urllib.request.Request(conversation["base_url"].rstrip("/") + "/chat/completions",
         data=json.dumps(payload).encode(), headers={"Authorization": "Bearer " + conversation["api_key"].strip(), "Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=45) as response:
+    with open_model_request(request, timeout=45) as response:
         data = json.loads(response.read(2 * 1024 * 1024).decode())
     text = str(((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
     try:

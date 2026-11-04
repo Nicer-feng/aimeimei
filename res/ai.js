@@ -467,6 +467,7 @@
         }
 
 	    function applyCurrentUser(user) {
+          if (state.user?.id !== user?.id) globalThis.MeimeiOpenAIEgress?.accountChanged();
           if (state.user?.id !== user?.id || user?.role !== 'admin') globalThis.MeimeiLoginHistory?.clear();
           if (state.user?.id !== user?.id) resetTokenStats();
 	      state.user = user || null;
@@ -2178,6 +2179,7 @@
       name.textContent = model ? model.name : "选择模型";
       code.textContent = model ? model.model : (state.models.length ? "请选择一个模型" : "暂无可用模型");
       button.title = model ? `${model.name} · ${modelProviderLabel(model)} · ${model.model}` : "选择模型";
+      globalThis.MeimeiOpenAIEgress?.sync(model);
     }
 
     function positionModelPickerPopover() {
@@ -2263,12 +2265,18 @@
             '<span class="model-code-line">' + escapeHTML(model.model || "") + ' · ' + escapeHTML(modelProviderLabel(model)) + '</span>' +
           '</span>' +
           '<span class="model-check">' + iconMarkup("check", "✓") + '</span>';
+        if (model.uses_openai_egress) {
+          const dot = document.createElement('span');
+          dot.className = 'openai-health'; dot.dataset.openaiHealth = model.id; dot.setAttribute('role', 'img');
+          button.querySelector('.model-option-top').append(dot);
+        }
         button.addEventListener("mouseenter", () => setModelPickerSelectedIndex(index));
         button.addEventListener("click", () => chooseModel(model.id));
         box.appendChild(button);
       }
       queueLucideRefresh();
       scrollActiveModelOptionIntoView();
+      globalThis.MeimeiOpenAIEgress?.paint();
     }
 
     function scrollActiveModelOptionIntoView() {
@@ -2342,6 +2350,7 @@
       }
       const previousId = select.value || state.currentConversation?.model_id || "";
       if (previousId === modelId) {
+        globalThis.MeimeiOpenAIEgress?.check(model);
         syncModelPickerButton();
         $("prompt").focus();
         return;
@@ -4417,7 +4426,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.3" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.4" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8616,6 +8625,7 @@
           logins: { title: "登录记录", desc: "设备、成功登录与会话状态 · 北京时间" },
 	      models: { title: "模型管理", desc: "维护模型名称、供应商、Endpoint、System Prompt 和能力标签。" },
 	      keys: { title: "密钥管理", desc: "集中维护管理密钥、模型 API Key 和搜索 API Key。" },
+          egress: { title: "OpenAI 代理", desc: "仅官方 OpenAI API 出站 · 手动更新订阅 · 按需检查连接" },
 	      search: { title: "联网搜索", desc: "配置 Tavily/Brave、搜索策略、搜索深度和结果数量。" },
 	      tts: { title: "语音服务", desc: "配置豆包 TTS、可用音色、默认语速和 OSS 音频缓存。" },
 	      plugins: { title: "插件管理", desc: "查看图片、听悟、搜索、提示词等功能状态，后续可扩展独立开关。" },
@@ -8641,6 +8651,7 @@
 	      if (key === "overview") loadAdminOverview();
 	      if (key === "accounts") loadAdminUsers();
           if (key === "logins") globalThis.MeimeiLoginHistory?.open();
+          if (key === "egress") globalThis.MeimeiOpenAIEgress?.open();
 	      if (key === "models") loadAdminModels();
           if (key === "keys") {
             loadAdminModels();
@@ -10032,7 +10043,16 @@
 	        const clear = createIconButton("eraser", "清空");
 	        clear.addEventListener("click", () => saveModelKey(model.id, input, true));
 	        row.append(label, save, clear);
+            const keyStatus = document.createElement('p');
+            if (model.uses_openai_egress) {
+              keyStatus.className = 'openai-key-status'; keyStatus.setAttribute('role', 'status');
+              const test = createIconButton('plug-zap', '测试连接'); test.dataset.egressAction = '';
+              test.addEventListener('click', () => globalThis.MeimeiOpenAIEgress?.test(test,
+                { kind: 'model', model_id: model.id, api_key: input.value.trim() }, keyStatus));
+              row.append(test);
+            }
 	        card.append(title, desc, row);
+            if (model.uses_openai_egress) card.append(keyStatus);
 	        list.appendChild(card);
 	      }
 	      box.appendChild(list);

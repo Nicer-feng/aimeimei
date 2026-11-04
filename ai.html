@@ -58,10 +58,11 @@
   <script src="/res/markdown-renderer.js"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.30.3">
-  <link rel="stylesheet" href="/res/reader.css?v=2.30.3">
-  <link rel="stylesheet" href="/res/usage-time.css?v=2.30.3">
-  <link rel="stylesheet" href="/res/ui-motion.css?v=2.30.3">
+  <link rel="stylesheet" href="/res/ai.css?v=2.30.4">
+  <link rel="stylesheet" href="/res/openai-egress.css?v=2.30.4">
+  <link rel="stylesheet" href="/res/reader.css?v=2.30.4">
+  <link rel="stylesheet" href="/res/usage-time.css?v=2.30.4">
+  <link rel="stylesheet" href="/res/ui-motion.css?v=2.30.4">
 
   <link rel="stylesheet" href="/res/markdown.css">
 <link rel="apple-touch-icon" sizes="180x180" href="/res/apple-touch-icon.png?brand=20261023">
@@ -73,7 +74,7 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.30.3</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.30.4</button>
       </div>
       <div class="login-mode-tabs" role="tablist" aria-label="登录方式">
         <button class="login-mode-tab active" id="loginPasswordMode" type="button" role="tab" aria-selected="true"><i data-lucide="key-round" aria-hidden="true"></i><span>密码登录</span></button>
@@ -107,7 +108,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.30.3</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.30.4</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -120,7 +121,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png?brand=20261023" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.30.3</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.30.4</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -179,7 +180,7 @@
 	          </a>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.30.3</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.30.4</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -754,6 +755,7 @@
                 <button class="admin-nav-item" type="button" data-admin-section="logins"><i data-lucide="history" aria-hidden="true"></i><span>登录记录</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="models"><i data-lucide="bot" aria-hidden="true"></i><span>模型管理</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="keys"><i data-lucide="key-round" aria-hidden="true"></i><span>密钥管理</span></button>
+                <button class="admin-nav-item" type="button" data-admin-section="egress"><i data-lucide="network" aria-hidden="true"></i><span>OpenAI 代理</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="search"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="tts"><i data-lucide="volume-2" aria-hidden="true"></i><span>语音服务</span></button>
 	        <button class="admin-nav-item" type="button" data-admin-section="plugins"><i data-lucide="puzzle" aria-hidden="true"></i><span>插件管理</span></button>
@@ -904,6 +906,27 @@
 	          </section>
 	        </section>
 
+                <section class="admin-page" data-admin-page="egress">
+                  <section class="panel">
+                    <h2 class="panel-title"><i data-lucide="network" aria-hidden="true"></i><span>OpenAI 专用出站代理</span></h2>
+                    <p class="library-card-meta" id="openaiEgressSummary"></p>
+                    <label class="openai-egress-switch"><input id="openaiEgressEnabled" type="checkbox"><span>启用官方 OpenAI 出站代理</span></label>
+                    <label>VPN 订阅<input id="openaiSubscription" type="password" autocomplete="off" spellcheck="false" placeholder="HTTPS Clash / Mihomo 订阅链接"></label>
+                    <label>当前节点<select id="openaiEgressNode"><option value="">选择节点</option></select></label>
+                    <div class="openai-egress-actions">
+                      <button id="openaiEgressSave" data-egress-action type="button" class="ui-btn ui-btn-primary"><i data-lucide="save" aria-hidden="true"></i><span>保存开关与节点</span></button>
+                      <button id="openaiEgressReload" data-egress-action type="button" class="ui-btn ui-btn-secondary"><i data-lucide="download" aria-hidden="true"></i><span>更新订阅</span></button>
+                      <button id="openaiEgressRefresh" data-egress-action type="button" class="ui-btn ui-btn-secondary"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新配置</span></button>
+                      <button id="openaiProxyTest" data-egress-action type="button" class="ui-btn ui-btn-secondary"><i data-lucide="activity" aria-hidden="true"></i><span>测试代理</span></button>
+                    </div>
+                    <div class="openai-egress-test">
+                      <label>API 测试模型<select id="openaiTestModel"><option value="">选择官方 OpenAI 模型</option></select></label>
+                      <button id="openaiModelTest" data-egress-action type="button" class="ui-btn ui-btn-secondary"><i data-lucide="plug-zap" aria-hidden="true"></i><span>测试 API</span></button>
+                    </div>
+                    <p class="library-card-meta">测试只检查 HTTPS 连接与模型访问权限，不发送聊天内容；绿色不代表生成额度保证。</p>
+                    <div class="status" id="openaiEgressStatus" role="status" aria-live="polite"></div>
+                  </section>
+                </section>
 	        <section class="admin-page" data-admin-page="search">
 	          <section class="panel">
 		            <h2 class="panel-title"><i data-lucide="search" aria-hidden="true"></i><span>联网搜索</span></h2>
@@ -1117,7 +1140,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.30.3</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.30.4</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -1199,14 +1222,15 @@
       <p id="writingDraftState" class="writing-help"></p><button type="button" id="saveWritingDraft">保存稿件与定稿状态</button>
     </details>
   </dialog>
-      <script src="/res/ui-motion.js?v=2.30.3"></script>
-      <script src="/res/client-device.js?v=2.30.3"></script>
-      <script src="/res/login-history.js?v=2.30.3"></script>
-	  <script src="/res/ai.js?v=2.30.3"></script>
-      <script src="/res/ai-motion.js?v=2.30.3"></script>
-      <script src="/res/reader.js?v=2.30.3"></script>
-      <script src="/res/usage-clock.js?v=2.30.3"></script>
-      <script src="/res/usage-time.js?v=2.30.3"></script>
+      <script src="/res/ui-motion.js?v=2.30.4"></script>
+      <script src="/res/client-device.js?v=2.30.4"></script>
+      <script src="/res/login-history.js?v=2.30.4"></script>
+      <script src="/res/openai-egress.js?v=2.30.4"></script>
+	  <script src="/res/ai.js?v=2.30.4"></script>
+      <script src="/res/ai-motion.js?v=2.30.4"></script>
+      <script src="/res/reader.js?v=2.30.4"></script>
+      <script src="/res/usage-clock.js?v=2.30.4"></script>
+      <script src="/res/usage-time.js?v=2.30.4"></script>
 
 </body>
 </html>

@@ -51,6 +51,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (pathname === '/fixture.png') { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(png); return; }
     if (pathname === '/api/me') return json(res, { authenticated: true, user: { id: 'paste-fixture', username: 'fixture', display_name: '本地测试', role: 'family' } });
+    if (pathname === '/api/session/device-info') return json(res, { ok: true });
     if (pathname === '/api/models') return json(res, { models });
     if (pathname === '/api/features') return json(res, { features: { selection_quote: true, side_discussion: false, long_text_detection: true } });
     if (pathname === '/api/version') return json(res, { version: fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim(), build_id: 'clipboard-fixture' });

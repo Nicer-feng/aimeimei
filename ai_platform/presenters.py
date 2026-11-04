@@ -1,9 +1,13 @@
+from .openai_egress import is_openai_url
+
+
 def public_model(row):
     return {
         "id": row["id"],
         "name": row["name"],
         "provider": row["provider"],
         "base_url": row["base_url"],
+        "uses_openai_egress": is_openai_url(row["base_url"]),
         "model": row["model"],
         "system_prompt": row["system_prompt"],
         "supports_vision": bool(row["supports_vision"]) if "supports_vision" in row.keys() else False,
