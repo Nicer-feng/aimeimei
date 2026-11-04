@@ -7,6 +7,7 @@ from .daily_reports import init_daily_report_tables
 from .product_reports import init_product_report_tables
 from .login_history import init_login_history_tables
 from .openai_budget import init_tables as init_openai_budget_tables
+from .super_writing import init_tables as init_super_writing_tables
 from .settings import (
     DATA_DIR,
     DB_PATH,
@@ -555,6 +556,8 @@ def init_db(secrets_data=None):
         conversation_columns = table_columns(conn, "conversations")
         if "writing_mode" not in conversation_columns:
             conn.execute("ALTER TABLE conversations ADD COLUMN writing_mode INTEGER NOT NULL DEFAULT 0")
+        if "super_mode" not in conversation_columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN super_mode INTEGER NOT NULL DEFAULT 0")
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS writing_tasks (
               conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
@@ -576,6 +579,7 @@ def init_db(secrets_data=None):
         """)
         if "history_start_id" not in table_columns(conn, "writing_tasks"):
             conn.execute("ALTER TABLE writing_tasks ADD COLUMN history_start_id INTEGER NOT NULL DEFAULT 0")
+        init_super_writing_tables(conn)
         user_columns = table_columns(conn, "users")
         if "phone" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''")

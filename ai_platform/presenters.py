@@ -71,6 +71,7 @@ def conversation_row(row):
         "supports_reasoning_control": bool(row["supports_reasoning_control"]) if "supports_reasoning_control" in row.keys() else False,
         "reasoning_mode": row["reasoning_mode"] if "reasoning_mode" in row.keys() else "balanced",
         "writing_mode": bool(row["writing_mode"]) if "writing_mode" in row.keys() else False,
+        "super_mode": bool(row["super_mode"]) if "super_mode" in row.keys() else False,
         "pinned": bool(row["pinned"]) if "pinned" in row.keys() else False,
         "pinned_at": row["pinned_at"] if "pinned_at" in row.keys() else 0,
         "context_mode": row["context_mode"] if "context_mode" in row.keys() else "smart",

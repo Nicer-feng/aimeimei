@@ -55,16 +55,17 @@
   <script src="/res/vendor/highlight-11.11.1.min.js"></script>
   <script src="/res/vendor/highlight-nginx-11.11.1.min.js"></script>
   <script src="/res/vendor/highlight-dockerfile-11.11.1.min.js"></script>
-  <script src="/res/markdown-renderer.js?v=2.31.0"></script>
+  <script src="/res/markdown-renderer.js?v=2.32.0"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.31.0">
-  <link rel="stylesheet" href="/res/openai-egress.css?v=2.31.0">
-  <link rel="stylesheet" href="/res/reader.css?v=2.31.0">
-  <link rel="stylesheet" href="/res/usage-time.css?v=2.31.0">
-  <link rel="stylesheet" href="/res/ui-motion.css?v=2.31.0">
+  <link rel="stylesheet" href="/res/ai.css?v=2.32.0">
+  <link rel="stylesheet" href="/res/openai-egress.css?v=2.32.0">
+  <link rel="stylesheet" href="/res/reader.css?v=2.32.0">
+  <link rel="stylesheet" href="/res/super-writing.css?v=2.32.0">
+  <link rel="stylesheet" href="/res/usage-time.css?v=2.32.0">
+  <link rel="stylesheet" href="/res/ui-motion.css?v=2.32.0">
 
-  <link rel="stylesheet" href="/res/markdown.css?v=2.31.0">
+  <link rel="stylesheet" href="/res/markdown.css?v=2.32.0">
 <link rel="apple-touch-icon" sizes="180x180" href="/res/apple-touch-icon.png?brand=20261023">
 </head>
 <body>
@@ -74,7 +75,7 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.31.0</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.32.0</button>
       </div>
       <div class="login-mode-tabs" role="tablist" aria-label="登录方式">
         <button class="login-mode-tab active" id="loginPasswordMode" type="button" role="tab" aria-selected="true"><i data-lucide="key-round" aria-hidden="true"></i><span>密码登录</span></button>
@@ -108,7 +109,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.31.0</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.32.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -121,7 +122,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png?brand=20261023" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.31.0</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.32.0</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -180,7 +181,7 @@
 	          </a>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.31.0</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.32.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -245,6 +246,8 @@
 		            <button class="prompt-chip ui-badge inline-flex items-center" id="openPrompts" type="button">更多</button>
 	          </div>
           <div class="reader-toolbar">
+            <button class="super-mode-toggle" id="superModeToggle" type="button" aria-pressed="false" aria-label="超能槑槑模式：关闭，当前使用原流程" hidden><i data-lucide="zap" aria-hidden="true"></i><span>超能槑槑模式</span><small id="superModeState">原流程</small></button>
+            <button class="super-final-entry" id="openFinalDelivery" type="button" title="回传或更新本单最终交付" hidden><i data-lucide="file-check-2" aria-hidden="true"></i><span>最终交付</span></button>
             <button class="ui-icon-btn reader-toggle" id="readerToggle" type="button" title="摸鱼模式" aria-label="摸鱼模式" aria-pressed="false"><i data-lucide="fish" aria-hidden="true"></i></button>
           <div class="reader-controls" id="readerControls" hidden>
             <button class="ui-icon-btn" id="readerPrevious" type="button" aria-label="上一页" title="上一页"><i data-lucide="chevron-left" aria-hidden="true"></i></button>
@@ -1172,7 +1175,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.31.0</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.32.0</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -1254,15 +1257,30 @@
       <p id="writingDraftState" class="writing-help"></p><button type="button" id="saveWritingDraft">保存稿件与定稿状态</button>
     </details>
   </dialog>
-      <script src="/res/ui-motion.js?v=2.31.0"></script>
-      <script src="/res/client-device.js?v=2.31.0"></script>
-      <script src="/res/login-history.js?v=2.31.0"></script>
-      <script src="/res/openai-egress.js?v=2.31.0"></script>
-	  <script src="/res/ai.js?v=2.31.0"></script>
-      <script src="/res/ai-motion.js?v=2.31.0"></script>
-      <script src="/res/reader.js?v=2.31.0"></script>
-      <script src="/res/usage-clock.js?v=2.31.0"></script>
-      <script src="/res/usage-time.js?v=2.31.0"></script>
+  <dialog id="finalDeliveryDialog" class="super-delivery-dialog" aria-labelledby="finalDeliveryTitle">
+    <header><div><strong id="finalDeliveryTitle">本单最终交付</strong><p>粘贴或上传客户已接受的稿件，更新时保留旧版本。</p></div><button id="closeFinalDelivery" type="button" aria-label="关闭最终交付"><i data-lucide="x" aria-hidden="true"></i></button></header>
+    <p id="finalDeliveryStatus" class="super-delivery-status" role="status" aria-live="polite"></p>
+    <div class="super-delivery-fields">
+      <label>稿件名称<input id="finalDeliveryLabel" type="text" maxlength="120" value="最终交付" placeholder="例如：博主甲口播稿"></label>
+      <label>历史版本<select id="finalDeliveryVersions"><option value="">当前版本</option></select></label>
+    </div>
+    <div class="super-delivery-source-row"><span id="finalDeliverySource" class="super-delivery-source">尚未回传</span><span id="finalDeliveryFileName"></span></div>
+    <label class="super-delivery-body-label" for="finalDeliveryContent">交付稿原文</label>
+    <textarea id="finalDeliveryContent" rows="15" maxlength="100000" placeholder="粘贴客户最终接受的完整稿件；也可以从聊天中选取后再核对。"></textarea>
+    <div class="super-delivery-import-row"><label class="super-delivery-message-label">从本单聊天载入<select id="finalDeliveryMessages"><option value="">选择一条消息</option></select></label><button id="uploadFinalDelivery" type="button"><i data-lucide="upload" aria-hidden="true"></i><span>上传文件</span></button><input id="finalDeliveryFile" type="file" accept=".txt,.md,.markdown,.doc,.docx,.pdf" hidden></div>
+    <p class="super-delivery-help" id="finalDeliveryHelp">仅保存最终交付，不会发送新消息或修改原聊天。历史推定稿需要你核对，保存后才记为客户确认稿。</p>
+    <footer><span id="finalDeliveryReferenceNote"></span><button id="saveFinalDelivery" type="button" class="super-delivery-save">保存为客户确认稿</button></footer>
+  </dialog>
+      <script src="/res/ui-motion.js?v=2.32.0"></script>
+      <script src="/res/client-device.js?v=2.32.0"></script>
+      <script src="/res/login-history.js?v=2.32.0"></script>
+      <script src="/res/openai-egress.js?v=2.32.0"></script>
+	  <script src="/res/ai.js?v=2.32.0"></script>
+      <script src="/res/super-writing.js?v=2.32.0"></script>
+      <script src="/res/ai-motion.js?v=2.32.0"></script>
+      <script src="/res/reader.js?v=2.32.0"></script>
+      <script src="/res/usage-clock.js?v=2.32.0"></script>
+      <script src="/res/usage-time.js?v=2.32.0"></script>
 
 </body>
 </html>

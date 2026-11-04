@@ -290,16 +290,16 @@ class AdminHandlersMixin:
             """
             SELECT
               COUNT(DISTINCT u.id) AS total_users,
-              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN 1 ELSE 0 END), 0) AS total_requests,
-              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
-              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
-              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN
+              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN 1 ELSE 0 END), 0) AS total_requests,
+              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
+              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
+              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN
                 CASE WHEN COALESCE(m.total_tokens, 0) > 0
                   THEN COALESCE(m.total_tokens, 0)
                   ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
                 END ELSE 0 END), 0) AS total_tokens,
-              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.cached_tokens, 0) ELSE 0 END), 0) AS cached_tokens,
-              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.cache_creation_tokens, 0) ELSE 0 END), 0) AS cache_creation_tokens
+              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.cached_tokens, 0) ELSE 0 END), 0) AS cached_tokens,
+              COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.cache_creation_tokens, 0) ELSE 0 END), 0) AS cache_creation_tokens
             FROM users u
             LEFT JOIN messages m ON m.user_id=u.id
             """
@@ -311,12 +311,12 @@ class AdminHandlersMixin:
         join_sql = ""
         where_sql = "m.user_id=?"
         if kind == "models":
-            join_sql = "JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id"
-            where_sql = "c.model_id=?"
+            join_sql = "LEFT JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id"
+            where_sql = "COALESCE(NULLIF(m.cost_model_id, ''), c.model_id)=?"
         rows = conn.execute(
             f"""
             WITH recent AS (
-              SELECT m.id, m.user_id, m.conversation_id, m.created_at,
+              SELECT m.id, m.user_id, m.conversation_id, m.created_at, m.cost_model_id, m.actual_model,
                      m.prompt_tokens, m.completion_tokens,
                      CASE WHEN COALESCE(m.total_tokens, 0) > 0
                        THEN m.total_tokens
@@ -324,17 +324,17 @@ class AdminHandlersMixin:
                      END AS total_tokens
               FROM messages m
               {join_sql}
-              WHERE (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) AND {where_sql}
+              WHERE (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) AND {where_sql}
               ORDER BY m.created_at DESC, m.id DESC
               LIMIT 20
             )
             SELECT m.*, c.title AS conversation_title,
-                   mo.name AS model_name, mo.model AS model_code,
+                   COALESCE(mo.name,m.actual_model,'未知模型') AS model_name, COALESCE(mo.model,m.actual_model,'') AS model_code,
                    u.username, u.display_name,
                    EXISTS(SELECT 1 FROM message_sources s WHERE s.message_id=m.id) AS web_search
             FROM recent m
             LEFT JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
-            LEFT JOIN models mo ON mo.id=c.model_id
+            LEFT JOIN models mo ON mo.id=COALESCE(NULLIF(m.cost_model_id, ''), c.model_id)
             LEFT JOIN users u ON u.id=m.user_id
             ORDER BY m.created_at DESC, m.id DESC
             """,
@@ -388,24 +388,24 @@ class AdminHandlersMixin:
         rows = conn.execute(
             """
             WITH recent AS (
-              SELECT m.id, m.user_id, m.conversation_id, m.created_at,
+              SELECT m.id, m.user_id, m.conversation_id, m.created_at, m.cost_model_id, m.actual_model,
                      m.prompt_tokens, m.completion_tokens,
                      CASE WHEN COALESCE(m.total_tokens, 0) > 0
                        THEN m.total_tokens
                        ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
                      END AS total_tokens
               FROM messages m INDEXED BY idx_messages_user_recent
-              WHERE m.user_id=? AND (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）'))
+              WHERE m.user_id=? AND (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%')))
                 AND m.created_at>=? AND m.created_at<?
               ORDER BY m.created_at DESC, m.id DESC
               LIMIT 20
             )
             SELECT m.*, c.title AS conversation_title,
-                   mo.name AS model_name, mo.model AS model_code,
+                   COALESCE(mo.name,m.actual_model,'未知模型') AS model_name, COALESCE(mo.model,m.actual_model,'') AS model_code,
                    EXISTS(SELECT 1 FROM message_sources s WHERE s.message_id=m.id) AS web_search
             FROM recent m
             LEFT JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
-            LEFT JOIN models mo ON mo.id=c.model_id
+            LEFT JOIN models mo ON mo.id=COALESCE(NULLIF(m.cost_model_id, ''), c.model_id)
             ORDER BY m.created_at DESC, m.id DESC
             """,
             (user_id, day_start, day_end),
@@ -632,17 +632,17 @@ class AdminHandlersMixin:
                   u.is_active,
                   u.created_at,
                   COUNT(DISTINCT c.id) AS conversation_count,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN 1 ELSE 0 END), 0) AS request_count,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN 1 ELSE 0 END), 0) AS request_count,
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN
                     CASE WHEN COALESCE(m.total_tokens, 0) > 0
                       THEN COALESCE(m.total_tokens, 0)
                       ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
                     END ELSE 0 END), 0) AS total_tokens,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.cached_tokens, 0) ELSE 0 END), 0) AS cached_tokens,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.cache_creation_tokens, 0) ELSE 0 END), 0) AS cache_creation_tokens,
-                  MAX(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN m.created_at ELSE NULL END) AS last_used_at
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.cached_tokens, 0) ELSE 0 END), 0) AS cached_tokens,
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.cache_creation_tokens, 0) ELSE 0 END), 0) AS cache_creation_tokens,
+                  MAX(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN m.created_at ELSE NULL END) AS last_used_at
                 FROM users u
                 LEFT JOIN conversations c ON c.user_id=u.id
                 LEFT JOIN messages m ON m.user_id=u.id AND m.conversation_id=c.id
@@ -654,31 +654,35 @@ class AdminHandlersMixin:
                 args,
             ).fetchall() if view in ("all", "users") else []
 
-            # Join by conversation; the recent-user index scans too many messages here.
+            # 辅助调用按自己的模型归集，不能全部算到会话当前选择的主模型。
             model_rows = conn.execute(
                 f"""
+                WITH billed AS (
+                  SELECT msg.*, COALESCE(NULLIF(msg.cost_model_id, ''), c.model_id) AS effective_model_id
+                  FROM messages msg
+                  LEFT JOIN conversations c ON c.id=msg.conversation_id AND c.user_id=msg.user_id
+                  WHERE (msg.role='assistant' OR (msg.role='system' AND (msg.content='写稿要求整理（辅助调用）' OR msg.content LIKE '超能槑槑%')))
+                )
                 SELECT
                   mo.id,
                   mo.name,
                   mo.model,
                   mo.provider,
                   mo.enabled,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN 1 ELSE 0 END), 0) AS request_count,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN 1 ELSE 0 END), 0) AS request_count,
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.prompt_tokens, 0) ELSE 0 END), 0) AS prompt_tokens,
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.completion_tokens, 0) ELSE 0 END), 0) AS completion_tokens,
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN
                     CASE WHEN COALESCE(m.total_tokens, 0) > 0
                       THEN COALESCE(m.total_tokens, 0)
                       ELSE COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)
                     END ELSE 0 END), 0) AS total_tokens,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.cached_tokens, 0) ELSE 0 END), 0) AS cached_tokens,
-                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN COALESCE(m.cache_creation_tokens, 0) ELSE 0 END), 0) AS cache_creation_tokens,
-                  COUNT(DISTINCT CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN c.user_id ELSE NULL END) AS user_count,
-                  MAX(CASE WHEN (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) THEN m.created_at ELSE NULL END) AS last_used_at
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.cached_tokens, 0) ELSE 0 END), 0) AS cached_tokens,
+                  COALESCE(SUM(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN COALESCE(m.cache_creation_tokens, 0) ELSE 0 END), 0) AS cache_creation_tokens,
+                  COUNT(DISTINCT CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN m.user_id ELSE NULL END) AS user_count,
+                  MAX(CASE WHEN (m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) THEN m.created_at ELSE NULL END) AS last_used_at
                 FROM models mo
-                LEFT JOIN conversations c ON c.model_id=mo.id
-                LEFT JOIN messages m INDEXED BY idx_messages_user_conversation
-                  ON m.conversation_id=c.id AND m.user_id=c.user_id AND (m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）'))
+                LEFT JOIN billed m ON m.effective_model_id=mo.id
                 {model_where_sql}
                 GROUP BY mo.id
                 ORDER BY {model_order_sql}
@@ -778,7 +782,7 @@ class AdminHandlersMixin:
         start_ts = int(datetime.combine(start, day_time.min).timestamp())
         end_ts = int(datetime.combine(end + timedelta(days=1), day_time.min).timestamp())
         cutoff = start_ts if range_key != "all" else 0
-        range_where = "(m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）'))"
+        range_where = "(m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%')))"
         range_args = []
         if cutoff:
             range_where += " AND m.created_at>=? AND m.created_at<?"
@@ -791,7 +795,7 @@ class AdminHandlersMixin:
                    SUM(completion_tokens) AS completion_tokens,
                    SUM(CASE WHEN total_tokens>0 THEN total_tokens ELSE prompt_tokens+completion_tokens END) AS total_tokens,
                    SUM(estimated_cost) AS estimated_cost FROM messages
-                   WHERE (role='assistant' OR (role='system' AND content='写稿要求整理（辅助调用）'))
+                   WHERE (role='assistant' OR (role='system' AND (content='写稿要求整理（辅助调用）' OR content LIKE '超能槑槑%')))
                      AND created_at>=? AND created_at<? GROUP BY date ORDER BY date""",
                 (start_ts, end_ts),
             ).fetchall()
@@ -801,14 +805,14 @@ class AdminHandlersMixin:
                   COALESCE(SUM(estimated_cost), 0) AS total_cost,
                   COUNT(*) AS request_count
                 FROM messages
-                WHERE (role='assistant' OR (role='system' AND content='写稿要求整理（辅助调用）'))
+                WHERE (role='assistant' OR (role='system' AND (content='写稿要求整理（辅助调用）' OR content LIKE '超能槑槑%')))
                 """
             ).fetchone()
             today_summary = conn.execute(
                 """
                 SELECT COALESCE(SUM(estimated_cost), 0) AS cost
                 FROM messages
-                WHERE (role='assistant' OR (role='system' AND content='写稿要求整理（辅助调用）')) AND created_at>=?
+                WHERE (role='assistant' OR (role='system' AND (content='写稿要求整理（辅助调用）' OR content LIKE '超能槑槑%'))) AND created_at>=?
                 """,
                 (local_day_start(),),
             ).fetchone()
@@ -816,7 +820,7 @@ class AdminHandlersMixin:
                 """
                 SELECT COALESCE(SUM(estimated_cost), 0) AS cost
                 FROM messages
-                WHERE (role='assistant' OR (role='system' AND content='写稿要求整理（辅助调用）')) AND created_at>=?
+                WHERE (role='assistant' OR (role='system' AND (content='写稿要求整理（辅助调用）' OR content LIKE '超能槑槑%'))) AND created_at>=?
                 """,
                 (local_month_start(),),
             ).fetchone()
@@ -944,7 +948,7 @@ class AdminHandlersMixin:
             cutoff = now() - 7 * 86400
         elif range_key == "30d":
             cutoff = now() - 30 * 86400
-        where_sql = "(m.role='assistant' OR (m.role='system' AND m.content='写稿要求整理（辅助调用）')) AND COALESCE(m.estimated_cost, 0)=0"
+        where_sql = "(m.role='assistant' OR (m.role='system' AND (m.content='写稿要求整理（辅助调用）' OR m.content LIKE '超能槑槑%'))) AND COALESCE(m.estimated_cost, 0)=0 AND COALESCE(m.generation_status, '')!='usage_unknown'"
         args = []
         if cutoff:
             where_sql += " AND m.created_at>=?"
@@ -958,14 +962,14 @@ class AdminHandlersMixin:
                   m.completion_tokens,
                   m.total_tokens,
                   m.created_at,
-                  c.model_id,
-                  mo.model AS model_code,
+                  COALESCE(NULLIF(m.cost_model_id, ''), c.model_id) AS model_id,
+                  COALESCE(NULLIF(m.actual_model, ''), mo.model) AS model_code,
                   mo.input_price_per_million,
                   mo.output_price_per_million,
                   mo.cost_enabled
                 FROM messages m
                 JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
-                JOIN models mo ON mo.id=c.model_id
+                JOIN models mo ON mo.id=COALESCE(NULLIF(m.cost_model_id, ''), c.model_id)
                 WHERE {where_sql}
                 """,
                 args,
@@ -1010,7 +1014,7 @@ class AdminHandlersMixin:
             conn.execute(
                 """
                 INSERT INTO daily_usage
-                (user_id, date, request_count, input_tokens, output_tokens, total_tokens, estimated_cost, updated_at)
+                (user_id, date, request_count, input_tokens, output_tokens, total_tokens, cached_tokens, cache_creation_tokens, estimated_cost, updated_at)
                 SELECT
                   user_id,
                   date(created_at, 'unixepoch', 'localtime') AS usage_date,
@@ -1018,10 +1022,12 @@ class AdminHandlersMixin:
                   COALESCE(SUM(prompt_tokens), 0) AS input_tokens,
                   COALESCE(SUM(completion_tokens), 0) AS output_tokens,
                   COALESCE(SUM(CASE WHEN total_tokens>0 THEN total_tokens ELSE prompt_tokens+completion_tokens END), 0) AS total_tokens,
+                  COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                  COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
                   COALESCE(SUM(estimated_cost), 0) AS estimated_cost,
                   ?
                 FROM messages
-                WHERE (role='assistant' OR (role='system' AND content='写稿要求整理（辅助调用）'))
+                WHERE (role='assistant' OR (role='system' AND (content='写稿要求整理（辅助调用）' OR content LIKE '超能槑槑%')))
                 GROUP BY user_id, usage_date
                 """,
                 (now(),),
@@ -1081,7 +1087,7 @@ class AdminHandlersMixin:
                 FROM messages msg
                 LEFT JOIN conversations c ON c.id=msg.conversation_id AND c.user_id=msg.user_id
                 LEFT JOIN models mo ON mo.id=COALESCE(NULLIF(msg.cost_model_id, ''), c.model_id)
-                WHERE msg.user_id=? AND (msg.role='assistant' OR (msg.role='system' AND msg.content='写稿要求整理（辅助调用）'))
+                WHERE msg.user_id=? AND (msg.role='assistant' OR (msg.role='system' AND (msg.content='写稿要求整理（辅助调用）' OR msg.content LIKE '超能槑槑%')))
                 GROUP BY model_name, model_code
                 ORDER BY total_tokens DESC, request_count DESC
                 LIMIT 5
@@ -1096,7 +1102,7 @@ class AdminHandlersMixin:
                   COUNT(msg.id) AS request_count,
                   COALESCE(SUM(CASE WHEN msg.total_tokens>0 THEN msg.total_tokens ELSE msg.prompt_tokens+msg.completion_tokens END), 0) AS total_tokens
                 FROM conversations c
-                JOIN messages msg ON msg.conversation_id=c.id AND msg.user_id=c.user_id AND (msg.role='assistant' OR (msg.role='system' AND msg.content='写稿要求整理（辅助调用）'))
+                JOIN messages msg ON msg.conversation_id=c.id AND msg.user_id=c.user_id AND (msg.role='assistant' OR (msg.role='system' AND (msg.content='写稿要求整理（辅助调用）' OR msg.content LIKE '超能槑槑%')))
                 WHERE c.user_id=?
                 GROUP BY c.id
                 ORDER BY total_tokens DESC, request_count DESC
@@ -1115,7 +1121,7 @@ class AdminHandlersMixin:
                 FROM messages msg
                 LEFT JOIN conversations c ON c.id=msg.conversation_id AND c.user_id=msg.user_id
                 LEFT JOIN models mo ON mo.id=COALESCE(NULLIF(msg.cost_model_id, ''), c.model_id)
-                WHERE msg.user_id=? AND (msg.role='assistant' OR (msg.role='system' AND msg.content='写稿要求整理（辅助调用）')) AND msg.created_at>=?
+                WHERE msg.user_id=? AND (msg.role='assistant' OR (msg.role='system' AND (msg.content='写稿要求整理（辅助调用）' OR msg.content LIKE '超能槑槑%'))) AND msg.created_at>=?
                 GROUP BY usage_date, model_name
                 ORDER BY usage_date ASC, total_tokens DESC
                 """,

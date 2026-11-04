@@ -471,6 +471,7 @@
           if (state.user?.id !== user?.id || user?.role !== 'admin') globalThis.MeimeiLoginHistory?.clear();
           if (state.user?.id !== user?.id) resetTokenStats();
 	      state.user = user || null;
+          globalThis.MeimeiSuper?.accountChanged();
           globalThis.MeimeiUsage?.accountChanged();
 	      const label = $("currentUserLabel");
 	      if (label) {
@@ -1621,7 +1622,7 @@
 	      const open = ["promptDialog", "profileDialog", "favoriteDialog", "mediaDialog", "ocrDialog", "accentDialog", "copyDialog", "globalSearchDialog", "modelPickerDialog", "changelogDialog", "confirmDialog", "shareDialog"].some((id) => {
         const el = $(id);
         return el && el.classList.contains("show");
-      });
+      }) || Boolean($("finalDeliveryDialog")?.open);
       document.body.classList.toggle("dialog-open", open);
 	  if (open) closeDesktopPetMenu();
 	  else schedulePetPositionCorrection();
@@ -4091,6 +4092,7 @@
     function beginConversationTransition(options = {}) {
       globalThis.MeimeiReader?.exit();
       state.conversationEpoch++;
+      globalThis.MeimeiSuper?.transition();
       closeSideDiscussion();
       state.conversationController?.abort();
       state.conversationController = new AbortController();
@@ -4148,6 +4150,7 @@
         if (!isCurrentConversation(context)) return null;
       }
       saveCurrentDraft();
+      const pendingSuperMode = globalThis.MeimeiSuper?.newConversationMode() === true;
       const epoch = beginConversationTransition({ sendAttempt: options.sendAttempt });
       const controller = state.conversationController;
 	      const button = $("newChat");
@@ -4161,7 +4164,7 @@
 	        state.activeSideDiscussion = null;
 	        state.sideDiscussionMessages = [];
 	        updateSideDiscussionEntry();
-	        const res = await api("/api/conversations", { method: "POST", signal: controller.signal, body: JSON.stringify({ model_id: modelId, writing_mode: getUserStorage("writingMode", "0") === "1" }) });
+	        const res = await api("/api/conversations", { method: "POST", signal: controller.signal, body: JSON.stringify({ model_id: modelId, writing_mode: getUserStorage("writingMode", "0") === "1", super_mode: pendingSuperMode }) });
         if (!res.ok) throw new Error(await readError(res, "新建对话失败，稍后再试一下。"));
         const data = await res.json();
         if (epoch !== state.conversationEpoch) return null;
@@ -4255,6 +4258,7 @@
       } finally {
         if (isCurrentConversation(context)) {
           state.conversationLoading = false;
+          globalThis.MeimeiSuper?.sync();
           pollDocumentAttachments();
         }
       }
@@ -4292,6 +4296,7 @@
     let writingConversationId = null;
     const writingFieldLabels = {project:"客户／项目", audience:"目标受众", account:"账号／博主视角", format:"交付格式", tone:"表达风格", focus:"传播重点与必带卖点", facts:"材料事实与限定条件", shooting:"拍摄条件与可用素材", notes:"其他要求", required:"必带词（逐行填写，按原文检查）", forbidden:"避用词（仅本单，逐行填写）", missing:"待补信息（逐行填写）", min_chars:"正文最少字数（0 表示未指定）", max_chars:"正文最多字数（0 表示未指定）"};
     function renderWritingMode() {
+      globalThis.MeimeiSuper?.sync();
       const enabled = state.currentConversation ? Boolean(state.currentConversation.writing_mode) : getUserStorage("writingMode", "0") === "1";
       const button = $("writingModeToggle");
       button.classList.toggle("active", enabled);
@@ -4388,6 +4393,7 @@
       finally { buttons.forEach(b => b.disabled = false); }
     }
     function renderWritingCheck(wrap, message) {
+      globalThis.MeimeiSuper?.renderCheck(wrap, message);
       let panel = wrap.querySelector(".writing-check");
       if (!message.writing_check || message.thinking) { if (panel) panel.remove(); return; }
       if (!panel) { panel = document.createElement("details"); panel.className = "writing-check"; wrap.querySelector(".bubble-shell").append(panel); }
@@ -4438,7 +4444,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.31.0" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.32.0" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8373,6 +8379,7 @@
     }
 
 	    async function sendMessage(contentOverride = "", options = {}) {
+          if (globalThis.MeimeiSuper?.isBusy()) { setStatus("chatStatus", "请等待本单模式或交付稿保存完成后再发送。", ""); return; }
           globalThis.MeimeiReader?.exit();
 	      const hasOverride = typeof contentOverride === "string" && contentOverride.trim();
 	      const rawContent = (hasOverride ? contentOverride : $("prompt").value).trim();
@@ -8514,6 +8521,12 @@
         if (!res.ok) throw await readChatFailure(res, "发送失败，稍后再试一下。");
         await readChatEvents(res, event => {
           if (!isCurrentGeneration(generation)) return;
+          if (event.type === "super_status") {
+            assistant._activityStatus = event.message || (event.status === "checking" ? "正在核对本单要求与交付稿。" : "超能槑槑正在生成，完成后核对本单要求。");
+            setStatus("chatStatus", assistant._activityStatus, "");
+            updateStreamingMessage(assistant, { activity: true });
+            return;
+          }
           if (event.type === "message.failed") {
             if (event.message_id) assistant.id = event.message_id;
             const error = new Error(event.message || "回答生成中断，请重试。");
@@ -8538,6 +8551,7 @@
             assistant.id = event.message_id;
             assistant.generation_status = event.generation_status || "completed";
             assistant.writing_check = event.writing_check || null;
+            assistant.super_check = event.super_check || null;
             assistant.favorite_id = null;
             assistant.usage = event.usage || assistant.usage || null;
             if (Array.isArray(event.sources)) assistant.sources = event.sources;

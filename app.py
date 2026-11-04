@@ -23,6 +23,7 @@ from ai_platform.handlers.daily_reports import DailyReportHandlersMixin
 from ai_platform.handlers.product_reports import ProductReportHandlersMixin
 from ai_platform.handlers.login_history import LoginHistoryHandlersMixin
 from ai_platform.handlers.openai_egress import OpenAIEgressHandlersMixin
+from ai_platform.handlers.super_writing import SuperWritingHandlersMixin
 from ai_platform.login_history import cleanup_history, request_ip, touch_session
 from ai_platform.handlers import (
     AdminHandlersMixin,
@@ -61,6 +62,7 @@ from ai_platform.settings import (
 
 
 class AppHandler(
+    SuperWritingHandlersMixin,
     OpenAIEgressHandlersMixin,
     LoginHistoryHandlersMixin,
     DailyReportHandlersMixin,
@@ -237,6 +239,8 @@ class AppHandler(
             return self.require_user(self.handle_side_discussion_item)
         if path.startswith("/api/conversations/") and path.endswith("/writing"):
             return self.require_user(self.handle_writing)
+        if re.fullmatch(r"/api/conversations/[^/]+/(?:super-writing|final-deliveries)", path):
+            return self.require_user(self.handle_super_writing)
         if path == "/api/conversations":
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
@@ -372,6 +376,8 @@ class AppHandler(
             return self.require_user(self.handle_conversations)
         if path.startswith("/api/conversations/") and path.endswith("/messages"):
             return self.require_user(self.handle_send_message)
+        if re.fullmatch(r"/api/conversations/[^/]+/final-deliveries", path):
+            return self.require_user(self.handle_super_writing)
         if path.startswith("/api/conversations/") and path.endswith("/shares"):
             return self.require_user(self.handle_conversation_shares)
         return self.error(HTTPStatus.NOT_FOUND, "not found")
@@ -408,6 +414,8 @@ class AppHandler(
             return self.require_user(self.handle_profile_item)
         if path.startswith("/api/conversations/") and path.endswith("/writing"):
             return self.require_user(self.handle_writing)
+        if re.fullmatch(r"/api/conversations/[^/]+/super-writing", path):
+            return self.require_user(self.handle_super_writing)
         if path.startswith("/api/conversations/"):
             return self.require_user(self.handle_conversation_item)
         return self.error(HTTPStatus.NOT_FOUND, "not found")

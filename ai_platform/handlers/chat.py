@@ -3,6 +3,7 @@ from ..docmind import build_document_context
 from .. import writing
 from ..openai_egress import is_openai_url
 from .. import openai_budget
+from .. import super_writing, super_generation
 
 import codecs
 import threading
@@ -128,12 +129,16 @@ class ChatHandlersMixin:
 
     @classmethod
     def run_context_summary_job(cls, job_key, conversation_id, user_id):
+        conversation = None
+        summary_started = False
+        summary_recorded = False
         try:
             with db() as conn:
                 conversation = conn.execute(
                     """
-                    SELECT c.id, c.user_id, c.context_mode, c.context_summary,
-                           c.context_summary_message_id, m.base_url, m.api_key, m.model
+                    SELECT c.id, c.user_id, c.context_mode, c.context_summary, c.super_mode,
+                           c.context_summary_message_id, m.base_url, m.api_key, m.model,
+                           m.id AS model_id,m.input_price_per_million,m.output_price_per_million,m.cost_enabled
                     FROM conversations c JOIN models m ON m.id=c.model_id
                     WHERE c.id=? AND c.user_id=? AND c.archived=0
                     """,
@@ -189,8 +194,12 @@ class ChatHandlersMixin:
                 },
                 method="POST",
             )
+            summary_started = True
             with open_model_request(request, timeout=CONTEXT_SUMMARY_REQUEST_TIMEOUT) as response:
                 result = json.loads(response.read(2 * 1024 * 1024).decode(errors="replace"))
+            if conversation["super_mode"] and super_writing.eligible(user_id):
+                super_generation.record_summary(conversation, result.get("usage"))
+                summary_recorded = True
             choice = (result.get("choices") or [{}])[0]
             message = choice.get("message") or {}
             summary = str(message.get("content") or "").strip()
@@ -208,6 +217,11 @@ class ChatHandlersMixin:
                     (summary, int(rows[-1]["id"]), now(), conversation_id, user_id, int(rows[-1]["id"])),
                 )
         except Exception:
+            if summary_started and not summary_recorded and conversation and conversation["super_mode"] and super_writing.eligible(user_id):
+                try:
+                    super_generation.record_summary(conversation, None)
+                except Exception:
+                    pass
             # 上下文压缩是节省成本的辅助任务，任何异常都不能影响主聊天。
             pass
         finally:
@@ -737,6 +751,10 @@ class ChatHandlersMixin:
 
         model_id = str(data.get("model_id") or "").strip()
         title = str(data.get("title") or "新对话").strip()[:80] or "新对话"
+        if "super_mode" in data and not isinstance(data["super_mode"], bool):
+            return self.error(HTTPStatus.BAD_REQUEST, "超能模式值不正确")
+        if data.get("super_mode") and not super_writing.eligible(user_id):
+            return self.error(HTTPStatus.FORBIDDEN, "当前账号不可使用超能模式")
         with db() as conn:
             model = conn.execute(
                 "SELECT * FROM models WHERE id=? AND enabled=1", (model_id,)
@@ -747,10 +765,10 @@ class ChatHandlersMixin:
             ts = now()
             conn.execute(
                 """
-                INSERT INTO conversations(id, user_id, title, model_id, reasoning_mode, writing_mode, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO conversations(id, user_id, title, model_id, reasoning_mode, writing_mode, super_mode, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (conversation_id, user_id, title, model_id, self.reasoning_mode(data.get("reasoning_mode")), int(data.get("writing_mode") is True), ts, ts),
+                (conversation_id, user_id, title, model_id, self.reasoning_mode(data.get("reasoning_mode")), int(data.get("writing_mode") is True), int(data.get("super_mode") is True), ts, ts),
             )
             row = conn.execute(
                 """
@@ -803,7 +821,7 @@ class ChatHandlersMixin:
             row = conn.execute(
                 """
                 SELECT c.id, c.updated_at, m.name AS model_name, m.model AS model,
-                       COUNT(msg.id) AS message_count,
+                       COALESCE(SUM(CASE WHEN msg.role IN ('user','assistant') THEN 1 ELSE 0 END), 0) AS message_count,
                        COALESCE(SUM(CASE WHEN msg.role='user' THEN 1 ELSE 0 END), 0) AS turn_count,
                        COALESCE(SUM(
                          CASE
@@ -813,7 +831,7 @@ class ChatHandlersMixin:
                        ), 0) AS total_tokens
                 FROM conversations c
                 JOIN models m ON m.id = c.model_id
-                LEFT JOIN messages msg ON msg.conversation_id=c.id AND msg.user_id=c.user_id AND msg.role!='system'
+                LEFT JOIN messages msg ON msg.conversation_id=c.id AND msg.user_id=c.user_id
                 WHERE c.id=? AND c.user_id=? AND c.archived=0
                 GROUP BY c.id
                 """,
@@ -994,7 +1012,9 @@ class ChatHandlersMixin:
             ).fetchall()
         with db() as conn:
             checks = conn.execute("SELECT wc.message_id,wc.result_json FROM writing_checks wc JOIN messages m ON m.id=wc.message_id WHERE wc.user_id=? AND m.user_id=? AND m.conversation_id=?", (user_id,user_id,conversation_id)).fetchall()
+            super_checks = conn.execute("SELECT sc.message_id,sc.result_json FROM super_checks sc JOIN messages m ON m.id=sc.message_id WHERE sc.user_id=? AND m.user_id=? AND m.conversation_id=?", (user_id,user_id,conversation_id)).fetchall()
         checks_by_message = {r["message_id"]: writing.decode(r["result_json"], {}) for r in checks}
+        super_by_message = {r["message_id"]: writing.decode(r["result_json"], {}) for r in super_checks}
         sources_by_message = {}
         for source in sources:
             sources_by_message.setdefault(source["message_id"], []).append(
@@ -1022,12 +1042,13 @@ class ChatHandlersMixin:
                         "reasoning_content": row["reasoning_content"],
                         "generation_status": row["generation_status"],
                         "created_at": row["created_at"],
-                        "usage": message_token_usage(row),
+                        "usage": super_by_message.get(row["id"], {}).get("usage") or message_token_usage(row),
                         "sources": sources_by_message.get(row["id"], []),
                         "favorite_id": favorite_by_message.get(row["id"]),
                         "images": images_by_message.get(row["id"], []),
                         "documents": documents_by_message.get(row["id"], []),
                         "writing_check": checks_by_message.get(row["id"]),
+                        "super_check": super_by_message.get(row["id"]),
                     }
                     for row in messages
                 ]
@@ -1208,8 +1229,15 @@ class ChatHandlersMixin:
                 )
             context_mode = self.context_mode(convo["context_mode"])
             context_summary = str(convo["context_summary"] or "").strip()
-            history_limit = CONTEXT_RECENT_MESSAGE_LIMIT if context_mode == "smart" and context_summary else 80
-            history = conn.execute(
+            super_enabled = bool(convo["super_mode"] and super_writing.eligible(user_id))
+            if context_mode == "smart" and context_summary:
+                # 摘要水位之后的原文必须全部保留，避免新增消息挤出尚未摘要的要求。
+                history = conn.execute("""SELECT id,role,content FROM messages
+                    WHERE conversation_id=? AND user_id=? AND role IN ('user','assistant') AND content!=''
+                      AND id>? ORDER BY id ASC""",
+                    (conversation_id, user_id, int(convo["context_summary_message_id"] or 0))).fetchall()
+            else:
+                history = conn.execute(
                 """
                 SELECT id, role, content
                 FROM (
@@ -1221,9 +1249,9 @@ class ChatHandlersMixin:
                 ) AS recent_messages
                 ORDER BY id ASC
                 """,
-                (conversation_id, user_id, history_limit),
-            ).fetchall()
-            if convo["writing_mode"]:
+                (conversation_id, user_id, 80),
+                ).fetchall()
+            if convo["writing_mode"] and not super_enabled:
                 task_state = writing.get_state(conn, conversation_id, user_id)
                 start_id = task_state["history_start_id"]
                 if start_id:
@@ -1253,11 +1281,20 @@ class ChatHandlersMixin:
             ).fetchall()
 
         writing_run = None
-        if convo["writing_mode"]:
+        if convo["writing_mode"] and not super_enabled:
             writing_run = self.prepare_writing(convo, user_message_content, document_context, history)
             if writing_run[0]["history_start_id"]:
                 history = [r for r in history if r["id"] >= writing_run[0]["history_start_id"]]
                 context_summary = ""
+
+        super_run = None
+        super_check = None
+        if super_enabled:
+            try:
+                super_run = super_generation.prepare(convo, user_message_content, document_context, history)
+            except Exception as exc:
+                self.log_message("super writing preparation deferred (%s)", type(exc).__name__)
+                super_check = {"status": "failed", "notice": "超能辅助暂不可用，本轮按原流程生成。", "issues": [], "repaired": False}
 
         images_by_history_message = {}
         for image in history_images:
@@ -1319,6 +1356,8 @@ class ChatHandlersMixin:
                 upstream_messages.append({"role": "system", "content": document_context})
             if writing_run:
                 upstream_messages.append({"role": "system", "content": writing.prompt_context(*writing_run)})
+            if super_run:
+                upstream_messages.append({"role": "system", "content": super_generation.prompt_context(super_run)})
             upstream_messages.extend(upstream_message_from_history(row) for row in history)
             return upstream_messages
 
@@ -1454,12 +1493,16 @@ class ChatHandlersMixin:
         stream_failed = False
         stream_failure_message = ""
         native_work_started = False
+        super_buffer = bool(super_run)
         protect_storyboard = bool(writing_run and writing_run[0]["locked_version_id"] and writing_run[1] and writing_run[2]["intent"] == "storyboard")
 
         def emit_client_event(event):
             nonlocal client_connected
             if not client_connected:
                 return False
+            if super_buffer and event.get("choices"):
+                # 原始候选暂不交付，防止用户复制后正文被悄悄替换。
+                return True
             if protect_storyboard and (event.get("choices") or [{}])[0].get("delta", {}).get("content"):
                 return True
             try:
@@ -1484,6 +1527,8 @@ class ChatHandlersMixin:
         if search_results:
             emit_client_event({"type": "search_status", "status": "done",
                                "count": len(search_results), "sources": public_sources(search_results)})
+        if super_run:
+            emit_client_event({"type": "super_status", "status": "generating", "message": "超能槑槑正在生成，完成后核对本单要求。"})
         if search_fallback_notice:
             assistant_parts.append(search_fallback_notice)
             emit_client_event({"choices": [{"index": 0, "delta": {"content": search_fallback_notice},
@@ -1702,6 +1747,17 @@ class ChatHandlersMixin:
                 writing_run[0]["notice"] = protection_notice
             protect_storyboard = False
             emit_client_event({"choices": [{"delta": {"content": assistant_text}}]})
+        if super_run:
+            if generation_status == "completed" and emit_client_event({"type": "super_status", "status": "checking", "message": "正在核对本单要求与交付稿。"}):
+                try:
+                    assistant_text, super_check = super_generation.finish(super_run, assistant_text, convo)
+                except Exception as exc:
+                    self.log_message("super writing check deferred (%s)", type(exc).__name__)
+                    super_check = {"status": "failed", "notice": "复核未完成，保留原稿。", "issues": [], "repaired": False}
+            else:
+                super_check = {"status": "skipped", "notice": "主生成未完整完成，本轮未执行交付复核。", "issues": [], "repaired": False}
+            super_buffer = False
+            emit_client_event({"choices": [{"index": 0, "delta": {"content": assistant_text}, "finish_reason": "stop" if generation_status == "completed" else None}]})
         writing_check = None
         if assistant_text or reasoning_text or generation_status != "completed":
             with db() as conn:
@@ -1742,6 +1798,16 @@ class ChatHandlersMixin:
                 message_id = cursor.lastrowid
                 if writing_run and assistant_text:
                     writing_check = self.finish_writing(conn, *writing_run, assistant_text, message_id)
+                if super_check is not None:
+                    main_usage_known = isinstance(usage_data, dict) and any(k in usage_data for k in ("prompt_tokens", "input_tokens", "completion_tokens", "output_tokens", "total_tokens"))
+                    super_check["usage_unknown"] = bool(super_check.get("usage_unknown") or not main_usage_known)
+                    main_usage = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens, "estimated_cost": estimated_cost,
+                        "cached_tokens": cached_tokens, "cache_creation_tokens": cache_creation_tokens}
+                    super_check["usage"] = super_generation.combined_usage(super_run, main_usage) if super_run else main_usage
+                    super_check["calls"] = super_run["calls"] if super_run else []
+                    conn.execute("INSERT INTO super_checks(message_id,user_id,result_json) VALUES (?,?,?)",
+                        (message_id, user_id, json.dumps(super_check, ensure_ascii=False)))
                 for index, item in enumerate(search_results, 1):
                     conn.execute(
                         """
@@ -1814,8 +1880,11 @@ class ChatHandlersMixin:
                 },
                 "sources": public_sources(search_results),
                 "writing_check": writing_check,
+                "super_check": super_check,
                 "generation_status": generation_status,
             }
+            if super_check:
+                saved_event["usage"] = super_check["usage"]
             emit_client_event(saved_event)
             if generation_status != "completed":
                 emit_client_event({"type": "message.failed", "status": generation_status,
