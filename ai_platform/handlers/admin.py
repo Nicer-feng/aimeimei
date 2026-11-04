@@ -8,7 +8,7 @@ class AdminHandlersMixin:
     def handle_models(self):
         with db() as conn:
             rows = conn.execute(
-                "SELECT * FROM models WHERE enabled=1 ORDER BY updated_at DESC"
+                "SELECT * FROM models WHERE enabled=1 ORDER BY CASE WHEN trim(api_key)='' THEN 1 ELSE 0 END, updated_at DESC"
             ).fetchall()
         return self.json({"models": [public_model(row) for row in rows]})
 

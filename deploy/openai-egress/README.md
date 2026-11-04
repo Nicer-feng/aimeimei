@@ -27,7 +27,26 @@ python3 deploy/openai-egress/install.py --archive /tmp/mihomo-linux-amd64-v1-VER
 
 模型状态：灰色未检查/关闭，琥珀色检查中，绿色最近接口及模型权限检查通过，红色最近检查失败。悬停查看文字原因。选中模型或聚焦输入区时才按需检查，前后端缓存 90 秒、同模型合并并发，全局最多同时两项自动检查；无定时测速、无轮询、无伪造聊天。缓存过期后再次交互才更新，灯是最近状态而不是实时在线保证。
 
-## 数据与安全
+## 官方模型参数与人民币价格
+
+`ai_platform/model_options.py` 仅对已核验的官方模型 ID 配置能力。GPT-6.1 Sol 的三档映射为 low/medium/high；Terra 为 none/medium/high，Sol 快速档不会完全关闭思考。当前网页沿用三档，不额外展示 xhigh/max。未知官方模型不继承百炼参数、不猜测支持的档位。第三方 OpenAI-compatible 地址不按官方模型强制改写。
+
+主聊天、侧边讨论、写稿要求整理、上下文摘要和音视频增强继续走 Chat Completions。官方辅助调用将 max_tokens 转为 max_completion_tokens（包含思考预算）；写稿整理/摘要使用 Sol low、Terra none，正文使用当前档位。思考开启时不发送 temperature/top_p/logprobs/top_logprobs。不会把 Qwen 的 enable_thinking、thinking_budget 或 web_extractor 用到官方模型。原 Qwen 分支保持不变。
+
+两条模型的配置工具默认只打印方案：
+
+```sh
+python3 deploy/openai-egress/configure-writing-models.py
+python3 deploy/openai-egress/configure-writing-models.py --apply --backup-dir /opt/ai-platform-release-backups/本次私有备份目录
+```
+
+只有第二条命令修改模型数据，先备份数据库与公开模型配置，再经本机已鉴权 API 操作。重复执行不重复创建，不清空已有 Key，不修改其它模型；全新模型 Key 为空，价格统计/图片/档位启用，使用平台联网而非百炼工具。空 Key 模型排在已配置模型之后，不抢默认模型。
+
+2026-11-04 采用[中国银行折算价](https://www.boc.cn/sourcedb/whpj/) 100美元=671.80元，即1美元=6.7180元。按官方常规 Standard 美元价换算，Sol 输入13.436、输出67.18，Terra 输入6.718、输出33.59，单位均为元/百万Token。固定估算，不持续请求汇率，不更改历史费用，缓存优惠/写入、超过272K输入和特殊服务档位另计，以供应商账单及实际结算汇率为准。
+
+规格与参数依据：[Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol)、[Terra](https://developers.openai.com/api/docs/models/gpt-6.1-terra)、[GPT-6兼容参数](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6.1-sol)、[Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)。
+
+## 配置文件权限
 
 - `/opt/ai-platform/openai-egress.json`：总开关、订阅凭证、节点；`0600`，仅服务端可读写。
 - `/opt/ai-platform/openai-egress-client.json`：本机代理和控制认证；`0600`，不返回浏览器。

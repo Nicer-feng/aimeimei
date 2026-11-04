@@ -1,4 +1,5 @@
 from .openai_egress import is_openai_url
+from .model_options import public_reasoning_options
 
 
 def public_model(row):
@@ -21,6 +22,7 @@ def public_model(row):
         "has_api_key": bool(row["api_key"].strip()),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        **public_reasoning_options(row),
     }
 
 

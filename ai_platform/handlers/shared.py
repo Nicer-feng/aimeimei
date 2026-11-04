@@ -31,6 +31,7 @@ from ..content import (
 )
 from ..database import db
 from ..openai_egress import open_model_request
+from ..model_options import openai_reasoning_options, prepare_chat_payload
 from ..features import feature_enabled, feature_flags
 from ..presenters import (
     ai_user_admin,

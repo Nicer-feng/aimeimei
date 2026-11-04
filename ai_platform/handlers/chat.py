@@ -1,6 +1,7 @@
 from .shared import *
 from ..docmind import build_document_context
 from .. import writing
+from ..openai_egress import is_openai_url
 
 import codecs
 import threading
@@ -93,6 +94,9 @@ class ChatHandlersMixin:
     def reasoning_request_options(cls, conversation, native_search=False):
         if not bool(conversation["supports_reasoning_control"]):
             return {}
+        options = openai_reasoning_options(conversation, cls.reasoning_mode(conversation["reasoning_mode"]), responses=native_search)
+        if options is not None:
+            return options
         mode = cls.reasoning_mode(conversation["reasoning_mode"])
         if native_search:
             effort = {"fast": "none", "balanced": "medium", "deep": "xhigh"}[mode]
@@ -172,6 +176,7 @@ class ChatHandlersMixin:
                 "stream": False,
                 "max_tokens": 1800,
             }
+            payload = prepare_chat_payload(payload, conversation, auxiliary=True)
             request = urllib.request.Request(
                 str(conversation["base_url"] or "").rstrip("/") + "/chat/completions",
                 data=json.dumps(payload).encode(),
@@ -503,7 +508,7 @@ class ChatHandlersMixin:
             }
             if include_usage:
                 payload["stream_options"] = {"include_usage": True}
-            return payload
+            return prepare_chat_payload(payload, discussion)
 
         def open_upstream(payload):
             request = urllib.request.Request(
@@ -1140,6 +1145,7 @@ class ChatHandlersMixin:
 
             use_native_search = bool(
                 use_web_search and convo["supports_native_web_search"]
+                and not is_openai_url(convo["base_url"])
             )
             if use_web_search and not use_native_search:
                 if not search_config["enabled"] or not search_config["api_key"]:
@@ -1314,7 +1320,7 @@ class ChatHandlersMixin:
             if include_usage:
                 payload["stream_options"] = {"include_usage": True}
             payload.update(self.reasoning_request_options(convo))
-            return payload
+            return prepare_chat_payload(payload, convo, mode=self.reasoning_mode(convo["reasoning_mode"]))
 
         def make_native_search_payload(include_extractor=True):
             tools = [{"type": "web_search"}]

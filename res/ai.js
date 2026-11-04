@@ -2001,13 +2001,19 @@
 	    }
 
     const REASONING_MODE_META = {
-      fast: { label: "快速", icon: "zap", title: "快速：关闭思考，优先响应速度" },
-      balanced: { label: "平衡", icon: "brain", title: "平衡：中等思考力度，适合日常使用" },
-      deep: { label: "深度", icon: "sparkles", title: "深度：高思考力度，适合复杂任务" }
+      fast: { label: "快速", icon: "zap", title: "快速：关闭思考，优先响应速度", description: "直接回答，首字更快" },
+      balanced: { label: "平衡", icon: "brain", title: "平衡：中等思考力度，适合日常使用", description: "适合日常工作与分析" },
+      deep: { label: "深度", icon: "sparkles", title: "深度：高思考力度，适合复杂任务", description: "复杂任务，耗时更多" }
     };
 
     function normalizeReasoningMode(value) { return REASONING_MODE_META[value] ? value : "balanced"; }
-    function selectedModelSupportsReasoningControl() { return Boolean(selectedModel()?.supports_reasoning_control || state.currentConversation?.supports_reasoning_control); }
+    function selectedModelSupportsReasoningControl() {
+      const model = selectedModel();
+      return Boolean(model ? model.supports_reasoning_control : state.currentConversation?.supports_reasoning_control);
+    }
+    function reasoningModeMeta(mode) {
+      return { ...REASONING_MODE_META[mode], ...(selectedModel()?.reasoning_mode_options?.[mode] || {}) };
+    }
     function reasoningModeForCurrentModel() {
       const modelId = $("modelSelect")?.value || state.currentConversation?.model_id || "";
       if (state.currentConversation && state.currentConversation.model_id === modelId) return normalizeReasoningMode(state.currentConversation.reasoning_mode);
@@ -2025,12 +2031,15 @@
       picker.hidden = !supported;
       if (!supported) { closeReasoningPicker(); return; }
       const mode = reasoningModeForCurrentModel();
-      const meta = REASONING_MODE_META[mode];
+      const meta = reasoningModeMeta(mode);
       select.value = mode;
       if (icon) icon.innerHTML = iconMarkup(meta.icon);
       label.textContent = meta.label;
       button.title = meta.title;
-      menu.querySelectorAll("[data-reasoning-mode]").forEach((item) => item.classList.toggle("selected", item.dataset.reasoningMode === mode));
+      menu.querySelectorAll("[data-reasoning-mode]").forEach((item) => {
+        item.classList.toggle("selected", item.dataset.reasoningMode === mode);
+        item.querySelector('small').textContent = reasoningModeMeta(item.dataset.reasoningMode).description;
+      });
       if (state.reasoningPickerOpen) { menu.hidden = false; button.setAttribute("aria-expanded", "true"); }
       queueLucideRefresh();
     }
@@ -4426,7 +4435,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.5" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.6" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>

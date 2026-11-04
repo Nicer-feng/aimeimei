@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Real loopback HTTP controller and TLS CONNECT fixtures; no paid/external APIs."""
 import base64
+import contextlib
+import importlib.util
+import io
 from concurrent.futures import ThreadPoolExecutor
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +24,7 @@ import test_chat_stream as fixture
 from app import AppHandler
 from ai_platform.database import db, init_db
 from ai_platform import openai_egress as e
+from ai_platform.model_options import openai_reasoning_options, prepare_chat_payload, public_reasoning_options
 
 
 class EgressTests(unittest.TestCase):
@@ -59,6 +63,24 @@ class EgressTests(unittest.TestCase):
                     self.send_response(302); self.send_header("Location", "https://leak.invalid/secret"); self.end_headers(); return
                 body = json.dumps({"id": self.path.rsplit("/", 1)[-1]} if status == 200 else {"error": "private upstream body"}).encode()
                 self.send_response(status); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
+            def do_POST(self):
+                payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                cls.calls.append(('completion', self.path, payload))
+                forbidden = {'enable_thinking', 'thinking_budget', 'max_tokens', 'temperature', 'top_p', 'logprobs', 'top_logprobs'}
+                if forbidden.intersection(payload) or payload.get('reasoning_effort') not in ('none', 'low', 'medium', 'high'):
+                    self.send_error(400, 'incompatible fixture parameters'); return
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream' if payload.get('stream') else 'application/json')
+                self.end_headers()
+                if payload.get('stream'):
+                    event = {'choices': [{'delta': {'content': '本地模拟脚本正文。'}, 'finish_reason': 'stop'}],
+                             'usage': {'prompt_tokens': 3, 'completion_tokens': 5, 'total_tokens': 8}}
+                    self.wfile.write(('data: ' + json.dumps(event, ensure_ascii=False) + '\n\ndata: [DONE]\n\n').encode())
+                else:
+                    content = json.dumps({'requirements': {}, 'intent': 'draft', 'full_manuscript': True, 'scope': '本地测试', 'enhanced_summary': '本地摘要'}, ensure_ascii=False)
+                    self.wfile.write(json.dumps({'choices': [{'message': {'content': content}}],
+                        'usage': {'prompt_tokens': 3, 'completion_tokens': 5, 'total_tokens': 8}}, ensure_ascii=False).encode())
 
         class Controller(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -133,6 +155,118 @@ class EgressTests(unittest.TestCase):
         e.write_config(e.CONFIG_PATH, self.cfg); e.write_config(e.CLIENT_PATH, self.client)
         e.write_config(e.RUNTIME_PATH, e.runtime_config(self.cfg, self.client), 0o640)
         self.model = {"id": "official", "model": "gpt-fixture", "api_key": "sk-fixture-only"}
+        with db() as conn:
+            conn.execute("UPDATE models SET model='gpt-fixture',supports_reasoning_control=0,supports_native_web_search=0 WHERE id='official'")
+
+    def stream(self, name, mode='balanced', writing=False):
+        cid = self.id().split('.')[-1] + name + mode
+        with db() as conn:
+            conn.execute("UPDATE models SET model=?,supports_reasoning_control=1 WHERE id='official'", (name,))
+            conn.execute("INSERT INTO conversations(id,user_id,title,model_id,reasoning_mode,writing_mode,created_at,updated_at) VALUES (?,'default','fixture','official',?,?,0,0)", (cid, mode, int(writing)))
+        conn = http.client.HTTPConnection('127.0.0.1', self.app.server_port, timeout=15)
+        conn.request('POST', '/api/conversations/' + cid + '/messages',
+            json.dumps({'content': '请根据材料写一段视频脚本。', 'web_search': False}), {'X-Fixture-Role': 'admin', 'Content-Type': 'application/json'})
+        response = conn.getresponse(); body = response.read().decode(); status = response.status; conn.close()
+        self.assertEqual(status, 200, body)
+        self.assertIn('message_saved', body)
+        self.assertIn('本地模拟脚本正文', body)
+        return cid
+
+    def test_sol_terra_modes_through_real_tls_and_main_chat(self):
+        for name, fast in [('gpt-6.1-sol', 'low'), ('gpt-6.1-terra', 'none')]:
+            for mode, effort in [('fast', fast), ('balanced', 'medium'), ('deep', 'high')]:
+                self.calls.clear(); self.stream(name, mode)
+                calls = [c[2] for c in self.calls if c[0] == 'completion']
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0]['reasoning_effort'], effort)
+                self.assertTrue(calls[0]['stream_options']['include_usage'])
+
+    def test_writing_planner_has_its_own_compatible_options(self):
+        for name, effort in [('gpt-6.1-sol', 'low'), ('gpt-6.1-terra', 'none')]:
+            self.calls.clear(); self.stream(name, 'deep', writing=True)
+            calls = [c[2] for c in self.calls if c[0] == 'completion']
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[0]['reasoning_effort'], effort)
+            self.assertEqual(calls[0]['max_completion_tokens'], 7000)
+            self.assertEqual(calls[1]['reasoning_effort'], 'high')
+
+    def test_summary_and_media_use_compatible_options(self):
+        cid = 'summary-options'
+        with db() as conn:
+            conn.execute("UPDATE models SET model='gpt-6.1-sol',supports_reasoning_control=1 WHERE id='official'")
+            conn.execute("INSERT INTO conversations(id,user_id,title,model_id,created_at,updated_at) VALUES (?,'default','fixture','official',0,0)", (cid,))
+            conn.executemany("INSERT INTO messages(conversation_id,user_id,role,content,created_at) VALUES (?,'default',?,'历史材料',?)", [(cid, 'user' if i % 2 == 0 else 'assistant', i) for i in range(26)])
+            model = dict(conn.execute("SELECT * FROM models WHERE id='official'").fetchone())
+        AppHandler.run_context_summary_job('fixture-summary', cid, 'default')
+        summary = [c[2] for c in self.calls if c[0] == 'completion']
+        self.assertEqual(summary[0]['reasoning_effort'], 'low')
+        self.assertEqual(summary[0]['max_completion_tokens'], 1800)
+        with db() as conn:
+            self.assertTrue(conn.execute("SELECT context_summary FROM conversations WHERE id=?", (cid,)).fetchone()[0])
+        with patch('ai_platform.handlers.media.media_ai_source_context', return_value='本地转写材料'):
+            result = fixture.Handler(cid).call_media_ai_model(model, {})
+        self.assertEqual(result['enhanced_summary'], '本地摘要')
+        payload = [c[2] for c in self.calls if c[0] == 'completion'][-1]
+        self.assertNotIn('temperature', payload)
+        self.assertEqual(payload['reasoning_effort'], 'medium')
+
+    def test_provider_options_are_isolated_and_unknown_models_safe(self):
+        row = {'base_url': 'https://api.openai.com/v1', 'model': 'gpt-6.1-sol', 'supports_reasoning_control': True}
+        self.assertEqual(openai_reasoning_options(row, 'fast'), {'reasoning_effort': 'low'})
+        self.assertEqual(openai_reasoning_options(row, 'deep', responses=True), {'reasoning': {'effort': 'high'}})
+        payload = {'enable_thinking': False, 'temperature': .4, 'top_p': .8, 'max_tokens': 123, 'messages': []}
+        clean = prepare_chat_payload(payload, row, 'fast')
+        self.assertEqual(clean, {'reasoning_effort': 'low', 'max_completion_tokens': 123, 'messages': []})
+        self.assertIn('enable_thinking', payload)
+        row['model'] = 'unknown-future-model'
+        self.assertFalse(public_reasoning_options(row)['supports_reasoning_control'])
+        self.assertEqual(openai_reasoning_options(row, 'fast'), {})
+        row['base_url'] = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+        self.assertIs(prepare_chat_payload(payload, row), payload)
+        for native in (False, True):
+            row.update(reasoning_mode='fast', model='qwen-fixture')
+            expected = {'reasoning': {'effort': 'none'}} if native else {'enable_thinking': False}
+            self.assertEqual(AppHandler.reasoning_request_options(row, native_search=native), expected)
+
+    def test_unconfigured_models_do_not_take_over_default(self):
+        with db() as conn:
+            conn.execute("INSERT INTO models(id,name,provider,base_url,api_key,model,created_at,updated_at) VALUES('no-key','test','OpenAI','https://api.openai.com/v1','','gpt-6.1-sol',9999999999,9999999999)")
+        try:
+            code, data = self.req('/api/models')
+            self.assertEqual(code, 200)
+            self.assertEqual(data['models'][0]['id'], 'official')
+            empty = next(m for m in data['models'] if m['id'] == 'no-key')
+            self.assertEqual(empty['reasoning_mode_options']['fast']['effort'], 'low')
+        finally:
+            with db() as conn:
+                conn.execute("DELETE FROM models WHERE id='no-key'")
+
+    def test_writing_model_setup_prices_idempotence_and_key_preservation(self):
+        path = Path(__file__).resolve().parents[1] / 'deploy/openai-egress/configure-writing-models.py'
+        spec = importlib.util.spec_from_file_location('seed_models', path)
+        seed = importlib.util.module_from_spec(spec); spec.loader.exec_module(seed)
+        backup = self.root / 'model-backup'; backup.mkdir(mode=0o700)
+        data_dir = Path(fixture.TEMP.name); (data_dir / 'admin.key').write_text('fixture-only')
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                seed.apply(data_dir, backup, 'http://127.0.0.1:' + str(self.app.server_port))
+            with db() as conn:
+                rows = conn.execute("SELECT * FROM models WHERE model IN ('gpt-6.1-sol','gpt-6.1-terra')").fetchall()
+                self.assertEqual(len(rows), 2)
+                prices = {row['model']: (row['input_price_per_million'], row['output_price_per_million']) for row in rows}
+                self.assertEqual(prices, {'gpt-6.1-sol': (13.436, 67.18), 'gpt-6.1-terra': (6.718, 33.59)})
+                self.assertTrue(all(not row['api_key'] for row in rows))
+                conn.execute("UPDATE models SET api_key='sk-seed-private-fixture' WHERE model='gpt-6.1-sol'")
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                seed.apply(data_dir, backup, 'http://127.0.0.1:' + str(self.app.server_port))
+            self.assertNotIn('sk-seed-private-fixture', output.getvalue())
+            with db() as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM models WHERE model IN ('gpt-6.1-sol','gpt-6.1-terra')").fetchone()[0], 2)
+                self.assertEqual(conn.execute("SELECT api_key FROM models WHERE model='gpt-6.1-sol'").fetchone()[0], 'sk-seed-private-fixture')
+            self.assertFalse(any(call[0] == 'completion' for call in self.calls))
+        finally:
+            with db() as conn:
+                conn.execute("DELETE FROM models WHERE model IN ('gpt-6.1-sol','gpt-6.1-terra')")
 
     def req(self, path, body=None, role="admin"):
         conn = http.client.HTTPConnection("127.0.0.1", self.app.server_port, timeout=15)

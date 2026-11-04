@@ -7,8 +7,8 @@
 - 项目名称：AI槑槑。
 - GitHub：`git@github.com:Nicer-feng/aimeimei.git`。
 - 主分支：`main`。
-- 当前基线版本：`2.30.5`。
-- 当前基线构建：`20261104-105804`。
+- 当前基线版本：`2.30.6`。
+- 当前基线构建：`20261104-123027`。
 - 当前材料附件行为：新上传材料默认只绑定本条用户消息；通过聊天顶部“当前对话文件”可显式设为持续参考，旧 `conversation_documents` 仍代表持续参考材料。
 - 当前基线提交：以 `git log -1 --oneline` 为准（发布后需同步本段）。
 - 本地实际仓库：`/Users/feng/Documents/文稿 - Unknown/aliyun3129`。
@@ -25,6 +25,8 @@
 `VERSION`、`BUILD_ID`、线上接口 `/api/version` 才是版本事实来源。本文件中的版本只表示编写本手册时的基线，未来发布后应同步更新本节。
 
 ## 2. 产品范围
+
+官方 OpenAI 参数兼容集中在 `ai_platform/model_options.py`，按官方域名与已核验模型 ID 区分，不能靠 provider 文案或名称猜通用能力。Sol 三档 low/medium/high，Terra none/medium/high；未知官方模型保留默认，不注入 Qwen 参数。`max_completion_tokens` 覆盖官方辅助调用，思考开启时移除不兼容采样参数；百炼原生联网与 Qwen 缓存仍独立。新增模型配置工具 `deploy/openai-egress/configure-writing-models.py` 默认仅 dry-run，显式 --apply 需要已有私有备份目录；通过本机管理员 API 创建/更新 Sol/Terra，绝不覆盖已有 Key 或其它模型。新配置 Key 留空、图片/档位启用，人民币输入/输出价分别13.436/67.18、6.718/33.59元/百万Token（中行2026-11-04折算6.7180），仅常规 Standard 估算，不含缓存/长上下文/特殊服务档位差异；不回算历史费用。未配置 Key 的模型排在可用模型后面，不抢默认选择。本地 TLS 夹具和浏览器通过不代表真实账号模型已通，仍需用户填写 Key 与代理后测试。
 
 OpenAI 专用出站代理见 `deploy/openai-egress/README.md`。独立 Mihomo 服务 `ai-platform-egress`，只监听本机 17891/17892，不设置系统代理/DNS/TUN/路由，不影响 Qwen、OSS 等既有出站。后台“OpenAI 代理”手动导入 HTTPS Clash/Mihomo 订阅、选择节点、总开关和无生成连通测试；初始关闭、无订阅和 Key，不做真实模型调用。官方模型由精确域名 api.openai.com 判断，关闭或配置失败不回落直连，更新订阅/切节点拒绝打断活跃 OpenAI 请求。客户端配置、订阅仅在服务端受限文件中，不回显浏览器。网页模型灯仅选中/使用时检查，90秒缓存、同模型并发合并、最多两项自动检查，无轮询；绿色只是接口和模型目录权限，不保证生成额度。现有主聊天仍用 Chat Completions，不将仅支持 Responses 的模型标为已适配。服务器安装默认拒绝覆盖已有代理认证文件。新模块隔离 TLS CONNECT、HTTP 权限、失败关闭、缓存并发及 Chrome 深浅主题/窄屏回归见 `scripts/test_openai_egress.py`、`scripts/test_openai_egress_ui.js`。
 

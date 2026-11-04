@@ -465,6 +465,7 @@ mindmap_text 要求：
             "stream": False,
             "temperature": 0.4,
         }
+        payload = prepare_chat_payload(payload, model)
         request = urllib.request.Request(
             model["base_url"].rstrip("/") + "/chat/completions",
             data=json.dumps(payload, ensure_ascii=False).encode(),

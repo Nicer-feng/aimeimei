@@ -5,6 +5,7 @@ import re
 import threading
 import urllib.request
 from .openai_egress import open_model_request
+from .model_options import prepare_chat_payload
 
 
 # Fixed stripes bound memory and serialize edits with in-flight generation.
@@ -116,6 +117,7 @@ facts保留材料中明确的数据、限定条件及出处线索，missing保�
                 {"role": "user", "content": json.dumps(context, ensure_ascii=False)}], "stream": False, "max_tokens": 7000}
     if conversation["supports_reasoning_control"]:
         payload["enable_thinking"] = False
+    payload = prepare_chat_payload(payload, conversation, auxiliary=True)
     request = urllib.request.Request(conversation["base_url"].rstrip("/") + "/chat/completions",
         data=json.dumps(payload).encode(), headers={"Authorization": "Bearer " + conversation["api_key"].strip(), "Content-Type": "application/json"}, method="POST")
     with open_model_request(request, timeout=45) as response:

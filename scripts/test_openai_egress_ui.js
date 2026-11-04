@@ -5,9 +5,11 @@ const fs = require('node:fs'), http = require('node:http'), path = require('node
 const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const models = [
-  { id: 'qwen', name: '现有 Qwen', model: 'qwen-fixture', provider: 'Qwen' },
-  { id: 'official', name: 'OpenAI 测试模型', model: 'gpt-fixture', provider: 'OpenAI', uses_openai_egress: true, has_api_key: true },
-  { id: 'other', name: '另一个 OpenAI', model: 'gpt-other', provider: 'OpenAI', uses_openai_egress: true }
+  { id: 'qwen', name: '现有 Qwen', model: 'qwen-fixture', provider: 'Qwen', supports_reasoning_control: true },
+  { id: 'official', name: 'OpenAI 测试模型', model: 'gpt-6.1-sol', provider: 'OpenAI', uses_openai_egress: true, has_api_key: true, supports_reasoning_control: true,
+    reasoning_mode_options: { fast: { title: '快速：低思考强度（low）', description: '低思考强度，不完全关闭思考' }, balanced: { title: '平衡（medium）', description: '中等思考强度' }, deep: { title: '深度（high）', description: '高思考强度' } } },
+  { id: 'other', name: '另一个 OpenAI', model: 'gpt-6.1-terra', provider: 'OpenAI', uses_openai_egress: true, supports_reasoning_control: true,
+    reasoning_mode_options: { fast: { title: '快速：关闭思考（none）', description: '关闭思考，优先响应速度' } } }
 ];
 const counts = { check: 0, test: [], saves: [] };
 let base, reachable = true, cfg = { installed: true, enabled: false, subscription_configured: false, selected_node: '' };
@@ -76,7 +78,7 @@ const server = http.createServer(async (req, res) => {
     await page.locator('#openaiProxyTest').click();
     await page.waitForFunction(() => document.querySelector('#openaiEgressStatus').textContent.includes('模拟连接通过'));
     await page.getByRole('button', { name: /^API 测试模型：/ }).click();
-    await page.getByRole('option', { name: 'OpenAI 测试模型 · gpt-fixture', exact: true }).click();
+    await page.getByRole('option', { name: 'OpenAI 测试模型 · gpt-6.1-sol', exact: true }).click();
     await page.locator('#openaiModelTest').click();
     await page.waitForTimeout(200); assert.deepEqual(counts.test.map(item => item.kind), ['proxy', 'model']);
     await page.screenshot({ path: '/private/tmp/meimei-openai-egress-desktop.png' });
@@ -90,7 +92,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.evaluate(() => switchAdminSection('keys'));
     await page.waitForFunction(() => document.querySelectorAll('.admin-key-row [data-egress-action]').length === 2);
-    const card = page.locator('.admin-key-card').filter({ hasText: 'gpt-fixture' });
+    const card = page.locator('.admin-key-card').filter({ hasText: 'gpt-6.1-sol' });
     await card.locator('input').fill('sk-local-fixture'); await card.locator('[data-egress-action]').click();
     await page.waitForFunction(() => document.querySelector('.openai-key-status')?.textContent.includes('模拟连接通过'));
     await page.screenshot({ path: '/private/tmp/meimei-openai-egress-key-mobile.png' });
@@ -100,6 +102,19 @@ const server = http.createServer(async (req, res) => {
     const actions = card.locator('.openai-key-row > button'), first = await actions.first().boundingBox();
     for (let i = 1; i < 3; i++) assert.ok(Math.abs((await actions.nth(i).boundingBox()).y - first.y) < 2);
     await page.screenshot({ path: '/private/tmp/meimei-openai-egress-key-desktop.png' });
+    await page.evaluate(async () => { closeSettings(); await chooseModel('official'); await chooseReasoningMode('fast'); });
+    assert.match(await page.locator('#reasoningPickerButton').getAttribute('title'), /low/);
+    assert.match(await page.locator('[data-reasoning-mode="fast"] small').textContent(), /不完全关闭/);
+    assert.equal(await page.locator('#reasoningPickerIcon [data-lucide="zap"]').count(), 1);
+    await page.locator('#reasoningPickerButton').click(); await page.waitForTimeout(200);
+    await page.screenshot({ path: '/private/tmp/meimei-openai-sol-reasoning.png' });
+    await page.locator('#reasoningPickerButton').click();
+    await page.evaluate(() => chooseReasoningMode('deep'));
+    assert.match(await page.locator('#reasoningPickerButton').getAttribute('title'), /high/);
+    await page.evaluate(async () => { await chooseModel('other'); await chooseReasoningMode('fast'); });
+    assert.match(await page.locator('#reasoningPickerButton').getAttribute('title'), /none/);
+    await page.evaluate(async () => { await chooseModel('qwen'); await chooseReasoningMode('fast'); });
+    assert.match(await page.locator('#reasoningPickerButton').getAttribute('title'), /关闭思考/);
     assert.equal(counts.test.at(-1).api_key, 'sk-local-fixture'); assert.deepEqual(errors, []);
     console.log(JSON.stringify({ passed: true, availability_checks: counts.check, tests: counts.test.length, automatic_polling: false }));
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
