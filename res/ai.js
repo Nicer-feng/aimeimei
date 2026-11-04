@@ -4426,7 +4426,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.4" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.5" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -10045,6 +10045,7 @@
 	        row.append(label, save, clear);
             const keyStatus = document.createElement('p');
             if (model.uses_openai_egress) {
+              row.classList.add('openai-key-row');
               keyStatus.className = 'openai-key-status'; keyStatus.setAttribute('role', 'status');
               const test = createIconButton('plug-zap', '测试连接'); test.dataset.egressAction = '';
               test.addEventListener('click', () => globalThis.MeimeiOpenAIEgress?.test(test,

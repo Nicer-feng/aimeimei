@@ -93,6 +93,13 @@ const server = http.createServer(async (req, res) => {
     const card = page.locator('.admin-key-card').filter({ hasText: 'gpt-fixture' });
     await card.locator('input').fill('sk-local-fixture'); await card.locator('[data-egress-action]').click();
     await page.waitForFunction(() => document.querySelector('.openai-key-status')?.textContent.includes('模拟连接通过'));
+    await page.screenshot({ path: '/private/tmp/meimei-openai-egress-key-mobile.png' });
+    await page.setViewportSize({ width: 1440, height: 960 });
+    await page.evaluate(() => { closeSidebar(); openSettings(); switchAdminSection('keys'); });
+    await page.waitForFunction(() => document.querySelectorAll('.openai-key-row').length === 2);
+    const actions = card.locator('.openai-key-row > button'), first = await actions.first().boundingBox();
+    for (let i = 1; i < 3; i++) assert.ok(Math.abs((await actions.nth(i).boundingBox()).y - first.y) < 2);
+    await page.screenshot({ path: '/private/tmp/meimei-openai-egress-key-desktop.png' });
     assert.equal(counts.test.at(-1).api_key, 'sk-local-fixture'); assert.deepEqual(errors, []);
     console.log(JSON.stringify({ passed: true, availability_checks: counts.check, tests: counts.test.length, automatic_polling: false }));
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
