@@ -52,7 +52,10 @@ class DailyReportHandlersMixin:
                 if not isinstance(installation, str):
                     return self.error(HTTPStatus.BAD_REQUEST, "invalid installation")
                 with db() as conn:
-                    conn.execute("DELETE FROM report_push_devices WHERE user_id=? AND installation_id=?", (uid,installation))
+                    conn.execute("UPDATE report_push_deliveries SET state='cancelled',reason='Unsubscribed' WHERE device_id IN (SELECT id FROM report_push_devices WHERE user_id=? AND installation_id=?) AND state IN ('pending','sending')", (uid,installation))
+                    # 保留产品频道仍在使用的共享设备，只退出研发日报频道。
+                    conn.execute("UPDATE report_push_devices SET daily_subscribed=0 WHERE user_id=? AND installation_id=?", (uid,installation))
+                    conn.execute("DELETE FROM report_push_devices WHERE user_id=? AND installation_id=? AND NOT EXISTS(SELECT 1 FROM product_push_subscriptions s WHERE s.device_id=report_push_devices.id)", (uid,installation))
                 return self.json({"ok": True})
             if self.command != "POST":
                 return self.error(HTTPStatus.METHOD_NOT_ALLOWED, "read only")
@@ -66,10 +69,11 @@ class DailyReportHandlersMixin:
                     return self.error(HTTPStatus.CONFLICT, "too many devices")
                 # 同一设备切换账号后只通知当前登录者，不按可伪造的安装 ID 清理其他账号。
                 conn.execute("DELETE FROM report_push_devices WHERE token=? AND NOT (user_id=? AND installation_id=?)", (data["token"].lower(),uid,data["installation_id"]))
-                conn.execute("INSERT INTO report_push_devices(user_id,installation_id,token,session_hash,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,installation_id) DO UPDATE SET token=excluded.token,session_hash=excluded.session_hash,updated_at=excluded.updated_at", (uid,data["installation_id"],data["token"].lower(),token_hash(self.session_token()),now()))
+                conn.execute("INSERT INTO report_push_devices(user_id,installation_id,token,session_hash,updated_at,daily_subscribed) VALUES(?,?,?,?,?,1) ON CONFLICT(user_id,installation_id) DO UPDATE SET token=excluded.token,session_hash=excluded.session_hash,updated_at=excluded.updated_at,daily_subscribed=1", (uid,data["installation_id"],data["token"].lower(),token_hash(self.session_token()),now()))
                 device = conn.execute("SELECT id FROM report_push_devices WHERE user_id=? AND installation_id=?", (uid,data["installation_id"])).fetchone()[0]
                 if old and old["token"] != data["token"].lower():
                     conn.execute("DELETE FROM report_push_deliveries WHERE device_id=? AND state='invalid'", (device,))
+                    conn.execute("DELETE FROM product_push_deliveries WHERE device_id=? AND state='invalid'", (device,))
                 # 注册只绑定后续通知，不为安装前保存的日报补建投递。
             deliver_pending()
             return self.json({"ok": True})

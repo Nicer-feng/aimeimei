@@ -6,10 +6,13 @@ public struct Account: Codable, Equatable, Sendable {
     public let displayName: String
     public let dailyReportsEnabled: Bool
     public let dailyPushEnabled: Bool
+    public let productReportsEnabled: Bool
+    public let productPushEnabled: Bool
     public var label: String { displayName.isEmpty ? username : displayName }
     enum CodingKeys: String, CodingKey {
         case id, username; case displayName = "display_name"
         case dailyReportsEnabled = "daily_reports_enabled", dailyPushEnabled = "daily_push_enabled"
+        case productReportsEnabled = "product_reports_enabled", productPushEnabled = "product_push_enabled"
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -17,6 +20,8 @@ public struct Account: Codable, Equatable, Sendable {
         displayName = try c.decode(String.self, forKey: .displayName)
         dailyReportsEnabled = try c.decodeIfPresent(Bool.self, forKey: .dailyReportsEnabled) ?? false
         dailyPushEnabled = try c.decodeIfPresent(Bool.self, forKey: .dailyPushEnabled) ?? false
+        productReportsEnabled = try c.decodeIfPresent(Bool.self, forKey: .productReportsEnabled) ?? false
+        productPushEnabled = try c.decodeIfPresent(Bool.self, forKey: .productPushEnabled) ?? false
     }
 }
 

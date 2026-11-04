@@ -15,14 +15,14 @@ struct DailyReportsView: View {
                             Button("重试", systemImage: "arrow.clockwise") { Task { await controller.refresh() } }
                         }
                         if controller.reports.isEmpty && !controller.busy && controller.error == nil {
-                            ContentUnavailableView("暂无日报", systemImage: "doc.text")
+                            ContentUnavailableView(controller.channel == .development ? "暂无日报" : "暂无产品推荐", systemImage: controller.channel == .development ? "doc.text" : "sparkles")
                         }
                         ForEach(controller.reports) { report in
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack(spacing: 10) {
                                     Image("Avatar").resizable().scaledToFit().frame(width: 32, height: 32)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("槑槑 · 研发日报").font(.subheadline.bold())
+                                        Text("槑槑 · \(controller.channel.title)").font(.subheadline.bold())
                                         Text(report.reportDate + (report.simulation ? " · 模拟" : "")).font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
@@ -30,11 +30,11 @@ struct DailyReportsView: View {
                                 }
                                 MarkdownView(content: report.content).padding(14)
                                     .background(Brand.background, in: RoundedRectangle(cornerRadius: 8))
-                            }.id(report.id).accessibilityIdentifier("dailyReport-\(report.id)")
+                            }.id(report.id).accessibilityIdentifier("\(controller.channel.itemIdentifier)-\(report.id)")
                                 .task { await controller.read(report) }
                         }
                         if controller.nextBefore != nil {
-                            Button("更早的日报", systemImage: "clock.arrow.circlepath") { Task { await controller.refresh(older: true) } }.disabled(controller.busy)
+                            Button(controller.channel == .development ? "更早的日报" : "更早的产品推荐", systemImage: "clock.arrow.circlepath") { Task { await controller.refresh(older: true) } }.disabled(controller.busy)
                         }
                         if controller.busy { ProgressView().frame(maxWidth: .infinity) }
                     }.padding(20)
@@ -48,7 +48,7 @@ struct DailyReportsView: View {
                     Task { await controller.refresh(); if let id { proxy.scrollTo(id, anchor: .top) } }
                 }
             }
-            .navigationTitle("研发日报").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(controller.channel.title).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
         }
     }

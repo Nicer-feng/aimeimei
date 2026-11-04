@@ -9,5 +9,6 @@ Group=ai-platform
 WorkingDirectory=/opt/ai-platform
 Environment=AI_PLATFORM_DATA=/opt/ai-platform
 ExecStart=/opt/ai-platform/.venv/bin/python /opt/ai-platform/scripts/publish_frontend_report.py --retry
+ExecStart=/opt/ai-platform/.venv/bin/python /opt/ai-platform/scripts/publish_product_report.py --retry
 NoNewPrivileges=true
 PrivateTmp=true

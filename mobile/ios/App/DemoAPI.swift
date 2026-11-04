@@ -84,7 +84,10 @@ actor DemoAPI: PlatformServing {
     private var loginName = "family"
     private var dailyReadUsers: Set<String> = []
     private var reportPermissions = ["feng": true, "czq": true]
+    private var productPermissions = ["feng": true, "czq": true]
+    private var productReadUsers: Set<String> = []
     func setDailyPermission(_ enabled: Bool, username: String) { reportPermissions[username] = enabled }
+    func setProductPermission(_ enabled: Bool, username: String) { productPermissions[username] = enabled }
     private var dailyRegistered = false
     func dailyReports(before: Int64?) async throws -> DailyReportsPage {
         guard reportPermissions[loginName] == true else { throw PlatformError.http(404, "") }
@@ -105,6 +108,25 @@ actor DemoAPI: PlatformServing {
     }
     func registerDailyDevice(installationID: String, token: String) async throws { dailyRegistered = true }
     func removeDailyDevice(installationID: String) async throws { dailyRegistered = false }
+    func productReports(before: Int64?) async throws -> DailyReportsPage {
+        guard productPermissions[loginName] == true else { throw PlatformError.http(404, "") }
+        let read = productReadUsers.contains(loginName)
+        let report: [String: Any] = ["id": loginName == "czq" ? 102 : 101, "report_date": "2026-11-04", "title": "每日产品推送",
+            "content": "## 今日产品发现\n\n- **像素特效工具**：在线预览游戏动画，再导出自己的素材。\n- **清爽电视桌面**：把常用应用放回首页。\n\n[查看项目来源](https://example.com/projects)",
+            "created_at": 1793754000, "read_at": read ? 1 : 0, "simulation": true]
+        return try JSONDecoder().decode(DailyReportsPage.self, from: JSONSerialization.data(withJSONObject:
+            ["reports": [report], "unread": read ? 0 : 1, "next_before": NSNull()]))
+    }
+    func productReport(id: Int64) async throws -> DailyReport {
+        let report = try await productReports(before: nil).reports[0]
+        guard report.id == id else { throw PlatformError.http(404, "") }
+        return report
+    }
+    func readProductReport(id: Int64) async throws {
+        _ = try await productReport(id: id); productReadUsers.insert(loginName)
+    }
+    func registerProductDevice(installationID: String, token: String) async throws {}
+    func removeProductDevice(installationID: String) async throws {}
     private var created = 1
     private var smsSends = 0
     private var smsVerifications = 0
@@ -134,7 +156,7 @@ actor DemoAPI: PlatformServing {
         Self.decode(Captcha.self, #"{"captcha_id":"offline","image_svg":"<svg><rect width='128' height='48' rx='14' fill='#fffaf6'/><text x='16' y='34' fill='#6F594B' font-size='24'>AB23</text></svg>"}"#)
     }
     func currentAccount() async throws -> Account? {
-        loggedIn ? Self.decode(Account.self, #"{"id":"\#(loginName == "czq" ? "offline-czq" : "offline-user")","username":"\#(loginName)","display_name":"家人","daily_reports_enabled":\#(reportPermissions[loginName] == true),"daily_push_enabled":\#(reportPermissions[loginName] == true)}"#) : nil
+        loggedIn ? Self.decode(Account.self, #"{"id":"\#(loginName == "czq" ? "offline-czq" : "offline-user")","username":"\#(loginName)","display_name":"家人","daily_reports_enabled":\#(reportPermissions[loginName] == true),"daily_push_enabled":\#(reportPermissions[loginName] == true),"product_reports_enabled":\#(productPermissions[loginName] == true),"product_push_enabled":\#(productPermissions[loginName] == true)}"#) : nil
     }
     func login(username: String, password: String, captcha: Captcha, answer: String) async throws -> Account {
         loginName = ["feng", "czq"].contains(username) ? username : "family"

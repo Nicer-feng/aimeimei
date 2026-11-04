@@ -1,6 +1,6 @@
 # iOS 接口契约
 
-已对照当前 `app.py`、`handlers/auth.py`、`handlers/chat.py` 与 `presenters.py`，不新增或修改服务端接口。
+已对照当前 `app.py`、`handlers/auth.py`、`handlers/chat.py` 与 `presenters.py`；每日产品推送随本次服务端独立频道一同发布。
 
 | 功能 | 方法和路径 | 关键字段 |
 |---|---|---|
@@ -69,3 +69,12 @@ GET `/api/ocr/tasks`、POST `/api/ocr/upload-policy`、POST `/api/ocr/tasks`、D
 - GET `/api/media/tasks`；POST `/api/media/upload-policy` 获取策略；经独立无 Cookie 会话从临时文件上传 OSS 后，POST `/api/media/tasks` 携带 filename/mime_type/file_size/oss_key/source_language=cn。最多500MB且不超过策略 max_size，上传表单按64KB分块写入临时文件，结束后删除。
 - POST `/api/media/tasks/{id}/refresh` 只查询原任务，保留临时上游错误与已有结果，前台详情最多12轮每5秒查询，离开或后台取消轮询；仍可手动刷新。
 - POST `/api/media/tasks/{id}/conversation` 传 model_id，复用服务端分析会话；不自动发送模型问题。DELETE `/api/media/tasks/{id}` 删除记录前确认，已创建会话和OSS源文件保留。
+
+## 研发日报与每日产品推送（0.8.4）
+
+- 账号响应分别提供布尔 `daily_reports_enabled/daily_push_enabled` 与 `product_reports_enabled/product_push_enabled`；缺失时默认关闭。客户端只展示服务端开放的频道，不在本机维护用户名名单。
+- 研发日报沿用 `/api/daily-reports`，产品推送使用 `/api/product-reports`。GET 列表接受数字 `before`，返回 `reports/unread/next_before`；GET `/{id}` 返回 `report`，POST `/{id}/read` 标记本人记录已读。两频道均只读，不创建聊天或模型请求。
+- 两频道记录字段相同：`id/report_date/title/content/created_at/read_at/simulation`；列表、分页、未读、定位和账号清理分别保存，不混合展示。
+- POST `/api/product-reports/device` 携带 `installation_id/token`，仅在当前会话的 iOS 设备信息上报完成后订阅。复用研发日报安装 ID 与 APNs token；DELETE 同路径只传 `installation_id`，仅取消产品订阅。
+- APNs `kind=frontend_daily` 打开研发日报，`kind=product_daily` 打开每日产品推送，均按正整数 `report_id` 定位；未知类型和无效 ID 忽略。旧版未主动订阅产品频道的设备不接收该类通知。
+- 前台每30秒及返回应用时刷新服务端权限，撤权、退出或切换账号立即清理对应频道；关闭单频道不会删除另一频道共享的设备绑定。

@@ -55,16 +55,16 @@
   <script src="/res/vendor/highlight-11.11.1.min.js"></script>
   <script src="/res/vendor/highlight-nginx-11.11.1.min.js"></script>
   <script src="/res/vendor/highlight-dockerfile-11.11.1.min.js"></script>
-  <script src="/res/markdown-renderer.js?v=2.30.9"></script>
+  <script src="/res/markdown-renderer.js?v=2.31.0"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.30.9">
-  <link rel="stylesheet" href="/res/openai-egress.css?v=2.30.9">
-  <link rel="stylesheet" href="/res/reader.css?v=2.30.9">
-  <link rel="stylesheet" href="/res/usage-time.css?v=2.30.9">
-  <link rel="stylesheet" href="/res/ui-motion.css?v=2.30.9">
+  <link rel="stylesheet" href="/res/ai.css?v=2.31.0">
+  <link rel="stylesheet" href="/res/openai-egress.css?v=2.31.0">
+  <link rel="stylesheet" href="/res/reader.css?v=2.31.0">
+  <link rel="stylesheet" href="/res/usage-time.css?v=2.31.0">
+  <link rel="stylesheet" href="/res/ui-motion.css?v=2.31.0">
 
-  <link rel="stylesheet" href="/res/markdown.css?v=2.30.9">
+  <link rel="stylesheet" href="/res/markdown.css?v=2.31.0">
 <link rel="apple-touch-icon" sizes="180x180" href="/res/apple-touch-icon.png?brand=20261023">
 </head>
 <body>
@@ -74,7 +74,7 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.30.9</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.31.0</button>
       </div>
       <div class="login-mode-tabs" role="tablist" aria-label="登录方式">
         <button class="login-mode-tab active" id="loginPasswordMode" type="button" role="tab" aria-selected="true"><i data-lucide="key-round" aria-hidden="true"></i><span>密码登录</span></button>
@@ -108,7 +108,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.30.9</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.31.0</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -121,7 +121,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png?brand=20261023" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.30.9</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.31.0</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -180,7 +180,7 @@
 	          </a>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.30.9</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.31.0</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -806,6 +806,13 @@
                   <label class="feature-toggle-card"><span>开放研发日报</span><span class="feature-switch"><input id="accountDailyReports" type="checkbox"><span></span></span></label>
                   <label class="feature-toggle-card"><span>日报推送通知</span><span class="feature-switch"><input id="accountDailyPush" type="checkbox"><span></span></span></label>
                 </div>
+                <div id="accountProductReportControls" hidden>
+                  <div class="grid2">
+                    <label class="feature-toggle-card"><span>开放每日产品推送</span><span class="feature-switch"><input id="accountProductReports" type="checkbox" disabled><span></span></span></label>
+                    <label class="feature-toggle-card"><span>产品推送通知</span><span class="feature-switch"><input id="accountProductPush" type="checkbox" disabled><span></span></span></label>
+                  </div>
+                  <p class="admin-field-help">每日产品推送仅向 feng、czq 的 iOS 开放，与研发日报分别控制。</p>
+                </div>
 	            <div class="library-actions">
 		              <button class="primary ui-btn ui-btn-primary inline-flex items-center gap-2" id="saveAccount"><i data-lucide="save" aria-hidden="true"></i><span>保存账号</span></button>
 		              <button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="resetAccountForm"><i data-lucide="eraser" aria-hidden="true"></i><span>清空</span></button>
@@ -1157,12 +1164,15 @@
 	            <h2 class="panel-title"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>登录与系统</span></h2>
                 <label class="feature-toggle-card"><span>暂停日报推送</span><span class="feature-switch"><input id="dailyReportsPaused" type="checkbox"><span></span></span></label>
                 <div class="status" id="dailyReportsPauseStatus"></div>
+                <label class="feature-toggle-card"><span>暂停产品推送</span><span class="feature-switch"><input id="productReportsPaused" type="checkbox" disabled><span></span></span></label>
+                <p class="admin-field-help">每天北京时间 9:00 筛选有新意的产品与开源工具；没有值得分享的内容时跳过。暂停只影响通知，已保存内容仍可查看。</p>
+                <div class="status" id="productReportsPauseStatus"></div>
             <div class="grid2 form-control-row">
               <label>新的家用登录密码<input id="familyPassword" type="password" autocomplete="new-password" placeholder="至少 8 位"></label>
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.30.9</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.31.0</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -1244,15 +1254,15 @@
       <p id="writingDraftState" class="writing-help"></p><button type="button" id="saveWritingDraft">保存稿件与定稿状态</button>
     </details>
   </dialog>
-      <script src="/res/ui-motion.js?v=2.30.9"></script>
-      <script src="/res/client-device.js?v=2.30.9"></script>
-      <script src="/res/login-history.js?v=2.30.9"></script>
-      <script src="/res/openai-egress.js?v=2.30.9"></script>
-	  <script src="/res/ai.js?v=2.30.9"></script>
-      <script src="/res/ai-motion.js?v=2.30.9"></script>
-      <script src="/res/reader.js?v=2.30.9"></script>
-      <script src="/res/usage-clock.js?v=2.30.9"></script>
-      <script src="/res/usage-time.js?v=2.30.9"></script>
+      <script src="/res/ui-motion.js?v=2.31.0"></script>
+      <script src="/res/client-device.js?v=2.31.0"></script>
+      <script src="/res/login-history.js?v=2.31.0"></script>
+      <script src="/res/openai-egress.js?v=2.31.0"></script>
+	  <script src="/res/ai.js?v=2.31.0"></script>
+      <script src="/res/ai-motion.js?v=2.31.0"></script>
+      <script src="/res/reader.js?v=2.31.0"></script>
+      <script src="/res/usage-clock.js?v=2.31.0"></script>
+      <script src="/res/usage-time.js?v=2.31.0"></script>
 
 </body>
 </html>

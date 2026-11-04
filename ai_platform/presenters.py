@@ -46,6 +46,8 @@ def ai_user_public(row):
         "is_active": bool(row["is_active"]),
         "daily_reports_enabled": bool(row["daily_reports_enabled"]) if "daily_reports_enabled" in row.keys() else False,
         "daily_push_enabled": bool(row["daily_push_enabled"]) if "daily_push_enabled" in row.keys() else False,
+        "product_reports_enabled": bool(row["product_reports_enabled"]) if "product_reports_enabled" in row.keys() and row["username"] in ("feng", "czq") else False,
+        "product_push_enabled": bool(row["product_push_enabled"]) if "product_push_enabled" in row.keys() and row["username"] in ("feng", "czq") else False,
         "phone_masked": mask_phone(phone),
         "phone_verified": bool(verified_at),
         "created_at": row["created_at"],

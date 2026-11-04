@@ -4438,7 +4438,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.9" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.31.0" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8695,7 +8695,7 @@
 	      if (key === "tokens") { loadTokenStats(); loadUsageTrend(); }
           if (key === "usage") globalThis.MeimeiUsage?.openAdmin();
 	      if (key === "costs") loadCostStats();
-      if (key === "system") { loadAdminSmsAuth(); loadDailyReportSettings(); }
+      if (key === "system") { loadAdminSmsAuth(); loadDailyReportSettings(); loadProductReportSettings(); }
 	      queueLucideRefresh();
 	    }
 
@@ -10325,12 +10325,25 @@
 	      queueLucideRefresh();
 	    }
 
+    function syncProductReportAccountControls() {
+      const allowed = ["feng", "czq"].includes($("accountUsername").value.trim());
+      $("accountProductReportControls").hidden = !allowed;
+      for (const id of ["accountProductReports", "accountProductPush"]) {
+        $(id).disabled = !allowed;
+        if (!allowed) $(id).checked = false;
+      }
+      return allowed;
+    }
+
 	    function fillAccountForm(user) {
           $("accountDailyReports").checked = user.daily_reports_enabled === true;
           $("accountDailyPush").checked = user.daily_push_enabled === true;
 	      $("editingUserId").value = user.id || "";
 	      $("accountUsername").value = user.username || "";
 	      $("accountUsername").disabled = true;
+          $("accountProductReports").checked = user.product_reports_enabled === true;
+          $("accountProductPush").checked = user.product_push_enabled === true;
+          syncProductReportAccountControls();
 	      $("accountDisplayName").value = user.display_name || "";
 	      $("accountRole").value = user.role || "family";
 	      $("accountActive").value = user.is_active ? "1" : "0";
@@ -10347,6 +10360,9 @@
 	      $("editingUserId").value = "";
 	      $("accountUsername").value = "";
 	      $("accountUsername").disabled = false;
+          $("accountProductReports").checked = false;
+          $("accountProductPush").checked = false;
+          syncProductReportAccountControls();
 	      $("accountDisplayName").value = "";
 	      $("accountRole").value = "family";
 	      $("accountActive").value = "1";
@@ -10374,6 +10390,10 @@
         phone_verified: $("accountPhoneVerified").value === "1",
 	        password: $("accountPassword").value
 	      };
+      if (syncProductReportAccountControls()) {
+        body.product_reports_enabled = $("accountProductReports").checked;
+        body.product_push_enabled = $("accountProductPush").checked;
+      }
 	      const res = await adminApi(id ? `/api/admin/users/${id}` : "/api/admin/users", {
 	        method: id ? "PUT" : "POST",
 	        body: JSON.stringify(body)
@@ -10400,6 +10420,28 @@
         input.checked = (await res.json()).paused === true;
         setStatus("dailyReportsPauseStatus", input.checked ? "日报推送已暂停" : "日报推送已恢复", "ok");
       } catch (_) { input.checked = !input.checked; setStatus("dailyReportsPauseStatus", "日报设置保存失败", "err"); }
+      finally { input.disabled = false; }
+    }
+    async function loadProductReportSettings() {
+      const input = $("productReportsPaused");
+      input.disabled = true;
+      try {
+        const res = await adminApi("/api/admin/product-report-settings");
+        if (!res.ok) throw new Error("load failed");
+        input.checked = (await res.json()).paused === true;
+        input.disabled = false;
+        setStatus("productReportsPauseStatus", "");
+      } catch (_) { setStatus("productReportsPauseStatus", "产品推送设置读取失败，请重新打开系统设置。", "err"); }
+    }
+    async function saveProductReportSettings() {
+      const input = $("productReportsPaused");
+      input.disabled = true;
+      try {
+        const res = await adminApi("/api/admin/product-report-settings", { method: "POST", body: JSON.stringify({ paused: input.checked }) });
+        if (!res.ok) throw new Error("save failed");
+        input.checked = (await res.json()).paused === true;
+        setStatus("productReportsPauseStatus", input.checked ? "产品推送已暂停" : "产品推送已恢复", "ok");
+      } catch (_) { input.checked = !input.checked; setStatus("productReportsPauseStatus", "产品推送设置保存失败", "err"); }
       finally { input.disabled = false; }
     }
 	function applySidebarToolsState(open, options = {}) {
@@ -10783,6 +10825,8 @@
 		    $("changePassword").addEventListener("click", changePassword);
     $("saveSmsAuthConfig")?.addEventListener("click", saveAdminSmsAuth);
     $("dailyReportsPaused")?.addEventListener("change", saveDailyReportSettings);
+    $("productReportsPaused")?.addEventListener("change", saveProductReportSettings);
+	    $("accountUsername").addEventListener("input", syncProductReportAccountControls);
 		    $("saveAccount").addEventListener("click", saveAccount);
 		    $("resetAccountForm").addEventListener("click", resetAccountForm);
         $("adminKey").addEventListener("change", () => {

@@ -52,7 +52,7 @@ struct MeimeiApp: App {
             .onChange(of: scenePhase) { _, phase in
                 guard phase != .inactive else { return }
                 Task { await store?.sceneActive(phase == .active) }
-                if phase == .active, let store { Task { await push.configure(store.daily) } }
+                if phase == .active, let store { Task { await push.configure(store.daily, products: store.products) } }
             }
         }
     }

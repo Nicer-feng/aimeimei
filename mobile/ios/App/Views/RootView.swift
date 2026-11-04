@@ -1,4 +1,5 @@
 import SwiftUI
+import MeimeiCore
 
 struct RootView: View {
     let store: AppStore
@@ -13,8 +14,8 @@ struct RootView: View {
             else {
                 NavigationStack {
                     ChatView(store: store)
-                        .disabled(store.daily.presented)
-                        .accessibilityHidden(store.daily.presented)
+                        .disabled(store.daily.presented || store.products.presented)
+                        .accessibilityHidden(store.daily.presented || store.products.presented)
                         .navigationTitle("AI槑槑")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
@@ -39,18 +40,28 @@ struct RootView: View {
         .sheet(isPresented: $showHistory) { HistoryView(store: store) }
         .sheet(isPresented: $showSettings) { SettingsView(store: store) }
         .sheet(item: $librarySection) { LibraryView(store: store, initial: $0) }
-        .sheet(isPresented: Binding(get: { store.daily.presented && store.daily.owner != nil }, set: { store.daily.presented = $0 })) {
-            DailyReportsView(controller: store.daily)
+        .sheet(item: Binding<ReportChannel?>(get: {
+            if store.products.presented && store.products.owner != nil { return .product }
+            if store.daily.presented && store.daily.owner != nil { return .development }
+            return nil
+        }, set: { channel in
+            store.daily.presented = channel == .development
+            store.products.presented = channel == .product
+        })) { channel in
+            DailyReportsView(controller: channel == .development ? store.daily : store.products)
         }
         .task(id: store.account?.id) {
             while store.account != nil && !Task.isCancelled {
                 await store.refreshDailyPermissions()
-                await push?.configure(store.daily)
+                await push?.configure(store.daily, products: store.products)
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
             }
         }
         .onChange(of: store.daily.presented) { _, shown in
-            if shown { showHistory = false; showSettings = false; librarySection = nil }
+            if shown { store.products.presented = false; showHistory = false; showSettings = false; librarySection = nil }
+        }
+        .onChange(of: store.products.presented) { _, shown in
+            if shown { store.daily.presented = false; showHistory = false; showSettings = false; librarySection = nil }
         }
         .onChange(of: store.account?.id) { _, account in
             if account == nil { showSettings = false; showHistory = false; librarySection = nil }
@@ -84,13 +95,19 @@ private struct SettingsView: View {
                         Text("跟随系统").tag("system"); Text("浅色").tag("light"); Text("深色").tag("dark")
                     }
                 }
-                if store.daily.owner != nil {
-                    Section("日报通知") {
-                        Button("研发日报", systemImage: "doc.text") { dismiss(); Task { try? await Task.sleep(for: .milliseconds(350)); store.daily.open() } }
+                if store.daily.owner != nil || store.products.owner != nil {
+                    Section("推送订阅") {
+                        if store.daily.owner != nil {
+                            Button("研发日报", systemImage: "doc.text") { dismiss(); Task { try? await Task.sleep(for: .milliseconds(350)); store.daily.open() } }
+                        }
+                        if store.products.owner != nil {
+                            Button("每日产品推送", systemImage: "sparkles") { dismiss(); Task { try? await Task.sleep(for: .milliseconds(350)); store.products.open() } }
+                        }
                         Button("系统通知设置", systemImage: "bell") {
                             if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                         }
                         if let notice = store.daily.notificationNotice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+                        if let notice = store.products.notificationNotice, notice != store.daily.notificationNotice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
                     }
                 }
                 Section("关于") {

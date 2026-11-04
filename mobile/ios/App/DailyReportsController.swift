@@ -19,23 +19,22 @@ final class DailyReportsController {
     @ObservationIgnored private var revision = UUID()
     @ObservationIgnored private var savedToken: String?
     @ObservationIgnored private var registeredOwner: String?
-    @ObservationIgnored private var deviceReport: Task<Void, Never>?
     private var readIDs = Set<Int64>()
     let installationID: String
+    let channel: ReportChannel
 
-    init(api: any PlatformServing) {
-        self.api = api
+    init(api: any PlatformServing, channel: ReportChannel = .development) {
+        self.api = api; self.channel = channel
         let key = "daily-report-installation"
         installationID = UserDefaults.standard.string(forKey: key) ?? UUID().uuidString
         UserDefaults.standard.set(installationID, forKey: key)
     }
     func bind(_ account: Account?) {
-        let id = account.flatMap { $0.dailyReportsEnabled ? $0.id : nil }
-        let push = id != nil && account?.dailyPushEnabled == true
+        let id = account.flatMap { (channel == .development ? $0.dailyReportsEnabled : $0.productReportsEnabled) ? $0.id : nil }
+        let push = id != nil && (channel == .development ? account?.dailyPushEnabled : account?.productPushEnabled) == true
         if push != pushEnabled { savedToken = nil; registeredOwner = nil; notificationNotice = nil }
         pushEnabled = push
         guard id != owner else { return }
-        deviceReport?.cancel(); deviceReport = nil
         revision = UUID(); owner = id; reports = []; unread = 0; nextBefore = nil
         busy = false; presented = false; focusID = nil; error = nil
         registeredOwner = nil; savedToken = nil; notificationNotice = nil
@@ -47,12 +46,16 @@ final class DailyReportsController {
         busy = true; error = nil
         defer { if ticket == revision { busy = false } }
         do {
-            let page = try await api.dailyReports(before: older ? nextBefore : nil)
+            let page: DailyReportsPage
+            if channel == .development { page = try await api.dailyReports(before: older ? nextBefore : nil) }
+            else { page = try await api.productReports(before: older ? nextBefore : nil) }
             guard ticket == revision, self.owner == owner else { return }
             reports = older ? reports + page.reports.filter { item in !reports.contains { $0.id == item.id } } : page.reports
             unread = page.unread; nextBefore = page.nextBefore
             if let focusID, !reports.contains(where: { $0.id == focusID }) {
-                let item = try await api.dailyReport(id: focusID)
+                let item: DailyReport
+                if channel == .development { item = try await api.dailyReport(id: focusID) }
+                else { item = try await api.productReport(id: focusID) }
                 guard ticket == revision else { return }
                 reports.append(item)
             }
@@ -64,7 +67,7 @@ final class DailyReportsController {
                 bind(account); focusID = nil; presented = false
             }
             if (error as? PlatformError)?.isUnauthorized == true { onUnauthorized?() }
-            self.error = "日报暂时无法加载，请稍后重试"
+            self.error = "\(channel.title)暂时无法加载，请稍后重试"
         }
     }
     func read(_ report: DailyReport) async {
@@ -72,7 +75,8 @@ final class DailyReportsController {
         readIDs.insert(report.id)
         let ticket = revision
         do {
-            try await api.readDailyReport(id: report.id)
+            if channel == .development { try await api.readDailyReport(id: report.id) }
+            else { try await api.readProductReport(id: report.id) }
             guard ticket == revision else { return }
             unread = max(0, unread - 1)
         } catch { if ticket == revision { readIDs.remove(report.id) } }
@@ -82,8 +86,9 @@ final class DailyReportsController {
         guard pushEnabled, let owner, savedToken != token || registeredOwner != owner else { return }
         let ticket = revision
         do {
-            try await api.registerDailyDevice(installationID: installationID, token: token)
-            guard ticket == revision else { return }
+            if channel == .development { try await api.registerDailyDevice(installationID: installationID, token: token) }
+            else { try await api.registerProductDevice(installationID: installationID, token: token) }
+            guard ticket == revision, pushEnabled else { return }
             savedToken = token; registeredOwner = owner; notificationNotice = nil
         } catch {
             guard ticket == revision else { return }
@@ -92,17 +97,17 @@ final class DailyReportsController {
     }
     func unregister() async {
         guard owner != nil else { return }
-        try? await api.removeDailyDevice(installationID: installationID)
+        if channel == .development { try? await api.removeDailyDevice(installationID: installationID) }
+        else { try? await api.removeProductDevice(installationID: installationID) }
         savedToken = nil; registeredOwner = nil
     }
-    func reportNotificationStatus(_ status: String) {
-        deviceReport?.cancel()
+    func reportNotificationStatus(_ status: String) async {
         let ticket = revision
         let info = NativeClientDevice.info(authorization: status)
-        deviceReport = Task { [weak self] in
-            guard let self, self.revision == ticket, !Task.isCancelled else { return }
-            try? await self.api.reportClientDevice(info)
-        }
+        guard owner != nil, !Task.isCancelled else { return }
+        // 产品通知注册依赖当前会话的 iOS 设备记录，先等待设备上报完成。
+        try? await api.reportClientDevice(info)
+        guard revision == ticket else { return }
     }
     func open(id: Int64? = nil) {
         guard owner != nil else { return }

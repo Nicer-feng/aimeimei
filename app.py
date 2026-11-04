@@ -20,6 +20,7 @@ from ai_platform.database import db, init_db
 from ai_platform.handlers.reading import ReadingHandlersMixin
 from ai_platform.handlers.usage_time import UsageTimeHandlersMixin
 from ai_platform.handlers.daily_reports import DailyReportHandlersMixin
+from ai_platform.handlers.product_reports import ProductReportHandlersMixin
 from ai_platform.handlers.login_history import LoginHistoryHandlersMixin
 from ai_platform.handlers.openai_egress import OpenAIEgressHandlersMixin
 from ai_platform.login_history import cleanup_history, request_ip, touch_session
@@ -63,6 +64,7 @@ class AppHandler(
     OpenAIEgressHandlersMixin,
     LoginHistoryHandlersMixin,
     DailyReportHandlersMixin,
+    ProductReportHandlersMixin,
     UsageTimeHandlersMixin,
     ReadingHandlersMixin,
     GiftHandlersMixin,
@@ -97,6 +99,8 @@ class AppHandler(
             return self.require_admin(self.handle_admin_login_records)
         if re.fullmatch(r"/api/admin/users/[^/]+/devices", path):
             return self.require_admin(self.handle_admin_user_devices)
+        if path == "/api/product-reports" or path.startswith("/api/product-reports/"):
+            return self.require_user(self.handle_product_reports)
         if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
             return self.require_user(self.handle_daily_reports)
         if path.startswith('/api/usage-time/'):
@@ -211,6 +215,8 @@ class AppHandler(
             return self.require_admin(self.handle_admin_daily_token_details)
         if path == "/api/admin/features":
             return self.require_admin(self.handle_admin_features)
+        if path == "/api/admin/product-report-settings":
+            return self.require_admin(self.handle_admin_product_report_settings)
         if path == "/api/admin/daily-report-settings":
             return self.require_admin(self.handle_admin_daily_report_settings)
         if path == "/api/admin/token-stats":
@@ -262,6 +268,8 @@ class AppHandler(
             return self.require_admin(self.handle_admin_openai_test)
         if path == "/api/session/device-info":
             return self.require_user(self.handle_client_device_info)
+        if path == "/api/product-reports" or path.startswith("/api/product-reports/"):
+            return self.require_user(self.handle_product_reports)
         if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
             return self.require_user(self.handle_daily_reports)
         if path.startswith('/api/usage-time/'):
@@ -304,6 +312,8 @@ class AppHandler(
             return self.require_admin(self.handle_admin_search)
         if path == "/api/admin/features":
             return self.require_admin(self.handle_admin_features)
+        if path == "/api/admin/product-report-settings":
+            return self.require_admin(self.handle_admin_product_report_settings)
         if path == "/api/admin/daily-report-settings":
             return self.require_admin(self.handle_admin_daily_report_settings)
         if path == "/api/admin/cost-recalculate":
@@ -368,6 +378,8 @@ class AppHandler(
 
     def do_PUT(self):
         path = urlparse(self.path).path
+        if path == "/api/product-reports" or path.startswith("/api/product-reports/"):
+            return self.require_user(self.handle_product_reports)
         if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
             return self.require_user(self.handle_daily_reports)
         if path.startswith("/cat/api/cats/"):
@@ -386,6 +398,8 @@ class AppHandler(
 
     def do_PATCH(self):
         path = urlparse(self.path).path
+        if path == "/api/product-reports" or path.startswith("/api/product-reports/"):
+            return self.require_user(self.handle_product_reports)
         if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
             return self.require_user(self.handle_daily_reports)
         if path.startswith("/api/gifts/"):
@@ -400,6 +414,8 @@ class AppHandler(
 
     def do_DELETE(self):
         path = urlparse(self.path).path
+        if path == "/api/product-reports" or path.startswith("/api/product-reports/"):
+            return self.require_user(self.handle_product_reports)
         if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
             return self.require_user(self.handle_daily_reports)
         if path.startswith("/api/reading/"):

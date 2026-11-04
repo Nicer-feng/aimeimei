@@ -11,6 +11,7 @@ final class AppStore {
     let personal: PersonalToolsController
     let speech: SpeechController
     let daily: DailyReportsController
+    let products: DailyReportsController
     private(set) var documents: [ChatDocument] = []
     private(set) var importingDocuments = false
     private(set) var documentUploadingName: String?
@@ -62,11 +63,13 @@ final class AppStore {
         personal = PersonalToolsController(api: api)
         speech = SpeechController(api: api, output: audioOutput ?? DeviceAudioOutput())
         daily = DailyReportsController(api: api)
+        products = DailyReportsController(api: api, channel: .product)
         writing.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }; media.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         ocr.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         personal.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         speech.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
         daily.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
+        products.onUnauthorized = { [weak self] in self?.report(PlatformError.http(401, "")) }
     }
     var locked: Bool { busy || streaming }
     var currentModel: ChatModel? { models.first { $0.id == draft.modelID } }
@@ -152,6 +155,7 @@ final class AppStore {
     private func clearAccount() {
         deviceReport?.cancel(); deviceReport = nil
         daily.bind(nil)
+        products.bind(nil)
         generation?.cancel(); runID = UUID(); speech.reset(); personal.reset(); ocr.reset(); writing.reset(); media.reset()
         documents = []; importingDocuments = false; failedDocument = nil; documentUploadingName = nil
         account = nil; selected = nil; messages = []; conversations = []; models = []
@@ -163,6 +167,8 @@ final class AppStore {
     }
     func logout() async {
         await work {
+            // 产品退订先清理频道订阅，再移除共享的 APNs 设备绑定。
+            await products.unregister()
             await daily.unregister()
             do { try await api.logout() }
             catch { self.error = "网络未能确认服务器退出；本机登录状态已清除" }
@@ -174,10 +180,12 @@ final class AppStore {
     private func loadWorkspace() async throws {
         reportCurrentDevice()
         daily.bind(account)
+        products.bind(account)
         let list = try await api.conversations()
         let available = try await api.models()
         conversations = list; models = available
         if daily.owner != nil { await daily.refresh() }
+        if products.owner != nil { await products.refresh() }
         if let selected {
             self.selected = list.first { $0.id == selected.id }
             if let current = self.selected {
@@ -429,7 +437,7 @@ final class AppStore {
             let user = try await api.currentAccount()
             guard owner == account?.id else { return }
             guard let user, user.id == owner else { clearAccount(); return }
-            account = user; daily.bind(user)
+            account = user; daily.bind(user); products.bind(user)
         } catch {
             if (error as? PlatformError)?.isUnauthorized == true { clearAccount() }
         }

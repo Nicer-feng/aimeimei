@@ -51,6 +51,10 @@ def init_daily_report_tables(conn):
       );
       CREATE INDEX IF NOT EXISTS idx_daily_reports_user ON daily_reports(user_id,id DESC);
     """)
+    device_columns = {row[1] for row in conn.execute("PRAGMA table_info(report_push_devices)")}
+    if "daily_subscribed" not in device_columns:
+        # 旧版设备沿用日报订阅；新增产品频道不能让它们被动改变订阅状态。
+        conn.execute("ALTER TABLE report_push_devices ADD COLUMN daily_subscribed INTEGER NOT NULL DEFAULT 1")
 
 
 def configure_user_reports(conn, uid, data, reactivated=False):
@@ -163,8 +167,8 @@ def publish_report(data):
             if row["content_hash"] != digest:
                 raise ValueError("当日日报已存在且正文不同，未覆盖旧记录")
             if inserted.rowcount == 1 and push_allowed(conn, uid, row["id"]):
-                conn.execute("INSERT OR IGNORE INTO report_push_deliveries(report_id,device_id) SELECT ?,id FROM report_push_devices WHERE user_id=?", (row["id"], uid))
-            devices = conn.execute("SELECT COUNT(*) FROM report_push_devices WHERE user_id=?", (uid,)).fetchone()[0]
+                conn.execute("INSERT OR IGNORE INTO report_push_deliveries(report_id,device_id) SELECT ?,id FROM report_push_devices WHERE user_id=? AND daily_subscribed=1", (row["id"], uid))
+            devices = conn.execute("SELECT COUNT(*) FROM report_push_devices WHERE user_id=? AND daily_subscribed=1", (uid,)).fetchone()[0]
             push = bool(conn.execute("SELECT daily_push_enabled FROM users WHERE id=?", (uid,)).fetchone()[0])
             paused = bool(conn.execute("SELECT paused FROM daily_report_settings WHERE id=1").fetchone()[0])
             reports.append({"username": username, "report_id": row["id"], "registered_devices": devices,
@@ -217,7 +221,7 @@ def deliver_pending(report_id=None):
                 JOIN users u ON u.id=r.user_id
                 JOIN sessions s ON s.token_hash=d.session_hash AND s.user_id=d.user_id AND s.expires_at>strftime('%s','now')
                 WHERE (p.state='pending' OR (p.state='sending' AND p.updated_at<?))
-                  AND r.created_at>? AND u.is_active=1 AND u.daily_reports_enabled=1 AND u.daily_push_enabled=1 AND d.user_id=r.user_id
+                  AND r.created_at>? AND u.is_active=1 AND u.daily_reports_enabled=1 AND u.daily_push_enabled=1 AND d.user_id=r.user_id AND d.daily_subscribed=1
                   AND r.id>u.daily_push_after_id AND EXISTS(SELECT 1 FROM daily_report_settings g WHERE g.id=1 AND g.paused=0 AND r.id>g.push_after_id)
                   AND (? IS NULL OR r.id=?) ORDER BY r.id LIMIT 20""",
                 (now()-120, now()-86400, report_id, report_id)).fetchall()

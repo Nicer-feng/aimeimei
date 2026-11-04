@@ -49,6 +49,19 @@ final class MeimeiUITests: XCTestCase {
         login()
         app.buttons["historyButton"].tap()
         XCTAssertFalse(app.buttons["dailyReportEntry"].exists)
+        XCTAssertFalse(app.buttons["productReportEntry"].exists)
+    }
+    func testProductRecommendationsArePinnedBesideDevelopmentReportsAndReadOnly() {
+        login("feng")
+        app.buttons["historyButton"].tap()
+        XCTAssertTrue(app.buttons["dailyReportEntry"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["productReportEntry"].waitForExistence(timeout: 5))
+        capture("44-product-report-pinned")
+        app.buttons["productReportEntry"].tap()
+        XCTAssertTrue(app.staticTexts["今日产品发现"].waitForExistence(timeout: 10))
+        capture("45-product-report-read-only")
+        XCTAssertFalse(app.textViews["composerField"].exists && app.textViews["composerField"].isHittable)
+        XCTAssertFalse(app.buttons["sendButton"].exists && app.buttons["sendButton"].isHittable)
     }
     func testWritingDraftSaveAndLock() {
         login(); let tools = app.scrollViews["composerToolsScroll"]; tools.swipeLeft()

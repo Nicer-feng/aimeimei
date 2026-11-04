@@ -2,6 +2,19 @@ import XCTest
 @testable import MeimeiCore
 
 final class CoreTests: XCTestCase {
+    func testProductPermissionDefaultsAndNotificationKindsAreIndependent() throws {
+        let legacy = try JSONDecoder().decode(Account.self, from: Data(#"{"id":"u","username":"feng","display_name":"家人","daily_reports_enabled":true,"daily_push_enabled":true}"#.utf8))
+        XCTAssertTrue(legacy.dailyReportsEnabled)
+        XCTAssertFalse(legacy.productReportsEnabled)
+        XCTAssertFalse(legacy.productPushEnabled)
+        let productOnly = try JSONDecoder().decode(Account.self, from: Data(#"{"id":"u","username":"feng","display_name":"家人","product_reports_enabled":true,"product_push_enabled":true}"#.utf8))
+        XCTAssertFalse(productOnly.dailyReportsEnabled)
+        XCTAssertTrue(productOnly.productReportsEnabled)
+        XCTAssertTrue(productOnly.productPushEnabled)
+        XCTAssertEqual(ReportChannel(notificationKind: "product_daily"), .product)
+        XCTAssertEqual(ReportChannel(notificationKind: "frontend_daily"), .development)
+        XCTAssertNil(ReportChannel(notificationKind: "unknown"))
+    }
     func testByteFramingKeepsEmptyLinesAndSplitUTF8AcrossCRLFAndLF() throws {
         var parser = SSEByteParser(); var events: [String] = []
         let raw = ": heartbeat\r\n\r\ndata: 你好😀\r\n\r\ndata: 第二行\n\ndata: 未结束"
@@ -103,6 +116,48 @@ private final class StubProtocol: URLProtocol, @unchecked Sendable {
 }
 
 final class APITests: XCTestCase {
+    func testProductReportsUseSeparateEndpointsAndScopedSubscription() async throws {
+        let record = #"{"id":101,"report_date":"2026-11-04","title":"每日产品推送","content":"项目介绍","created_at":1,"read_at":0,"simulation":false}"#
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/product-reports")
+            XCTAssertEqual(request.url?.query, "before=102")
+            XCTAssertEqual(request.httpMethod, "GET")
+            return (200, [:], "{\"reports\":[\(record)],\"unread\":1,\"next_before\":101}")
+        }
+        let page = try await api.productReports(before: 102)
+        XCTAssertEqual(page.reports.first?.id, 101)
+        XCTAssertEqual(page.nextBefore, 101)
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/product-reports/101")
+            XCTAssertEqual(request.httpMethod, "GET")
+            return (200, [:], "{\"report\":\(record)}")
+        }
+        let detail = try await api.productReport(id: 101)
+        XCTAssertEqual(detail.content, "项目介绍")
+        StubProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/product-reports/101/read")
+            XCTAssertEqual(request.httpMethod, "POST")
+            return (200, [:], #"{"ok":true}"#)
+        }
+        try await api.readProductReport(id: 101)
+        StubProtocol.handler = { [self] request in
+            XCTAssertEqual(request.url?.path, "/api/product-reports/device")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let payload = try body(request)
+            XCTAssertEqual(payload["installation_id"] as? String, "test-installation")
+            XCTAssertEqual(payload["token"] as? String, String(repeating: "a", count: 64))
+            XCTAssertEqual(Set(payload.keys), Set(["installation_id", "token"]))
+            return (200, [:], #"{"ok":true}"#)
+        }
+        try await api.registerProductDevice(installationID: "test-installation", token: String(repeating: "a", count: 64))
+        StubProtocol.handler = { [self] request in
+            XCTAssertEqual(request.url?.path, "/api/product-reports/device")
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(Set(try body(request).keys), Set(["installation_id"]))
+            return (200, [:], #"{"ok":true}"#)
+        }
+        try await api.removeProductDevice(installationID: "test-installation")
+    }
     func testDailyReportsUseReadOnlyFeedAndScopedDeviceRegistration() async throws {
         let record = #"{"id":7,"report_date":"2026-10-26","title":"日报","content":"正文","created_at":1,"read_at":0,"simulation":false}"#
         StubProtocol.handler = { request in
