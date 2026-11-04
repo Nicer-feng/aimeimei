@@ -4438,7 +4438,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.7" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.30.8" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -5000,11 +5000,11 @@
 	      return html.join("");
 	    }
 
-	    function renderMarkdown(source) {
+	    function renderMarkdown(source, options = {}) {
 	      const value = String(source || "");
 	      try {
 	        if (window.AIMarkdown?.isReady()) {
-	          const html = window.AIMarkdown.render(value);
+	          const html = window.AIMarkdown.render(value, options);
 	          if (html || !value.trim()) return html;
 	        }
 	      } catch {
@@ -5017,11 +5017,15 @@
 	      const value = String(source || "");
 	      const sourceKey = slot === "reasoning" ? "_reasoningMarkdownSource" : "_contentMarkdownSource";
 	      const htmlKey = slot === "reasoning" ? "_reasoningMarkdownHtml" : "_contentMarkdownHtml";
-	      if (message?.[sourceKey] === value && typeof message?.[htmlKey] === "string") return message[htmlKey];
-	      const html = renderMarkdown(value);
+	      const sources = slot === "content" && message?.role === "assistant" && !message.thinking ? normalizedSearchSources(message.sources) : [];
+	      const citationsKey = JSON.stringify(sources.map((item) => [item.citationIndex, item.url, item.title]));
+	      const cachedCitationsKey = slot === "reasoning" ? "_reasoningMarkdownCitations" : "_contentMarkdownCitations";
+	      if (message?.[sourceKey] === value && message?.[cachedCitationsKey] === citationsKey && typeof message?.[htmlKey] === "string") return message[htmlKey];
+	      const html = renderMarkdown(value, { sources });
 	      if (message) {
 	        message[sourceKey] = value;
 	        message[htmlKey] = html;
+	        message[cachedCitationsKey] = citationsKey;
 	      }
 	      return html;
 	    }
@@ -5343,7 +5347,7 @@
 	    }
 
 	    function normalizeSearchSource(rawSource, index = 0) {
-	      const raw = rawSource || {};
+	      const raw = typeof rawSource === "string" ? { url: rawSource } : (rawSource || {});
 	      const url = String(raw.url || raw.link || raw.href || "").trim();
 	      const hostname = sourceDomain(url);
 	      const favicon = String(raw.favicon || raw.icon || raw.favicon_url || raw.site_icon || raw.logo || "").trim();
@@ -5356,7 +5360,7 @@
 	        snippet: String(raw.snippet || raw.summary || raw.content || raw.description || "").trim(),
 	        publishedAt: raw.published_at || raw.publishedAt || raw.date || raw.created_at || "",
 	        sourceName: String(raw.source_name || raw.sourceName || raw.site_name || hostname || "").trim(),
-	        citationIndex: Number(raw.citation_index || raw.position || index + 1) || index + 1
+	        citationIndex: Number(raw.citationIndex || raw.citation_index || raw.position || index + 1) || index + 1
 	      };
 	    }
 
@@ -6357,7 +6361,8 @@
 	      if (highlightIndex) {
 	        requestAnimationFrame(() => {
 	          const target = $("reference-source-" + highlightIndex);
-	          target?.scrollIntoView({ block: "center", behavior: "smooth" });
+	          const list = $("referenceSourcesList");
+	          if (target && list) list.scrollTo({ top: list.scrollTop + target.getBoundingClientRect().top - list.getBoundingClientRect().top - (list.clientHeight - target.clientHeight) / 2, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 	          setTimeout(() => target?.classList.remove("is-highlighted"), 1600);
 	        });
 	      }
@@ -7822,6 +7827,17 @@
 	    document.addEventListener("aimarkdown:image", (event) => {
 	      openImagePreview(event.detail?.src || "");
 	    });
+
+    $("messages").addEventListener("click", (event) => {
+      const link = event.target.closest?.(".message-content a.md-citation[data-citation-index]");
+      if (!link || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      const wrap = link.closest(".bubble.assistant");
+      const message = state.messages.find((item) => messageKey(item) === wrap?.dataset.messageKey);
+      const index = Number(link.dataset.citationIndex);
+      if (!message || message.thinking || !normalizedSearchSources(message.sources).some((item) => item.citationIndex === index)) return;
+      event.preventDefault();
+      openReferenceSources(message, { highlightIndex: index });
+    });
 
 	    function uploadFormWithProgress(url, form, onProgress) {
 	      return new Promise((resolve, reject) => {

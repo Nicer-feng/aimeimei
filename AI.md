@@ -7,8 +7,8 @@
 - 项目名称：AI槑槑。
 - GitHub：`git@github.com:Nicer-feng/aimeimei.git`。
 - 主分支：`main`。
-- 当前基线版本：`2.30.7`。
-- 当前基线构建：`20261104-125025`。
+- 当前基线版本：`2.30.8`。
+- 当前基线构建：`20261104-132243`。
 - 当前材料附件行为：新上传材料默认只绑定本条用户消息；通过聊天顶部“当前对话文件”可显式设为持续参考，旧 `conversation_documents` 仍代表持续参考材料。
 - 当前基线提交：以 `git log -1 --oneline` 为准（发布后需同步本段）。
 - 本地实际仓库：`/Users/feng/Documents/文稿 - Unknown/aliyun3129`。
@@ -25,6 +25,8 @@
 `VERSION`、`BUILD_ID`、线上接口 `/api/version` 才是版本事实来源。本文件中的版本只表示编写本手册时的基线，未来发布后应同步更新本节。
 
 ## 2. 产品范围
+
+Markdown 中文加粗的标点相邻兼容在 `res/markdown-renderer.js` 的局部 inline 规则中完成，沿用 markdown-it 分隔符配对，不正则改写原文或代码。列表显式恢复 disc/decimal，任务列表仍无圆点。最终 assistant 的 `[n]` 仅在已保存来源存在有效 HTTP(S) 对应项时转成小型引用链接；普通点击复用右侧来源栏并仅滚动该栏，Ctrl/Cmd 点击和分享页跳原网页。未知编号、用户消息、思考、流式中正文、代码、数学与既有链接保持原样。源码缓存需连同来源编号/标题/URL一起失效，不重绘历史；来源 normalize 必须保留 citationIndex，不能二次处理时重排。`scripts/test_markdown_citations_ui.js` 覆盖中文标点、连续引用、脚注/HTML/代码隔离、缓存、历史/分享与深浅主题手机布局；`markdown-test.html` 保留人工回归样例。聊天和分享页的 renderer/CSS 都带版本缓存标识。v2.30.8 纯静态发布，不改后端、搜索、prompt 或数据库。
 
 思考档位菜单的 `reasoningPickerOpen`、菜单 hidden、按钮 aria-expanded 必须双向同步，不能只渲染打开分支。重复点击直接调用 closeReasoningPicker；点外关闭使用 pointerdown 捕获，不阻止原点击；打开模型选择器同步收起。桌面/触摸、同按钮、Esc、键盘、选中当前档位、生成中开关与草稿保留回归在 `scripts/test_openai_egress_ui.js`，无需真实模型和账号。v2.30.7 为纯静态修复，不重启共享服务。
 

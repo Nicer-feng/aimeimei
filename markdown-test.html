@@ -47,7 +47,7 @@
     .image-lightbox.show { display: flex; }
     .image-lightbox img { border-radius: 16px; max-height: 90vh; max-width: 92vw; }
   </style>
-  <link rel="stylesheet" href="/res/markdown.css">
+  <link rel="stylesheet" href="/res/markdown.css?v=2.30.8">
 </head>
 <body>
   <header class="test-header">
@@ -281,6 +281,15 @@ classDiagram
 <details><summary>允许的安全 HTML</summary><p>这段内容可以展开，危险脚本会被清理。</p></details>
 <script>alert("这段脚本不应执行")</script>
 
+### 中文加粗与来源编号回归
+
+**我的判断是：这里是中文。**你可以继续阅读。资料说明：**边界。**后面仍是正文。[1][2]
+
+- **利率与国债收益率：**如果发生变化，需要核实。[2]
+- **盈利预期：**继续保持正常列表符号。
+
+行内代码保持原样：`[1] **中文。**后续`。不存在的来源仍是普通文本：[99]。
+
 ### 数学公式预留
 
 行内公式：$a^2+b^2=c^2$
@@ -304,10 +313,13 @@ THIS_IS_A_VERY_LONG_LINE_WITHOUT_WRAPPING_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_
   <script src="/res/vendor/highlight-11.11.1.min.js"></script>
   <script src="/res/vendor/highlight-nginx-11.11.1.min.js"></script>
   <script src="/res/vendor/highlight-dockerfile-11.11.1.min.js"></script>
-  <script src="/res/markdown-renderer.js"></script>
+  <script src="/res/markdown-renderer.js?v=2.30.8"></script>
   <script>
     const preview = document.getElementById("preview");
-    preview.innerHTML = window.AIMarkdown.render(document.getElementById("markdownSource").value.trim());
+    preview.innerHTML = window.AIMarkdown.render(document.getElementById("markdownSource").value.trim(), { sources: [
+      { url: "https://example.com/source-1", title: "来源一（测试链接）", position: 1 },
+      { url: "https://example.com/source-2", title: "来源二（测试链接）", position: 2 }
+    ] });
     window.AIMarkdown.enhance(preview);
 
     document.getElementById("themeToggle").addEventListener("click", (event) => {

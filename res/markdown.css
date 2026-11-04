@@ -49,6 +49,10 @@
 .markdown li { margin: .3em 0; padding-left: .15em; }
 .markdown li > ul,
 .markdown li > ol { margin: .3em 0; }
+.markdown ul { list-style-type: disc; }
+.markdown ol { list-style-type: decimal; }
+.markdown ul ul { list-style-type: circle; }
+.markdown ul ul ul { list-style-type: square; }
 .markdown ul.contains-task-list { list-style: none; padding-left: .2em; }
 .markdown .task-list-item { align-items: flex-start; display: flex; gap: .58em; }
 .markdown .task-list-item > label { display: inline; }
@@ -79,6 +83,33 @@
   transition: color 160ms ease, text-decoration-color 160ms ease;
 }
 .markdown a:hover { text-decoration-color: currentColor; }
+.markdown a.md-citation {
+  align-items: center;
+  background: var(--md-muted-bg);
+  border: 1px solid var(--md-border);
+  border-radius: 5px;
+  color: var(--muted, #8a6d5a);
+  display: inline-flex;
+  font-size: .72em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  justify-content: center;
+  line-height: 1.35;
+  margin: 0 .12em;
+  min-width: 1.5em;
+  padding: .05em .3em;
+  text-decoration: none;
+  vertical-align: .18em;
+  white-space: nowrap;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+.markdown a.md-citation:hover,
+.markdown a.md-citation:focus-visible {
+  background: color-mix(in srgb, var(--accent-strong, #c87391) 12%, var(--md-muted-bg));
+  border-color: var(--accent-strong, #c87391);
+  color: var(--text, #1f2428);
+}
+.markdown a.md-citation:focus-visible { outline: 2px solid var(--accent-strong, #c87391); outline-offset: 2px; }
 .markdown code,
 .markdown .math-placeholder {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;

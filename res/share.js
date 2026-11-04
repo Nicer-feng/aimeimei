@@ -16,11 +16,11 @@
     return `还有 ${Math.max(1, Math.ceil(remain / 60000))} 分钟失效`;
   }
 
-  function renderMarkdown(root, content) {
+  function renderMarkdown(root, content, sources = []) {
     const text = String(content || "");
     try {
       if (window.AIMarkdown?.isReady?.()) {
-        const html = window.AIMarkdown.render(text);
+        const html = window.AIMarkdown.render(text, { sources });
         if (html || !text.trim()) {
           root.innerHTML = html;
           window.AIMarkdown.enhance(root, { imagePreview: true });
@@ -64,7 +64,7 @@
     }
     const content = document.createElement("div");
     content.className = "share-message-content";
-    renderMarkdown(content, message.content);
+    renderMarkdown(content, message.content, message.role === "assistant" ? message.sources : []);
     body.appendChild(content);
     if (Array.isArray(message.sources) && message.sources.length) {
       const sources = document.createElement("div");

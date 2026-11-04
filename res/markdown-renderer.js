@@ -119,6 +119,87 @@
     };
   }
 
+  function installCjkEmphasis(md) {
+    const cjk = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff]/;
+    const punctuation = function (char) {
+      return Boolean(char && (md.utils.isPunctChar(char) || md.utils.isMdAsciiPunct(char.charCodeAt(0))));
+    };
+    md.inline.ruler.before("emphasis", "cjk_strong", function (state, silent) {
+      if (silent || state.src.slice(state.pos, state.pos + 2) !== "**") return false;
+      const scan = state.scanDelims(state.pos, true);
+      const before = state.src[state.pos - 1] || "";
+      const after = state.src[state.pos + scan.length] || "";
+      const open = scan.can_open || (cjk.test(before) && punctuation(after));
+      const close = scan.can_close || (punctuation(before) && cjk.test(after));
+      if (open === scan.can_open && close === scan.can_close) return false;
+      // Reuse markdown-it's delimiter balancing; never rewrite source/code text.
+      for (let i = 0; i < scan.length; i += 1) {
+        state.push("text", "", 0).content = "*";
+        state.delimiters.push({ marker: 42, length: scan.length, token: state.tokens.length - 1, end: -1, open, close });
+      }
+      state.pos += scan.length;
+      return true;
+    });
+  }
+
+  function citationSources(sources) {
+    const items = new Map();
+    (Array.isArray(sources) ? sources : []).forEach(function (raw, offset) {
+      if (!raw) return;
+      const index = Number(raw.citationIndex || raw.citation_index || raw.position || offset + 1);
+      if (!Number.isSafeInteger(index) || index < 1 || items.has(index)) return;
+      try {
+        const url = new URL(typeof raw === "string" ? raw : (raw.url || raw.link || raw.href || ""));
+        if (!["https:", "http:"].includes(url.protocol)) return;
+        items.set(index, { url: url.href, title: String(raw.title || raw.name || url.hostname) });
+      } catch {}
+    });
+    return items;
+  }
+
+  function installCitations(md) {
+    function inLiteralHtml(state) {
+      const tags = state._citationHtmlTags || (state._citationHtmlTags = []);
+      for (let i = state._citationHtmlCursor || 0; i < state.tokens.length; i += 1) {
+        const token = state.tokens[i];
+        if (token.type !== "html_inline") continue;
+        const tag = /^<(\/?)(a|code|pre|kbd|samp|script|style|textarea)(?:\s[^>]*|)>$/i.exec(token.content);
+        if (!tag) continue;
+        if (tag[1]) {
+          const index = tags.lastIndexOf(tag[2].toLowerCase());
+          if (index >= 0) tags.splice(index);
+        } else if (!/\/\s*>$/.test(token.content)) tags.push(tag[2].toLowerCase());
+      }
+      state._citationHtmlCursor = state.tokens.length;
+      return tags.length > 0;
+    }
+    md.inline.ruler.before("link", "source_citation", function (state, silent) {
+      if (!state.env.citationSources?.size || state.linkLevel > 0 || state.src[state.pos] !== "[") return false;
+      const match = /^\[([1-9]\d{0,5})\]/.exec(state.src.slice(state.pos));
+      if (!match) return false;
+      const end = state.pos + match[0].length;
+      // Existing Markdown links, reference links and footnotes keep their semantics.
+      const reference = /^\[([^\]]*)\]/.exec(state.src.slice(end));
+      if (state.src[end] === "(" || state.env.references?.[match[1]] ||
+          (reference && state.env.references?.[md.utils.normalizeReference(reference[1] || match[1])]) || inLiteralHtml(state)) return false;
+      const index = Number(match[1]);
+      const source = state.env.citationSources.get(index);
+      if (!source) return false;
+      if (!silent) {
+        const token = state.push("source_citation", "a", 0);
+        token.meta = { index, source };
+      }
+      state.pos = end;
+      return true;
+    });
+    md.renderer.rules.source_citation = function (tokens, index) {
+      const item = tokens[index].meta;
+      const title = md.utils.escapeHtml("参考来源 " + item.index + "：" + item.source.title);
+      return '<a class="md-citation" data-citation-index="' + item.index + '" href="' + md.utils.escapeHtml(item.source.url) +
+        '" target="_blank" rel="noopener noreferrer nofollow" title="' + title + '" aria-label="' + title + '">' + item.index + '</a>';
+    };
+  }
+
   function createMarkdown() {
     if (!window.markdownit || !window.DOMPurify) return null;
     const md = window.markdownit({
@@ -130,6 +211,8 @@
     if (window.markdownitFootnote) md.use(window.markdownitFootnote);
     if (window.markdownitTaskLists) md.use(window.markdownitTaskLists, { enabled: false, label: true, labelAfter: true });
     installMathPlaceholder(md);
+    installCjkEmphasis(md);
+    installCitations(md);
     md.renderer.rules.fence = renderFence;
 
     const defaultLinkOpen = md.renderer.rules.link_open || function (tokens, index, options, env, self) {
@@ -174,10 +257,10 @@
     });
   }
 
-  function render(source) {
+  function render(source, options = {}) {
     if (!markdown) markdown = createMarkdown();
     if (!markdown) return "";
-    return sanitize(markdown.render(String(source || "")));
+    return sanitize(markdown.render(String(source || ""), { citationSources: citationSources(options.sources) }));
   }
 
   function initializeMermaid() {
