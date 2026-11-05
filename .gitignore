@@ -25,3 +25,6 @@ tmp/
 
 # 送礼物流服务的运行时凭证
 gift-logistics.secret.json
+
+# 题库速查的独立运行凭证与会话
+ncd-data/

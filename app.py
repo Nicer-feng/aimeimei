@@ -15,6 +15,7 @@ from gift.handlers import GiftHandlersMixin
 from gift.database import init_gift_db
 from file_share.handlers import FileShareHandlersMixin
 from file_share.database import init_share_db
+from ncd.handlers import NcdHandlersMixin
 
 from ai_platform.database import db, init_db
 from ai_platform.handlers.reading import ReadingHandlersMixin
@@ -62,6 +63,7 @@ from ai_platform.settings import (
 
 
 class AppHandler(
+    NcdHandlersMixin,
     SuperWritingHandlersMixin,
     OpenAIEgressHandlersMixin,
     LoginHistoryHandlersMixin,
@@ -91,6 +93,8 @@ class AppHandler(
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/ncd" or path.startswith("/ncd/"):
+            return self.ncd_dispatch()
         if path == "/api/admin/openai-egress":
             return self.require_admin(self.handle_admin_openai_egress)
         if path == "/api/admin/openai-budget":
@@ -264,6 +268,8 @@ class AppHandler(
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/ncd" or path.startswith("/ncd/"):
+            return self.ncd_dispatch()
         if path == "/api/admin/openai-egress":
             return self.require_admin(self.handle_admin_openai_egress)
         if path == "/api/admin/openai-budget":

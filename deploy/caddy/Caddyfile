@@ -7,6 +7,11 @@
 feng.asia, www.feng.asia {
 	root * /var/www/aimeimei
 
+	@ncd path /ncd /ncd/*
+	handle @ncd {
+		reverse_proxy 127.0.0.1:8000
+	}
+
 	@file_share path /admin/share /admin/share/* /share/* /gifts /gifts/*
 	handle @file_share {
 		reverse_proxy 127.0.0.1:8000

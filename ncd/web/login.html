@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="referrer" content="same-origin">
+  <title>进入</title>
+  <link rel="stylesheet" href="/ncd/assets/ncd.css?v=0.1.0">
+  <script src="/ncd/assets/login.js?v=0.1.0" defer></script>
+</head>
+<body>
+  <main class="page login-page">
+    <form class="login-form" id="loginForm" autocomplete="off">
+      <label class="visually-hidden" for="password">访问密码</label>
+      <input id="password" name="password" type="password" placeholder="输入密码" maxlength="256" autocomplete="off" required autofocus>
+      <button type="submit" id="loginButton">进入</button>
+    </form>
+    <p class="status" id="loginStatus" role="status" aria-live="polite" hidden></p>
+    <noscript><p class="status">请启用浏览器 JavaScript 后进入。</p></noscript>
+  </main>
+</body>
+</html>

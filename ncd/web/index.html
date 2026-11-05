@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="referrer" content="same-origin">
+  <title>搜索</title>
+  <link rel="stylesheet" href="/ncd/assets/ncd.css?v=0.1.0">
+  <script src="/ncd/assets/search.js?v=0.1.0" defer></script>
+</head>
+<body>
+  <main class="page">
+    <form class="search-form" id="searchForm" role="search" autocomplete="off">
+      <label class="visually-hidden" for="query">题目关键词</label>
+      <input id="query" name="q" type="search" placeholder="输入题目关键词" maxlength="1000" autocomplete="off" spellcheck="false" autofocus>
+      <button type="submit">搜索</button>
+    </form>
+    <p class="status" id="searchStatus" role="status" aria-live="polite" hidden></p>
+    <section class="results" id="results" aria-label="搜索结果" aria-busy="false"></section>
+    <div class="more-row" id="moreRow" hidden>
+      <button type="button" class="more-button" id="loadMore">更多</button>
+    </div>
+    <noscript><p class="status">请启用浏览器 JavaScript 后搜索。</p></noscript>
+  </main>
+</body>
+</html>
