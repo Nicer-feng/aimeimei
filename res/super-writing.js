@@ -165,10 +165,7 @@
       select.add(new Option(`${version.label || '最终交付'} · ${source} · ${formatMessageTime(version.updated_at || version.created_at)}`, String(version.id)));
     }
     select.value = data.delivery?.id ? String(data.delivery.id) : '';
-    const ref = data.reference_status || {};
-    byId('finalDeliveryReferenceNote').textContent = ref.confirmed_count
-      ? `已回传 ${ref.confirmed_count} 份客户确认稿，超能模式按任务选取参考。`
-      : '确认稿积累前，超能模式参考历史推定稿。';
+    byId('finalDeliveryReferenceNote').textContent = '交付稿用于本单版本管理与复盘，暂不自动参考其他任务。';
   }
 
   function fillEditor(data) {
@@ -327,17 +324,82 @@
       wrap.querySelector('.bubble-shell')?.append(box);
     }
     box.replaceChildren();
+    const issues = [], seen = new Set();
+    for (const [kind, values] of [['rule', check.deterministic_issues], ['model', check.issues]]) {
+      for (const issue of Array.isArray(values) ? values : []) {
+        const text = (typeof issue === 'string' ? issue : issue && typeof issue === 'object'
+          ? [issue.quote, issue.reason, issue.evidence_status === 'not_in_material'
+            ? [(issue.evidence || issue.source_quote) ? `相关材料：${issue.evidence || issue.source_quote}` : '', '模型未在本单材料中找到该主张的依据，需确认；这不等于事实虚假。'].filter(Boolean).join('；')
+            : (issue.evidence || issue.source_quote) ? `依据：${issue.evidence || issue.source_quote}` : ''].filter(Boolean).join('；')
+          : '').trim();
+        if (text && !seen.has(text)) { issues.push({ kind, text }); seen.add(text); }
+      }
+    }
     const summary = document.createElement('summary');
-    const labels = { passed: '已完成本轮检查', issues: '有待确认内容', skipped: '本轮未做深度检查', failed: '本轮未完成检查' };
-    summary.textContent = `超能槑槑 · ${check.repaired ? '已作局部修复' : labels[check.status] || '查看检查记录'}`;
+    const singleReview = check.review_method === 'single_pass';
+    const labels = { passed: '本轮有限检查已完成', reviewed: singleReview ? '本次复检已返回' : '本轮有限检查已完成', issues: '有待确认内容', skipped: '本轮未做深度检查', failed: '本轮未完成检查', unrecognized: '正文计数未完成' };
+    let status = issues.length && ['passed', 'reviewed'].includes(check.status) ? 'issues' : check.status;
+    if (check.body_status === 'unrecognized' && ['passed', 'reviewed'].includes(status)) status = 'unrecognized';
+    summary.textContent = `超能槑槑 · ${check.repaired ? (issues.length ? '已作局部修复，仍有待确认内容' : '已作局部修复') : labels[status] || '查看检查记录'}`;
     box.append(summary);
     const note = document.createElement('p'); note.textContent = check.notice || '检查范围有限，请以客户要求和原始材料为准。'; box.append(note);
-    const issues = Array.isArray(check.issues) ? check.issues : [];
+    if (check.body_status) {
+      const count = document.createElement('p'); count.className = 'super-writing-count';
+      const counts = Array.isArray(check.body_chars) ? check.body_chars.filter(value => Number.isInteger(value) && value >= 0) : [];
+      const length = check.length_requirement || {};
+      let target = '';
+      if (length.mode === 'approx' && length.min_chars > 0 && length.max_chars > 0) {
+        target = `本单参考约${length.min_chars}–${length.max_chars}字，不按固定上下限判定。`;
+      } else if (['approx', 'target'].includes(length.mode) && length.target_chars > 0) {
+        target = `本单目标${length.mode === 'approx' ? '约' : ''}${length.target_chars}字，仅作参考，不按固定上下限判定。`;
+      } else if (length.mode === 'range') {
+        target = length.min_chars && length.max_chars ? `本单要求${length.min_chars}–${length.max_chars}字。`
+          : length.max_chars ? `本单要求最多${length.max_chars}字。` : length.min_chars ? `本单要求至少${length.min_chars}字。` : '';
+      }
+      count.textContent = check.body_status === 'unrecognized'
+        ? (check.count_notice || '正文边界不明确，本轮未检查正文字数。')
+        : `${check.body_scope === 'dialogue' ? '分镜台词' : '正文'}：${counts.map((value, index) => `第${index + 1}${check.body_scope === 'dialogue' ? '表' : '篇'} ${value} 字`).join('；')}。${target}${check.count_notice || ''}`;
+      box.append(count);
+      const sections = Array.isArray(check.sections) ? check.sections : [];
+      const names = { cover: '封面/标题', publication: '发布文案', body: '正文', dialogue: '分镜台词', captions: '花字/字幕', production: '制作说明' };
+      const identified = Object.entries(names).map(([kind, name]) => {
+        const size = sections.filter(section => section?.kind === kind).length;
+        return size ? `${name} ${size} 项` : '';
+      }).filter(Boolean);
+      if (identified.length) {
+        const parts = document.createElement('p'); parts.className = 'super-writing-sections';
+        parts.textContent = `已识别分区：${identified.join(' · ')}。`;
+        box.append(parts);
+      }
+      const countNote = document.createElement('p'); countNote.textContent = check.count_note || '仅计正文或分镜台词，不含封面/标题、发布文案和已识别花字；不计空白，含标点。'; box.append(countNote);
+    }
+    const scope = document.createElement('p'); scope.className = 'super-writing-scope';
+    scope.textContent = '规则检查针对明确字数范围和本单逐字词项；模型意见仍待核对。自然度、观点和广告感不作代码判定，检查完成不等于客户验收。';
+    box.append(scope);
+    if (singleReview) {
+      const method = document.createElement('p'); method.className = 'super-writing-single';
+      method.textContent = '本次采用一次 Flash 复检，原稿保留。检查完成仅表示返回格式和材料范围满足本次协议，不代表逐句覆盖或事实全部正确。已返回的模型用量计入当前对话。';
+      box.append(method);
+    }
+    const coverage = check.coverage;
+    if (!singleReview && coverage && Number.isInteger(coverage.covered_units) && Number.isInteger(coverage.total_units)) {
+      const progress = document.createElement('p'); progress.className = 'super-writing-coverage';
+      progress.textContent = `稿件单元覆盖记录：${coverage.covered_units}/${coverage.total_units}。覆盖只表示模型处理过该位置，不代表判断正确。`;
+      box.append(progress);
+    }
+    if (!singleReview && check.secondary_review?.attempted) {
+      const second = document.createElement('p'); second.className = 'super-writing-secondary';
+      second.textContent = (check.secondary_review.status === 'completed'
+        ? '二次事实复核已结束，模型判断仍待核对。'
+        : '二次事实复核未完整完成，未确认的首轮疑点不会作为复核结果展示。')
+        + '两阶段已返回的模型用量均计入当前对话，未返回的用量会标记未知。';
+      box.append(second);
+    }
     if (issues.length) {
       const list = document.createElement('ul');
       issues.forEach(issue => {
         const line = document.createElement('li');
-        line.textContent = typeof issue === 'string' ? issue : [issue.quote, issue.reason, issue.evidence ? `依据：${issue.evidence}` : ''].filter(Boolean).join('；');
+        line.textContent = `${issue.kind === 'rule' ? '规则检查' : '模型待核对'}：${issue.text}`;
         list.append(line);
       });
       box.append(list);

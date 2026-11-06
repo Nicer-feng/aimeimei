@@ -6,6 +6,7 @@ from ..docmind import (
     document_chunks,
     get_doc_parser_result,
     query_doc_parser_status,
+    response_data,
     response_error,
     response_status,
     response_task_id,
@@ -14,6 +15,92 @@ from ..docmind import (
 )
 from ..presenters import document_file_public
 from ..storage import document_oss_config, document_oss_prefix, document_upload_policy
+
+
+STRUCTURED_LAYOUT_BATCH = 3000
+STRUCTURED_LAYOUT_LIMIT = 12000
+STRUCTURED_TEXT_LIMIT = 2_000_000
+
+
+class _DocumentStructureError(ValueError):
+    """材料不能完整保存时明确失败，不把部分内容当作解析完成。"""
+
+
+def _structured_document_result(service, task_id, status_response):
+    data = response_data(status_response)
+    total = data.get("NumberOfSuccessfulParsing")
+    if total is not None:
+        if isinstance(total, str) and total.strip().isdigit():
+            total = int(total.strip())
+        if type(total) is not int or total < 0:
+            raise _DocumentStructureError("材料版面总数格式无效，无法确认是否已完整取得")
+        if total > STRUCTURED_LAYOUT_LIMIT:
+            raise _DocumentStructureError("材料版面超过12000块的完整解析上限，未保存部分结果")
+
+    layouts, batch_hashes, identities = [], set(), set()
+
+    def fetch(start):
+        result = response_data(get_doc_parser_result(service, task_id, start, STRUCTURED_LAYOUT_BATCH))
+        batch = result.get("layouts") if "layouts" in result else result.get("Layouts")
+        if not isinstance(batch, list):
+            raise _DocumentStructureError("材料版面分页字段无效，无法确认是否已完整取得")
+        if len(batch) > STRUCTURED_LAYOUT_BATCH:
+            raise _DocumentStructureError("材料版面分页返回数量异常，未保存部分结果")
+        return batch
+
+    def append_batch(batch):
+        if not batch:
+            return
+        digest = hashlib.sha256(json.dumps(batch, ensure_ascii=False, sort_keys=True).encode()).digest()
+        if digest in batch_hashes:
+            raise _DocumentStructureError("材料版面分页重复，无法确认是否已完整取得")
+        batch_hashes.add(digest)
+        batch_identities = set()
+        for layout in batch:
+            if not isinstance(layout, dict):
+                raise _DocumentStructureError("材料版面结构无效，未保存部分结果")
+            unique_id = layout.get("uniqueId")
+            identity = None
+            if isinstance(unique_id, (str, int)) and not isinstance(unique_id, bool) and str(unique_id).strip():
+                identity = ("uniqueId", str(unique_id))
+            elif type(layout.get("index")) is int:
+                # index只承诺阅读顺序；连同完整块内容去重，不能假定同页index必然唯一。
+                identity = ("layout", layout["index"], hashlib.sha256(json.dumps(layout, ensure_ascii=False, sort_keys=True).encode()).digest())
+            if identity is not None:
+                # 缺唯一ID的同批同形块可能是原文重复，只拒绝跨批重放。
+                if identity in identities or (identity[0] == "uniqueId" and identity in batch_identities):
+                    raise _DocumentStructureError("材料版面定位标识重复，无法确认是否已完整取得")
+                batch_identities.add(identity)
+        identities.update(batch_identities)
+        if len(layouts) + len(batch) > STRUCTURED_LAYOUT_LIMIT:
+            raise _DocumentStructureError("材料版面超过12000块的完整解析上限，未保存部分结果")
+        layouts.extend(batch)
+
+    if total is not None:
+        for start in range(0, total, STRUCTURED_LAYOUT_BATCH):
+            batch = fetch(start)
+            if len(batch) != min(STRUCTURED_LAYOUT_BATCH, total - start):
+                raise _DocumentStructureError("材料版面分页数量与解析总数不一致，未保存部分结果，可刷新重试")
+            append_batch(batch)
+    else:
+        # 总数缺失时用空页确认结束；最多四个满批和一次确认，不无界查询。
+        while True:
+            batch = fetch(len(layouts))
+            if not batch:
+                break
+            append_batch(batch)
+            if len(batch) < STRUCTURED_LAYOUT_BATCH:
+                if fetch(len(layouts)):
+                    raise _DocumentStructureError("材料版面短批后仍有内容，无法确认分页完整性，未保存部分结果")
+                break
+
+    chunks = document_chunks({"Data": {"layouts": layouts}}, preserve_structure=True)
+    if any(not isinstance(chunk, dict) or chunk.get("structure_status") != "preserved" for chunk in chunks):
+        raise _DocumentStructureError("平台未能完整保留材料结构，未保存部分结果")
+    parsed_text = "\n\n".join(chunk["content"] for chunk in chunks)
+    if len(parsed_text) > STRUCTURED_TEXT_LIMIT:
+        raise _DocumentStructureError("材料正文超过2000000字的完整保存上限，未保存部分结果")
+    return chunks, parsed_text
 
 
 class DocumentHandlersMixin:
@@ -98,7 +185,7 @@ class DocumentHandlersMixin:
         if row["status"] == "failed" and not retry_failed:
             return row
         service = docmind_config(self.server.secrets)
-        status, error_message, chunks = "processing", "", None
+        status, error_message, chunks, parsed_text = "processing", "", None, None
         if not docmind_configured(service):
             error_message = "阿里云文档解析还没有配置好，配置恢复后可刷新重试"
         else:
@@ -106,8 +193,11 @@ class DocumentHandlersMixin:
                 status_response = query_doc_parser_status(service, row["parser_task_id"])
                 provider_status = response_status(status_response)
                 if provider_status in ("success", "completed", "complete"):
-                    result = get_doc_parser_result(service, row["parser_task_id"], 0, 3000)
-                    chunks = document_chunks(result)
+                    if row["user_id"] == "default":
+                        chunks, parsed_text = _structured_document_result(service, row["parser_task_id"], status_response)
+                    else:
+                        result = get_doc_parser_result(service, row["parser_task_id"], 0, 3000)
+                        chunks = document_chunks(result)
                     if chunks:
                         status = "completed"
                     else:
@@ -115,6 +205,8 @@ class DocumentHandlersMixin:
                 elif provider_status in ("fail", "failed", "error"):
                     status = "failed"
                     error_message = safe_docmind_error(response_error(status_response) or "文档解析失败")
+            except _DocumentStructureError as exc:
+                status, error_message = "failed", str(exc)
             except Exception:
                 # A query/download failure does not mean the provider job failed.
                 error_message = "文档解析结果暂时无法获取，将继续查询，也可稍后刷新重试"
@@ -130,7 +222,8 @@ class DocumentHandlersMixin:
                 conn.executemany("""INSERT INTO document_chunks
                     (document_id,user_id,ordinal,title,content,page_number,created_at)
                     VALUES (?,?,?,?,?,?,?)""", [(row["id"],row["user_id"],index,item["title"],item["content"],item["page"],now()) for index,item in enumerate(chunks)])
-                conn.execute("""UPDATE document_files SET status='completed', parsed_text=?, page_count=?, chunk_count=?, error_message='', updated_at=? WHERE id=? AND user_id=?""", ("\n\n".join(item["content"] for item in chunks)[:2_000_000], 0, len(chunks), now(), row["id"], row["user_id"]))
+                content = parsed_text if row["user_id"] == "default" else "\n\n".join(item["content"] for item in chunks)[:2_000_000]
+                conn.execute("""UPDATE document_files SET status='completed', parsed_text=?, page_count=?, chunk_count=?, error_message='', updated_at=? WHERE id=? AND user_id=?""", (content, 0, len(chunks), now(), row["id"], row["user_id"]))
             else:
                 conn.execute("UPDATE document_files SET status=?, error_message=?, updated_at=? WHERE id=? AND user_id=?", (status, error_message, now(), row["id"], row["user_id"]))
             return conn.execute("SELECT * FROM document_files WHERE id=? AND user_id=?", (row["id"], row["user_id"])).fetchone()

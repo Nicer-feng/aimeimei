@@ -104,6 +104,71 @@ const server = http.createServer(async (req, res) => {
     const mode = page.locator('#superModeToggle');
     assert.equal(await mode.getAttribute('aria-pressed'), 'false');
     assert.equal(await page.locator('.super-writing-check').count(), 1);
+    const renderedChecks = await page.evaluate(() => {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = '<div class="bubble-shell"></div>';
+      document.body.append(wrap);
+      const checks = [
+        { status: 'passed', deterministic_issues: ['正文超过要求字数。', '正文超过要求字数。'], issues: ['正文超过要求字数。', { reason: '正文超过要求字数。' }, { quote: '原句', reason: '需要核对本单条件', source_quote: '仅限指定版本' }] },
+        { status: 'failed', deterministic_issues: ['正文超过要求字数。'], issues: [] },
+        { status: 'reviewed', deterministic_issues: [], issues: [], body_status: 'recognized', body_scope: 'body', body_chars: [710, 878], sections: [{ kind: 'cover' }, { kind: 'publication' }, { kind: 'body' }, { kind: 'body' }], length_requirement: { mode: 'approx', target_chars: 750, source_quote: '正文约750字' } },
+        { status: 'issues', repaired: true, deterministic_issues: ['仍有待补数据。'], issues: [] },
+        { status: 'reviewed', deterministic_issues: [], issues: [], body_status: 'unrecognized', body_chars: [], count_notice: '正文边界不明确，本轮未检查正文字数。' },
+        { status: 'reviewed', deterministic_issues: [], issues: [], body_status: 'plain', body_chars: [710], length_requirement: { mode: 'approx', min_chars: 650, max_chars: 700, target_chars: 0 } },
+        { status: 'reviewed', deterministic_issues: [], issues: [], body_status: 'recognized', body_scope: 'dialogue', body_chars: [100, 200], count_notice: '按表统计台词；未执行单篇字数范围检查。' },
+        { status: 'issues', deterministic_issues: [], issues: [{ kind: 'added_claim', quote: '维修师傅家里都用它。', reason: '新增第三方自用背书。', evidence_status: 'not_in_material', source_quote: '额定容量8L。', grounded: false }], coverage: { covered_units: 3, total_units: 4 }, secondary_review: { attempted: true, status: 'completed' } },
+        { status: 'failed', issues: [], deterministic_issues: [], secondary_review: { attempted: true, status: 'failed' }, usage_unknown: true },
+        { status: 'issues', issues: [{ quote: '购买后就能免费更换。', reason: '遗漏30天内且有质量问题的条件。', source_quote: '购买后30天内质量问题可免费更换。' }], deterministic_issues: [], review_complete: false, secondary_review: { attempted: true, status: 'incomplete' } },
+        { status: 'reviewed', issues: [], deterministic_issues: [], review_complete: true, review_method: 'single_pass' },
+        { status: 'failed', issues: [], deterministic_issues: [], review_complete: false, review_method: 'single_pass', usage_unknown: true }
+      ];
+      const results = checks.map(check => {
+        MeimeiSuper.renderCheck(wrap, { super_check: check });
+        return { summary: wrap.querySelector('summary').textContent, issues: [...wrap.querySelectorAll('li')].map(line => line.textContent),
+          count: wrap.querySelector('.super-writing-count')?.textContent || '', sections: wrap.querySelector('.super-writing-sections')?.textContent || '', scope: wrap.querySelector('.super-writing-scope')?.textContent || '', coverage: wrap.querySelector('.super-writing-coverage')?.textContent || '', secondary: wrap.querySelector('.super-writing-secondary')?.textContent || '', single: wrap.querySelector('.super-writing-single')?.textContent || '' };
+      });
+      wrap.remove();
+      return results;
+    });
+    assert.match(renderedChecks[0].summary, /有待确认内容/);
+    assert.deepEqual(renderedChecks[0].issues, ['规则检查：正文超过要求字数。', '模型待核对：原句；需要核对本单条件；依据：仅限指定版本']);
+    assert.match(renderedChecks[1].summary, /本轮未完成检查/);
+    assert.match(renderedChecks[2].summary, /本轮有限检查已完成/);
+    assert.doesNotMatch(renderedChecks[2].summary, /通过|验收/);
+    assert.match(renderedChecks[2].count, /第1篇 710 字；第2篇 878 字/);
+    assert.match(renderedChecks[2].count, /目标约750字，仅作参考/);
+    assert.match(renderedChecks[2].sections, /封面\/标题 1 项 · 发布文案 1 项 · 正文 2 项/);
+    assert.match(renderedChecks[2].scope, /自然度、观点和广告感不作代码判定/);
+    assert.match(renderedChecks[3].summary, /已作局部修复，仍有待确认内容/);
+    assert.match(renderedChecks[4].summary, /正文计数未完成/);
+    assert.match(renderedChecks[4].count, /未检查正文字数/);
+    assert.match(renderedChecks[5].count, /参考约650–700字，不按固定上下限判定/);
+    assert.doesNotMatch(renderedChecks[5].count, /约0字/);
+    assert.match(renderedChecks[6].count, /第1表 100 字；第2表 200 字/);
+    assert.match(renderedChecks[6].count, /未执行单篇字数范围检查/);
+    assert.match(renderedChecks[7].issues[0], /模型未在本单材料中找到该主张的依据，需确认/);
+    assert.match(renderedChecks[7].issues[0], /这不等于事实虚假/);
+    assert.doesNotMatch(renderedChecks[7].issues[0], /依据：/);
+    assert.match(renderedChecks[7].issues[0], /相关材料：额定容量8L/);
+    assert.match(renderedChecks[7].coverage, /覆盖记录：3\/4/);
+    assert.match(renderedChecks[7].coverage, /不代表判断正确/);
+    assert.match(renderedChecks[7].secondary, /二次事实复核已结束，模型判断仍待核对/);
+    assert.match(renderedChecks[7].secondary, /两阶段已返回的模型用量均计入当前对话/);
+    assert.match(renderedChecks[8].secondary, /未完整完成/);
+    assert.match(renderedChecks[8].secondary, /未返回的用量会标记未知/);
+    assert.match(renderedChecks[9].summary, /有待确认内容/);
+    assert.match(renderedChecks[9].issues[0], /遗漏30天内且有质量问题的条件/);
+    assert.match(renderedChecks[9].secondary, /未完整完成/);
+    assert.doesNotMatch(renderedChecks[9].summary + renderedChecks[9].secondary, /全部正确|已验收|检查已完成/);
+    assert.match(renderedChecks[10].summary, /本次复检已返回/);
+    assert.match(renderedChecks[10].single, /一次 Flash 复检/);
+    assert.match(renderedChecks[10].single, /不代表逐句覆盖或事实全部正确/);
+    assert.match(renderedChecks[10].single, /模型用量计入当前对话/);
+    assert.equal(renderedChecks[10].coverage, '');
+    assert.equal(renderedChecks[10].secondary, '');
+    assert.match(renderedChecks[11].summary, /未完成检查/);
+    assert.match(renderedChecks[11].single, /一次 Flash 复检/);
+    assert.equal(renderedChecks[11].secondary, '');
     await page.locator('#prompt').fill('开关不能清空的草稿');
     await mode.click();
     await page.waitForFunction(() => document.querySelector('#superModeToggle').getAttribute('aria-pressed') === 'true' && !document.querySelector('#superModeToggle').disabled);
@@ -120,10 +185,12 @@ const server = http.createServer(async (req, res) => {
     await page.locator('#openFinalDelivery').click();
     await page.waitForFunction(() => document.querySelector('#finalDeliveryDialog').open);
     assert.match(await page.locator('#finalDeliverySource').textContent(), /历史推定稿/);
+    assert.match(await page.locator('#finalDeliveryReferenceNote').textContent(), /本单版本管理与复盘，暂不自动参考其他任务/);
     await page.locator('#finalDeliveryContent').fill('客户已通过的第一版终稿。');
     await page.locator('#saveFinalDelivery').click();
     await page.waitForFunction(() => document.querySelector('#finalDeliveryStatus').textContent.includes('客户确认稿已保存'));
     assert.equal(await page.locator('#finalDeliverySource').textContent(), '客户确认稿');
+    assert.match(await page.locator('#finalDeliveryReferenceNote').textContent(), /暂不自动参考其他任务/);
     await page.locator('#finalDeliveryContent').fill('客户已通过的第二版终稿。');
     await page.locator('#saveFinalDelivery').click();
     await page.waitForFunction(() => document.querySelector('#finalDeliveryVersions').options.length === 3);
@@ -197,7 +264,7 @@ const server = http.createServer(async (req, res) => {
     await page.waitForFunction(() => document.querySelector('#finalDeliveryStatus').textContent.includes('客户确认稿已保存'));
     assert.equal(workspace(conversations[0].id).delivery.content, '手机端回传客户已接受的完整终稿。');
     assert.deepEqual(errors, []);
-    console.log('超能模式 UI 回归通过：开关隔离/刷新/原流程/终稿更新/冲突/文本和文档上传/账号隔离/迟到响应/桌面与手机布局。');
+    console.log('超能模式 UI 回归通过：检查问题合并去重/有限检查状态/本单终稿说明/开关隔离/刷新/原流程/终稿更新/冲突/文本和文档上传/账号隔离/迟到响应/桌面与手机布局。');
   } finally {
     await browser.close(); await new Promise(resolve => server.close(resolve));
   }

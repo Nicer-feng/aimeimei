@@ -10,7 +10,7 @@ from .settings import DEFAULT_AI_USER_ID
 CONFIRMED_THRESHOLD = 10
 MAX_DELIVERY_CHARS = 100000
 HISTORY_TASK_LIMIT = 100
-PIPELINE_VERSION = "super-v1"
+PIPELINE_VERSION = "super-postcheck-v6"
 
 
 def eligible(user_id):

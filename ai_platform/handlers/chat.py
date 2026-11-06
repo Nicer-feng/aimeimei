@@ -1,5 +1,6 @@
 from .shared import *
 from ..docmind import build_document_context
+from ..document_context import build_context as build_structured_document_context
 from .. import writing
 from ..openai_egress import is_openai_url
 from .. import openai_budget
@@ -1166,6 +1167,7 @@ class ChatHandlersMixin:
             existing_document_ids = {row["id"] for row in document_rows}
             document_rows.extend(row for row in message_document_rows if row["id"] not in existing_document_ids)
             document_context = ""
+            document_coverage = None
             if document_rows:
                 doc_ids = [row["id"] for row in document_rows]
                 placeholders = ",".join("?" for _ in doc_ids)
@@ -1173,7 +1175,11 @@ class ChatHandlersMixin:
                     f"SELECT document_id, ordinal, title, content, page_number FROM document_chunks WHERE document_id IN ({placeholders}) AND user_id=? ORDER BY ordinal ASC",
                     (*doc_ids, user_id),
                 ).fetchall()
-                document_context = build_document_context(document_rows, chunks, content or "请根据这些材料分析")
+                if super_writing.eligible(user_id):
+                    document_coverage = build_structured_document_context(document_rows, chunks, content or "请根据这些材料分析")
+                    document_context = document_coverage["context"]
+                else:
+                    document_context = build_document_context(document_rows, chunks, content or "请根据这些材料分析")
 
             use_native_search = bool(
                 use_web_search and convo["supports_native_web_search"]
@@ -1251,7 +1257,7 @@ class ChatHandlersMixin:
                 """,
                 (conversation_id, user_id, 80),
                 ).fetchall()
-            if convo["writing_mode"] and not super_enabled:
+            if convo["writing_mode"]:
                 task_state = writing.get_state(conn, conversation_id, user_id)
                 start_id = task_state["history_start_id"]
                 if start_id:
@@ -1281,7 +1287,7 @@ class ChatHandlersMixin:
             ).fetchall()
 
         writing_run = None
-        if convo["writing_mode"] and not super_enabled:
+        if convo["writing_mode"]:
             writing_run = self.prepare_writing(convo, user_message_content, document_context, history)
             if writing_run[0]["history_start_id"]:
                 history = [r for r in history if r["id"] >= writing_run[0]["history_start_id"]]
@@ -1291,10 +1297,16 @@ class ChatHandlersMixin:
         super_check = None
         if super_enabled:
             try:
-                super_run = super_generation.prepare(convo, user_message_content, document_context, history)
+                if document_coverage is None:
+                    super_run = super_generation.prepare(convo, user_message_content, document_context, history)
+                else:
+                    super_run = super_generation.prepare(convo, user_message_content, document_context, history,
+                                                         document_coverage=document_coverage)
             except Exception as exc:
                 self.log_message("super writing preparation deferred (%s)", type(exc).__name__)
-                super_check = {"status": "failed", "notice": "超能辅助暂不可用，本轮按原流程生成。", "issues": [], "repaired": False}
+                super_check = {"status": "failed", "notice": "超能辅助暂不可用，本轮按原流程生成。", "issues": [], "repaired": False,
+                    "version": super_generation.VERSION, "review_complete": False,
+                    "repair": {"status": "disabled_review_only"}}
 
         images_by_history_message = {}
         for image in history_images:
@@ -1357,7 +1369,9 @@ class ChatHandlersMixin:
             if writing_run:
                 upstream_messages.append({"role": "system", "content": writing.prompt_context(*writing_run)})
             if super_run:
-                upstream_messages.append({"role": "system", "content": super_generation.prompt_context(super_run)})
+                super_context = super_generation.prompt_context(super_run)
+                if super_context:
+                    upstream_messages.append({"role": "system", "content": super_context})
             upstream_messages.extend(upstream_message_from_history(row) for row in history)
             return upstream_messages
 
@@ -1501,7 +1515,7 @@ class ChatHandlersMixin:
             if not client_connected:
                 return False
             if super_buffer and event.get("choices"):
-                # 原始候选暂不交付，防止用户复制后正文被悄悄替换。
+                # 沿用超能模式的缓冲时机，成稿后只记录检查结果，不改正文。
                 return True
             if protect_storyboard and (event.get("choices") or [{}])[0].get("delta", {}).get("content"):
                 return True
@@ -1753,9 +1767,13 @@ class ChatHandlersMixin:
                     assistant_text, super_check = super_generation.finish(super_run, assistant_text, convo)
                 except Exception as exc:
                     self.log_message("super writing check deferred (%s)", type(exc).__name__)
-                    super_check = {"status": "failed", "notice": "复核未完成，保留原稿。", "issues": [], "repaired": False}
+                    super_check = {"status": "failed", "notice": "复核未完成，保留原稿。", "issues": [], "repaired": False,
+                        "version": super_generation.VERSION, "review_complete": False,
+                        "repair": {"status": "disabled_review_only"}}
             else:
-                super_check = {"status": "skipped", "notice": "主生成未完整完成，本轮未执行交付复核。", "issues": [], "repaired": False}
+                super_check = {"status": "skipped", "notice": "主生成未完整完成，本轮未执行交付复核。", "issues": [], "repaired": False,
+                    "version": super_generation.VERSION, "review_complete": False,
+                    "repair": {"status": "disabled_review_only"}}
             super_buffer = False
             emit_client_event({"choices": [{"index": 0, "delta": {"content": assistant_text}, "finish_reason": "stop" if generation_status == "completed" else None}]})
         writing_check = None

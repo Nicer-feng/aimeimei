@@ -259,6 +259,146 @@ class WritingTests(unittest.TestCase):
         check=writing.validate_output("正文：绝对好，数据xxx。",writing.requirements({"required":["车型全称"],"forbidden":["绝对"],"min_chars":100}),"draft")
         self.assertEqual(len(check["issues"]),4)
 
+    def test_parser_markdown_body_labels_and_separate_scripts(self):
+        for label in ["**正文：**", "**正文**：", "__正文：__", "__正文__：", "### 正文", "【正文】",
+                      "### 正文（口播脚本）", "**正文（口播脚本）：**", "口播正文(约两分钟)："]:
+            with self.subTest(label=label):
+                source = f"封面文案：别把标题算进正文\n{label}\n第一份口播。\n\n脚本二\n封面文案：第二个标题\n正文：第二份口播。"
+                self.assertEqual(writing.manuscript_bodies(source), ["第一份口播。", "第二份口播。"])
+
+    def test_parser_excludes_only_trailing_topic_lines(self):
+        body = "大家都在聊#周末出行，这就是今天的话题。\n#内容中途的话题\n接着说自己的体验。"
+        source = "正文：\n" + body + "\n\n#品牌话题 #车型话题\n#第三个话题\n"
+        self.assertEqual(writing.manuscript_bodies(source), [body])
+        check = writing.validate_output(source, writing.requirements({}), "draft")
+        self.assertEqual(check["body_chars"], [len(body.replace("\n", ""))])
+        self.assertEqual(writing.manuscript_bodies(body + "\n#末尾话题"), [body])
+        literal = "正文：\n今天讨论 C# 和 # 符号。\n#这不是话题，而是要读的句子。"
+        self.assertEqual(writing.manuscript_bodies(literal), [literal.split("\n", 1)[1]])
+
+    def test_parser_two_scripts_do_not_count_publishing_topics(self):
+        source = "**脚本一**\n封面文案：一\n发布文案：发布用的短句。#话题\n正文：\n第一份原文。\n\n#话题甲 #话题乙\n\n---\n**脚本二**\n封面文案：二\n发布文案：第二条短句。\n**正文：**\n第二份原文。\n\n#话题丙"
+        self.assertEqual(writing.manuscript_bodies(source), ["第一份原文。", "第二份原文。"])
+        restored, _ = writing.preserve_storyboard(source, "分镜改坏了。", "转分镜")
+        self.assertTrue(writing.locked_storyboard(source, restored))
+        self.assertNotIn("话题", restored)
+
+    def test_parser_excludes_explicit_production_notes_but_keeps_dialogue(self):
+        source = """封面文案：这是标题。
+### 正文（口播脚本）
+**【开头钩子 - 镜头对准主播，表情自然】**
+【别急】先把话听完。
+**【产品引入 - 手持产品，正面特写】**
+产品来了（这个包装挺顺手）。
+**【核心卖点1 - 配合画面演示】**
+【看完再说。】
+**【收尾 - 产品展示+主播总结】**
+听听你的看法。
+**【画面提示】**
+- 场景：室内
+- 花字：产品型号
+"""
+        bodies = writing.manuscript_bodies(source)
+        self.assertEqual(len(bodies), 1)
+        self.assertEqual([line for line in bodies[0].splitlines() if line.strip()],
+                         ["【别急】先把话听完。", "产品来了（这个包装挺顺手）。", "【看完再说。】", "听听你的看法。"])
+        check = writing.validate_output(source, writing.requirements({}), "draft")
+        expected = "【别急】先把话听完。产品来了（这个包装挺顺手）。【看完再说。】听听你的看法。"
+        self.assertEqual(check["body_chars"], [len(expected)])
+
+    def test_sections_separate_cover_publication_body_and_captions(self):
+        source = "封面文案：这是封面。\n发布文案：短文案。#话题\n正文：\n只计算这句口播。\n花字：硬数据仅作花字。"
+        result = writing.validate_output(source, {}, "draft")
+        self.assertEqual(result["body_status"], "recognized")
+        self.assertEqual(result["body_scope"], "body")
+        self.assertEqual(result["body_chars"], [len("只计算这句口播。")])
+        self.assertEqual([part["kind"] for part in result["sections"]], ["cover", "publication", "body", "captions"])
+        self.assertEqual(result["sections"][2]["chars"], len("只计算这句口播。"))
+        self.assertNotIn("text", result["sections"][2])
+        self.assertEqual(writing.manuscript_sections(source)["sections"][2]["text"], "只计算这句口播。")
+
+    def test_missing_body_boundary_does_not_count_entire_delivery(self):
+        source = "### 封面文案\n标题内容。\n### 发布文案\n这是发布文案。\n\n后面还有未标明分区的长段文字。"
+        result = writing.validate_output(source, {"max_chars": 5}, "draft")
+        self.assertEqual(result["body_status"], "unrecognized")
+        self.assertEqual(result["body_chars"], [])
+        self.assertEqual(result["issues"], [])
+        self.assertIn("未检查正文字数", result["count_notice"])
+        for incomplete in ("标题：这是唯一标题。", "发布文案：只有发布文案。#品牌", "### 未知交付结构\n一段内容。"):
+            with self.subTest(incomplete=incomplete):
+                check = writing.validate_output(incomplete, {"max_chars": 1}, "draft")
+                self.assertEqual(check["body_status"], "unrecognized")
+                self.assertEqual(check["body_chars"], [])
+                self.assertEqual(check["issues"], [])
+
+    def test_two_plain_scripts_under_explicit_script_headings_count_separately(self):
+        source = "### 脚本一\n第一篇纯口播。\n\n---\n### 脚本二｜另一个切入\n第二篇纯口播。"
+        check = writing.validate_output(source, {}, "draft")
+        self.assertEqual(check["body_status"], "recognized")
+        self.assertEqual(check["body_chars"], [len("第一篇纯口播。"), len("第二篇纯口播。")])
+
+    def test_unknown_internal_heading_does_not_silently_truncate_body(self):
+        for heading in ("### 中段", "###中段"):
+            source = "正文：\n开场口播。\n" + heading + "\n中间还有很多正文不能默默丢掉。"
+            check = writing.validate_output(source, {"min_chars": 100}, "draft")
+            self.assertEqual(check["body_status"], "unrecognized")
+            self.assertEqual(check["body_chars"], [])
+            self.assertEqual(check["issues"], [])
+            protected, notice = writing.preserve_storyboard(source, "不可靠分镜", "转分镜")
+            self.assertEqual(protected, source)
+            self.assertIn("无法确认", notice)
+
+    def test_internal_separator_does_not_silently_truncate_body(self):
+        for heading in ("正文：", "### 脚本一"):
+            source = heading + "\n一二三四五\n---\n六七八九十"
+            check = writing.validate_output(source, {"min_chars": 10}, "draft")
+            self.assertEqual(check["body_status"], "unrecognized")
+            self.assertEqual(check["body_chars"], [])
+            self.assertEqual(check["issues"], [])
+        trailing = writing.validate_output("正文：\n一二三四五\n---\n", {}, "draft")
+        self.assertEqual(trailing["body_chars"], [5])
+
+    def test_plain_monologue_and_storyboard_have_explicit_count_scope(self):
+        plain = writing.validate_output("这是一段没有额外标题的纯口播。", {}, "draft")
+        self.assertEqual(plain["body_status"], "plain")
+        self.assertEqual(plain["body_chars"], [len("这是一段没有额外标题的纯口播。")])
+        source = "| 画面 | 口播内容（语气自然） | 花字 |\n| --- | --- | --- |\n| 车内展示 | 只算这句话。 | 参数不计入正文 |"
+        result = writing.validate_output(source, {}, "storyboard")
+        self.assertEqual(result["body_status"], "recognized")
+        self.assertEqual(result["body_scope"], "dialogue")
+        self.assertEqual(result["body_chars"], [len("只算这句话。")])
+        limit = {"length_requirement": {"mode": "range", "max_chars": 3, "source_quote": "正文最多3字"}}
+        self.assertEqual(len(writing.validate_output(source, limit, "storyboard")["issues"]), 1)
+
+    def test_multiple_storyboard_tables_are_not_one_manuscript(self):
+        first = "| 画面 | 台词 | 花字 |\n| --- | --- | --- |\n| 画面一 | 第一表台词。 | 参数一 |"
+        second = "| 画面 | 口播内容 | 花字 |\n| --- | --- | --- |\n| 画面二 | 第二表台词更长。 | 参数二 |"
+        source = first + "\n\n" + second
+        result = writing.validate_output(source, {"min_chars": 100}, "draft")
+        self.assertEqual(result["body_scope"], "dialogue")
+        self.assertEqual(result["body_chars"], [len("第一表台词。"), len("第二表台词更长。")])
+        self.assertEqual(result["issues"], [])
+        self.assertIn("未执行单篇字数范围检查", result["count_notice"])
+        self.assertEqual(writing.table_dialogue(source), ["第一表台词。", "第二表台词更长。"])
+
+    def test_approximate_length_is_not_invented_hard_bounds(self):
+        for mode in ("approx", "target", "none"):
+            with self.subTest(mode=mode):
+                req = {"min_chars": 700, "max_chars": 800,
+                       "length_requirement": {"mode": mode, "target_chars": 750, "source_quote": "正文约750字"}}
+                result = writing.validate_output("正文：\n" + "字" * 900, req, "draft")
+                self.assertEqual(result["body_chars"], [900])
+                self.assertEqual(result["issues"], [])
+        req = {"length_requirement": {"mode": "range", "min_chars": 700, "max_chars": 800,
+                                      "target_chars": 0, "source_quote": "正文700到800字"}}
+        self.assertEqual(len(writing.validate_output("正文：\n" + "字" * 900, req, "draft")["issues"]), 1)
+        req["length_requirement"]["mode"] = "approx"
+        self.assertEqual(writing.validate_output("正文：\n" + "字" * 900, req, "draft")["issues"], [])
+
+    def test_style_preferences_are_not_code_violations(self):
+        req = writing.requirements({"tone": "自然、有观点、少广告味", "notes": "不要死板"})
+        self.assertEqual(writing.validate_output("正文：\n产品介绍。", req, "draft")["issues"], [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

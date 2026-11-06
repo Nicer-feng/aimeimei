@@ -171,38 +171,122 @@ def clean_markup(text):
     return html.unescape(re.sub(r"<br\s*/?>", "\n", text, flags=re.I).replace("**", "").replace("\\|", "|"))
 
 
-def table_dialogue(text):
-    lines, col = [], None
+def _table_dialogue_groups(text):
+    groups, lines, col = [], [], None
     for line in text.splitlines():
         if not line.strip().startswith("|"):
+            if lines:
+                groups.append(lines)
+                lines = []
             col = None
             continue
         cells = re.split(r"(?<!\\)\|", line.strip().strip("|"))
         cells = [clean_markup(c.strip()) for c in cells]
-        found = next((i for i, c in enumerate(cells) if c in ("台词", "口播", "口播文案", "口播内容", "口播台词")), None)
+        found = next((i for i, c in enumerate(cells) if re.fullmatch(
+            r"(?:台词|口播|口播文案|口播内容|口播台词)(?:[（(][^\n）)]{1,40}[）)])?", c)), None)
         if found is not None:
+            if lines:
+                groups.append(lines)
+                lines = []
             col = found
         elif col is not None and len(cells) > col and not re.fullmatch(r"[:\-\s]+", cells[col]):
             lines.append(cells[col])
-    return lines
+    if lines:
+        groups.append(lines)
+    return groups
+
+
+def table_dialogue(text):
+    return [line for group in _table_dialogue_groups(text) for line in group]
+
+
+def _clean_manuscript_body(text):
+    # 只排除带明确拍摄动作的独立阶段标签；自然对白中的括号原样保留。
+    text = re.sub(
+        r"(?m)^[ \t]*【(?:开头钩子|开场|产品引入|核心卖点\d*|收尾|结尾)[ \t]*[-—·｜|][^】\n]*"
+        r"(?:镜头|画面|特写|展示|手持|主播|表情|演示)[^】\n]*】[ \t]*$", "", text)
+    # 仅剔除稿末独立话题，不删除正文句子中的井号或中途出现的话题行。
+    lines = text.rstrip().splitlines()
+    while lines and (not lines[-1].strip() or re.fullmatch(r"(?:#[\w-]+[ \t]*)+", lines[-1].strip())):
+        lines.pop()
+    return "\n".join(lines).strip()
+
+
+def manuscript_sections(text):
+    """有限识别交付分区供计数使用，不改写或替换保存的原回答。"""
+    dialogue = _table_dialogue_groups(text)
+    if dialogue:
+        bodies = ["\n\n".join(group) for group in dialogue]
+        return {"status": "recognized", "scope": "dialogue", "bodies": bodies,
+                "sections": [{"kind": "dialogue", "text": body} for body in bodies],
+                "notice": "按表统计台词；多张表与单篇正文的对应关系不明确，未执行单篇字数范围检查。" if len(bodies) > 1 else ""}
+    clean = clean_markup(text)
+    labels = {
+        "body": "正文|口播正文|口播文案|口播稿|口播内容|口播|台词",
+        "cover": "封面文案|封面标题|视频标题|标题",
+        "publication": "发布文案|视频文案",
+        "captions": "花字|字幕",
+        "production": "画面提示|拍摄提示|拍摄说明|制作说明",
+    }
+    markers = []
+    for kind, names in labels.items():
+        label = rf"(?:{names})(?:（[^\n（）]{{1,24}}）|\([^\n()]{{1,24}}\))?"
+        pattern = (rf"(?m)^[ \t]*(?:#{{1,6}}[ \t]+)?(?:{label}[ \t]*[：:]|"
+                   rf"__{label}[：:]?__[ \t]*[：:]?|【{label}[：:]?】[ \t]*[：:]?|"
+                   rf"{label}[ \t]*(?=\n|$))[ \t]*")
+        markers.extend((match, kind) for match in re.finditer(pattern, clean))
+    markers.sort(key=lambda item: item[0].start())
+    unknown_heading = r"(?m)^[ \t]*(?:#{1,6}[ \t]+|#{2,6}(?=\S))"
+    script_boundary = r"(?m)^[ \t]*(?:#{1,6}[ \t]*)?脚本[一二三四五六七八九十\d]+(?:[：:]|[ \t]*(?:[｜|][^\n]*)?$)"
+    def bounded_content(rest):
+        stop = re.search(script_boundary, rest)
+        content = rest[:stop.start()] if stop else rest
+        # 末尾分隔线可忽略；中间分隔线不能证明后面的文字不属于正文。
+        return re.sub(r"(?m)^[ \t]*---+[ \t]*\s*\Z", "", content)
+
+    def ambiguous_body(content):
+        return bool(re.search(unknown_heading, content) or re.search(r"(?m)^[ \t]*---+[ \t]*$", content))
+    if markers:
+        sections, unknown_body = [], False
+        for index, (marker, kind) in enumerate(markers):
+            end = markers[index + 1][0].start() if index + 1 < len(markers) else len(clean)
+            rest = clean[marker.end():end]
+            content = bounded_content(rest)
+            if kind == "body" and ambiguous_body(content):
+                unknown_body = True
+                kind = "unrecognized"
+            content = _clean_manuscript_body(content) if kind == "body" else content.strip()
+            if content:
+                sections.append({"kind": kind, "text": content})
+        bodies = [] if unknown_body else [section["text"] for section in sections if section["kind"] == "body"]
+        return {"status": "recognized" if bodies else "unrecognized", "scope": "body" if bodies else "unrecognized",
+                "bodies": bodies, "sections": sections,
+                "notice": "" if bodies else "正文含未明确归属的内部标题或分隔内容，本轮未检查正文字数。" if unknown_body else "已识别非正文分区，但正文边界不明确，本轮未检查正文字数。"}
+    scripts = list(re.finditer(r"(?m)^[ \t]*(?:#{1,6}[ \t]+)?脚本[一二三四五六七八九十\d]+[：:]?[ \t]*(?:[｜|][^\n]*)?$", clean))
+    if scripts:
+        bodies = []
+        for index, marker in enumerate(scripts):
+            content = clean[marker.end():scripts[index + 1].start() if index + 1 < len(scripts) else len(clean)]
+            content = bounded_content(content)
+            if ambiguous_body(content):
+                return {"status": "unrecognized", "scope": "unrecognized", "bodies": [], "sections": [],
+                        "notice": "正文含未明确归属的内部标题或分隔内容，本轮未检查正文字数。"}
+            bodies.append(_clean_manuscript_body(content))
+        bodies = [body for body in bodies if body]
+        return {"status": "recognized" if bodies else "unrecognized", "scope": "body" if bodies else "unrecognized",
+                "bodies": bodies, "sections": [{"kind": "body", "text": body} for body in bodies],
+                "notice": "" if bodies else "未识别到可计数正文，本轮未检查正文字数。"}
+    if re.search(unknown_heading, clean):
+        return {"status": "unrecognized", "scope": "unrecognized", "bodies": [], "sections": [],
+                "notice": "输出包含未识别的结构标题，本轮未检查正文字数。"}
+    body = _clean_manuscript_body(clean)
+    return {"status": "plain" if body else "unrecognized", "scope": "body" if body else "unrecognized",
+            "bodies": [body] if body else [], "sections": [{"kind": "body", "text": body}] if body else [],
+            "notice": "" if body else "未识别到可计数正文，本轮未检查正文字数。"}
 
 
 def manuscript_bodies(text):
-    dialogue = table_dialogue(text)
-    if dialogue:
-        return ["\n\n".join(dialogue)]
-    clean = clean_markup(text)
-    markers = list(re.finditer(r"(?m)^\s*(?:#{1,6}\s*)?(?:正文|口播正文|口播文案|口播稿)[：:]\s*", clean))
-    if markers:
-        parts = []
-        for marker in markers:
-            rest = clean[marker.end():]
-            stop = re.search(r"(?m)^\s*(?:#{1,6}\s+|(?:视频标题|标题|视频文案|发布文案|脚本[一二三四五六七八九十\d]+)[：:]|---+\s*$)", rest)
-            body = rest[:stop.start()] if stop else rest
-            if body.strip():
-                parts.append(body.strip())
-        return parts
-    return [clean.strip()] if clean.strip() else []
+    return manuscript_sections(text)["bodies"]
 
 
 def normalized(text):
@@ -217,14 +301,22 @@ def locked_storyboard(original, proposed):
 
 def validate_output(text, req, intent, locked=None):
     issues = []
-    bodies = manuscript_bodies(text)
+    partition = manuscript_sections(text)
+    bodies = partition["bodies"]
     counts = [len(re.sub(r"\s", "", x)) for x in bodies]
-    if intent in {"draft", "revise", "rewrite", "variant"}:
+    length_requirement = req.get("length_requirement")
+    # 旧写稿模式保留原有明确上下限；后置检查只执行来源中明确指定的范围。
+    check_bounds = not isinstance(length_requirement, dict) or length_requirement.get("mode") == "range"
+    if partition["scope"] == "dialogue" and len(bodies) > 1:
+        check_bounds = False
+    bounds = length_requirement if isinstance(length_requirement, dict) else req
+    if intent in {"draft", "revise", "rewrite", "variant", "storyboard"}:
         for i, n in enumerate(counts, 1):
-            if req.get("min_chars", 0) and n < req["min_chars"]:
-                issues.append(f"第{i}份正文约{n}字，少于要求的{req['min_chars']}字。")
-            if req.get("max_chars", 0) and n > req["max_chars"]:
-                issues.append(f"第{i}份正文约{n}字，超过要求的{req['max_chars']}字。")
+            if check_bounds and bounds.get("min_chars", 0) and n < bounds["min_chars"]:
+                issues.append(f"第{i}份正文约{n}字，少于要求的{bounds['min_chars']}字。")
+            if check_bounds and bounds.get("max_chars", 0) and n > bounds["max_chars"]:
+                issues.append(f"第{i}份正文约{n}字，超过要求的{bounds['max_chars']}字。")
+    if intent in {"draft", "revise", "rewrite", "variant"}:
         for word in req.get("required", []):
             if word not in text:
                 issues.append("缺少本单必带词：" + word)
@@ -236,13 +328,22 @@ def validate_output(text, req, intent, locked=None):
             issues.append("稿件中仍有待补数据。")
     if locked and intent == "storyboard" and not locked_storyboard(locked, text):
         issues.insert(0, "分镜台词与定稿不一致，已保留原定稿；本次分镜不能直接交付。")
-    return {"issues": issues[:50], "body_chars": counts, "count_note": "不计空白，含标点；多篇分别统计。", "scope": "仅检查明确字数、逐字词项和定稿一致性，不代表事实或客户验收通过。"}
+    return {"issues": issues[:50], "body_chars": counts, "body_status": partition["status"],
+            "body_scope": partition["scope"],
+            "sections": [{"kind": section["kind"], "chars": len(re.sub(r"\s", "", section["text"]))}
+                         for section in partition["sections"]],
+            "count_notice": partition["notice"],
+            "length_requirement": length_requirement,
+            "count_note": "仅计正文或分镜台词，不含封面/标题、发布文案、独立话题及已识别花字/制作说明；不计空白，含标点，多篇分别统计。",
+            "scope": "规则仅检查明确字数范围、逐字词项和定稿一致性；自然度、观点和广告感不作代码判定，不代表事实或客户验收通过。"}
 
 
 def preserve_storyboard(original, proposed, request_text):
     """Fail closed: a bad generated table is replaced with literal source segments."""
     if locked_storyboard(original, proposed):
         return proposed, ""
+    if not manuscript_bodies(original):
+        return original, "无法确认定稿正文边界，已保留原定稿；本次分镜尚未通过台词一致性检查。"
     count_match = re.search(r"分成\s*([2-9]|1[0-6]|[二三四五六七八九十])\s*段", request_text)
     n = 6
     if count_match:
