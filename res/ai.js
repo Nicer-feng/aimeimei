@@ -944,6 +944,8 @@
 	      const obstacles = [];
 	      const composer = document.querySelector(".composer");
 	      if (petElementIsVisible(composer)) obstacles.push(composer.getBoundingClientRect());
+	      const revisionOffer = $("superRevisionOffer");
+	      if (petElementIsVisible(revisionOffer)) obstacles.push(revisionOffer.getBoundingClientRect());
 	      const latest = $("scrollLatest");
 	      if (latest?.classList.contains("show") && petElementIsVisible(latest)) obstacles.push(latest.getBoundingClientRect());
 	      return obstacles;
@@ -4444,7 +4446,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.32.1" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.32.2" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8463,6 +8465,7 @@
 	      state.abortController = generation.controller;
 	      const mode = state.searchConfig?.mode || "auto";
 	      const useWebSearch = $("webSearchToggle").checked && !$("webSearchToggle").disabled;
+	      globalThis.MeimeiSuper?.dismissOffer();
 	      setSendingUI(true);
 	      if (!hasOverride) {
 	        $("prompt").value = "";
@@ -8489,7 +8492,8 @@
         renderDocumentPreviews();
       }
       const userContent = content || (readyDocuments.length ? "请根据这些材料分析。" : "请分析这些图片。");
-      state.messages.push({ role: "user", content: userContent, images: sentImages, documents: sentDocuments, created_at: sentAt });
+      const sentMessage = { role: "user", content: userContent, images: sentImages, documents: sentDocuments, created_at: sentAt };
+      state.messages.push(sentMessage);
 	      const assistant = {
         role: "assistant", content: "", reasoning_content: "", sources: [], thinking: true,
         created_at: sentAt, _thinkingStartedAt: Date.now(), _activityStartedAt: Date.now(), _upstreamActive: true,
@@ -8518,6 +8522,27 @@
 	          signal: generation.controller.signal
 	        });
         if (!isCurrentGeneration(generation)) return;
+        if (res.status === 422 && state.currentConversation?.super_mode) {
+          const error = await readChatFailure(res, "请明确要修改的范围。");
+          if (!isCurrentGeneration(generation)) return;
+          assistant.thinking = false;
+          assistant._upstreamActive = false;
+          state.messages = state.messages.filter(item => item !== assistant && item !== sentMessage);
+          if (!hasOverride && !$("prompt").value) {
+            $("prompt").value = rawContent;
+            state.pendingQuotes = quoteSnapshot;
+            state.attachments = readyAttachments;
+            state.documentAttachments = readyDocuments;
+            saveCurrentDraft();
+            renderComposerQuotes();
+            renderAttachmentPreviews();
+            renderDocumentPreviews();
+            autosizePrompt();
+          }
+          renderMessages();
+          setStatus("chatStatus", friendlyError(error, "请明确要修改的范围。"), "err");
+          return;
+        }
         if (!res.ok) throw await readChatFailure(res, "发送失败，稍后再试一下。");
         await readChatEvents(res, event => {
           if (!isCurrentGeneration(generation)) return;

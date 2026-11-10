@@ -12,9 +12,55 @@
   let uploadBusy = false;
   let uploadSequence = 0;
   let lastUserId = null;
+  let offerTimer = 0;
+  let offeredHere = '';
+  const paragraphEdit = /^(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)?(?:修改|改写|改|调整|优化|润色)(?:一下|下)?[：:\s]*(?:开头|结尾|收尾|第(?:[1-9]|10|[一二三四五六七八九十])段)(?=$|[\s，,。；;：:！!？?、]|改成|换成|写成|更|推荐)/;
+  const shotColumn = /^(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)?(?:在时长(?:前面|之前|前))?(?:添加|增加|加上|加)(?:一)?列[：:\s]*[「“]?景别[」”]?[。！!\s]*$/;
   const eligible = () => state.authed && state.user?.id === 'default';
   const currentKey = () => `${state.user?.id || ''}:${state.conversationEpoch}:${state.currentConversation?.id || 'new'}`;
   const enabled = () => Boolean(state.currentConversation ? state.currentConversation.super_mode : pendingMode);
+
+  function hideOffer() {
+    clearTimeout(offerTimer);
+    byId('superRevisionOffer').hidden = true;
+  }
+
+  function dismissOffer() {
+    offeredHere = '';
+    hideOffer();
+  }
+
+  function updateOffer() {
+    const offer = byId('superRevisionOffer');
+    const prompt = byId('prompt').value.trim();
+    const id = state.currentConversation?.id;
+    const storageKey = 'superRevisionOffer:' + id;
+    const paragraph = paragraphEdit.test(prompt) && !/全文|全篇|联网|查资料|(?:同时|顺便|并且|还有|再把|以及|和)(?:也|再)?(?:修改|改|加|删|重写|调整)/.test(prompt);
+    const column = shotColumn.test(prompt);
+    if (!eligible() || !id || state.conversationLoading || state.sending || loading || enabled() ||
+        prompt.length > 100 || prompt.includes('\n') || (!paragraph && !column) ||
+        !byId('fullComposerSuggestion').hidden || !byId('fullComposer').hidden ||
+        (offeredHere !== currentKey() && getUserStorage(storageKey) === '1')) {
+      offer.hidden = true;
+      return;
+    }
+    const previous = state.messages.at(-1);
+    const previousRequest = state.messages.at(-2);
+    const body = previous?.content || '';
+    const table = /^[ \t]*\|.*时长.*\|/m.test(body);
+    const draft = previous?.role === 'assistant' && previous.id && !previous.thinking &&
+      (!previous.generation_status || previous.generation_status === 'completed') &&
+      (table || /(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*|【)?(?:正文|口播稿)[：:\s*】]/.test(body) ||
+        (body.length >= 120 && /口播|脚本|文案|稿件|分镜/.test(previousRequest?.content || '')));
+    if (!draft || (column ? !table : table)) {
+      offer.hidden = true;
+      return;
+    }
+    if (offeredHere !== currentKey()) setUserStorage(storageKey, '1');
+    offeredHere = currentKey();
+    offer.hidden = false;
+    schedulePetPositionCorrection();
+  }
 
   function message(text, error = false) {
     const box = byId('finalDeliveryStatus');
@@ -31,6 +77,7 @@
   }
 
   function reset() {
+    dismissOffer();
     controller?.abort();
     controller = null;
     loading = false;
@@ -60,7 +107,7 @@
     mode.setAttribute('aria-pressed', String(allowed && enabled()));
     const label = enabled() ? '超能槑槑模式：开启' : '超能槑槑模式：关闭，当前使用原流程';
     mode.setAttribute('aria-label', label);
-    mode.title = enabled() ? '本单已开启；点击恢复原流程。校验会增加等待，全部用量计入当前对话。' : '当前使用原流程；点击仅为本单开启超能槑槑模式。';
+    mode.title = enabled() ? '本单已开启局部修稿；点击恢复普通模式。' : '仅为当前对话开启局部修稿。';
     byId('superModeState').textContent = enabled() ? '已开启' : '原流程';
     mode.disabled = !allowed || state.sending || state.conversationLoading || loading || changing;
     final.disabled = !allowed || !state.currentConversation || state.sending || state.conversationLoading || loading || changing;
@@ -68,6 +115,9 @@
     const busy = state.sending || changing || uploadBusy;
     ['saveFinalDelivery', 'uploadFinalDelivery', 'finalDeliveryVersions', 'finalDeliveryMessages', 'finalDeliveryLabel', 'finalDeliveryContent'].forEach(id => { byId(id).disabled = busy; });
     byId('saveFinalDelivery').disabled = busy || !editor || (!byId('finalDeliveryContent').value.trim() && !editor.documentId);
+    byId('acceptSuperRevision').disabled = busy;
+    byId('dismissSuperRevision').disabled = changing;
+    if (state.sending || enabled()) hideOffer();
   }
 
   async function fetchWorkspace(id, signal) {
@@ -125,7 +175,7 @@
     if (!id) {
       pendingMode = next;
       render();
-      setStatus('chatStatus', next ? '本单将使用超能槑槑模式，校验会增加等待，全部用量计入本单。' : '本单恢复原流程。', 'ok');
+      setStatus('chatStatus', next ? '本单将开启超能槑槑局部修稿。' : '本单恢复原流程。', 'ok');
       return;
     }
     const key = currentKey();
@@ -142,7 +192,7 @@
       const data = await response.json();
       if (currentKey() !== key || !eligible()) return;
       applyWorkspace(data, id);
-      setStatus('chatStatus', next ? '本单已开启超能槑槑模式，全部新增用量计入当前对话。' : '本单已恢复原流程，已保存的交付稿保留。', 'ok');
+      setStatus('chatStatus', next ? '本单已开启超能槑槑局部修稿。' : '本单已恢复原流程，已保存的交付稿保留。', 'ok');
     } catch (error) {
       if (currentKey() === key && error?.name !== 'AbortError') setStatus('chatStatus', friendlyError(error, '模式保存失败，当前开关未改变。'), 'err');
     } finally {
@@ -324,6 +374,20 @@
       wrap.querySelector('.bubble-shell')?.append(box);
     }
     box.replaceChildren();
+    if (check.version === 'super-revision-v1') {
+      const summary = document.createElement('summary');
+      summary.textContent = check.repaired ? '超能槑槑 · 已局部修订' : '超能槑槑 · 原稿保留';
+      box.append(summary);
+      const note = document.createElement('p');
+      note.textContent = check.notice;
+      box.append(note);
+      for (const issue of check.issues || []) {
+        const detail = document.createElement('p');
+        detail.textContent = issue;
+        box.append(detail);
+      }
+      return;
+    }
     const issues = [], seen = new Set();
     for (const [kind, values] of [['rule', check.deterministic_issues], ['model', check.issues]]) {
       for (const issue of Array.isArray(values) ? values : []) {
@@ -412,6 +476,26 @@
   }
 
   byId('superModeToggle').addEventListener('click', toggle);
+  byId('acceptSuperRevision').addEventListener('click', async () => {
+    if (enabled()) return;
+    const key = currentKey();
+    await toggle();
+    if (currentKey() === key) {
+      if (enabled()) dismissOffer();
+      byId('prompt').focus();
+    }
+  });
+  byId('dismissSuperRevision').addEventListener('click', () => {
+    dismissOffer();
+    byId('prompt').focus();
+  });
+  const scheduleOffer = event => {
+    if (!eligible()) return;
+    hideOffer();
+    if (!event.isComposing) offerTimer = setTimeout(updateOffer, 220);
+  };
+  byId('prompt').addEventListener('input', scheduleOffer);
+  byId('prompt').addEventListener('compositionend', scheduleOffer);
   byId('openFinalDelivery').addEventListener('click', open);
   byId('closeFinalDelivery').addEventListener('click', close);
   byId('finalDeliveryDialog').addEventListener('cancel', close);
@@ -443,6 +527,7 @@
 
   globalThis.MeimeiSuper = {
     sync, renderCheck,
+    dismissOffer,
     isBusy: () => changing,
     newConversationMode: () => eligible() && !state.currentConversation && pendingMode,
     transition: reset,

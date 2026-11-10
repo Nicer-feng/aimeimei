@@ -6,6 +6,14 @@
 .super-mode-toggle[aria-pressed="true"] { color:var(--accent-strong); border-color:color-mix(in srgb, var(--accent) 48%, var(--line)); background:var(--accent-soft); }
 .super-mode-toggle[aria-pressed="true"] small { color:var(--accent-strong); background:var(--surface); }
 .super-mode-toggle:disabled, .super-final-entry:disabled { opacity:.5; cursor:default; }
+.super-revision-offer { position:absolute; z-index:4; inset-inline:0; bottom:calc(100% + 8px); display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 12px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); box-shadow:var(--shadow); font-size:12px; }
+.super-revision-offer[hidden] { display:none; }
+.super-revision-actions { display:flex; flex-wrap:wrap; gap:4px; }
+.super-revision-actions button { min-height:32px; padding:4px 8px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--muted); font:inherit; cursor:pointer; }
+.super-revision-actions button:first-child { background:var(--accent-soft); color:var(--accent-strong); }
+.super-revision-actions button:hover { border-color:var(--line); color:var(--text); }
+.super-revision-actions button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.super-revision-actions button:disabled { opacity:.5; cursor:default; }
 .composer-box.has-super-controls .composer-chip-row { padding-right:315px; }
 .super-delivery-dialog { box-sizing:border-box; width:min(780px,calc(100vw - 28px)); max-height:88dvh; overflow:auto; border:1px solid var(--line); border-radius:20px; padding:22px; color:var(--text); background:var(--surface); box-shadow:var(--shadow); }
 .super-delivery-dialog::backdrop { background:rgba(25,20,22,.38); }
@@ -38,6 +46,7 @@
 .super-writing-check p { margin:7px 0; }
 .super-mode-toggle:focus-visible, .super-final-entry:focus-visible, .super-delivery-dialog :is(button,input,select,textarea):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 @media (max-width:760px) {
+  .super-revision-actions button { min-height:40px; }
   .composer-box.has-super-controls { grid-template-areas:"super super" "chips chips" "input input" "tools tools"; }
   .composer-box.has-super-controls .reader-toolbar { position:static; grid-area:super; justify-content:flex-end; flex-wrap:wrap; }
   .composer-box.has-super-controls .composer-chip-row { padding-right:2px; }

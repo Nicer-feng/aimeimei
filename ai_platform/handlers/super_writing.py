@@ -31,7 +31,7 @@ class SuperWritingHandlersMixin:
                     if self.command == "PATCH":
                         if not isinstance(data.get("enabled"), bool):
                             raise ValueError("超能模式开关值不正确")
-                        conn.execute("UPDATE conversations SET super_mode=? WHERE id=? AND user_id=? AND archived=0",
+                        conn.execute("UPDATE conversations SET super_revision_mode=? WHERE id=? AND user_id=? AND archived=0",
                                      (int(data["enabled"]), cid, uid))
                     elif self.command == "POST":
                         self._save_super_delivery(conn, cid, uid, data)

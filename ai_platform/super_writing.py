@@ -2,7 +2,7 @@
 import json
 import re
 
-from . import writing
+from . import super_revision, writing
 from .runtime import now
 from .settings import DEFAULT_AI_USER_ID
 
@@ -253,14 +253,14 @@ def reference_context(conn, user_id, conversation_id, question, max_chars=1800):
 
 
 def public_state(conn, conversation_id, user_id):
-    conversation = conn.execute("SELECT super_mode FROM conversations WHERE id=? AND user_id=? AND archived=0",
+    conversation = conn.execute("SELECT super_revision_mode FROM conversations WHERE id=? AND user_id=? AND archived=0",
                                 (conversation_id, user_id)).fetchone()
     if not conversation or not eligible(user_id):
         return None
     rows = conn.execute("""SELECT * FROM super_deliveries WHERE conversation_id=? AND user_id=?
         ORDER BY id DESC LIMIT 20""", (conversation_id, user_id)).fetchall()
     delivery = current_delivery(conn, conversation_id, user_id)
-    return {"eligible": True, "enabled": bool(conversation["super_mode"]),
+    return {"eligible": True, "enabled": bool(conversation["super_revision_mode"]),
             "revision": settings_revision(conn, conversation_id, user_id), "delivery": delivery,
             "versions": [delivery_public(row) for row in rows], "reference_status": reference_status(conn, user_id),
-            "pipeline_version": PIPELINE_VERSION}
+            "pipeline_version": super_revision.VERSION}

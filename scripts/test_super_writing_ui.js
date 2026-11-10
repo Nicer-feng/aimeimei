@@ -10,7 +10,7 @@ const root = path.resolve(__dirname, '..');
 const now = Math.floor(Date.now() / 1000);
 const model = { id: 'mock', name: '本地模型', model: 'qwen-fixture', provider: 'mock', supports_vision: true };
 let base, created = 0, versionId = 0, conflict = false, delayPatch = 0;
-const counts = { super: 0, final: [], create: [], bind: 0, document: 0 };
+const counts = { super: 0, final: [], create: [], sends: [], bind: 0, document: 0 };
 const conversations = ['a', 'b'].map((id, index) => ({ id, title: `任务${id}`, model_id: 'mock', model_name: model.name, model: model.model, super_mode: false, writing_mode: false, context_mode: 'smart', created_at: now - index, updated_at: now - index }));
 const records = new Map();
 const workspace = id => {
@@ -52,18 +52,21 @@ const server = http.createServer(async (req, res) => {
     }
     return json(res, { conversations });
   }
-  if (/^\/api\/conversations\/[^/]+\/messages$/.test(p)) {
+  if ((match = p.match(/^\/api\/conversations\/([^/]+)\/messages$/))) {
     if (req.method === 'POST') {
+      const scoped = workspace(match[1]).enabled;
+      counts.sends.push({ id: match[1], content: body.content, scoped });
+      if (scoped && body.content === '只改这段') return json(res, { error: '请写明要修改的位置。' }, 422);
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      res.write('data: ' + JSON.stringify({ type: 'super_status', status: 'checking', message: '正在核对本单要求与交付稿。' }) + '\n\n');
+      if (scoped) res.write('data: ' + JSON.stringify({ type: 'super_status', status: 'generating', message: '超能槑槑正在修订指定位置。' }) + '\n\n');
       await new Promise(resolve => setTimeout(resolve, 350));
       const events = [
-        { choices: [{ delta: { content: '正文：核对完成后交付的本地模拟稿件。' } }] },
-        { type: 'message_saved', message_id: 21, generation_status: 'completed', usage: { prompt_tokens: 30, completion_tokens: 20, total_tokens: 50 }, super_check: { status: 'failed', notice: '部分辅助调用未返回用量。', issues: [], repaired: false, usage_unknown: true } }
+        { choices: [{ delta: { content: '正文：\n开头不变。\n\n这是本地模拟结尾。' } }] },
+        { type: 'message_saved', message_id: 21, generation_status: 'completed', usage: { prompt_tokens: 30, completion_tokens: 20, total_tokens: 50 }, super_check: scoped ? { version: 'super-revision-v1', status: 'passed', notice: '已仅修改结尾，其余原文保留。', issues: [], repaired: true } : null }
       ];
       return res.end(events.map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('') + 'data: [DONE]\n\n');
     }
-    return json(res, { messages: [{ id: 20, role: 'assistant', content: '正文：本地口播稿，展示客户终稿保存入口。', created_at: now, usage: { total_tokens: 80 }, super_check: { status: 'passed', notice: '本地模拟校验完成。', issues: [], repaired: false } }] });
+    return json(res, { messages: [{ id: 20, role: 'assistant', content: '正文：\n开头不变。\n\n原来的结尾。', generation_status: 'completed', created_at: now, usage: { total_tokens: 80 }, super_check: { status: 'passed', notice: '本地模拟校验完成。', issues: [], repaired: false } }] });
   }
   if (/^\/api\/conversations\/[^/]+\/stats$/.test(p)) return json(res, { stats: { total_tokens: 80, prompt_tokens: 50, completion_tokens: 30 } });
   if (/^\/api\/conversations\/[^/]+\/documents$/.test(p)) { if (req.method !== 'GET') counts.bind++; return json(res, { documents: [] }); }
@@ -169,13 +172,41 @@ const server = http.createServer(async (req, res) => {
     assert.match(renderedChecks[11].summary, /未完成检查/);
     assert.match(renderedChecks[11].single, /一次 Flash 复检/);
     assert.equal(renderedChecks[11].secondary, '');
-    await page.locator('#prompt').fill('开关不能清空的草稿');
-    await mode.click();
+    const offer = page.locator('#superRevisionOffer');
+    const prompt = page.locator('#prompt');
+    const waitForPetClearance = () => page.waitForFunction(() => {
+      const pet = document.querySelector('#desktopPet');
+      if (pet.hidden) return true;
+      const petRect = pet.getBoundingClientRect();
+      const offerRect = document.querySelector('#superRevisionOffer').getBoundingClientRect();
+      return petRect.right <= offerRect.left || petRect.left >= offerRect.right ||
+        petRect.bottom <= offerRect.top || petRect.top >= offerRect.bottom;
+    });
+    await prompt.fill('感觉一般');
+    await page.waitForTimeout(300);
+    assert.equal(await offer.isVisible(), false);
+    await prompt.fill('改下结尾');
+    await offer.waitFor({ state: 'visible' });
+    await waitForPetClearance();
+    await page.screenshot({ path: '/private/tmp/aimeimei-super-revision-desktop.png' });
+    await page.locator('#acceptSuperRevision').click();
     await page.waitForFunction(() => document.querySelector('#superModeToggle').getAttribute('aria-pressed') === 'true' && !document.querySelector('#superModeToggle').disabled);
-    assert.equal(await page.locator('#prompt').inputValue(), '开关不能清空的草稿');
+    assert.equal(await prompt.inputValue(), '改下结尾');
+    assert.equal(counts.sends.length, 0);
+    assert.equal(await offer.isVisible(), false);
     await page.evaluate(() => selectConversation('b'));
     await page.waitForFunction(() => state.currentConversation?.id === 'b' && !document.querySelector('#superModeToggle').disabled);
     assert.equal(await mode.getAttribute('aria-pressed'), 'false');
+    await prompt.fill('改下结尾');
+    await offer.waitFor({ state: 'visible' });
+    await page.locator('#dismissSuperRevision').click();
+    assert.equal(await prompt.inputValue(), '改下结尾');
+    await prompt.fill('只改开头');
+    await page.waitForTimeout(300);
+    assert.equal(await offer.isVisible(), false);
+    await page.locator('#send').click();
+    await page.waitForFunction(() => state.messages.at(-1)?.id === 21 && !state.sending);
+    assert.deepEqual(counts.sends.at(-1), { id: 'b', content: '只改开头', scoped: false });
     await page.evaluate(() => selectConversation('a'));
     await page.waitForFunction(() => state.currentConversation?.id === 'a' && !document.querySelector('#superModeToggle').disabled);
     assert.equal(await mode.getAttribute('aria-pressed'), 'true');
@@ -217,11 +248,16 @@ const server = http.createServer(async (req, res) => {
     assert.equal(counts.final.at(-1).body.document_id, 'local-document');
     await page.screenshot({ path: '/private/tmp/meimei-super-delivery-desktop.png' });
     await page.locator('#closeFinalDelivery').click();
-    await page.locator('#prompt').fill('写一条新的口播稿');
+    await prompt.fill('只改这段');
     await page.locator('#send').click();
-    await page.waitForFunction(() => document.querySelector('#chatStatus').textContent.includes('正在核对本单要求'));
+    await page.waitForFunction(() => document.querySelector('#chatStatus').textContent.includes('请写明要修改的位置'));
+    assert.equal(await prompt.inputValue(), '只改这段');
+    assert.equal(await page.evaluate(() => state.messages.length), 1);
+    await prompt.fill('改下结尾');
+    await page.locator('#send').click();
+    await page.waitForFunction(() => document.querySelector('#chatStatus').textContent.includes('正在修订指定位置'));
     await page.waitForFunction(() => !state.sending);
-    assert.match(await page.locator('.super-writing-check').last().textContent(), /部分调用未返回用量/);
+    assert.match(await page.locator('.super-writing-check').last().textContent(), /已仅修改结尾/);
     await page.evaluate(() => setSendingUI(true));
     assert.equal(await mode.isDisabled(), true); assert.equal(await page.locator('#openFinalDelivery').isDisabled(), true);
     await page.evaluate(() => setSendingUI(false));
@@ -250,7 +286,16 @@ const server = http.createServer(async (req, res) => {
     assert.equal(counts.create.at(-1).super_mode, false);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.evaluate(() => closeSidebar());
-    await page.waitForTimeout(250);
+    await prompt.fill('写一条新口播稿');
+    await page.locator('#send').click();
+    await page.waitForFunction(() => state.messages.at(-1)?.id === 21 && !state.sending);
+    await prompt.fill('改下结尾');
+    await offer.waitFor({ state: 'visible' });
+    const mobileOffer = await offer.boundingBox();
+    assert.ok(mobileOffer.x >= 0 && mobileOffer.x + mobileOffer.width <= 390 && mobileOffer.y >= 0);
+    await waitForPetClearance();
+    await page.screenshot({ path: '/private/tmp/aimeimei-super-revision-mobile.png' });
+    await page.locator('#dismissSuperRevision').click();
     await page.screenshot({ path: '/private/tmp/meimei-super-composer-mobile.png' });
     assert.equal(await mode.isVisible(), true);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
@@ -264,7 +309,7 @@ const server = http.createServer(async (req, res) => {
     await page.waitForFunction(() => document.querySelector('#finalDeliveryStatus').textContent.includes('客户确认稿已保存'));
     assert.equal(workspace(conversations[0].id).delivery.content, '手机端回传客户已接受的完整终稿。');
     assert.deepEqual(errors, []);
-    console.log('超能模式 UI 回归通过：检查问题合并去重/有限检查状态/本单终稿说明/开关隔离/刷新/原流程/终稿更新/冲突/文本和文档上传/账号隔离/迟到响应/桌面与手机布局。');
+    console.log('超能模式 UI 回归通过：推荐触发/拒绝和原流程/开启保留草稿且不发送/范围不明恢复草稿/历史检查与终稿保留/账号隔离/桌面与手机布局。');
   } finally {
     await browser.close(); await new Promise(resolve => server.close(resolve));
   }

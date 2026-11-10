@@ -4,7 +4,7 @@ from ..document_context import build_context as build_structured_document_contex
 from .. import writing
 from ..openai_egress import is_openai_url
 from .. import openai_budget
-from .. import super_writing, super_generation
+from .. import super_writing, super_revision
 
 import codecs
 import threading
@@ -130,16 +130,12 @@ class ChatHandlersMixin:
 
     @classmethod
     def run_context_summary_job(cls, job_key, conversation_id, user_id):
-        conversation = None
-        summary_started = False
-        summary_recorded = False
         try:
             with db() as conn:
                 conversation = conn.execute(
                     """
-                    SELECT c.id, c.user_id, c.context_mode, c.context_summary, c.super_mode,
-                           c.context_summary_message_id, m.base_url, m.api_key, m.model,
-                           m.id AS model_id,m.input_price_per_million,m.output_price_per_million,m.cost_enabled
+                    SELECT c.id, c.user_id, c.context_mode, c.context_summary,
+                           c.context_summary_message_id, m.base_url, m.api_key, m.model
                     FROM conversations c JOIN models m ON m.id=c.model_id
                     WHERE c.id=? AND c.user_id=? AND c.archived=0
                     """,
@@ -195,12 +191,8 @@ class ChatHandlersMixin:
                 },
                 method="POST",
             )
-            summary_started = True
             with open_model_request(request, timeout=CONTEXT_SUMMARY_REQUEST_TIMEOUT) as response:
                 result = json.loads(response.read(2 * 1024 * 1024).decode(errors="replace"))
-            if conversation["super_mode"] and super_writing.eligible(user_id):
-                super_generation.record_summary(conversation, result.get("usage"))
-                summary_recorded = True
             choice = (result.get("choices") or [{}])[0]
             message = choice.get("message") or {}
             summary = str(message.get("content") or "").strip()
@@ -218,11 +210,6 @@ class ChatHandlersMixin:
                     (summary, int(rows[-1]["id"]), now(), conversation_id, user_id, int(rows[-1]["id"])),
                 )
         except Exception:
-            if summary_started and not summary_recorded and conversation and conversation["super_mode"] and super_writing.eligible(user_id):
-                try:
-                    super_generation.record_summary(conversation, None)
-                except Exception:
-                    pass
             # 上下文压缩是节省成本的辅助任务，任何异常都不能影响主聊天。
             pass
         finally:
@@ -766,7 +753,7 @@ class ChatHandlersMixin:
             ts = now()
             conn.execute(
                 """
-                INSERT INTO conversations(id, user_id, title, model_id, reasoning_mode, writing_mode, super_mode, created_at, updated_at)
+                INSERT INTO conversations(id, user_id, title, model_id, reasoning_mode, writing_mode, super_revision_mode, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (conversation_id, user_id, title, model_id, self.reasoning_mode(data.get("reasoning_mode")), int(data.get("writing_mode") is True), int(data.get("super_mode") is True), ts, ts),
@@ -1103,6 +1090,7 @@ class ChatHandlersMixin:
         use_web_search = should_use_web_search(content, requested_web_search, search_config)
         use_profile = data.get("use_profile", True) is not False
         profile_rows = []
+        revision_plan = None
         with db() as conn:
             convo = conn.execute(
                 """
@@ -1121,6 +1109,23 @@ class ChatHandlersMixin:
                 return self.error(HTTPStatus.BAD_REQUEST, "model disabled")
             if not convo["api_key"].strip():
                 return self.error(HTTPStatus.BAD_REQUEST, "model api key is not configured")
+            if convo["super_revision_mode"] and super_writing.eligible(user_id):
+                try:
+                    revision = super_revision.parse_request(content)
+                    if revision:
+                        if image_ids or document_ids or requested_web_search:
+                            raise super_revision.ScopeError("局部修稿不使用新附件或联网搜索，请移除附件或关闭联网后重试。")
+                        latest = conn.execute("""SELECT content, generation_status FROM messages
+                            WHERE conversation_id=? AND user_id=? AND role='assistant'
+                            ORDER BY id DESC LIMIT 1""", (conversation_id, user_id)).fetchone()
+                        prior = conn.execute("""SELECT SUBSTR(content,-4000) AS text FROM messages
+                            WHERE conversation_id=? AND user_id=? AND role='user'
+                            ORDER BY id DESC LIMIT 8""", (conversation_id, user_id)).fetchall()
+                        draft = latest["content"] if latest and latest["generation_status"] == "completed" else ""
+                        revision_plan = super_revision.prepare(revision, draft, [row["text"] for row in reversed(prior)])
+                        use_web_search = False
+                except super_revision.ScopeError as exc:
+                    return self.error(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc))
             if is_openai_url(convo["base_url"]):
                 try:
                     openai_budget.check()
@@ -1167,8 +1172,7 @@ class ChatHandlersMixin:
             existing_document_ids = {row["id"] for row in document_rows}
             document_rows.extend(row for row in message_document_rows if row["id"] not in existing_document_ids)
             document_context = ""
-            document_coverage = None
-            if document_rows:
+            if document_rows and not revision_plan:
                 doc_ids = [row["id"] for row in document_rows]
                 placeholders = ",".join("?" for _ in doc_ids)
                 chunks = conn.execute(
@@ -1176,8 +1180,7 @@ class ChatHandlersMixin:
                     (*doc_ids, user_id),
                 ).fetchall()
                 if super_writing.eligible(user_id):
-                    document_coverage = build_structured_document_context(document_rows, chunks, content or "请根据这些材料分析")
-                    document_context = document_coverage["context"]
+                    document_context = build_structured_document_context(document_rows, chunks, content or "请根据这些材料分析")["context"]
                 else:
                     document_context = build_document_context(document_rows, chunks, content or "请根据这些材料分析")
 
@@ -1235,8 +1238,9 @@ class ChatHandlersMixin:
                 )
             context_mode = self.context_mode(convo["context_mode"])
             context_summary = str(convo["context_summary"] or "").strip()
-            super_enabled = bool(convo["super_mode"] and super_writing.eligible(user_id))
-            if context_mode == "smart" and context_summary:
+            if revision_plan:
+                history = []
+            elif context_mode == "smart" and context_summary:
                 # 摘要水位之后的原文必须全部保留，避免新增消息挤出尚未摘要的要求。
                 history = conn.execute("""SELECT id,role,content FROM messages
                     WHERE conversation_id=? AND user_id=? AND role IN ('user','assistant') AND content!=''
@@ -1257,13 +1261,13 @@ class ChatHandlersMixin:
                 """,
                 (conversation_id, user_id, 80),
                 ).fetchall()
-            if convo["writing_mode"]:
+            if convo["writing_mode"] and not revision_plan:
                 task_state = writing.get_state(conn, conversation_id, user_id)
                 start_id = task_state["history_start_id"]
                 if start_id:
                     history = [r for r in history if r["id"] >= start_id]
                     context_summary = ""
-            if use_profile:
+            if use_profile and not revision_plan:
                 profile_rows = conn.execute(
                     """
                     SELECT *
@@ -1274,7 +1278,7 @@ class ChatHandlersMixin:
                     """,
                     (user_id,),
                 ).fetchall()
-            history_images = conn.execute(
+            history_images = [] if revision_plan else conn.execute(
                 """
                 SELECT *
                 FROM chat_message_images
@@ -1287,26 +1291,13 @@ class ChatHandlersMixin:
             ).fetchall()
 
         writing_run = None
-        if convo["writing_mode"]:
+        if convo["writing_mode"] and not revision_plan:
             writing_run = self.prepare_writing(convo, user_message_content, document_context, history)
             if writing_run[0]["history_start_id"]:
                 history = [r for r in history if r["id"] >= writing_run[0]["history_start_id"]]
                 context_summary = ""
 
-        super_run = None
         super_check = None
-        if super_enabled:
-            try:
-                if document_coverage is None:
-                    super_run = super_generation.prepare(convo, user_message_content, document_context, history)
-                else:
-                    super_run = super_generation.prepare(convo, user_message_content, document_context, history,
-                                                         document_coverage=document_coverage)
-            except Exception as exc:
-                self.log_message("super writing preparation deferred (%s)", type(exc).__name__)
-                super_check = {"status": "failed", "notice": "超能辅助暂不可用，本轮按原流程生成。", "issues": [], "repaired": False,
-                    "version": super_generation.VERSION, "review_complete": False,
-                    "repair": {"status": "disabled_review_only"}}
 
         images_by_history_message = {}
         for image in history_images:
@@ -1332,6 +1323,9 @@ class ChatHandlersMixin:
             return {"role": row["role"], "content": row["content"]}
 
         def make_upstream_messages(results):
+            if revision_plan:
+                prompt = convo["system_prompt"].strip()
+                return ([{"role": "system", "content": prompt}] if prompt else []) + super_revision.upstream_messages(revision_plan)
             runtime_context = build_runtime_context(bool(results))
             if use_native_search:
                 runtime_context += (
@@ -1368,10 +1362,6 @@ class ChatHandlersMixin:
                 upstream_messages.append({"role": "system", "content": document_context})
             if writing_run:
                 upstream_messages.append({"role": "system", "content": writing.prompt_context(*writing_run)})
-            if super_run:
-                super_context = super_generation.prompt_context(super_run)
-                if super_context:
-                    upstream_messages.append({"role": "system", "content": super_context})
             upstream_messages.extend(upstream_message_from_history(row) for row in history)
             return upstream_messages
 
@@ -1507,16 +1497,22 @@ class ChatHandlersMixin:
         stream_failed = False
         stream_failure_message = ""
         native_work_started = False
-        super_buffer = bool(super_run)
+        revision_buffer = bool(revision_plan)
         protect_storyboard = bool(writing_run and writing_run[0]["locked_version_id"] and writing_run[1] and writing_run[2]["intent"] == "storyboard")
 
         def emit_client_event(event):
             nonlocal client_connected
             if not client_connected:
                 return False
-            if super_buffer and event.get("choices"):
-                # 沿用超能模式的缓冲时机，成稿后只记录检查结果，不改正文。
-                return True
+            if revision_buffer and event.get("choices"):
+                choice = event["choices"][0]
+                reasoning = {k: v for k, v in (choice.get("delta") or choice.get("message") or {}).items()
+                             if k in ("reasoning_content", "reasoning", "thinking") and v}
+                event = {k: event[k] for k in ("usage",) if k in event}
+                if reasoning:
+                    event["choices"] = [{"delta": reasoning}]
+                if not event:
+                    return True
             if protect_storyboard and (event.get("choices") or [{}])[0].get("delta", {}).get("content"):
                 return True
             try:
@@ -1541,8 +1537,8 @@ class ChatHandlersMixin:
         if search_results:
             emit_client_event({"type": "search_status", "status": "done",
                                "count": len(search_results), "sources": public_sources(search_results)})
-        if super_run:
-            emit_client_event({"type": "super_status", "status": "generating", "message": "超能槑槑正在生成，完成后核对本单要求。"})
+        if revision_plan:
+            emit_client_event({"type": "super_status", "status": "generating", "message": "超能槑槑正在修订指定位置。"})
         if search_fallback_notice:
             assistant_parts.append(search_fallback_notice)
             emit_client_event({"choices": [{"index": 0, "delta": {"content": search_fallback_notice},
@@ -1761,20 +1757,9 @@ class ChatHandlersMixin:
                 writing_run[0]["notice"] = protection_notice
             protect_storyboard = False
             emit_client_event({"choices": [{"delta": {"content": assistant_text}}]})
-        if super_run:
-            if generation_status == "completed" and emit_client_event({"type": "super_status", "status": "checking", "message": "正在核对本单要求与交付稿。"}):
-                try:
-                    assistant_text, super_check = super_generation.finish(super_run, assistant_text, convo)
-                except Exception as exc:
-                    self.log_message("super writing check deferred (%s)", type(exc).__name__)
-                    super_check = {"status": "failed", "notice": "复核未完成，保留原稿。", "issues": [], "repaired": False,
-                        "version": super_generation.VERSION, "review_complete": False,
-                        "repair": {"status": "disabled_review_only"}}
-            else:
-                super_check = {"status": "skipped", "notice": "主生成未完整完成，本轮未执行交付复核。", "issues": [], "repaired": False,
-                    "version": super_generation.VERSION, "review_complete": False,
-                    "repair": {"status": "disabled_review_only"}}
-            super_buffer = False
+        if revision_plan:
+            assistant_text, super_check = super_revision.apply_result(revision_plan, assistant_text, generation_status == "completed")
+            revision_buffer = False
             emit_client_event({"choices": [{"index": 0, "delta": {"content": assistant_text}, "finish_reason": "stop" if generation_status == "completed" else None}]})
         writing_check = None
         if assistant_text or reasoning_text or generation_status != "completed":
@@ -1822,8 +1807,7 @@ class ChatHandlersMixin:
                     main_usage = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
                         "total_tokens": total_tokens, "estimated_cost": estimated_cost,
                         "cached_tokens": cached_tokens, "cache_creation_tokens": cache_creation_tokens}
-                    super_check["usage"] = super_generation.combined_usage(super_run, main_usage) if super_run else main_usage
-                    super_check["calls"] = super_run["calls"] if super_run else []
+                    super_check["usage"] = main_usage
                     conn.execute("INSERT INTO super_checks(message_id,user_id,result_json) VALUES (?,?,?)",
                         (message_id, user_id, json.dumps(super_check, ensure_ascii=False)))
                 for index, item in enumerate(search_results, 1):
@@ -1874,7 +1858,7 @@ class ChatHandlersMixin:
                     (conversation_id, user_id, CONTEXT_RECENT_MESSAGE_LIMIT),
                 ).fetchone()
                 should_schedule_context_summary = bool(
-                    self.context_mode(convo["context_mode"]) == "smart"
+                    not revision_plan and self.context_mode(convo["context_mode"]) == "smart"
                     and summary_cutoff
                     and int(summary_cutoff["id"]) > int(convo["context_summary_message_id"] or 0)
                     and (

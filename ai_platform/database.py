@@ -558,6 +558,9 @@ def init_db(secrets_data=None):
             conn.execute("ALTER TABLE conversations ADD COLUMN writing_mode INTEGER NOT NULL DEFAULT 0")
         if "super_mode" not in conversation_columns:
             conn.execute("ALTER TABLE conversations ADD COLUMN super_mode INTEGER NOT NULL DEFAULT 0")
+        if "super_revision_mode" not in conversation_columns:
+            # 旧审稿开关不是新修稿流程的授权。
+            conn.execute("ALTER TABLE conversations ADD COLUMN super_revision_mode INTEGER NOT NULL DEFAULT 0")
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS writing_tasks (
               conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
