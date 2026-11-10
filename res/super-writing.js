@@ -14,7 +14,14 @@
   let lastUserId = null;
   let offerTimer = 0;
   let offeredHere = '';
-  const paragraphEdit = /^(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)?(?:修改|改写|改|调整|优化|润色)(?:一下|下)?[：:\s]*(?:开头|结尾|收尾|第(?:[1-9]|10|[一二三四五六七八九十])段)(?=$|[\s，,。；;：:！!？?、]|改成|换成|写成|更|推荐)/;
+  const editPrefix = '^(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)?';
+  const editTarget = '(?:开头|开场|结尾|收尾|第(?:10|[1-9一二三四五六七八九十])段)';
+  const editAction = '(?:重新写|重写|修改|改写|调整|优化|润色|换(?:个|一种)(?:说法|表达|话术)|改)(?:一下|下)?';
+  const editLink = '[ \\t]*[，,：:]?[ \\t]*(?:也|还|就)?(?:需要|可以|得|要)?[ \\t]*(?:再)?[ \\t]*';
+  const paragraphEdit = new RegExp(editPrefix + editAction + '[：:\\s]*' + editTarget);
+  const targetFirstEdit = new RegExp(editPrefix + '(?:把)?' + editTarget + editLink + editAction);
+  const extraTargetEdit = new RegExp('(?:^|[\\s，,。；;、])(?:然后|同时|顺便|另外|再)?[ \\t]*(?:把)?' + editTarget + editLink + editAction);
+  const extraActionEdit = /(?:^|[\s，,。；;])(?:再|也|另外)?(?:修改|改(?:写|一下|下)?|加(?:上|一列)?|删(?:掉|去)?|重写|调整)[：:\s]*(?:开头|开场|结尾|收尾|第[一二三四五六七八九十\d]+段|标题|景别)/;
   const shotColumn = /^(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)?(?:在时长(?:前面|之前|前))?(?:添加|增加|加上|加)(?:一)?列[：:\s]*[「“]?景别[」”]?[。！!\s]*$/;
   const eligible = () => state.authed && state.user?.id === 'default';
   const currentKey = () => `${state.user?.id || ''}:${state.conversationEpoch}:${state.currentConversation?.id || 'new'}`;
@@ -30,17 +37,32 @@
     hideOffer();
   }
 
+  function isParagraphEdit(prompt) {
+    const match = paragraphEdit.exec(prompt) || targetFirstEdit.exec(prompt);
+    if (!match) return false;
+    const suffix = prompt.slice(match[0].length);
+    if (/^(?:了)?(?:吗|么|没有|没|了|了没|了吧|得怎么样|得如何|得好不好)[\s？?。！!]*$/.test(suffix.trim())) return false;
+    const tail = suffix.replace(/^[吧哈啊哦呗]+(?=$|[\s，,。；;：:！!？?、])/, '');
+    return (!tail || /^[\s，,。；;：:！!？?、]|^改成|^换成|^写成|^成|^得|^更|^推荐/.test(tail)) &&
+      !/全文|全篇|联网|查资料|(?:同时|顺便|并且|还有|再把|以及|和)(?:也|再)?(?:修改|改|加|删|重写|调整)/.test(tail) &&
+      !paragraphEdit.test(tail.replace(/^[，,。；; ]+/, '')) &&
+      !extraActionEdit.test(tail) && !extraTargetEdit.test(tail);
+  }
+
   function updateOffer() {
     const offer = byId('superRevisionOffer');
     const prompt = byId('prompt').value.trim();
     const id = state.currentConversation?.id;
     const storageKey = 'superRevisionOffer:' + id;
-    const paragraph = paragraphEdit.test(prompt) && !/全文|全篇|联网|查资料|(?:同时|顺便|并且|还有|再把|以及|和)(?:也|再)?(?:修改|改|加|删|重写|调整)/.test(prompt);
-    const column = shotColumn.test(prompt);
     if (!eligible() || !id || state.conversationLoading || state.sending || loading || enabled() ||
-        prompt.length > 100 || prompt.includes('\n') || (!paragraph && !column) ||
+        prompt.length > 100 || prompt.includes('\n') ||
         !byId('fullComposerSuggestion').hidden || !byId('fullComposer').hidden ||
         (offeredHere !== currentKey() && getUserStorage(storageKey) === '1')) {
+      offer.hidden = true;
+      return;
+    }
+    const column = shotColumn.test(prompt);
+    if (!column && !isParagraphEdit(prompt)) {
       offer.hidden = true;
       return;
     }

@@ -182,25 +182,27 @@ const server = http.createServer(async (req, res) => {
       return petRect.right <= offerRect.left || petRect.left >= offerRect.right ||
         petRect.bottom <= offerRect.top || petRect.top >= offerRect.bottom;
     });
-    await prompt.fill('感觉一般');
-    await page.waitForTimeout(300);
-    assert.equal(await offer.isVisible(), false);
-    await prompt.fill('改下结尾');
+    for (const input of ['感觉一般', '第一段要改吗？', '重写整篇稿子', '结尾也改下吧，第一段要重新写']) {
+      await prompt.fill(input);
+      await page.waitForTimeout(300);
+      assert.equal(await offer.isVisible(), false, input);
+    }
+    await prompt.fill('结尾也改下吧');
     await offer.waitFor({ state: 'visible' });
     await waitForPetClearance();
     await page.screenshot({ path: '/private/tmp/aimeimei-super-revision-desktop.png' });
     await page.locator('#acceptSuperRevision').click();
     await page.waitForFunction(() => document.querySelector('#superModeToggle').getAttribute('aria-pressed') === 'true' && !document.querySelector('#superModeToggle').disabled);
-    assert.equal(await prompt.inputValue(), '改下结尾');
+    assert.equal(await prompt.inputValue(), '结尾也改下吧');
     assert.equal(counts.sends.length, 0);
     assert.equal(await offer.isVisible(), false);
     await page.evaluate(() => selectConversation('b'));
     await page.waitForFunction(() => state.currentConversation?.id === 'b' && !document.querySelector('#superModeToggle').disabled);
     assert.equal(await mode.getAttribute('aria-pressed'), 'false');
-    await prompt.fill('改下结尾');
+    await prompt.fill('第一段要重新写啊');
     await offer.waitFor({ state: 'visible' });
     await page.locator('#dismissSuperRevision').click();
-    assert.equal(await prompt.inputValue(), '改下结尾');
+    assert.equal(await prompt.inputValue(), '第一段要重新写啊');
     await prompt.fill('只改开头');
     await page.waitForTimeout(300);
     assert.equal(await offer.isVisible(), false);

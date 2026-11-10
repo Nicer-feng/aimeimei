@@ -8,10 +8,19 @@ from dataclasses import dataclass
 VERSION = "super-revision-v1"
 MAX_DRAFT = 60000
 NUMBERS = "一二三四五六七八九十"
+EDIT_PREFIX = r"^(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)?"
+EDIT_TARGET = r"(?:开头|开场|结尾|收尾|第(?:10|[1-9一二三四五六七八九十])段)"
+EDIT_ACTION = r"(?:重新写|重写|修改|改写|调整|优化|润色|换(?:个|一种)(?:说法|表达|话术)|改)(?:一下|下)?"
+EDIT_LINK = r"[ \t]*[，,：:]?[ \t]*(?:也|还|就)?(?:需要|可以|得|要)?[ \t]*(?:再)?[ \t]*"
 EDIT = re.compile(
-    r"^(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)?(?:修改|改写|改|调整|优化|润色)"
-    r"(?:一下|下)?[：:\s]*(开头|结尾|收尾|第([1-9]|10|[一二三四五六七八九十])段)"
+    rf"{EDIT_PREFIX}{EDIT_ACTION}[：:\s]*(?P<target>{EDIT_TARGET})"
 )
+TARGET_FIRST_EDIT = re.compile(rf"{EDIT_PREFIX}(?:把)?(?P<target>{EDIT_TARGET}){EDIT_LINK}{EDIT_ACTION}")
+EXTRA_TARGET_EDIT = re.compile(
+    rf"(?:^|[\s，,。；;、])(?:然后|同时|顺便|另外|再)?[ \t]*(?:把)?{EDIT_TARGET}{EDIT_LINK}{EDIT_ACTION}"
+)
+EDIT_TAIL = re.compile(r"^[\s，,。；;：:！!？?、]|^改成|^换成|^写成|^成|^得|^更|^推荐")
+EDIT_QUESTION = re.compile(r"^(?:了)?(?:吗|么|没有|没|了|了没|了吧|得怎么样|得如何|得好不好)[\s？?。！!]*$")
 COLUMN = re.compile(
     r"^(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)?(?:在时长(?:前面|之前|前))?"
     r"(?:添加|增加|加上|加)(?:一)?列[：:\s]*[「“]?景别[」”]?[。！!\s]*$"
@@ -19,7 +28,7 @@ COLUMN = re.compile(
 PASTED = re.compile(r"(?:^|\s)(?:就)?在(?:这个|这版|这段|以上)(?:的)?基础上(?:来)?(?:修改|改)[，,：:\s]*")
 UNSAFE = re.compile(r"(?:同时|顺便|并且|还有|再把|以及|和)(?:也|再)?(?:修改|改|加|删|重写|调整)|"
                     r"(?:^|[\s，,。；;])(?:再|也|另外)?(?:修改|改(?:写|一下|下)?|加(?:上|一列)?|删(?:掉|去)?|重写|调整)"
-                    r"[：:\s]*(?:开头|结尾|收尾|第[一二三四五六七八九十\d]+段|标题|景别)|"
+                    r"[：:\s]*(?:开头|开场|结尾|收尾|第[一二三四五六七八九十\d]+段|标题|景别)|"
                     r"全文|全篇|联网|查资料")
 LOCAL_UNCLEAR = re.compile(r"^(?:请|麻烦)?(?:帮我|给我)?(?:(?:只|仅)(?:需要|用)?(?:修改|改|调整)|(?:修改|改|调整)(?:一下|下)?(?:这|那)(?:句|段)|(?:添加|增加|加)(?:一)?列)")
 BODY = re.compile(r"(?m)^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|【)?(?:正文|口播正文|口播内容|口播稿|口播|台词)"
@@ -74,17 +83,25 @@ def parse_request(text):
         return None
     if COLUMN.fullmatch(text):
         return Request("景别", text, pasted)
-    m = EDIT.match(text)
+    m = EDIT.match(text) or TARGET_FIRST_EDIT.match(text)
     if not m:
         if LOCAL_UNCLEAR.match(text):
             raise ScopeError("没能确定要修改的位置。请写明只改开头、结尾、第几段，或给分镜表加景别列。")
         return None
     tail = text[m.end():]
-    if (tail and not re.match(r"^[\s，,。；;：:！!？?、]|^改成|^换成|^写成|^更|^推荐", tail)
-            or UNSAFE.search(tail) or EDIT.search(tail.lstrip("，,；; "))):
+    if EDIT_QUESTION.fullmatch(tail.strip()):
+        return None
+    tail = re.sub(r"^[吧哈啊哦呗]+(?=$|[\s，,。；;：:！!？?、])", "", tail)
+    if UNSAFE.search(tail) or EDIT.match(tail.lstrip("，,。；; ")) or EXTRA_TARGET_EDIT.search(tail):
         raise ScopeError("这条指令可能涉及多个位置，请一次只指定一处修改。")
-    p = m[2]
-    return Request(m[1], text, pasted, (int(p) if p.isdigit() else NUMBERS.index(p) + 1) if p else 0)
+    if tail and not EDIT_TAIL.match(tail):
+        if m.re is TARGET_FIRST_EDIT:
+            return None
+        raise ScopeError("这条指令可能涉及多个位置，请一次只指定一处修改。")
+    target = m["target"]
+    p = target[1:-1] if target.startswith("第") else ""
+    return Request("开头" if target == "开场" else target, text, pasted,
+                   (int(p) if p.isdigit() else NUMBERS.index(p) + 1) if p else 0)
 
 
 def paragraph_spans(draft):

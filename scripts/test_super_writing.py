@@ -126,6 +126,23 @@ class QuietHandler(AppHandler):
 
 
 class ScopedRevisionRulesTests(unittest.TestCase):
+    def test_natural_word_order_keeps_the_exact_requested_range(self):
+        draft = "标题：保留\n正文：\n这里是第一段。\n\n这里是第二段。\n\n这里是结尾。"
+        for instruction, target, paragraph, original in (
+            ("结尾也改下吧 感觉和前面的内容不是很搭配", "结尾", 0, "这里是结尾。"),
+            ("第一段要重新写啊 不能按照这个版本来写", "第一段", 1, "这里是第一段。"),
+            ("第二段换个说法", "第二段", 2, "这里是第二段。"),
+            ("开场再润色一下", "开头", 0, "这里是第一段。"),
+            ("改下结尾吧", "结尾", 0, "这里是结尾。"),
+        ):
+            with self.subTest(instruction=instruction):
+                request = super_revision.parse_request(instruction)
+                self.assertEqual((request.target, request.paragraph, request.instruction), (target, paragraph, instruction))
+                plan = super_revision.prepare(request, draft)
+                result, report = super_revision.apply_result(plan, '{"replacement":"本次修改。"}', True)
+                self.assertTrue(report["repaired"])
+                self.assertEqual(result, draft.replace(original, "本次修改。"))
+
     def test_pasted_draft_is_selected_instead_of_latest_reply(self):
         draft = "封面文案：保持标题\n正文：\n开头。\n\n这里才是用户贴回来的结尾。"
         request = super_revision.parse_request(draft + "\n就在这个基础上改 只需要改结尾 改成推荐大家去试驾")
@@ -135,9 +152,12 @@ class ScopedRevisionRulesTests(unittest.TestCase):
         self.assertTrue(report["repaired"])
 
     def test_nonlocal_and_conflicting_requests_are_not_treated_as_local(self):
-        for text in ("这个不太对", "重写整篇稿子", "你觉得这个结尾怎么样？"):
+        for text in ("这个不太对", "重写整篇稿子", "你觉得这个结尾怎么样？", "第一段要改吗？",
+                     "结尾改得怎么样？", "第一段不用改", "结尾怎么改？", "开头改完以后说了什么？"):
             self.assertIsNone(super_revision.parse_request(text))
-        for text in ("只改这段", "只改结尾，顺便修改标题", "只改结尾。删掉开头"):
+        for text in ("只改这段", "只改结尾，顺便修改标题", "只改结尾。删掉开头",
+                     "结尾也改下吧，第一段要重新写", "第一段要重新写，结尾也调整一下",
+                     "结尾也改下吧，重写全文"):
             with self.assertRaises(super_revision.ScopeError):
                 super_revision.parse_request(text)
 
@@ -496,7 +516,7 @@ class SuperWritingTests(unittest.TestCase):
         self.seed_draft(draft, "不会被送到修稿上游的大段材料。" * 1000)
         self.assertEqual(self.enable()[0], 200)
         MockModels.answer = '{"replacement":"有兴趣的话，周末可以到店试试。"}'
-        status, stream = self.send("只改结尾，改成推荐大家去试驾")
+        status, stream = self.send("结尾也改下吧，改成推荐大家去试驾")
         self.assertEqual(status, 200, stream)
         self.assertNotIn('"replacement"', stream)
         self.assertEqual(self.last_reply()["content"], draft.replace("原来的结尾。", "有兴趣的话，周末可以到店试试。"))
@@ -507,6 +527,17 @@ class SuperWritingTests(unittest.TestCase):
             self.assertNotIn(excluded, payload)
         self.assertIn("原来的结尾。", payload)
         self.assert_accounting()
+
+    def test_target_first_edit_switch_off_uses_normal_chat(self):
+        draft = "正文：\n开头。\n\n原稿结尾。"
+        self.seed_draft(draft)
+        self.enable()
+        self.enable(False)
+        self.assertEqual(self.send("第一段要重新写啊")[0], 200)
+        self.assertIsNone(self.last_reply()["super_check"])
+        self.assertEqual([item["stage"] for item in MockModels.requests], ["main"])
+        self.assertIn({"role": "assistant", "content": draft}, MockModels.requests[0]["body"]["messages"])
+        self.assertEqual(MockModels.requests[0]["body"]["messages"][-1]["content"], "第一段要重新写啊")
 
     def test_scoped_storyboard_preserves_existing_cells_and_durations(self):
         draft = "分镜安排\n\n| 段落 | 时长 | 画面描述 | 口播内容 |\n| --- | --- | --- | --- |\n| 1 | 18s | 车外 | 台词一。 |\n| 2 | 28s | 进车 | 台词二。 |\n\n总时长 46s"
