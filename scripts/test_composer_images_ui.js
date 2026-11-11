@@ -8,13 +8,14 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
+const retryOnly = process.argv.includes('--retry-only');
 const png = fs.readFileSync(path.join(root, 'res/meimei-avatar.png'));
 const models = [
   { id: 'vision', name: '图片模型', model: 'fixture-vision', supports_vision: true },
   { id: 'text', name: '文字模型', model: 'fixture-text', supports_vision: false }
 ].map(model => ({ ...model, provider: 'local', enabled: true }));
 const counts = { policies: 0, oss: 0, saved: 0, documents: 0, sends: [], unexpected: [] };
-let failOss = false, delayOss = 0, ossGate = null, base;
+let failOss = false, delayOss = 0, ossGate = null, replyGate = null, base;
 const conversations = [];
 const messages = new Map();
 function json(res, body, status = 200) {
@@ -84,7 +85,21 @@ const server = http.createServer(async (req, res) => {
       if (match[2] === '/messages' && req.method === 'POST') {
         counts.sends.push(data);
         const list = messages.get(conversation.id);
+        const firstAttempt = !list.some(item => item.role === 'user' && item.content === data.content);
         list.push({ id: list.length + 1, role: 'user', content: data.content, images: (data.image_ids || []).map(id => ({ id, view_url: base + '/fixture.png' })), created_at: Date.now() / 1000 });
+        const failure = firstAttempt && ({ '本地中断回归': 'interrupted', '本地失败回归': 'failed' })[data.content];
+        if (failure) {
+          const reply = { id: list.length + 1, role: 'assistant', content: '', reasoning_content: failure === 'interrupted' ? '只收到了思考。' : '', generation_status: failure, created_at: Date.now() / 1000 };
+          list.push(reply);
+          if (failure === 'failed') return json(res, { error: '本地模型失败', message_id: reply.id, generation_status: failure }, 502);
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          const events = [{ choices: [{ delta: { reasoning_content: reply.reasoning_content } }] },
+            { type: 'message_saved', message_id: reply.id, generation_status: failure },
+            { type: 'message.failed', message_id: reply.id, status: failure, message: '本地流式中断' }];
+          res.end(events.map(event => 'data: ' + JSON.stringify(event) + '\n\n').join(''));
+          return;
+        }
+        if (data.content === '本地并行测试' && replyGate) await replyGate;
         const reply = { id: list.length + 1, role: 'assistant', content: '本地流式回答正常。', generation_status: 'completed', created_at: Date.now() / 1000 };
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
         res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: reply.content }, finish_reason: null }] }) + '\n\n');
@@ -130,6 +145,58 @@ async function ready(page, count = 1) {
 async function clear(page) { await page.evaluate(() => clearAttachments()); }
 async function model(page, id) { await page.evaluate(id => chooseModel(id), id); }
 
+async function verifyEmptyReplyRetry(page, output, width) {
+  await page.evaluate(() => newConversation('text'));
+  const input = page.locator('#prompt');
+  const send = page.locator('#send');
+  const waitForFinish = status => page.waitForFunction(status => !state.sending && !state.sendAttempt && state.messages.at(-1)?.generation_status === status, status);
+  const interruption = '本地中断回归';
+  const interrupted = page.locator('#messages .bubble.assistant').filter({ hasText: '回答已中断，尚未收到正文' });
+  const retry = interrupted.locator('.regenerate-action');
+  await input.fill(interruption);
+  await send.click();
+  await waitForFinish('interrupted');
+  assert.equal(await retry.isVisible(), true, 'live reasoning-only interruption has a retry button');
+  assert.equal(await retry.isEnabled(), true);
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.empty-retry-actions')).opacity === '1');
+  assert.equal(await interrupted.locator('.favorite-action, .continue-action, .tts-action, .share-action, .copy-action').filter({ visible: true }).count(), 0);
+  await page.reload();
+  await retry.waitFor({ state: 'visible' });
+  assert.equal(await retry.isEnabled(), true, 'reload preserves recovery');
+  const bounds = await retry.boundingBox();
+  assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width);
+  if (width === 390) assert.ok(bounds.height >= 40);
+  await page.screenshot({ path: path.join(output, `empty-retry-${width}.png`) });
+
+  let releaseReply;
+  replyGate = new Promise(resolve => { releaseReply = resolve; });
+  try {
+    await input.fill('本地并行测试');
+    await send.click();
+    await page.waitForFunction(() => state.sending);
+    assert.equal(await retry.isDisabled(), true, 'old retry is disabled while another answer is running');
+    assert.equal(await interrupted.locator('.empty-retry-note').isVisible(), true);
+  } finally {
+    releaseReply();
+    replyGate = null;
+  }
+  await waitForFinish('completed');
+  assert.equal(await retry.isEnabled(), true);
+  assert.equal(await interrupted.locator('.empty-retry-note').isVisible(), false);
+  await input.fill('不要覆盖草稿');
+  await retry.click();
+  await waitForFinish('completed');
+  assert.equal(counts.sends.at(-1).content, interruption, 'retry resends the original question, not the latest one');
+  assert.equal(await input.inputValue(), '不要覆盖草稿');
+
+  await input.fill('本地失败回归');
+  await send.click();
+  await waitForFinish('failed');
+  const failure = page.locator('#messages .bubble.assistant').filter({ hasText: '生成失败，尚未收到正文' });
+  await failure.locator('.regenerate-action').waitFor({ state: 'visible' });
+  assert.equal(await failure.locator('.regenerate-action').isEnabled(), true);
+}
+
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); base = 'http://127.0.0.1:' + server.address().port;
   const output = fs.mkdtempSync(path.join(os.tmpdir(), 'aimeimei-clipboard-'));
@@ -140,9 +207,17 @@ async function model(page, id) { await page.evaluate(id => chooseModel(id), id);
       const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 960 }, isMobile: width === 390, hasTouch: width === 390 });
       await context.route('https://**', route => route.abort());
       const page = await context.newPage(), errors = [];
+      page.setDefaultTimeout(12000);
       page.on('pageerror', error => errors.push(String(error)));
       await page.goto(base); await page.waitForFunction(() => state.authed && state.models.length === 2);
       await page.waitForFunction(() => document.querySelector('#appView').hidden === false);
+      if (retryOnly) {
+        await verifyEmptyReplyRetry(page, output, width);
+        checks.push(`empty-retry/live/reload/busy/http-failure-${width}`);
+        assert.deepEqual(errors, []);
+        await context.close();
+        continue;
+      }
       await page.evaluate(() => {
         const upload = handleImageFiles;
         window.clipboardUploadTasks = [];
@@ -269,10 +344,12 @@ async function model(page, id) { await page.evaluate(id => chooseModel(id), id);
       assert.equal(intercepted, false);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
       assert.equal(overflow, false);
+      await verifyEmptyReplyRetry(page, output, width);
+      checks.push(`empty-retry/live/reload/busy/http-failure-${width}`);
       assert.deepEqual(errors, []);
       await context.close();
     }
-    assert.equal(counts.documents, 2, 'only the two explicit material selections should use document parsing');
+    assert.equal(counts.documents, retryOnly ? 0 : 2, 'only explicit material selections should use document parsing');
     assert.deepEqual(counts.unexpected, []);
     console.log(JSON.stringify({ checks, counts, screenshots: output }, null, 2));
   } finally { await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

@@ -6430,6 +6430,29 @@
     .bubble:focus-within .message-actions {
       opacity: 1;
     }
+    .message-actions.empty-retry-actions {
+      opacity: 1;
+      flex-wrap: wrap;
+    }
+    .empty-retry-actions .regenerate-action {
+      background: var(--accent-soft);
+      color: var(--color-text-primary);
+      font-weight: 650;
+    }
+    .empty-retry-actions .regenerate-action:disabled {
+      opacity: .58;
+      cursor: not-allowed;
+    }
+    .empty-retry-note {
+      padding: 0 4px;
+      font-size: 12px;
+      color: var(--color-text-secondary);
+    }
+    @media (hover: none) {
+      .empty-retry-actions .regenerate-action {
+        min-height: 40px;
+      }
+    }
     .message-action {
       min-height: 30px;
       padding: 0 8px;

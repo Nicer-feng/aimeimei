@@ -3805,6 +3805,28 @@
 	      await sendMessage(previous.content || "", { statusText: "正在重新生成..." });
 	    }
 
+	    function updateEmptyReplyRetry(button) {
+	      button.disabled = state.sending;
+	      const note = button.parentElement.querySelector(".empty-retry-note");
+	      if (note) note.hidden = !state.sending;
+	    }
+
+	    function renderRegenerateAction(actions, button, message, displayContent) {
+	      const emptyFailure = !displayContent && !message.thinking && Boolean(generationStatusLabel(message));
+	      const wasEmptyFailure = actions?.classList.contains("empty-retry-actions");
+	      if (emptyFailure !== wasEmptyFailure) actions?.classList.toggle("empty-retry-actions", emptyFailure);
+	      if (button) {
+	        button.hidden = message.role !== "assistant" || !(displayContent || emptyFailure);
+	        if (emptyFailure) updateEmptyReplyRetry(button);
+	        else if (wasEmptyFailure) {
+	          button.disabled = false;
+	          const note = actions?.querySelector(".empty-retry-note");
+	          if (note) note.hidden = true;
+	        }
+	      }
+	      return emptyFailure;
+	    }
+
 	    async function continueFromMessage(message) {
 	      if (!visibleMessageContent(message)) return;
 	      if (state.sending) return setStatus("chatStatus", "上一条还在生成，先等它完成。", "err");
@@ -4446,7 +4468,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.32.3" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.32.4" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -6760,8 +6782,12 @@
 	      regenerate.className = "message-action regenerate-action";
 	      regenerate.type = "button";
 	      regenerate.innerHTML = iconLabel("rotate-cw", "重新生成", "↻");
-	      regenerate.title = "把上一条问题放回输入框";
+	      regenerate.title = "重新发送原问题";
 	      regenerate.addEventListener("click", () => regenerateFromMessage(message));
+	      const retryNote = document.createElement("span");
+	      retryNote.className = "empty-retry-note";
+	      retryNote.hidden = true;
+	      retryNote.textContent = "当前回复完成后可重试";
 	      const continueWrite = document.createElement("button");
 	      continueWrite.className = "message-action continue-action";
 	      continueWrite.type = "button";
@@ -6784,7 +6810,7 @@
 	      reason.className = "message-action reason-action";
 	      reason.type = "button";
 	      reason.addEventListener("click", () => toggleReasoning(message));
-	      actions.append(favorite, regenerate, continueWrite, tts, share, copyAction);
+	      actions.append(favorite, regenerate, retryNote, continueWrite, tts, share, copyAction);
 
 	      shell.append(reasoningPanel, imagePanel, documentPanel, quotePanel, text, activity, copy);
 	      wrap.append(role, shell, sourcesPanel, time, actions);
@@ -6854,7 +6880,8 @@
 	      text.innerHTML = renderMessageMarkdown(message, displayContent || generationEmptyText(message));
 	      enhanceMarkdown(text, { mermaid: !message.thinking });
 	      copy.hidden = !displayContent || message.role === "assistant";
-	      const canShowAssistantActions = message.role === "assistant" && Boolean(displayContent);
+	      const emptyFailure = renderRegenerateAction(actions, regenerate, message, displayContent);
+	      const canShowAssistantActions = message.role === "assistant" && Boolean(displayContent || emptyFailure);
 	      const canShowUserActions = message.role === "user" && displayContent;
 	      if (actions) actions.hidden = !(canShowAssistantActions || canShowUserActions);
 	      if (copyAction) {
@@ -6867,9 +6894,6 @@
 	        favorite.innerHTML = message.favorite_id ? iconLabel("star", "已收藏", "★") : iconLabel("star", "收藏", "☆");
 	        favorite.classList.toggle("active", Boolean(message.favorite_id));
 	        favorite.title = message.favorite_id ? "取消收藏" : "收藏这条回答";
-	      }
-	      if (regenerate) {
-	        regenerate.hidden = !(message.role === "assistant" && displayContent);
 	      }
 	      if (continueWrite) {
 	        continueWrite.hidden = !(message.role === "assistant" && displayContent);
@@ -7137,13 +7161,13 @@
       }
 	      copy.hidden = true;
 	      const hasContent = Boolean(displayContent);
-	      if (actions) actions.hidden = !hasContent;
+	      const emptyFailure = renderRegenerateAction(actions, regenerate, message, displayContent);
+	      if (actions) actions.hidden = !(hasContent || emptyFailure);
 	      if (copyAction) copyAction.hidden = !hasContent;
 	      if (favorite) {
 	        favorite.hidden = !(message.id && hasContent);
 	        favorite.classList.toggle("active", Boolean(message.favorite_id));
 	      }
-	      if (regenerate) regenerate.hidden = !hasContent;
 	      if (continueWrite) continueWrite.hidden = !hasContent;
 	      if (tts) {
 	        const canRead = Boolean(options.final && message.id && hasContent && !message.thinking && state.ttsConfig?.enabled && state.ttsConfig?.configured);
@@ -8156,6 +8180,7 @@
 	    function setSendingUI(isSending) {
 	      const send = $("send");
 	      state.sending = Boolean(isSending);
+	      $("messages").querySelectorAll(".empty-retry-actions .regenerate-action").forEach(updateEmptyReplyRetry);
       renderWritingMode();
 	      send.disabled = false;
 	      send.classList.toggle("is-stop", state.sending);

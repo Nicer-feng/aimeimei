@@ -12,7 +12,7 @@ const functions = [
   'loadConversationDocuments', 'loadSideDiscussions', 'sendMessage', 'stopGeneration',
   'readChatEvents', 'generationStatusLabel', 'generationEmptyText', 'resetStreamState',
   'resolveStreamDrain', 'drainAssistantQueue', 'enqueueAssistantText', 'scheduleStreamTick',
-  'streamTick', 'streamChunkSize', 'setSendingUI', 'logout', 'closeSideDiscussion',
+  'streamTick', 'streamChunkSize', 'setSendingUI', 'updateEmptyReplyRetry', 'logout', 'closeSideDiscussion',
   'openSideDiscussion', 'sendSideDiscussionMessage', 'readChatFailure', 'createSideDiscussionFromSelection'
 ];
 function extract(name) {
@@ -47,7 +47,7 @@ function harness() {
     $: id => {
       if (!elements.has(id)) elements.set(id, { value: '', textContent: '', checked: false,
         disabled: false, style: {}, classList: { toggle() {}, add() {}, remove() {} },
-        setAttribute() {}, focus() {}, replaceChildren() {} });
+        setAttribute() {}, focus() {}, replaceChildren() {}, querySelectorAll() { return []; } });
       return elements.get(id);
     }
   };
