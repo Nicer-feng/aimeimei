@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 TEMP = tempfile.TemporaryDirectory(prefix="aimeimei-super-writing-test-")
 os.environ["AI_PLATFORM_DATA"] = TEMP.name
 from app import AppHandler, AIPlatformServer
-from ai_platform import super_revision, super_writing, writing
+from ai_platform import super_revision, super_writing, writing, writing_guard
 from ai_platform.database import db, init_db
 from ai_platform.runtime import now, token_hash
 from file_share.database import init_share_db
@@ -126,6 +126,35 @@ class QuietHandler(AppHandler):
 
 
 class ScopedRevisionRulesTests(unittest.TestCase):
+    def test_guard_checks_only_explicit_terms_in_the_body(self):
+        draft = "封面标题：最高表现\n发布文案：文案示例\n正文：\n经过**极限**测试，结果见原始材料。"
+        terms = writing_guard.ordinary_terms(["请写口播稿。不要用『最高』。", "调整下稿子 说了极限是极限词 我还是看到漏了"])
+        self.assertEqual(terms, ("最高", "极限"))
+        report = writing_guard.body_warning(draft, terms)
+        self.assertEqual(len(report["issues"]), 1)
+        self.assertIn("经过极限测试", report["issues"][0])
+        self.assertNotIn("最高", report["issues"][0])
+        self.assertEqual(writing_guard.ordinary_terms(["写一篇脚本，注意极限词。"]), ())
+        self.assertEqual(writing_guard.ordinary_terms(["请解释什么叫禁用「极限」"]), ())
+        self.assertEqual(writing_guard.explicit_terms(["禁止使用「极限」", "取消禁用「极限」"]), ())
+        self.assertIsNone(writing_guard.body_warning("普通对话里有极限二字。", terms))
+
+    def test_metadata_boundaries_are_conservative(self):
+        draft = "**【封面标题】**  原标题  \r\n\r\n**【发布文案】** 原文案\r\n\r\n**【口播正文】**\r\n段落一。  \r\n\r\n段落二。"
+        plan = writing_guard.prepare_metadata("标题和文案也要修改", draft, [])
+        merged, report = writing_guard.apply_metadata(plan, '{"title":"新标题","publication":"新文案"}', True)
+        self.assertEqual(merged, draft.replace("原标题", "新标题").replace("原文案", "新文案"))
+        self.assertTrue(report["repaired"])
+        for raw in ('{}', '{"title":"标题","publication":"文案","body":"不能改"}',
+                    '{"title":"标题","publication":"文案\\n正文：改动"}'):
+            self.assertEqual(writing_guard.apply_metadata(plan, raw, True)[0], draft)
+        self.assertEqual(writing_guard.apply_metadata(plan, '{"title":"标题","publication":"文案"}', False)[0], draft)
+        for command in ("只改标题和文案，然后正文重新写", "销量这块放在结尾", "给我两个完全不一样的脚本"):
+            with self.assertRaises(super_revision.ScopeError):
+                writing_guard.prepare_metadata(command, draft, [])
+        with self.assertRaises(super_revision.ScopeError):
+            writing_guard.prepare_metadata("标题和文案也要修改", draft + "\n" + draft, [])
+
     def test_natural_word_order_keeps_the_exact_requested_range(self):
         draft = "标题：保留\n正文：\n这里是第一段。\n\n这里是第二段。\n\n这里是结尾。"
         for instruction, target, paragraph, original in (
@@ -527,6 +556,64 @@ class SuperWritingTests(unittest.TestCase):
             self.assertNotIn(excluded, payload)
         self.assertIn("原来的结尾。", payload)
         self.assert_accounting()
+
+    def test_ordinary_guard_keeps_same_upstream_payload_and_answer(self):
+        original = "封面标题：正常标题\n发布文案：正常文案\n正文：\n经过极限测试，结果见原始材料。"
+        MockModels.answer = original
+        request = {"content": "请写一条口播稿。不要出现「极限」。", "web_search": False}
+        status, _ = self.request(f"/api/conversations/{self.cid}/messages", request)
+        self.assertEqual(status, 200)
+        self.assertIsNone(self.last_reply()["super_check"])
+        baseline = MockModels.requests[-1]["body"]
+        self.cid = self.create()
+        status, _ = self.request(f"/api/conversations/{self.cid}/messages", {**request, "writing_guard": True})
+        self.assertEqual(status, 200)
+        saved = self.last_reply()
+        self.assertEqual(saved["content"], original)
+        self.assertEqual(saved["super_check"]["version"], writing_guard.VERSION)
+        self.assertEqual(saved["super_check"]["issues"], ["正文包含「极限」：经过极限测试，结果见原始材料。"])
+        self.assertEqual(MockModels.requests[-1]["body"], baseline)
+        self.assertEqual([x["stage"] for x in MockModels.requests], ["main", "main"])
+        self.assertEqual(self.rows()[-1]["total_tokens"], MockModels.usages["main"]["total_tokens"])
+        with db() as conn:
+            total = conn.execute("SELECT SUM(total_tokens) FROM daily_usage WHERE user_id='default'").fetchone()[0]
+        self.assertEqual(total, 2 * MockModels.usages["main"]["total_tokens"])
+
+    def test_metadata_confirmation_is_single_turn_and_checks_source(self):
+        draft = "标题：原标题\n发布文案：原文案\n正文：\n不能改动的正文。  \n\n还有一个段落。"
+        self.seed_draft(draft)
+        source = self.rows()[-1]["id"]
+        url = f"/api/conversations/{self.cid}/messages"
+        body = {"content": "标题和文案也要修改", "writing_guard": True, "metadata_revision_from": source}
+        for bad in ({**body, "metadata_revision_from": source + 1}, {**body, "web_search": True}):
+            self.assertEqual(self.request(url, bad)[0], 422)
+            self.assertEqual(len(self.rows()), 2)
+        self.assertFalse(MockModels.requests)
+        MockModels.answer = '{"title":"新标题","publication":"新文案"}'
+        status, stream = self.request(url, body)
+        self.assertEqual(status, 200, stream)
+        self.assertEqual(self.last_reply()["content"], draft.replace("原标题", "新标题").replace("原文案", "新文案"))
+        self.assertEqual(self.rows()[1]["content"], draft)
+        self.assertFalse(self.workspace()["enabled"])
+        self.assertEqual([x["stage"] for x in MockModels.requests], ["main"])
+        self.assertNotIn("智驾是红线词汇", json.dumps(MockModels.requests[0]["body"], ensure_ascii=False))
+        self.assertNotIn('"{\\\"title\\\"', stream)
+        self.assertEqual(self.request(url, body)[0], 422)
+        self.assert_accounting()
+
+    def test_guard_scope_and_incomplete_generation(self):
+        url = f"/api/conversations/{self.cid}/messages"
+        body = {"content": "请写一条口播稿。不要出现「极限」。", "writing_guard": True}
+        MockModels.answer = "正文：\n经过极限测试，结果见原始材料。"
+        MockModels.finish_reason = "length"
+        self.assertEqual(self.request(url, body)[0], 200)
+        self.assertIsNone(self.last_reply()["super_check"])
+        MockModels.finish_reason = "stop"
+        for uid in ("other", "second-admin"):
+            other_url = f"/api/conversations/{self.create(user=uid)}/messages"
+            self.assertEqual(self.request(other_url, {**body, "metadata_revision_from": 1}, user=uid)[0], 403)
+            self.assertEqual(self.request(other_url, body, user=uid)[0], 200)
+            self.assertIsNone(self.request(other_url, user=uid)[1]["messages"][-1]["super_check"])
 
     def test_target_first_edit_switch_off_uses_normal_chat(self):
         draft = "正文：\n开头。\n\n原稿结尾。"

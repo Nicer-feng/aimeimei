@@ -57,3 +57,4 @@
   .super-delivery-dialog footer { align-items:stretch; flex-direction:column; }
   .super-delivery-dialog .super-delivery-save { width:100%; }
 }
+.app:not(.writing-guard-enabled) .writing-guard-warning { display: none; }

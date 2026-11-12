@@ -4468,7 +4468,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.32.5" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.32.6" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8409,6 +8409,8 @@
           if (globalThis.MeimeiSuper?.isBusy()) { setStatus("chatStatus", "请等待本单模式或交付稿保存完成后再发送。", ""); return; }
           globalThis.MeimeiReader?.exit();
 	      const hasOverride = typeof contentOverride === "string" && contentOverride.trim();
+	      const writingGuard = !hasOverride && globalThis.MeimeiSuper?.writingGuardEnabled?.() === true;
+	      const metadataRevisionFrom = writingGuard ? options.metadataRevisionFrom : undefined;
 	      const rawContent = (hasOverride ? contentOverride : $("prompt").value).trim();
 	      const quoteSnapshot = hasOverride ? [] : state.pendingQuotes.map((quote) => ({ ...quote }));
 	      const content = quoteSnapshot.length ? buildQuotedMessage(rawContent, quoteSnapshot) : rawContent;
@@ -8543,11 +8545,11 @@
             const useProfile = !profileDisabledForConversation(conversationId);
 	        const res = await api(`/api/conversations/${conversationId}/messages`, {
 	          method: "POST",
-	          body: JSON.stringify({ content: userContent, web_search: useWebSearch, use_profile: useProfile, image_ids: readyAttachments.map((item) => item.id), document_ids: readyDocuments.map((item) => item.id) }),
+	          body: JSON.stringify({ content: userContent, web_search: useWebSearch, use_profile: useProfile, image_ids: readyAttachments.map((item) => item.id), document_ids: readyDocuments.map((item) => item.id), ...(writingGuard ? { writing_guard: true, metadata_revision_from: metadataRevisionFrom } : {}) }),
 	          signal: generation.controller.signal
 	        });
         if (!isCurrentGeneration(generation)) return;
-        if (res.status === 422 && state.currentConversation?.super_mode) {
+        if (res.status === 422 && (state.currentConversation?.super_mode || metadataRevisionFrom)) {
           const error = await readChatFailure(res, "请明确要修改的范围。");
           if (!isCurrentGeneration(generation)) return;
           assistant.thinking = false;

@@ -14,6 +14,7 @@
   let lastUserId = null;
   let offerTimer = 0;
   let offeredHere = '';
+  let dismissedMetadata = '';
   const editPrefix = '^(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)?';
   const editTarget = '(?:开头|开场|结尾|收尾|第(?:10|[1-9一二三四五六七八九十])段)';
   const editAction = '(?:重新写|重写|修改|改写|调整|优化|润色|换(?:个|一种)(?:说法|表达|话术)|改)(?:一下|下)?';
@@ -26,14 +27,43 @@
   const eligible = () => state.authed && state.user?.id === 'default';
   const currentKey = () => `${state.user?.id || ''}:${state.conversationEpoch}:${state.currentConversation?.id || 'new'}`;
   const enabled = () => Boolean(state.currentConversation ? state.currentConversation.super_mode : pendingMode);
+  const guardEnabled = () => eligible() && getUserStorage('writingGuard', '0') === '1';
+  const metadataPair = '(?:封面)?标题[ \\t]*(?:和|及|、)[ \\t]*(?:发布)?文案';
+  const metadataKeep = '(?:[，,。；; \\t]*正文(?:不动|不变|不要动|不要改|原样保留))?';
+  const metadataRequest = new RegExp('^(?:(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)' +
+    '(?:修改|改写|调整|优化|改)(?:一下|下)?[ \\t]*' + metadataPair + '|' +
+    metadataPair + '(?:也)?要(?:修改|调整|改)(?:一下|下)?)' + metadataKeep + '[。！! \\t]*$');
+
+  function metadataCandidate() {
+    if (!guardEnabled() || !state.currentConversation || state.sending || state.sendAttempt ||
+        state.conversationLoading || state.newConversationPromise || loading || changing || enabled() ||
+        state.currentConversation.writing_mode || state.pendingQuotes?.length ||
+        state.attachments?.length || state.documentAttachments?.length ||
+        (byId('webSearchToggle').checked && !byId('webSearchToggle').disabled) ||
+        !byId('fullComposer').hidden || !byId('fullComposerSuggestion').hidden) return null;
+    const prompt = byId('prompt').value.trim();
+    const message = state.messages.at(-1);
+    const body = message?.content || '';
+    if (prompt.length > 80 || !metadataRequest.test(prompt) || message?.role !== 'assistant' ||
+        !Number.isSafeInteger(Number(message.id)) || Number(message.id) <= 0 || message.thinking ||
+        (message.generation_status && message.generation_status !== 'completed') || body.length > 12000) return null;
+    const count = pattern => Array.from(body.matchAll(pattern)).length;
+    if (count(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(?:封面标题|封面文案|视频标题|标题)(?=[：:*】\s]|$)/gm) !== 1 ||
+        count(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(?:发布文案|视频文案)(?=[：:*】\s]|$)/gm) !== 1 ||
+        count(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(?:正文|口播正文|口播稿|口播文案|口播内容|台词)(?=[：:*】\s]|$)/gm) !== 1) return null;
+    const key = JSON.stringify([currentKey(), message.id, prompt]);
+    return key === dismissedMetadata ? null : { key, id: Number(message.id) };
+  }
 
   function hideOffer() {
     clearTimeout(offerTimer);
     byId('superRevisionOffer').hidden = true;
+    byId('superMetadataOffer').hidden = true;
   }
 
   function dismissOffer() {
     offeredHere = '';
+    dismissedMetadata = '';
     hideOffer();
   }
 
@@ -50,6 +80,7 @@
   }
 
   function updateOffer() {
+    byId('superMetadataOffer').hidden = !metadataCandidate();
     const offer = byId('superRevisionOffer');
     const prompt = byId('prompt').value.trim();
     const id = state.currentConversation?.id;
@@ -123,6 +154,9 @@
     const allowed = eligible();
     const mode = byId('superModeToggle');
     const final = byId('openFinalDelivery');
+    byId('writingGuardSettings').hidden = !allowed;
+    byId('writingGuardToggle').checked = guardEnabled();
+    byId('appView').classList.toggle('writing-guard-enabled', guardEnabled());
     mode.hidden = !allowed;
     final.hidden = !allowed;
     byId('composerBox').classList.toggle('has-super-controls', allowed);
@@ -396,6 +430,18 @@
       wrap.querySelector('.bubble-shell')?.append(box);
     }
     box.replaceChildren();
+    box.classList.toggle('writing-guard-warning', check.version === 'writing-guard-v1');
+    if (check.version === 'writing-guard-v1') {
+      const summary = document.createElement('summary');
+      summary.textContent = '写稿保护 · 有明确禁词';
+      box.append(summary);
+      for (const issue of check.issues || []) {
+        const detail = document.createElement('p');
+        detail.textContent = issue;
+        box.append(detail);
+      }
+      return;
+    }
     if (check.version === 'super-revision-v1') {
       const summary = document.createElement('summary');
       summary.textContent = check.repaired ? '超能槑槑 · 已局部修订' : '超能槑槑 · 原稿保留';
@@ -516,6 +562,22 @@
     hideOffer();
     if (!event.isComposing) offerTimer = setTimeout(updateOffer, 220);
   };
+  byId('writingGuardToggle').addEventListener('change', event => {
+    if (!eligible()) return;
+    setUserStorage('writingGuard', event.target.checked ? '1' : '0');
+    render();
+    updateOffer();
+  });
+  byId('acceptSuperMetadata').addEventListener('click', () => {
+    const candidate = metadataCandidate();
+    hideOffer();
+    if (candidate) sendMessage('', { metadataRevisionFrom: candidate.id });
+  });
+  byId('dismissSuperMetadata').addEventListener('click', () => {
+    dismissedMetadata = metadataCandidate()?.key || '';
+    byId('superMetadataOffer').hidden = true;
+    byId('prompt').focus();
+  });
   byId('prompt').addEventListener('input', scheduleOffer);
   byId('prompt').addEventListener('compositionend', scheduleOffer);
   byId('openFinalDelivery').addEventListener('click', open);
@@ -552,6 +614,7 @@
     dismissOffer,
     isBusy: () => changing,
     newConversationMode: () => eligible() && !state.currentConversation && pendingMode,
+    writingGuardEnabled: guardEnabled,
     transition: reset,
     accountChanged() {
       if (lastUserId !== state.user?.id) { reset(); lastUserId = state.user?.id || null; }

@@ -55,17 +55,17 @@
   <script src="/res/vendor/highlight-11.11.1.min.js"></script>
   <script src="/res/vendor/highlight-nginx-11.11.1.min.js"></script>
   <script src="/res/vendor/highlight-dockerfile-11.11.1.min.js"></script>
-  <script src="/res/markdown-renderer.js?v=2.32.5"></script>
+  <script src="/res/markdown-renderer.js?v=2.32.6"></script>
   <script src="/res/vendor/tailwindcss-3.4.17.js"></script>
   <script defer src="/res/vendor/lucide-1.21.0.min.js"></script>
-  <link rel="stylesheet" href="/res/ai.css?v=2.32.5">
-  <link rel="stylesheet" href="/res/openai-egress.css?v=2.32.5">
-  <link rel="stylesheet" href="/res/reader.css?v=2.32.5">
-  <link rel="stylesheet" href="/res/super-writing.css?v=2.32.5">
-  <link rel="stylesheet" href="/res/usage-time.css?v=2.32.5">
-  <link rel="stylesheet" href="/res/ui-motion.css?v=2.32.5">
+  <link rel="stylesheet" href="/res/ai.css?v=2.32.6">
+  <link rel="stylesheet" href="/res/openai-egress.css?v=2.32.6">
+  <link rel="stylesheet" href="/res/reader.css?v=2.32.6">
+  <link rel="stylesheet" href="/res/super-writing.css?v=2.32.6">
+  <link rel="stylesheet" href="/res/usage-time.css?v=2.32.6">
+  <link rel="stylesheet" href="/res/ui-motion.css?v=2.32.6">
 
-  <link rel="stylesheet" href="/res/markdown.css?v=2.32.5">
+  <link rel="stylesheet" href="/res/markdown.css?v=2.32.6">
 <link rel="apple-touch-icon" sizes="180x180" href="/res/apple-touch-icon.png?brand=20261023">
 </head>
 <body>
@@ -75,7 +75,7 @@
       <div class="login-copy">
         <h1>欢迎回家</h1>
 	        <p>我是槑槑，陪你把事情慢慢想清楚。</p>
-        <button class="app-version version-trigger" type="button" data-version-trigger>v2.32.5</button>
+        <button class="app-version version-trigger" type="button" data-version-trigger>v2.32.6</button>
       </div>
       <div class="login-mode-tabs" role="tablist" aria-label="登录方式">
         <button class="login-mode-tab active" id="loginPasswordMode" type="button" role="tab" aria-selected="true"><i data-lucide="key-round" aria-hidden="true"></i><span>密码登录</span></button>
@@ -109,7 +109,7 @@
       <button class="primary" type="submit" style="width:100%">进入 AI槑槑</button>
       <div class="status err" id="loginStatus"></div>
       <footer class="site-icp">
-        <button class="version-trigger" type="button" data-version-trigger>v2.32.5</button>
+        <button class="version-trigger" type="button" data-version-trigger>v2.32.6</button>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
         <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
       </footer>
@@ -122,7 +122,7 @@
         <div class="brand">
           <img class="brand-avatar" src="/res/meimei-avatar.png?brand=20261023" alt="槑槑头像">
           <div class="brand-copy">
-            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.32.5</button></h1>
+            <h1>AI槑槑 <button class="app-version ui-badge version-trigger" type="button" data-version-trigger>v2.32.6</button></h1>
 	            <span class="brand-user-meta" id="currentUserMeta" title="">
 	              <strong class="brand-user-name" id="currentUserLabel">未登录</strong>
 	              <span class="brand-separator" aria-hidden="true">·</span>
@@ -181,7 +181,7 @@
 	          </a>
 	        </div>
 	        <footer class="site-icp side-icp">
-	          <button class="version-trigger" type="button" data-version-trigger>v2.32.5</button>
+	          <button class="version-trigger" type="button" data-version-trigger>v2.32.6</button>
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2026013740号</a>
           <a class="public-security" href="https://beian.mps.gov.cn/#/query/webSearch?code=36012202000659" target="_blank" rel="noopener noreferrer"><img src="/res/public-security-badge.png" alt="" aria-hidden="true"><span>赣公网安备36012202000659号</span></a>
         </footer>
@@ -261,6 +261,13 @@
             <div class="super-revision-actions">
               <button type="button" id="acceptSuperRevision">开启超能</button>
               <button type="button" id="dismissSuperRevision">继续普通模式</button>
+            </div>
+          </div>
+          <div class="super-revision-offer" id="superMetadataOffer" role="group" aria-labelledby="superMetadataOfferText" hidden>
+            <span id="superMetadataOfferText">只改标题和发布文案，保留正文？</span>
+            <div class="super-revision-actions">
+              <button type="button" id="acceptSuperMetadata">保留正文并发送</button>
+              <button type="button" id="dismissSuperMetadata">暂不使用</button>
             </div>
           </div>
           <div class="full-composer-suggestion" id="fullComposerSuggestion" role="status" hidden>
@@ -360,6 +367,13 @@
 		                  </label>
 		                  <button class="ui-btn ui-btn-secondary inline-flex items-center justify-center gap-2" id="resetPetPosition" type="button"><i data-lucide="locate-fixed" aria-hidden="true"></i><span>恢复默认位置</span></button>
 		                </div>
+		              </section>
+		              <section class="interface-section" id="writingGuardSettings" hidden>
+		                <h2>写稿保护</h2>
+		                <label class="pet-settings-row">
+		                  <span><strong>启用写稿保护（试用）</strong><small>仅在当前浏览器生效</small></span>
+		                  <input id="writingGuardToggle" type="checkbox">
+		                </label>
 		              </section>
 		              <section class="interface-section" id="ttsUserSettings" hidden>
 		                <h2>语音朗读</h2>
@@ -1182,7 +1196,7 @@
 	              <div style="display:flex;align-items:end"><button class="ui-btn ui-btn-secondary inline-flex items-center gap-2" id="changePassword"><i data-lucide="key-round" aria-hidden="true"></i><span>修改登录密码</span></button></div>
 	            </div>
 	            <div class="admin-system-list">
-	              <div><span>当前版本</span><strong id="systemVersionValue">v2.32.5</strong></div>
+	              <div><span>当前版本</span><strong id="systemVersionValue">v2.32.6</strong></div>
 	              <div><span>当前构建</span><strong id="systemBuildValue">读取中</strong></div>
 	              <div><span>最近更新</span><strong id="systemUpdatedValue">读取中</strong></div>
 	              <div><span>数据存储</span><strong>SQLite</strong></div>
@@ -1278,16 +1292,16 @@
     <p class="super-delivery-help" id="finalDeliveryHelp">仅保存最终交付，不会发送新消息或修改原聊天。历史推定稿需要你核对，保存后才记为客户确认稿。</p>
     <footer><span id="finalDeliveryReferenceNote"></span><button id="saveFinalDelivery" type="button" class="super-delivery-save">保存为客户确认稿</button></footer>
   </dialog>
-      <script src="/res/ui-motion.js?v=2.32.5"></script>
-      <script src="/res/client-device.js?v=2.32.5"></script>
-      <script src="/res/login-history.js?v=2.32.5"></script>
-      <script src="/res/openai-egress.js?v=2.32.5"></script>
-	  <script src="/res/ai.js?v=2.32.5"></script>
-      <script src="/res/super-writing.js?v=2.32.5"></script>
-      <script src="/res/ai-motion.js?v=2.32.5"></script>
-      <script src="/res/reader.js?v=2.32.5"></script>
-      <script src="/res/usage-clock.js?v=2.32.5"></script>
-      <script src="/res/usage-time.js?v=2.32.5"></script>
+      <script src="/res/ui-motion.js?v=2.32.6"></script>
+      <script src="/res/client-device.js?v=2.32.6"></script>
+      <script src="/res/login-history.js?v=2.32.6"></script>
+      <script src="/res/openai-egress.js?v=2.32.6"></script>
+	  <script src="/res/ai.js?v=2.32.6"></script>
+      <script src="/res/super-writing.js?v=2.32.6"></script>
+      <script src="/res/ai-motion.js?v=2.32.6"></script>
+      <script src="/res/reader.js?v=2.32.6"></script>
+      <script src="/res/usage-clock.js?v=2.32.6"></script>
+      <script src="/res/usage-time.js?v=2.32.6"></script>
 
 </body>
 </html>

@@ -9,10 +9,11 @@ const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const now = Math.floor(Date.now() / 1000);
 const model = { id: 'mock', name: '本地模型', model: 'qwen-fixture', provider: 'mock', supports_vision: true };
-let base, created = 0, versionId = 0, conflict = false, delayPatch = 0;
+let base, created = 0, versionId = 0, conflict = false, delayPatch = 0, metadataStale = false;
 const counts = { super: 0, final: [], create: [], sends: [], bind: 0, document: 0 };
 const conversations = ['a', 'b'].map((id, index) => ({ id, title: `任务${id}`, model_id: 'mock', model_name: model.name, model: model.model, super_mode: false, writing_mode: false, context_mode: 'smart', created_at: now - index, updated_at: now - index }));
 const records = new Map();
+const sampleDraft = '封面标题：原标题\n发布文案：原文案\n正文：\n原来的正文。\n\n一个字不要动。';
 const workspace = id => {
   if (!records.has(id)) records.set(id, { eligible: true, enabled: false, revision: 0, delivery: id === 'a' ? { id: 'inferred-a', content: '正文：这是根据历史交流提取的候选稿。', label: '历史推定', source: 'inferred', updated_at: now } : null, versions: [], reference_status: { confirmed_count: 0, fallback_count: 2, threshold: 10 } });
   return records.get(id);
@@ -55,18 +56,24 @@ const server = http.createServer(async (req, res) => {
   if ((match = p.match(/^\/api\/conversations\/([^/]+)\/messages$/))) {
     if (req.method === 'POST') {
       const scoped = workspace(match[1]).enabled;
-      counts.sends.push({ id: match[1], content: body.content, scoped });
+      counts.sends.push({ id: match[1], content: body.content, scoped, ...(body.writing_guard ? { guard: true, source: body.metadata_revision_from } : {}) });
+      if (body.metadata_revision_from && metadataStale) return json(res, { error: '原稿已变更，请按原方式发送。' }, 422);
       if (scoped && body.content === '只改这段') return json(res, { error: '请写明要修改的位置。' }, 422);
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       if (scoped) res.write('data: ' + JSON.stringify({ type: 'super_status', status: 'generating', message: '超能槑槑正在修订指定位置。' }) + '\n\n');
       await new Promise(resolve => setTimeout(resolve, 350));
+      const answer = body.metadata_revision_from ? sampleDraft.replace('原标题', '新标题').replace('原文案', '新文案')
+        : body.writing_guard ? sampleDraft : '正文：\n开头不变。\n\n这是本地模拟结尾。';
+      const superCheck = scoped || body.metadata_revision_from
+        ? { version: 'super-revision-v1', status: 'passed', notice: scoped ? '已仅修改结尾，其余原文保留。' : '正文原样保留。', issues: [], repaired: true }
+        : body.writing_guard ? { version: 'writing-guard-v1', issues: ['正文包含「极限」：本地测试。'] } : null;
       const events = [
-        { choices: [{ delta: { content: '正文：\n开头不变。\n\n这是本地模拟结尾。' } }] },
-        { type: 'message_saved', message_id: 21, generation_status: 'completed', usage: { prompt_tokens: 30, completion_tokens: 20, total_tokens: 50 }, super_check: scoped ? { version: 'super-revision-v1', status: 'passed', notice: '已仅修改结尾，其余原文保留。', issues: [], repaired: true } : null }
+        { choices: [{ delta: { content: answer } }] },
+        { type: 'message_saved', message_id: 21, generation_status: 'completed', usage: { prompt_tokens: 30, completion_tokens: 20, total_tokens: 50 }, super_check: superCheck }
       ];
       return res.end(events.map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('') + 'data: [DONE]\n\n');
     }
-    return json(res, { messages: [{ id: 20, role: 'assistant', content: '正文：\n开头不变。\n\n原来的结尾。', generation_status: 'completed', created_at: now, usage: { total_tokens: 80 }, super_check: { status: 'passed', notice: '本地模拟校验完成。', issues: [], repaired: false } }] });
+    return json(res, { messages: [{ id: 20, role: 'assistant', content: match[1] === 'b' ? sampleDraft : '正文：\n开头不变。\n\n原来的结尾。', generation_status: 'completed', created_at: now, usage: { total_tokens: 80 }, super_check: { status: 'passed', notice: '本地模拟校验完成。', issues: [], repaired: false } }] });
   }
   if (/^\/api\/conversations\/[^/]+\/stats$/.test(p)) return json(res, { stats: { total_tokens: 80, prompt_tokens: 50, completion_tokens: 30 } });
   if (/^\/api\/conversations\/[^/]+\/documents$/.test(p)) { if (req.method !== 'GET') counts.bind++; return json(res, { documents: [] }); }
@@ -310,8 +317,51 @@ const server = http.createServer(async (req, res) => {
     await page.locator('#saveFinalDelivery').click();
     await page.waitForFunction(() => document.querySelector('#finalDeliveryStatus').textContent.includes('客户确认稿已保存'));
     assert.equal(workspace(conversations[0].id).delivery.content, '手机端回传客户已接受的完整终稿。');
+    await page.locator('#closeFinalDelivery').click();
+    await page.evaluate(() => selectConversation('b'));
+    await page.waitForFunction(() => state.currentConversation?.id === 'b' && !state.conversationLoading);
+    const guard = page.locator('#writingGuardToggle');
+    const metadataOffer = page.locator('#superMetadataOffer');
+    const command = '标题和文案也要修改';
+    await prompt.fill(command);
+    await page.waitForTimeout(250);
+    assert.equal(await metadataOffer.isVisible(), false);
+    await page.locator('#openInterfaceSettings').click();
+    assert.equal(await guard.isChecked(), false);
+    await guard.check();
+    await page.locator('#closeInterfaceSettings').click();
+    await metadataOffer.waitFor({ state: 'visible' });
+    await page.locator('#dismissSuperMetadata').click();
+    assert.equal(await prompt.inputValue(), command);
+    await page.locator('#send').click();
+    await page.waitForFunction(() => state.messages.at(-1)?.id === 21 && !state.sending);
+    assert.equal(counts.sends.at(-1).guard, true);
+    assert.equal(counts.sends.at(-1).source, undefined);
+    const warning = page.locator('.writing-guard-warning');
+    await warning.waitFor({ state: 'visible' });
+    assert.match(await warning.textContent(), /有明确禁词/);
+    await prompt.fill('只改标题和发布文案，然后正文重新写');
+    await page.waitForTimeout(250);
+    assert.equal(await metadataOffer.isVisible(), false);
+    await prompt.fill('只改标题和发布文案，正文不动');
+    await metadataOffer.waitFor({ state: 'visible' });
+    metadataStale = true;
+    await page.locator('#acceptSuperMetadata').click();
+    await page.waitForFunction(() => !state.sending && document.querySelector('#chatStatus').textContent.includes('原稿已变更'));
+    assert.equal(await prompt.inputValue(), '只改标题和发布文案，正文不动');
+    metadataStale = false;
+    await prompt.fill(command);
+    await metadataOffer.waitFor({ state: 'visible' });
+    await page.locator('#acceptSuperMetadata').click();
+    await page.waitForFunction(() => !state.sending && state.messages.at(-1)?.content.includes('新标题'));
+    assert.equal(counts.sends.at(-1).source, 21);
+    assert.equal(await mode.getAttribute('aria-pressed'), 'false');
+    await page.locator('#openInterfaceSettings').click();
+    await guard.uncheck();
+    await page.locator('#closeInterfaceSettings').click();
+    assert.equal(await warning.isVisible(), false);
     assert.deepEqual(errors, []);
-    console.log('超能模式 UI 回归通过：推荐触发/拒绝和原流程/开启保留草稿且不发送/范围不明恢复草稿/历史检查与终稿保留/账号隔离/桌面与手机布局。');
+    console.log('超能模式与写稿保护 UI 回归通过：原流程、拒绝/确认、过期原稿恢复草稿、终稿、账号隔离及移动端。');
   } finally {
     await browser.close(); await new Promise(resolve => server.close(resolve));
   }
