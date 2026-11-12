@@ -1,6 +1,10 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const token = decodeURIComponent(location.pathname.split("/").filter(Boolean).pop() || "");
+  const colorScheme = matchMedia("(prefers-color-scheme: dark)");
+  const syncTheme = () => { document.documentElement.dataset.theme = colorScheme.matches ? "dark" : "light"; };
+  syncTheme();
+  colorScheme.addEventListener?.("change", syncTheme);
 
   function formatTime(value) {
     const date = new Date(Number(value || 0) * 1000);

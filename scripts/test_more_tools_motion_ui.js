@@ -14,12 +14,12 @@ const assert = require('node:assert/strict');
     for (let attempt = 0; attempt < 3; attempt++) {
       await page.locator('#toggleSidebarTools').click();
       const sample = await page.evaluate(async () => {
-        const card = document.querySelector('.sidebar-tool-card');
+        const panel = document.querySelector('#sidebarToolsPopover');
         const opacity = [], paths = new Set(), start = performance.now();
         while (performance.now() - start < 450) {
           await new Promise(requestAnimationFrame);
-          opacity.push(Number(getComputedStyle(card).opacity));
-          for (const animation of card.getAnimations()) {
+          opacity.push(Number(getComputedStyle(panel).opacity));
+          for (const animation of panel.getAnimations({ subtree: true })) {
             if (animation.effect.getKeyframes().some(frame => frame.opacity !== undefined)) paths.add(animation);
           }
         }
@@ -29,7 +29,7 @@ const assert = require('node:assert/strict');
       assert.equal(sample.paths, 1, 'Exactly one opacity entrance');
       assert.equal(sample.drops, 0, 'Opacity must not restart');assert.equal(sample.final, 1);
       await page.evaluate(() => openSidebarTools());
-      assert.equal(await page.locator('.sidebar-tool-card').first().evaluate(el => el.getAnimations().length), 0, 'Already-open tools must not replay');
+      assert.equal(await page.locator('#sidebarToolsPopover').evaluate(el => el.getAnimations({ subtree: true }).length), 0, 'Already-open tools must not replay');
       await page.locator('#toggleSidebarTools').click();await page.waitForTimeout(300);
       assert.equal(await page.locator('#toggleSidebarTools').getAttribute('aria-expanded'), 'false');
     }
@@ -37,7 +37,9 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('#promptDialog').isVisible(), true);
     await page.evaluate(() => closePromptLibrary());
     await page.emulateMedia({ reducedMotion: 'reduce' });await page.evaluate(() => openSidebarTools());
-    assert.equal(await page.locator('.sidebar-tool-card').first().evaluate(el => el.getAnimations().length), 0);
+    assert.equal(await page.locator('#sidebarToolsPopover').evaluate(el =>
+      el.getAnimations({ subtree: true }).filter(animation => animation.effect.getComputedTiming().duration > 1).length
+    ), 0);
     assert.deepEqual(errors, []);console.log('PASS: single entrance, repeated toggle, tool action, reduced motion');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -7,8 +7,8 @@
 - 项目名称：AI槑槑。
 - GitHub：`git@github.com:Nicer-feng/aimeimei.git`。
 - 主分支：`main`。
-- 当前基线版本：`2.32.4`。
-- 当前基线构建：`20261111-151543`。
+- 当前基线版本：`2.32.5`。
+- 当前基线构建：`20261112-101501`。
 - 当前材料附件行为：新上传材料默认只绑定本条用户消息；通过聊天顶部“当前对话文件”可显式设为持续参考，旧 `conversation_documents` 仍代表持续参考材料。
 - 当前基线提交：以 `git log -1 --oneline` 为准（发布后需同步本段）。
 - 本地实际仓库：`/Users/feng/Documents/文稿 - Unknown/aliyun3129`。
@@ -82,6 +82,7 @@ AI槑槑已经不是最初的家庭密码单页，而是一个多账号轻量 AI
 - Markdown：`res/markdown-renderer.js` + `res/markdown.css`。
 - 依赖存放在 `res/vendor/`，包括 Lucide、TailwindCSS、markdown-it、DOMPurify、highlight.js、Mermaid。
 - UI 维持奶油白、浅粉、毛玻璃、Lucide 图标风格。
+- v2.32.5 参考 [Unslop](https://github.com/heydamir/unslop) 精修 Web：手机窄屏的会话标题和输入框独立成行；更多工具仅动画浮层外壳；分享页主题跟随系统。不改原生客户端或服务端。回归见 `scripts/test_composer_images_ui.js --layout-only`、`scripts/test_more_tools_motion_ui.js` 和 `scripts/test_visual_surfaces_ui.js`。
 - 保留既有 DOM `id`、`data-*` 与事件选择器；前端改造优先局部完成，避免重写状态管理。
 - `res/ai.js` 和 `res/ai.css` 仍然很大，后续可以继续按功能渐进拆分，但每一版都必须保持静态资源加载顺序和全局函数兼容。
 

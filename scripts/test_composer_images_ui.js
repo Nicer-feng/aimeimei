@@ -9,9 +9,10 @@ const path = require('node:path');
 const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const retryOnly = process.argv.includes('--retry-only');
+const layoutOnly = process.argv.includes('--layout-only');
 const png = fs.readFileSync(path.join(root, 'res/meimei-avatar.png'));
 const models = [
-  { id: 'vision', name: '图片模型', model: 'fixture-vision', supports_vision: true },
+  { id: 'vision', name: '图片模型', model: 'fixture-vision', supports_vision: true, supports_reasoning_control: layoutOnly },
   { id: 'text', name: '文字模型', model: 'fixture-text', supports_vision: false }
 ].map(model => ({ ...model, provider: 'local', enabled: true }));
 const counts = { policies: 0, oss: 0, saved: 0, documents: 0, sends: [], unexpected: [] };
@@ -145,6 +146,85 @@ async function ready(page, count = 1) {
 async function clear(page) { await page.evaluate(() => clearAttachments()); }
 async function model(page, id) { await page.evaluate(id => chooseModel(id), id); }
 
+async function verifyChatLayout(page, output, width) {
+  const title = '长文写作与资料整理';
+  const paragraph = '这是一段用于验证长文阅读和输入区域留白的测试内容。';
+  const draft = paragraph.repeat(180);
+  const now = Date.now() / 1000;
+  const history = Array.from({ length: 8 }, (_, i) => [
+    { id: i * 2 + 1, role: 'user', content: '请把这些资料整理成便于核对的写作提纲。', created_at: now },
+    { id: i * 2 + 2, role: 'assistant', content: '### 写作提纲\n\n' + paragraph.repeat(4) +
+      '\n\n| 项目 | 核对说明 |\n| --- | --- |\n| 引用资料 | ' + paragraph.repeat(3) +
+      ' |\n\n' + paragraph + '\n\n最后一段应完整显示。', created_at: now }
+  ]).flat();
+  const conversation = {
+    id: 'layout-' + width, title, model_id: 'vision', model_name: models[0].name,
+    model: models[0].model, supports_vision: true, created_at: now, updated_at: now
+  };
+  conversations.push(conversation);
+  messages.set(conversation.id, history);
+  await page.evaluate(async id => { await loadConversations(); await selectConversation(id); }, conversation.id);
+  const prompt = page.locator('#prompt');
+  const main = page.locator('.main');
+  const scroll = page.locator('#messages');
+  const send = page.locator('#send');
+  const titleBox = await page.locator('#chatTitle').boundingBox();
+  const titleMinWidth = width < 521 ? 180 : 80;
+  assert.ok(titleBox.width >= titleMinWidth, 'title has visible space beside the toolbar');
+  if (width < 521) {
+    const rowBox = await page.locator('.input-row').boundingBox();
+    const promptBox = await prompt.boundingBox();
+    const sendBox = await send.boundingBox();
+    assert.ok(promptBox.width >= rowBox.width - 1, 'phone textarea uses the entire row');
+    assert.ok(promptBox.y + promptBox.height <= sendBox.y, 'send stays in its own row');
+  }
+  const assertInBounds = async selector => {
+    const mainBox = await main.boundingBox();
+    for (const node of await page.locator(selector).all()) {
+      const box = await node.boundingBox();
+      if (box) assert.ok(box.x >= mainBox.x - 1 && box.x + box.width <= mainBox.x + mainBox.width + 1, selector);
+    }
+  };
+  const assertFinalLine = async () => {
+    await scroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
+    await page.waitForFunction(() => {
+      const paragraph = [...document.querySelectorAll('#messages .assistant .markdown p')].at(-1);
+      const composer = document.querySelector('#composerBox');
+      return paragraph && paragraph.getBoundingClientRect().bottom <= composer.getBoundingClientRect().top;
+    });
+  };
+  await assertFinalLine();
+  await assertInBounds('.top-actions .icon, .input-row button, #prompt, .composer-left > :not([hidden])');
+  assert.equal(await scroll.evaluate(el => el.scrollWidth > el.clientWidth), false, 'chat has no sideways scroll');
+  await page.screenshot({ path: path.join(output, `chat-light-${width}.png`) });
+  const modelButton = page.locator('#modelPickerButton');
+  await modelButton.click();
+  await page.locator('.model-picker-popover').waitFor({ state: 'visible' });
+  await page.keyboard.press('Escape');
+  await page.locator('.model-picker-popover').waitFor({ state: 'hidden' });
+  const reasoningButton = page.locator('#reasoningPickerButton');
+  await reasoningButton.click();
+  await page.locator('#reasoningPickerMenu').waitFor({ state: 'visible' });
+  await reasoningButton.click();
+  await page.locator('#reasoningPickerMenu').waitFor({ state: 'hidden' });
+  await page.locator('#openInterfaceSettings').click();
+  await page.locator('#composerOpacityRange').fill('28');
+  await page.locator('#composerBlurRange').fill('9');
+  const glass = await page.locator('#composerBox').evaluate(el => {
+    const style = getComputedStyle(el);
+    return [style.backgroundColor, style.backdropFilter];
+  });
+  assert.match(glass[0], /0\.28\)$/);
+  assert.match(glass[1], /blur\(9px\)/);
+  await page.locator('#closeInterfaceSettings').click();
+  await prompt.fill(draft);
+  await assertFinalLine();
+  assert.equal(await prompt.inputValue(), draft);
+  await assertInBounds('#prompt, #send');
+  await page.locator('#themeToggle').click();
+  await page.screenshot({ path: path.join(output, `chat-dark-draft-${width}.png`), animations: 'disabled' });
+}
+
 async function verifyEmptyReplyRetry(page, output, width) {
   await page.evaluate(() => newConversation('text'));
   const input = page.locator('#prompt');
@@ -203,14 +283,24 @@ async function verifyEmptyReplyRetry(page, output, width) {
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const checks = [];
   try {
-    for (const width of [1440, 390]) {
-      const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 960 }, isMobile: width === 390, hasTouch: width === 390 });
+    for (const width of layoutOnly ? [1440, 1024, 390, 320] : [1440, 390]) {
+      conversations.length = 0;
+      messages.clear();
+      const mobile = width <= 390;
+      const context = await browser.newContext({ viewport: { width, height: mobile ? 844 : 960 }, isMobile: mobile, hasTouch: mobile });
       await context.route('https://**', route => route.abort());
       const page = await context.newPage(), errors = [];
       page.setDefaultTimeout(12000);
       page.on('pageerror', error => errors.push(String(error)));
       await page.goto(base); await page.waitForFunction(() => state.authed && state.models.length === 2);
       await page.waitForFunction(() => document.querySelector('#appView').hidden === false);
+      if (layoutOnly) {
+        await verifyChatLayout(page, output, width);
+        checks.push(`chat-layout/long-draft/menus/opacity-${width}`);
+        assert.deepEqual(errors, []);
+        await context.close();
+        continue;
+      }
       if (retryOnly) {
         await verifyEmptyReplyRetry(page, output, width);
         checks.push(`empty-retry/live/reload/busy/http-failure-${width}`);
@@ -349,7 +439,7 @@ async function verifyEmptyReplyRetry(page, output, width) {
       assert.deepEqual(errors, []);
       await context.close();
     }
-    assert.equal(counts.documents, retryOnly ? 0 : 2, 'only explicit material selections should use document parsing');
+    assert.equal(counts.documents, retryOnly || layoutOnly ? 0 : 2, 'only explicit material selections should use document parsing');
     assert.deepEqual(counts.unexpected, []);
     console.log(JSON.stringify({ checks, counts, screenshots: output }, null, 2));
   } finally { await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

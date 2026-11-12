@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   try {
     for (const width of [1440, 1280, 768, 390]) {
-      const context = await browser.newContext({ viewport: { width, height: 960 } });
+      const context = await browser.newContext({ viewport: { width, height: 960 }, reducedMotion: 'reduce' });
       await context.addCookies([{ name: 'ap_session', value: 'usage-admin', url: base }]);
       const page = await context.newPage();
       const errors = [];
