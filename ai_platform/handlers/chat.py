@@ -1062,10 +1062,13 @@ class ChatHandlersMixin:
         content = str(data.get("content") or "").strip()
         guard_enabled = data.get("writing_guard") is True and super_writing.eligible(user_id)
         metadata_source = data.get("metadata_revision_from")
-        if metadata_source is not None:
+        sentence_source = data.get("sentence_revision_from")
+        scoped_source = sentence_source if sentence_source is not None else metadata_source
+        if scoped_source is not None:
             if not guard_enabled:
                 return self.error(HTTPStatus.FORBIDDEN, "本账号未开启写稿保护。")
-            if type(metadata_source) is not int or metadata_source <= 0:
+            if (type(scoped_source) is not int or scoped_source <= 0
+                    or (metadata_source is not None and sentence_source is not None)):
                 return self.error(HTTPStatus.UNPROCESSABLE_ENTITY, "原稿标识无效，请按原方式发送。")
         raw_image_ids = data.get("image_ids") or []
         if not isinstance(raw_image_ids, list):
@@ -1098,7 +1101,7 @@ class ChatHandlersMixin:
         use_profile = data.get("use_profile", True) is not False
         profile_rows = []
         revision_plan = None
-        metadata_plan = None
+        guard_plan = None
         with db() as conn:
             convo = conn.execute(
                 """
@@ -1117,21 +1120,22 @@ class ChatHandlersMixin:
                 return self.error(HTTPStatus.BAD_REQUEST, "model disabled")
             if not convo["api_key"].strip():
                 return self.error(HTTPStatus.BAD_REQUEST, "model api key is not configured")
-            if metadata_source is not None:
+            if scoped_source is not None:
                 latest = conn.execute("""SELECT id,role,content,generation_status FROM messages
                     WHERE conversation_id=? AND user_id=? AND role IN ('user','assistant')
                     ORDER BY id DESC LIMIT 1""", (conversation_id, user_id)).fetchone()
                 if (convo["writing_mode"] or convo["super_revision_mode"]
                         or image_ids or document_ids or requested_web_search or not latest
-                        or latest["id"] != metadata_source or latest["role"] != "assistant"
+                        or latest["id"] != scoped_source or latest["role"] != "assistant"
                         or latest["generation_status"] != "completed"):
                     return self.error(HTTPStatus.UNPROCESSABLE_ENTITY, "原稿或发送条件已变更，请确认后按原方式发送。")
                 try:
-                    texts = writing_guard.recent_requirements(conn, conversation_id, user_id, metadata_source)
-                    metadata_plan = writing_guard.prepare_metadata(content, latest["content"], texts)
+                    texts = writing_guard.recent_requirements(conn, conversation_id, user_id, scoped_source)
+                    prepare = writing_guard.prepare_sentence if sentence_source is not None else writing_guard.prepare_metadata
+                    guard_plan = prepare(content, latest["content"], texts)
                 except super_revision.ScopeError as exc:
                     return self.error(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc))
-                revision_plan = metadata_plan
+                revision_plan = guard_plan
                 use_web_search = False
             elif convo["super_revision_mode"] and super_writing.eligible(user_id):
                 try:
@@ -1349,7 +1353,7 @@ class ChatHandlersMixin:
         def make_upstream_messages(results):
             if revision_plan:
                 prompt = convo["system_prompt"].strip()
-                messages = writing_guard.upstream_messages(metadata_plan) if metadata_plan else super_revision.upstream_messages(revision_plan)
+                messages = writing_guard.upstream_messages(guard_plan) if guard_plan else super_revision.upstream_messages(revision_plan)
                 return ([{"role": "system", "content": prompt}] if prompt else []) + messages
             runtime_context = build_runtime_context(bool(results))
             if use_native_search:
@@ -1783,7 +1787,7 @@ class ChatHandlersMixin:
             protect_storyboard = False
             emit_client_event({"choices": [{"delta": {"content": assistant_text}}]})
         if revision_plan:
-            apply_revision = writing_guard.apply_metadata if metadata_plan else super_revision.apply_result
+            apply_revision = writing_guard.apply_revision if guard_plan else super_revision.apply_result
             assistant_text, super_check = apply_revision(revision_plan, assistant_text, generation_status == "completed")
             revision_buffer = False
             emit_client_event({"choices": [{"index": 0, "delta": {"content": assistant_text}, "finish_reason": "stop" if generation_status == "completed" else None}]})

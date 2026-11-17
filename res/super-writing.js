@@ -14,7 +14,7 @@
   let lastUserId = null;
   let offerTimer = 0;
   let offeredHere = '';
-  let dismissedMetadata = '';
+  let dismissedGuard = '';
   const editPrefix = '^(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)?';
   const editTarget = '(?:开头|开场|结尾|收尾|第(?:10|[1-9一二三四五六七八九十])段)';
   const editAction = '(?:重新写|重写|修改|改写|调整|优化|润色|换(?:个|一种)(?:说法|表达|话术)|改)(?:一下|下)?';
@@ -33,8 +33,45 @@
   const metadataRequest = new RegExp('^(?:(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)' +
     '(?:修改|改写|调整|优化|改)(?:一下|下)?[ \\t]*' + metadataPair + '|' +
     metadataPair + '(?:也)?要(?:修改|调整|改)(?:一下|下)?)' + metadataKeep + '[。！! \\t]*$');
+  const sentenceRequest = /^([^\r\n]{5,162})[ \t，,:：]*(?:\r?\n[ \t]*)?(?:只改这(?:句话|句)(?:[ \t]*换个(?:说法|表述|表达))?|这(?:句话|句)[ \t]*(?:换个(?:说法|表述|表达)|改写(?:一下|下)?|改(?:一下|下)))[吧哈啊。！! \t]*$/u;
+  const sentenceMarkup = /[<>\[\]`*_\\|#\x00-\x1f]/;
 
-  function metadataCandidate() {
+  function sentenceCandidate(prompt, draft) {
+    if (prompt.length > 200 || /^[ \t]*(?:```|~~~)/m.test(draft)) return '';
+    let source = sentenceRequest.exec(prompt)?.[1].trim().replace(/[，,:： \t]+$/, '') || '';
+    if (/^(?:「.*」|『.*』|“.*”)$/u.test(source)) source = source.slice(1, -1).trim();
+    if (!/^[^。！？!?\r\n]{4,159}[。！？!?]$/u.test(source) || sentenceMarkup.test(source) || /^[\s+=-]/.test(source)) return '';
+    const index = draft.indexOf(source);
+    if (index < 0 || index !== draft.lastIndexOf(source)) return '';
+    const before = draft.slice(0, index), after = draft.slice(index + source.length);
+    let prefix = before.slice(before.lastIndexOf('\n') + 1);
+    const rest = after.split('\n', 1)[0];
+    if (/^\s*\|/.test(prefix)) {
+      const cellsOf = row => /^\|.*\|$/.test(row.trim()) && !row.includes('\\|') ? row.trim().slice(1, -1).split('|') : [];
+      const rows = before.slice(0, before.length - prefix.length).split('\n');
+      rows.pop();
+      let first = rows.length;
+      while (first > 0 && /^\s*\|/.test(rows[first - 1])) first--;
+      const cells = cellsOf(prefix + source + rest);
+      const block = rows.slice(first).map(cellsOf);
+      if (!cells.length || block.length < 2 || block.some(row => row.length !== cells.length) ||
+          block[1].some(cell => !/^:?-{3,}:?$/.test(cell.trim()))) return '';
+      const dialogue = block[0].map((cell, i) => /^(?:台词|口播(?:文案|内容|台词)?)(?:[（(][^）)]{1,40}[）)])?$/.test(cell.trim().replace(/^\*+|\*+$/g, '').trim()) ? i : -1)
+        .filter(i => i >= 0);
+      if (dialogue.length !== 1 || dialogue[0] !== prefix.split('|').length - 2) return '';
+      prefix = prefix.slice(prefix.lastIndexOf('|') + 1);
+      if (sentenceMarkup.test((prefix + source + rest.split('|', 1)[0]).trim())) return '';
+    } else {
+      const markers = Array.from(draft.matchAll(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(正文|口播正文|口播稿|口播文案|口播内容|台词|标题|封面标题|封面文案|视频标题|发布文案|视频文案|花字|字幕|画面提示|拍摄提示|拍摄说明|制作说明)(?=[：:*】\s]|$)/gm));
+      const bodies = markers.filter(marker => /^(?:正文|口播正文|口播稿|口播文案|口播内容|台词)$/.test(marker[1]));
+      if (bodies.length !== 1 || markers.filter(marker => marker.index < index).at(-1) !== bodies[0]) return '';
+      prefix = prefix.replace(/^\s*(?:#{1,6}[ \t]+)?(?:\*\*)?【?(?:正文|口播正文|口播稿|口播文案|口播内容|台词)[：:*】\t ]+/, '');
+      if (/^\s*(?:>|#|[-+*] |\d+[.)] )/.test(prefix) || sentenceMarkup.test((prefix + source + rest).trim())) return '';
+    }
+    return !prefix.trim() || /[。！？!?]$/.test(prefix.trimEnd()) ? source : '';
+  }
+
+  function guardCandidate() {
     if (!guardEnabled() || !state.currentConversation || state.sending || state.sendAttempt ||
         state.conversationLoading || state.newConversationPromise || loading || changing || enabled() ||
         state.currentConversation.writing_mode || state.pendingQuotes?.length ||
@@ -44,15 +81,18 @@
     const prompt = byId('prompt').value.trim();
     const message = state.messages.at(-1);
     const body = message?.content || '';
-    if (prompt.length > 80 || !metadataRequest.test(prompt) || message?.role !== 'assistant' ||
+    if (!prompt || prompt.length > 200 || message?.role !== 'assistant' ||
         !Number.isSafeInteger(Number(message.id)) || Number(message.id) <= 0 || message.thinking ||
         (message.generation_status && message.generation_status !== 'completed') || body.length > 12000) return null;
     const count = pattern => Array.from(body.matchAll(pattern)).length;
-    if (count(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(?:封面标题|封面文案|视频标题|标题)(?=[：:*】\s]|$)/gm) !== 1 ||
-        count(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(?:发布文案|视频文案)(?=[：:*】\s]|$)/gm) !== 1 ||
-        count(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(?:正文|口播正文|口播稿|口播文案|口播内容|台词)(?=[：:*】\s]|$)/gm) !== 1) return null;
+    const metadata = prompt.length <= 80 && metadataRequest.test(prompt) &&
+      count(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(?:封面标题|封面文案|视频标题|标题)(?=[：:*】\s]|$)/gm) === 1 &&
+      count(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(?:发布文案|视频文案)(?=[：:*】\s]|$)/gm) === 1 &&
+      count(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(?:正文|口播正文|口播稿|口播文案|口播内容|台词)(?=[：:*】\s]|$)/gm) === 1;
+    const source = metadata ? '' : sentenceCandidate(prompt, body);
+    if (!metadata && !source) return null;
     const key = JSON.stringify([currentKey(), message.id, prompt]);
-    return key === dismissedMetadata ? null : { key, id: Number(message.id) };
+    return key === dismissedGuard ? null : { key, id: Number(message.id), source };
   }
 
   function hideOffer() {
@@ -63,7 +103,7 @@
 
   function dismissOffer() {
     offeredHere = '';
-    dismissedMetadata = '';
+    dismissedGuard = '';
     hideOffer();
   }
 
@@ -80,8 +120,19 @@
   }
 
   function updateOffer() {
-    byId('superMetadataOffer').hidden = !metadataCandidate();
     const offer = byId('superRevisionOffer');
+    const guard = guardCandidate();
+    byId('superMetadataOffer').hidden = !guard;
+    if (guard) {
+      const label = byId('superMetadataOfferText');
+      const preview = Array.from(guard.source);
+      label.textContent = guard.source ? '只替换这句：' + preview.slice(0, 72).join('') + (preview.length > 72 ? '…' : '')
+        : '只改标题和发布文案，保留正文？';
+      label.title = guard.source;
+      byId('acceptSuperMetadata').textContent = guard.source ? '仅改这句并发送' : '保留正文并发送';
+      offer.hidden = true;
+      return;
+    }
     const prompt = byId('prompt').value.trim();
     const id = state.currentConversation?.id;
     const storageKey = 'superRevisionOffer:' + id;
@@ -569,12 +620,12 @@
     updateOffer();
   });
   byId('acceptSuperMetadata').addEventListener('click', () => {
-    const candidate = metadataCandidate();
+    const candidate = guardCandidate();
     hideOffer();
-    if (candidate) sendMessage('', { metadataRevisionFrom: candidate.id });
+    if (candidate) sendMessage('', candidate.source ? { sentenceRevisionFrom: candidate.id } : { metadataRevisionFrom: candidate.id });
   });
   byId('dismissSuperMetadata').addEventListener('click', () => {
-    dismissedMetadata = metadataCandidate()?.key || '';
+    dismissedGuard = guardCandidate()?.key || '';
     byId('superMetadataOffer').hidden = true;
     byId('prompt').focus();
   });

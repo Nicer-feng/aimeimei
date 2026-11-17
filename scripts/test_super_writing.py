@@ -139,6 +139,54 @@ class ScopedRevisionRulesTests(unittest.TestCase):
         self.assertEqual(writing_guard.explicit_terms(["禁止使用「极限」", "取消禁用「极限」"]), ())
         self.assertIsNone(writing_guard.body_warning("普通对话里有极限二字。", terms))
 
+    def test_explicit_terms_strip_reminders_but_do_not_guess_categories(self):
+        for requirement in ("注意智驾是红线词汇", "注意一下：智驾这个词属于本单的禁用词。",
+                            "请记住，智驾是极限词。", "说了智驾是红线词汇"):
+            with self.subTest(requirement=requirement):
+                self.assertEqual(writing_guard.explicit_terms([requirement]), ("智驾",))
+        self.assertEqual(writing_guard.explicit_terms(["首搭之类的是极限词", "智驾等都是禁用词",
+                                                      "智驾不是禁用词", "哪些是红线词汇"]), ())
+        self.assertEqual(writing_guard.explicit_terms(["注意智驾是红线词汇", "允许使用「智驾」"]), ())
+
+    def test_sentence_revisions_preserve_plain_text_and_table_cells(self):
+        source = "这个说法不够顺口。"
+        replacement = "换成更好理解的说法。"
+        self.assertEqual(writing_guard.sentence_source(f"{source}\n只改这句话"), source)
+        for draft in (
+            f"封面标题：不能改。\r\n正文：\r\n这是上一句。{source}这是下一句。  \r\n\r\n另一段。\r\n发布文案：不变。",
+            f"正文：{source}这是下一句。\n\n另一段。",
+            f"| 编号 | **口播内容** | 画面 |\r\n| --- | :--- | ---: |\r\n| 1 | 前一句。{source}后一句。 | 远景 |\r\n| 2 | 另一行。 | 特写 |\r\n",
+        ):
+            with self.subTest(draft=draft):
+                plan = writing_guard.prepare_sentence(f"「{source}」这句话换个说法吧", draft, ["注意智驾是红线词汇"])
+                expected = draft.replace(source, replacement, 1)
+                merged, report = writing_guard.apply_revision(plan, json.dumps({"replacement": replacement}), True)
+                self.assertEqual(merged.encode("utf-8"), expected.encode("utf-8"))
+                self.assertTrue(report["repaired"])
+                self.assertEqual(plan.bans, ("智驾",))
+                for invalid in ("改两句。再改一句。", "这里提到智驾。", "越过|边界了。",
+                                "这里另起\n一行。", "> 这里是引用。"):
+                    self.assertEqual(writing_guard.apply_revision(plan, json.dumps({"replacement": invalid}), True)[0], draft)
+                self.assertEqual(writing_guard.apply_revision(plan, '{"replacement":"可用的备选句。"}', False)[0], draft)
+
+    def test_sentence_revisions_reject_ambiguous_locations(self):
+        source = "这个说法不够顺口。"
+        command = f"{source}这句话换个表述吧"
+        for draft in (
+            f"正文：\n{source}\n\n{source}",
+            f"正文：\n开头不能改，{source}",
+            f"正文：\n这里是正文。\n\n发布文案：\n{source}",
+            f"正文：\n这个**说法**不够顺口。\n\n发布文案：\n{source}",
+            f"| 编号 | 台词 | 画面 |\n| --- | --- | --- |\n| 1 | 这里是台词。 | {source} |",
+            f"| 编号 | 台词 |\n| 1 | {source} |",
+            f"正文：\n{source}\n\n~~~\n代码块\n~~~",
+        ):
+            with self.subTest(draft=draft), self.assertRaises(super_revision.ScopeError):
+                writing_guard.prepare_sentence(command, draft, [])
+        for bad in ("这句话换个表述吧", f"这句也想换。{command}", f"{command}然后全文重写"):
+            with self.subTest(instruction=bad), self.assertRaises(super_revision.ScopeError):
+                writing_guard.prepare_sentence(bad, f"正文：\n{source}", [])
+
     def test_metadata_boundaries_are_conservative(self):
         draft = "**【封面标题】**  原标题  \r\n\r\n**【发布文案】** 原文案\r\n\r\n**【口播正文】**\r\n段落一。  \r\n\r\n段落二。"
         plan = writing_guard.prepare_metadata("标题和文案也要修改", draft, [])
@@ -612,8 +660,41 @@ class SuperWritingTests(unittest.TestCase):
         for uid in ("other", "second-admin"):
             other_url = f"/api/conversations/{self.create(user=uid)}/messages"
             self.assertEqual(self.request(other_url, {**body, "metadata_revision_from": 1}, user=uid)[0], 403)
+            self.assertEqual(self.request(other_url, {**body, "sentence_revision_from": 1}, user=uid)[0], 403)
             self.assertEqual(self.request(other_url, body, user=uid)[0], 200)
             self.assertIsNone(self.request(other_url, user=uid)[1]["messages"][-1]["super_check"])
+
+    def test_sentence_confirmation_is_a_single_scoped_request(self):
+        sentence = "这个说法不够顺口。"
+        command = f"{sentence}这句话换个表述吧"
+        draft = f"封面标题：不进模型的原标题\n发布文案：原文案\n正文：\n原稿开头。\n\n{sentence}后一句不动。"
+        self.seed_draft(draft, "写口播稿。注意智驾是红线词汇。其余长材料不进模型。")
+        source = self.rows()[-1]["id"]
+        url = f"/api/conversations/{self.cid}/messages"
+        request = {"content": command, "writing_guard": True, "sentence_revision_from": source}
+        for bad in ({**request, "sentence_revision_from": source + 1},
+                    {**request, "metadata_revision_from": source},
+                    {**request, "web_search": True}, {**request, "content": "只改这句话"}):
+            self.assertEqual(self.request(url, bad)[0], 422)
+            self.assertEqual(len(self.rows()), 2)
+        self.assertEqual(self.request(url, {**request, "writing_guard": False})[0], 403)
+        self.assertFalse(MockModels.requests)
+        replacement = "这一句读起来更自然。"
+        MockModels.answer = json.dumps({"replacement": replacement}, ensure_ascii=False)
+        status, stream = self.request(url, request)
+        self.assertEqual(status, 200, stream)
+        self.assertNotIn('"replacement"', stream)
+        self.assertEqual(self.rows()[1]["content"], draft)
+        self.assertEqual(self.last_reply()["content"], draft.replace(sentence, replacement, 1))
+        self.assertTrue(self.last_reply()["super_check"]["repaired"])
+        self.assertFalse(self.workspace()["enabled"])
+        self.assertEqual([x["stage"] for x in MockModels.requests], ["main"])
+        messages = MockModels.requests[0]["body"]["messages"]
+        self.assertEqual(json.loads(messages[-1]["content"]), {
+            "sentence": sentence, "before": "", "after": "后一句不动。", "forbidden_terms": ["智驾"],
+        })
+        self.assertEqual(self.request(url, request)[0], 422)
+        self.assert_accounting()
 
     def test_target_first_edit_switch_off_uses_normal_chat(self):
         draft = "正文：\n开头。\n\n原稿结尾。"

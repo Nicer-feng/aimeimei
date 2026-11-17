@@ -56,16 +56,19 @@ const server = http.createServer(async (req, res) => {
   if ((match = p.match(/^\/api\/conversations\/([^/]+)\/messages$/))) {
     if (req.method === 'POST') {
       const scoped = workspace(match[1]).enabled;
-      counts.sends.push({ id: match[1], content: body.content, scoped, ...(body.writing_guard ? { guard: true, source: body.metadata_revision_from } : {}) });
-      if (body.metadata_revision_from && metadataStale) return json(res, { error: '原稿已变更，请按原方式发送。' }, 422);
+      counts.sends.push({ id: match[1], content: body.content, scoped, ...(body.writing_guard ? { guard: true, source: body.metadata_revision_from } : {}),
+        ...(body.sentence_revision_from ? { sentence: body.sentence_revision_from } : {}) });
+      if ((body.metadata_revision_from || body.sentence_revision_from) && metadataStale) return json(res, { error: '原稿已变更，请按原方式发送。' }, 422);
       if (scoped && body.content === '只改这段') return json(res, { error: '请写明要修改的位置。' }, 422);
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       if (scoped) res.write('data: ' + JSON.stringify({ type: 'super_status', status: 'generating', message: '超能槑槑正在修订指定位置。' }) + '\n\n');
       await new Promise(resolve => setTimeout(resolve, 350));
       const answer = body.metadata_revision_from ? sampleDraft.replace('原标题', '新标题').replace('原文案', '新文案')
+        : body.sentence_revision_from ? sampleDraft.replace('原来的正文。', '换一种说法。')
         : body.writing_guard ? sampleDraft : '正文：\n开头不变。\n\n这是本地模拟结尾。';
-      const superCheck = scoped || body.metadata_revision_from
-        ? { version: 'super-revision-v1', status: 'passed', notice: scoped ? '已仅修改结尾，其余原文保留。' : '正文原样保留。', issues: [], repaired: true }
+      const superCheck = scoped || body.metadata_revision_from || body.sentence_revision_from
+        ? { version: 'super-revision-v1', status: 'passed', notice: scoped ? '已仅修改结尾，其余原文保留。'
+          : body.sentence_revision_from ? '已仅替换指定原句，其余原文保留。' : '正文原样保留。', issues: [], repaired: true }
         : body.writing_guard ? { version: 'writing-guard-v1', issues: ['正文包含「极限」：本地测试。'] } : null;
       const events = [
         { choices: [{ delta: { content: answer } }] },
@@ -356,12 +359,50 @@ const server = http.createServer(async (req, res) => {
     await page.waitForFunction(() => !state.sending && state.messages.at(-1)?.content.includes('新标题'));
     assert.equal(counts.sends.at(-1).source, 21);
     assert.equal(await mode.getAttribute('aria-pressed'), 'false');
+    await prompt.fill('这句话换个说法');
+    await page.waitForTimeout(250);
+    assert.equal(await metadataOffer.isVisible(), false);
+    const singleSentence = '原来的正文。这句话换个表述吧';
+    await prompt.fill(singleSentence);
+    await metadataOffer.waitFor({ state: 'visible' });
+    assert.match(await page.locator('#superMetadataOfferText').textContent(), /只替换这句：原来的正文。/);
+    assert.equal(await page.locator('#acceptSuperMetadata').textContent(), '仅改这句并发送');
+    assert.equal(await metadataOffer.evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
+    metadataStale = true;
+    await page.locator('#acceptSuperMetadata').click();
+    await page.waitForFunction(() => !state.sending && document.querySelector('#chatStatus').textContent.includes('原稿已变更'));
+    assert.equal(await prompt.inputValue(), singleSentence);
+    metadataStale = false;
+    await prompt.fill('');
+    await prompt.fill(singleSentence);
+    await metadataOffer.waitFor({ state: 'visible' });
+    await page.locator('#send').click();
+    await page.waitForFunction(() => !state.sending && state.messages.at(-1)?.id === 21);
+    assert.equal(counts.sends.at(-1).sentence, undefined);
+    await prompt.fill(singleSentence);
+    await metadataOffer.waitFor({ state: 'visible' });
+    await page.locator('#acceptSuperMetadata').click();
+    await page.waitForFunction(() => !state.sending && state.messages.at(-1)?.content.includes('换一种说法。'));
+    assert.equal(counts.sends.at(-1).sentence, 21);
+    assert.equal(counts.sends.at(-1).source, undefined);
+    assert.equal(await mode.getAttribute('aria-pressed'), 'false');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.evaluate(() => {
+      state.messages.at(-1).content = '| 编号 | 台词 | 画面 |\n| --- | --- | --- |\n| 1 | 这里是口播台词。 | 这段是拍摄说明。 |';
+    });
+    await prompt.fill('这段是拍摄说明。\n只改这句话');
+    await page.waitForTimeout(250);
+    assert.equal(await metadataOffer.isVisible(), false);
+    await prompt.fill('这里是口播台词。\n只改这句话');
+    await metadataOffer.waitFor({ state: 'visible' });
+    await page.locator('#dismissSuperMetadata').click();
+    assert.equal(await prompt.inputValue(), '这里是口播台词。\n只改这句话');
     await page.locator('#openInterfaceSettings').click();
     await guard.uncheck();
     await page.locator('#closeInterfaceSettings').click();
-    assert.equal(await warning.isVisible(), false);
+    assert.equal(await page.locator('.writing-guard-warning:visible').count(), 0);
     assert.deepEqual(errors, []);
-    console.log('超能模式与写稿保护 UI 回归通过：原流程、拒绝/确认、过期原稿恢复草稿、终稿、账号隔离及移动端。');
+    console.log('超能模式与写稿保护 UI 回归通过：普通发送、标题/单句确认、过期原稿恢复草稿、终稿、账号隔离及移动端。');
   } finally {
     await browser.close(); await new Promise(resolve => server.close(resolve));
   }

@@ -8,6 +8,7 @@
 .super-mode-toggle:disabled, .super-final-entry:disabled { opacity:.5; cursor:default; }
 .super-revision-offer { position:absolute; z-index:4; inset-inline:0; bottom:calc(100% + 8px); display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 12px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); box-shadow:var(--shadow); font-size:12px; }
 .super-revision-offer[hidden] { display:none; }
+#superMetadataOfferText { min-width:0; overflow-wrap:anywhere; }
 .super-revision-actions { display:flex; flex-wrap:wrap; gap:4px; }
 .super-revision-actions button { min-height:32px; padding:4px 8px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--muted); font:inherit; cursor:pointer; }
 .super-revision-actions button:first-child { background:var(--accent-soft); color:var(--accent-strong); }
