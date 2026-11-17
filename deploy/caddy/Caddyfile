@@ -7,6 +7,14 @@
 feng.asia, www.feng.asia {
 	root * /var/www/aimeimei
 
+	redir /lab /lab/ 308
+
+	handle_path /lab/* {
+		root * /var/www/electronics-lab
+		encode zstd gzip
+		file_server
+	}
+
 	@ncd path /ncd /ncd/*
 	handle @ncd {
 		reverse_proxy 127.0.0.1:8000
@@ -85,4 +93,10 @@ http://118.31.114.165 {
 	handle {
 		reverse_proxy 127.0.0.1:8000
 	}
+}
+
+lab.feng.asia {
+	root * /var/www/electronics-lab
+	encode zstd gzip
+	file_server
 }

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f6fa">
+  <meta name="description" content="用八节交互课做出虚拟感光小夜灯，学习模电、ESP32 和嵌入式基础。">
+  <title>电子小实验室 · 感光小夜灯</title>
+  <link rel="icon" href="./chip.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#lesson-title">跳到当前课程</a>
+  <header class="site-header">
+    <div class="frame header-inner">
+      <a class="brand" href="#top">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
+            <path d="M10 3v3m4-3v3m-4 12v3m4-3v3M3 10h3m-3 4h3m12-4h3m-3 4h3m-8-5-3 4h2l-1 2"/>
+          </svg>
+        </span>
+        <span>电子小实验室</span>
+      </a>
+      <nav class="header-nav" aria-label="页面导航">
+        <a href="#route" id="route-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15m6-12v15"/></svg>
+          <span>学习路线</span>
+        </a>
+        <a href="#lab">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6m-5 0v7l-5 8a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-8V3M8 14h8"/></svg>
+          <span>实验台</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="frame main-frame" id="top">
+    <section class="project-card" aria-labelledby="project-title">
+      <div class="project-copy">
+        <span class="project-tag"><span></span>入门项目</span>
+        <h1 id="project-title">做一盏感光小夜灯</h1>
+        <p>从电阻、电容到 ESP32，让小夜灯感知光线，自动亮起。</p>
+        <div class="project-actions">
+          <a class="project-cta" href="#lesson-title">
+            <span id="project-cta-label">开始学习</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg>
+          </a>
+          <div class="project-progress">
+            <div class="progress-track" role="progressbar" aria-label="课程完成进度" aria-valuenow="0" aria-valuemin="0" aria-valuemax="8">
+              <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <span id="progress-label">0 / 8 节已完成</span>
+          </div>
+        </div>
+      </div>
+      <svg class="project-diagram" viewBox="0 0 530 230" role="img" aria-labelledby="project-diagram-title">
+        <title id="project-diagram-title">感光小夜灯的信号路径，光敏电阻到 ESP32 再到 LED</title>
+        <defs>
+          <pattern id="board-dots" width="16" height="16" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="1" fill="#a998d6" opacity=".29"/>
+          </pattern>
+          <linearGradient id="board-fade">
+            <stop stop-color="#fff" stop-opacity="0"/>
+            <stop offset=".28" stop-color="#fff"/>
+            <stop offset=".83" stop-color="#fff"/>
+            <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+          </linearGradient>
+          <mask id="board-mask"><rect width="530" height="230" fill="url(#board-fade)"/></mask>
+          <radialGradient id="led-halo">
+            <stop stop-color="#bcf8dc" stop-opacity=".25"/>
+            <stop offset="1" stop-color="#bcf8dc" stop-opacity="0"/>
+          </radialGradient>
+          <linearGradient id="signal">
+            <stop stop-color="#9b8bc5"/>
+            <stop offset="1" stop-color="#c3f4d9"/>
+          </linearGradient>
+          <linearGradient id="chip-face" x2="1" y2="1">
+            <stop stop-color="#403163"/>
+            <stop offset="1" stop-color="#30244e"/>
+          </linearGradient>
+        </defs>
+        <rect width="530" height="230" fill="url(#board-dots)" mask="url(#board-mask)"/>
+        <circle cx="418" cy="106" r="85" fill="url(#led-halo)"/>
+        <g fill="none" stroke="#8774ac" stroke-width="1" opacity=".42">
+          <path d="M85 42h81l15 15h32M114 178h55l18-18h38M323 52h31l22-22h86m-124 148h40l18-18h82"/>
+          <circle cx="85" cy="42" r="3"/><circle cx="114" cy="178" r="3"/><circle cx="462" cy="30" r="3"/><circle cx="478" cy="160" r="3"/>
+        </g>
+        <g fill="none" stroke="url(#signal)" stroke-width="1.75" stroke-linejoin="round">
+          <path d="M134 106h44l17 15h26m102 0h28l15-15h26"/>
+          <path d="M192 116l5 5-5 5m170-15 5-5-5-5"/>
+        </g>
+        <circle cx="113" cy="106" r="28" fill="#35294f" stroke="#8e79bb"/>
+        <g stroke="#dacbf7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+          <path d="M98 114h7l3-6 4 12 4-12 3 6h8m-25-16 7 5m-4-5h4v4m2-10 7 5m-4-5h4v4"/>
+        </g>
+        <g stroke="#a894cb" stroke-width="2" stroke-linecap="round">
+          <path d="M241 81v-10m15 10v-10m16 10v-10m16 10v-10m16 10v-10m-63 88v10m15-10v10m16-10v10m16-10v10m16-10v10m-83-73h-9m9 16h-9m9 16h-9m9 16h-9m111-48h9m-9 16h9m-9 16h9m-9 16h9"/>
+        </g>
+        <rect x="222" y="81" width="100" height="78" rx="11" fill="url(#chip-face)" stroke="#b19bd9" stroke-width="1.4"/>
+        <rect x="232" y="91" width="80" height="58" rx="7" fill="none" stroke="#b19bd9" opacity=".37"/>
+        <circle cx="240" cy="99" r="2.4" fill="#cbaeee"/>
+        <text x="272" y="126" text-anchor="middle" fill="#eadffa" font-size="16" font-weight="650" font-family="ui-monospace, monospace">ESP32</text>
+        <circle cx="418" cy="106" r="28" fill="#3d465a" stroke="#a9dabc"/>
+        <g stroke="#d0f9e0" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" fill="none">
+          <path d="M408 109v-4a10 10 0 1 1 20 0v4zm6 0v8m8-8v8m-18-21-4-4m31 4 4-4m-17-7v-5"/>
+        </g>
+        <g fill="#c9bcde" font-size="12" text-anchor="middle" font-family="system-ui, sans-serif">
+          <text x="113" y="158">光照输入</text>
+          <text x="272" y="193">采样与判断</text>
+          <text x="418" y="158">LED 输出</text>
+        </g>
+      </svg>
+    </section>
+
+    <div class="learning-layout">
+      <aside class="route-card" id="route" aria-labelledby="route-title">
+        <div class="route-heading">
+          <span class="route-symbol" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V5a2 2 0 0 1 2-2h13v15H7a2 2 0 0 0 0 4h13M9 8h7m-7 4h5"/></svg>
+          </span>
+          <div>
+            <h2 id="route-title">学习路线</h2>
+            <p id="route-summary">共 8 节课</p>
+          </div>
+          <button class="route-toggle" id="route-toggle" type="button" aria-expanded="false" aria-controls="route-lessons">
+            <span class="sr-only">展开学习路线</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </div>
+        <nav id="route-lessons" class="route-lessons" aria-label="课程列表"></nav>
+        <p class="storage-note" id="storage-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 3v6h7V3m-6 14h6"/></svg>
+          <span id="storage-message">进度保存在当前浏览器</span>
+        </p>
+      </aside>
+
+      <div class="lesson-stack">
+        <article class="card lesson-card" aria-labelledby="lesson-title">
+          <header class="lesson-header">
+            <div class="lesson-meta">
+              <span class="lesson-index" id="lesson-index">第 1 课</span>
+              <span class="lesson-category" id="lesson-category"></span>
+              <span class="lesson-time" id="lesson-time"></span>
+            </div>
+            <h2 id="lesson-title" tabindex="-1"></h2>
+            <p id="lesson-description"></p>
+          </header>
+
+          <section class="lab-section" id="lab" aria-labelledby="lab-title">
+            <div class="section-heading">
+              <span class="section-icon lab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6m-5 0v7l-5 8a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-8V3M8 14h8m-5 3h.01m2 1h.01"/></svg>
+              </span>
+              <div>
+                <h3 id="lab-title">动手实验</h3>
+                <p id="lab-task"></p>
+              </div>
+            </div>
+            <div id="experiment"></div>
+          </section>
+        </article>
+
+        <section class="card knowledge-card" aria-labelledby="knowledge-title">
+          <div class="section-heading">
+            <span class="section-icon knowledge-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a7 7 0 0 0-8-1v14a7 7 0 0 1 8 1 7 7 0 0 1 8-1V4a7 7 0 0 0-8 1zm0 0v14"/></svg>
+            </span>
+            <h3 id="knowledge-title">理解实验</h3>
+          </div>
+          <div id="lesson-sections" class="knowledge-content"></div>
+          <details class="chip-explorer" id="chip-explorer" hidden>
+            <summary>打开 ESP32 功能图</summary>
+            <div class="chip-layout">
+              <div class="chip-board" aria-label="ESP32 外设">
+                <span class="chip-board-label">ESP32</span>
+                <div class="chip-parts" role="group" aria-label="选择一个外设">
+                  <button type="button" data-part="adc" aria-pressed="true">ADC</button>
+                  <button type="button" data-part="gpio" aria-pressed="false">GPIO</button>
+                  <button type="button" data-part="pwm" aria-pressed="false">PWM 定时器</button>
+                </div>
+              </div>
+              <div class="chip-explanation" aria-live="polite">
+                <h4 id="chip-part-title"></h4>
+                <p id="chip-part-description"></p>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <section class="card quiz-card" aria-labelledby="quiz-title">
+          <div class="section-heading">
+            <span class="section-icon quiz-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M9.65 9.5a2.35 2.35 0 1 1 3.85 1.8c-1.15.95-1.5 1.3-1.5 2.7m0 2.5h.01"/></svg>
+            </span>
+            <h3 id="quiz-title">随堂小测</h3>
+          </div>
+          <form id="quiz-form">
+            <fieldset>
+              <legend id="quiz-prompt"></legend>
+              <div class="quiz-options" id="quiz-options"></div>
+            </fieldset>
+            <p class="quiz-feedback" id="quiz-feedback" role="status"></p>
+            <button class="primary-button" id="quiz-submit" type="submit" disabled>检查答案</button>
+          </form>
+          <div class="lesson-footer" id="lesson-footer"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="frame site-footer"><a href="#top">电子小实验室</a><span>感光小夜灯</span></footer>
+  <noscript><p class="noscript">请启用 JavaScript 后使用交互实验及学习进度。</p></noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
