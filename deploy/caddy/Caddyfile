@@ -9,6 +9,14 @@ feng.asia, www.feng.asia {
 
 	redir /lab /lab/ 308
 
+	redir /ruankao /ruankao/ 308
+
+	handle_path /ruankao/* {
+		root * /var/www/aimeimei/ruankao
+		encode zstd gzip
+		file_server
+	}
+
 	handle_path /lab/* {
 		root * /var/www/electronics-lab
 		encode zstd gzip
