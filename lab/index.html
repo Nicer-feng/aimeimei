@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f6fa">
-  <meta name="description" content="用八节交互课做出虚拟感光小夜灯，学习模电、ESP32 和嵌入式基础。">
-  <title>电子小实验室 · 感光小夜灯</title>
+  <meta name="description" content="30 节可动手的交互课，从感光小夜灯学到模拟电路、ESP32 外设、芯片原理和系统调试。">
+  <title>电子小实验室 · 从电路到嵌入式</title>
   <link rel="icon" href="./chip.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=0.2.0">
 </head>
 <body>
   <a class="skip-link" href="#lesson-title">跳到当前课程</a>
@@ -38,19 +38,19 @@
   <main class="frame main-frame" id="top">
     <section class="project-card" aria-labelledby="project-title">
       <div class="project-copy">
-        <span class="project-tag"><span></span>入门项目</span>
-        <h1 id="project-title">做一盏感光小夜灯</h1>
-        <p>从电阻、电容到 ESP32，让小夜灯感知光线，自动亮起。</p>
+        <span class="project-tag"><span></span>30 天学习路线</span>
+        <h1 id="project-title">从电路到嵌入式</h1>
+        <p>从感光小夜灯起步，学到模拟电路、芯片外设和系统调试。</p>
         <div class="project-actions">
-          <a class="project-cta" href="#lesson-title">
+          <a class="project-cta" id="project-cta" href="#lesson-title">
             <span id="project-cta-label">开始学习</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg>
           </a>
           <div class="project-progress">
-            <div class="progress-track" role="progressbar" aria-label="课程完成进度" aria-valuenow="0" aria-valuemin="0" aria-valuemax="8">
+            <div class="progress-track" role="progressbar" aria-label="课程完成进度" aria-valuenow="0" aria-valuemin="0" aria-valuemax="30">
               <div class="progress-fill" id="progress-fill"></div>
             </div>
-            <span id="progress-label">0 / 8 节已完成</span>
+            <span id="progress-label">0 / 30 节已完成</span>
           </div>
         </div>
       </div>
@@ -121,7 +121,7 @@
           </span>
           <div>
             <h2 id="route-title">学习路线</h2>
-            <p id="route-summary">共 8 节课</p>
+            <p id="route-summary">共 30 节课</p>
           </div>
           <button class="route-toggle" id="route-toggle" type="button" aria-expanded="false" aria-controls="route-lessons">
             <span class="sr-only">展开学习路线</span>
@@ -209,8 +209,8 @@
     </div>
   </main>
 
-  <footer class="frame site-footer"><a href="#top">电子小实验室</a><span>感光小夜灯</span></footer>
+  <footer class="frame site-footer"><a href="#top">电子小实验室</a></footer>
   <noscript><p class="noscript">请启用 JavaScript 后使用交互实验及学习进度。</p></noscript>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=0.2.0"></script>
 </body>
 </html>

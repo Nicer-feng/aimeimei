@@ -1,4 +1,8 @@
-export const lessons = [
+import { analogLessons } from './analog.js';
+import { embeddedLessons } from './embedded.js';
+import { integrationLessons } from './integration.js';
+
+const nightlightLessons = [
   {
     id: 1,
     title: '电压和电流',
@@ -152,3 +156,12 @@ export const lessons = [
     },
   },
 ];
+
+export const courseGroups = [
+  { title: '感光小夜灯', lessons: nightlightLessons },
+  { title: '模拟电路进阶', lessons: analogLessons },
+  { title: '嵌入式与外设', lessons: embeddedLessons },
+  { title: '芯片与综合调试', lessons: integrationLessons },
+];
+
+export const lessons = courseGroups.flatMap((course) => course.lessons);

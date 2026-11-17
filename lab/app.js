@@ -1,5 +1,5 @@
-import { lessons } from "./lessons.js";
-import { mountExperiment } from "./experiments.js";
+import { courseGroups, lessons } from "./lessons.js?v=0.2.0";
+import { mountExperiment } from "./experiments.js?v=0.2.0";
 
 const storageKey = "feng-electronics-lab:progress:v1";
 const lessonIds = new Set(lessons.map(({ id }) => id));
@@ -12,6 +12,7 @@ const elements = {
   storageMessage: document.querySelector("#storage-message"),
   progressFill: document.querySelector("#progress-fill"),
   progressLabel: document.querySelector("#progress-label"),
+  projectCta: document.querySelector(".project-cta"),
   projectCtaLabel: document.querySelector("#project-cta-label"),
   lessonIndex: document.querySelector("#lesson-index"),
   lessonCategory: document.querySelector("#lesson-category"),
@@ -57,6 +58,7 @@ const chipButtons = elements.chipExplorer.querySelectorAll("[data-part]");
 
 const progress = loadProgress();
 const routeButtons = new Map();
+const routeGroups = new Map();
 let currentQuizSolved = false;
 
 function loadProgress() {
@@ -108,31 +110,48 @@ function setRouteOpen(open) {
 }
 
 function renderRoute() {
-  const totalMinutes = lessons.reduce((total, lesson) => total + lesson.minutes, 0);
-  elements.routeSummary.textContent = `共 ${lessons.length} 节课 · 约 ${totalMinutes} 分钟`;
+  elements.routeSummary.textContent = `共 ${lessons.length} 节课 · ${courseGroups.length} 个章节`;
 
-  for (const lesson of lessons) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "route-lesson";
-    const number = createTextElement("span", "route-lesson-number", String(lesson.id).padStart(2, "0"));
-    const text = document.createElement("span");
-    text.append(
-      createTextElement("span", "route-lesson-title", lesson.title),
-      createTextElement("span", "route-lesson-category", lesson.category),
-    );
-    const status = document.createElement("span");
-    status.className = "route-lesson-icon";
-    button.append(number, text, status);
-    button.addEventListener("click", () => selectLesson(lesson.id));
-    routeButtons.set(lesson.id, { button, status });
-    elements.routeLessons.append(button);
+  for (const course of courseGroups) {
+    const group = document.createElement("details");
+    group.className = "route-course";
+    group.name = "lab-course";
+    const header = document.createElement("summary");
+    const count = document.createElement("span");
+    count.className = "route-course-count";
+    header.append(createTextElement("span", "route-course-title", course.title), count);
+    const list = document.createElement("div");
+    list.className = "route-course-lessons";
+
+    for (const lesson of course.lessons) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "route-lesson";
+      button.dataset.lesson = lesson.id;
+      const number = createTextElement("span", "route-lesson-number", String(lesson.id).padStart(2, "0"));
+      const text = document.createElement("span");
+      text.append(
+        createTextElement("span", "route-lesson-title", lesson.title),
+        createTextElement("span", "route-lesson-category", lesson.category),
+      );
+      const status = document.createElement("span");
+      status.className = "route-lesson-icon";
+      button.append(number, text, status);
+      button.addEventListener("click", () => selectLesson(lesson.id));
+      routeButtons.set(lesson.id, { button, status, group });
+      list.append(button);
+    }
+
+    group.append(header, list);
+    routeGroups.set(course, count);
+    elements.routeLessons.append(group);
   }
 }
 
 function updateProgress() {
   const completeCount = progress.completed.size;
   elements.progressFill.style.width = `${(completeCount / lessons.length) * 100}%`;
+  elements.progressFill.parentElement.setAttribute("aria-valuemax", String(lessons.length));
   elements.progressFill.parentElement.setAttribute("aria-valuenow", String(completeCount));
   elements.progressLabel.textContent = `${completeCount} / ${lessons.length} 节已完成`;
   elements.projectCtaLabel.textContent = completeCount === lessons.length
@@ -147,6 +166,11 @@ function updateProgress() {
     button.classList.toggle("is-done", completed);
     status.innerHTML = completed ? icons.check : active ? icons.arrow : "";
     if (completed) status.append(createTextElement("span", "sr-only", "已完成"));
+  }
+  for (const [course, count] of routeGroups) {
+    const done = course.lessons.filter(({ id }) => progress.completed.has(id)).length;
+    count.textContent = `${done}/${course.lessons.length}`;
+    count.setAttribute("aria-label", `本章已完成 ${done} 节，共 ${course.lessons.length} 节`);
   }
 }
 
@@ -175,6 +199,7 @@ function selectChipPart(part) {
 
 function renderLesson() {
   const lesson = activeLesson();
+  routeButtons.get(lesson.id).group.open = true;
   elements.lessonIndex.textContent = `第 ${lesson.id} 课`;
   elements.lessonCategory.textContent = lesson.category;
   elements.lessonTime.innerHTML = icons.time;
@@ -224,9 +249,8 @@ function renderLessonFooter(lesson) {
   if (!progress.completed.has(lesson.id)) return;
 
   const allComplete = progress.completed.size === lessons.length;
-  elements.lessonFooter.append(createTextElement("p", "", allComplete ? "全部 8 节课已完成" : "本课已完成"));
-  const next = lessons.find(({ id }) => id > lesson.id && !progress.completed.has(id))
-    ?? lessons.find(({ id }) => !progress.completed.has(id));
+  elements.lessonFooter.append(createTextElement("p", "", allComplete ? `全部 ${lessons.length} 节课已完成` : "本课已完成"));
+  const next = nextUnfinishedLesson(lesson.id);
   if (!next) return;
 
   const button = createTextElement("button", "secondary-button", next.id > lesson.id ? "下一课" : "继续未完成的课");
@@ -234,6 +258,17 @@ function renderLessonFooter(lesson) {
   button.addEventListener("click", () => selectLesson(next.id));
   elements.lessonFooter.append(button);
 }
+
+function nextUnfinishedLesson(afterId) {
+  return lessons.find(({ id }) => id > afterId && !progress.completed.has(id))
+    ?? lessons.find(({ id }) => !progress.completed.has(id));
+}
+
+elements.projectCta.addEventListener("click", (event) => {
+  event.preventDefault();
+  const next = progress.completed.has(progress.active) ? nextUnfinishedLesson(progress.active) : undefined;
+  selectLesson(next?.id ?? progress.active);
+});
 
 elements.routeToggle.addEventListener("click", () => {
   setRouteOpen(elements.routeToggle.getAttribute("aria-expanded") !== "true");

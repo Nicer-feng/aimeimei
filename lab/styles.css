@@ -171,13 +171,41 @@ svg { display: block; }
 .route-heading h2 { font-size: 15px; font-weight: 720; line-height: 1.35; }
 .route-heading p { color: var(--muted); font-size: 11px; margin-top: 3px; }
 .route-toggle { display: none; }
-.route-lessons { display: grid; gap: 4px; }
+.route-lessons { display: grid; gap: 5px; }
+.route-course { min-width: 0; }
+.route-course summary {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 5px 9px;
+  background: #fbfafd;
+  cursor: pointer;
+  list-style: none;
+}
+.route-course summary::-webkit-details-marker { display: none; }
+.route-course summary::before {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border: solid var(--accent);
+  border-width: 1.4px 1.4px 0 0;
+  transform: rotate(45deg);
+  content: "";
+}
+.route-course[open] summary { background: #f5f0fb; border-color: #e9def5; }
+.route-course[open] summary::before { transform: rotate(135deg); }
+.route-course-title { min-width: 0; color: var(--ink); font-size: 12px; font-weight: 700; }
+.route-course-count { margin-left: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.route-course-lessons { display: grid; gap: 3px; margin-block: 4px 6px; }
 .route-lesson {
   display: grid;
   grid-template-columns: 31px minmax(0, 1fr) 16px;
   align-items: center;
   gap: 9px;
-  min-height: 53px;
+  min-height: 46px;
   width: 100%;
   border: 1px solid transparent;
   border-radius: 10px;
@@ -349,6 +377,7 @@ legend { max-width: 100%; padding: 0; margin-bottom: 11px; font-size: 15px; font
   .route-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
   .route-card:not(.is-open) .route-lessons, .route-card:not(.is-open) .storage-note { display: none; }
   .route-lessons { margin-top: 8px; }
+  .route-course summary { min-height: 44px; }
   .lesson-stack { gap: 12px; }
   .lesson-header { padding: 17px 15px 15px; }
   .lesson-header > p { font-size: 13px; }

@@ -1,45 +1,13 @@
-const colors = {
-  wire: '#ad9cdd',
-  quiet: '#b8a9d0',
-  ink: '#f7edff',
-  pink: '#f0a0eb',
-  mint: '#a7f3cb',
-  line: '#54426c',
-  panel: '#221630',
-};
+import { analogExperiments } from './analog.js';
+import { embeddedExperiments } from './embedded.js';
+import { integrationExperiments } from './integration.js';
+import { canvas, colors, label, point, stroke } from './lab-visuals.js';
 
 const number = (value, digits = 0) => value.toFixed(digits);
 const readAdc = (voltage) => Math.round(voltage / 3.3 * 4095);
 const volts = (value) => `${number(value, 2)} V`;
 const percent = (value) => `${number(value)}%`;
 const result = (label, value) => ({ label, value });
-
-function label(x, y, text, options = {}) {
-  const { size = 18, color = colors.ink, anchor = 'middle', mono = false, weight = 500 } = options;
-  const font = mono ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : 'inherit';
-  return `<text x="${x}" y="${y}" text-anchor="${anchor}" fill="${color}" font-family="${font}"
-    font-size="${size}" font-weight="${weight}">${text}</text>`;
-}
-
-function stroke(path, color = colors.wire, width = 2.5, dashed = false) {
-  return `<path d="${path}" fill="none" stroke="${color}" stroke-width="${width}"
-    stroke-linecap="round" stroke-linejoin="round"${dashed ? ' stroke-dasharray="4 5"' : ''}/>`;
-}
-
-function point(x, y, radius, color) {
-  return `<circle cx="${x}" cy="${y}" r="${radius}" fill="${color}"/>`;
-}
-
-function canvas(prefix, description, content) {
-  return `<svg viewBox="20 0 480 208" width="480" height="208" role="img" aria-label="${description}">
-    <defs>
-      <radialGradient id="${prefix}-glow">
-        <stop stop-color="#f8acff" stop-opacity=".55"/><stop offset="1" stop-color="#f8acff" stop-opacity="0"/>
-      </radialGradient>
-    </defs>
-    ${content}
-  </svg>`;
-}
 
 function lamp(x, y, brightness, prefix) {
   const level = brightness / 100;
@@ -206,7 +174,7 @@ function waveform({ duty }, prefix) {
 }
 
 function nightlight({ light, threshold, duty }, reading, brightness, prefix) {
-  const op = reading < threshold ? '&lt;' : '≥';
+  const op = reading < threshold ? '<' : '≥';
 
   return canvas(prefix, `光照 ${percent(light)}，ADC 读数 ${reading}，阈值 ${threshold}，设定占空比 ${percent(duty)}，亮度 ${percent(brightness)}`, `
     ${signalBox(82, '模拟光照', percent(light), colors.pink)}
@@ -318,6 +286,9 @@ const experiments = {
       };
     },
   },
+  ...analogExperiments,
+  ...embeddedExperiments,
+  ...integrationExperiments,
 };
 
 let nextMount = 0;
