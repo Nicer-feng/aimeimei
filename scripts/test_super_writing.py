@@ -147,6 +147,27 @@ class ScopedRevisionRulesTests(unittest.TestCase):
         self.assertEqual(writing_guard.explicit_terms(["首搭之类的是极限词", "智驾等都是禁用词",
                                                       "智驾不是禁用词", "哪些是红线词汇"]), ())
         self.assertEqual(writing_guard.explicit_terms(["注意智驾是红线词汇", "允许使用「智驾」"]), ())
+        self.assertEqual(writing_guard.explicit_terms(["极端之类的是极限词 然后国标是红线词汇 最好不要写"]), ("国标",))
+        self.assertEqual(writing_guard.explicit_terms(["然后国标不是禁用词"]), ())
+        self.assertEqual(writing_guard.explicit_terms(["不要用「然后国标」"]), ("然后国标",))
+        self.assertEqual(writing_guard.explicit_terms(["然后国标是红线词汇", "允许使用「国标」"]), ())
+
+    def test_spoken_sentence_with_feedback_in_unlabelled_prose(self):
+        source = "安全，永远是买车的核心考量！"
+        request = source + "这句话感觉念起来怪怪的 能不能调整一下 只需要调整这个就行"
+        draft = "先说说实际情况。\r\n\r\n这才是真本事。这次测试给咱们提了个醒：" + source
+        for instruction in (request, source + "这句话换个表述吧", source + "只需要调整这个就行"):
+            plan = writing_guard.prepare_sentence(instruction, draft, [])
+            result, report = writing_guard.apply_revision(plan, '{"replacement":"买车时还是得看重安全。"}', True)
+            self.assertTrue(report["repaired"])
+            self.assertEqual(result.encode(), draft.replace(source, "买车时还是得看重安全。").encode())
+            self.assertEqual("edit_note" in plan.context, instruction == request)
+        for bad in (request + "，再重写正文", "只需要调整这个就行", source + "给我写五个吧"):
+            self.assertIsNone(writing_guard.sentence_source(bad))
+        for bad in (draft + "\n" + source, "总要求：\n" + draft, "备注：" + source, draft + "\n---", "    " + source,
+                    "标题：这是标题。\n" + draft, "从这里切进去，" + source, "| 画面 | 台词 |\n| --- | --- |\n| " + source + " | 原词。 |"):
+            with self.subTest(draft=bad), self.assertRaises(super_revision.ScopeError):
+                writing_guard.prepare_sentence(request, bad, [])
 
     def test_sentence_revisions_preserve_plain_text_and_table_cells(self):
         source = "这个说法不够顺口。"

@@ -387,6 +387,15 @@ const server = http.createServer(async (req, res) => {
     assert.equal(counts.sends.at(-1).source, undefined);
     assert.equal(await mode.getAttribute('aria-pressed'), 'false');
     await page.setViewportSize({ width: 1440, height: 900 });
+    const sentence = '安全，永远是买车的核心考量！';
+    const natural = sentence + '这句话感觉念起来怪怪的 能不能调整一下 只需要调整这个就行';
+    await page.evaluate(s => { state.messages.at(-1).content = '先说说实际情况。\n\n这才是真本事。这次测试给咱们提了个醒：' + s; }, sentence);
+    await prompt.fill(natural);
+    await metadataOffer.waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#superMetadataOfferText').textContent(), '只替换这句：' + sentence);
+    await prompt.fill(natural + '，再重写正文');
+    await page.waitForTimeout(300);
+    assert.equal(await metadataOffer.isVisible(), false);
     await page.evaluate(() => {
       state.messages.at(-1).content = '| 编号 | 台词 | 画面 |\n| --- | --- | --- |\n| 1 | 这里是口播台词。 | 这段是拍摄说明。 |';
     });

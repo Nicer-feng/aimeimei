@@ -33,7 +33,10 @@
   const metadataRequest = new RegExp('^(?:(?:请|麻烦)?(?:帮我|给我)?(?:只(?:需要|用)?|仅)' +
     '(?:修改|改写|调整|优化|改)(?:一下|下)?[ \\t]*' + metadataPair + '|' +
     metadataPair + '(?:也)?要(?:修改|调整|改)(?:一下|下)?)' + metadataKeep + '[。！! \\t]*$');
-  const sentenceRequest = /^([^\r\n]{5,162})[ \t，,:：]*(?:\r?\n[ \t]*)?(?:只改这(?:句话|句)(?:[ \t]*换个(?:说法|表述|表达))?|这(?:句话|句)[ \t]*(?:换个(?:说法|表述|表达)|改写(?:一下|下)?|改(?:一下|下)))[吧哈啊。！! \t]*$/u;
+  const onlyThis = /(?:这句话(?:感觉)?(?:念|读|说)起来(?:怪怪的|有点别扭|不顺口|不自然)[，, \t]*(?:能不能|能否)?(?:调整|改)(?:一下|下)[，,。？? \t]*)?只(?:需要|用)?(?:调整|改)(?:这个|这一句|这句话)就行/;
+  const oldSentenceAction = /只改这(?:句话|句)(?:[ \t]*换个(?:说法|表述|表达))?|这(?:句话|句)[ \t]*(?:换个(?:说法|表述|表达)|改写(?:一下|下)?|改(?:一下|下))/;
+  const sentenceRequest = new RegExp(/^([^\r\n]{5,162}?)[ \t，,:：]*(?:\r?\n[ \t]*)?/.source +
+    '(?:' + oldSentenceAction.source + '|' + onlyThis.source + ')' + /[吧哈啊。！! \t]*$/.source, 'u');
   const sentenceMarkup = /[<>\[\]`*_\\|#\x00-\x1f]/;
 
   function sentenceCandidate(prompt, draft) {
@@ -46,6 +49,7 @@
     const before = draft.slice(0, index), after = draft.slice(index + source.length);
     let prefix = before.slice(before.lastIndexOf('\n') + 1);
     const rest = after.split('\n', 1)[0];
+    let cellTail = rest;
     if (/^\s*\|/.test(prefix)) {
       const cellsOf = row => /^\|.*\|$/.test(row.trim()) && !row.includes('\\|') ? row.trim().slice(1, -1).split('|') : [];
       const rows = before.slice(0, before.length - prefix.length).split('\n');
@@ -60,15 +64,22 @@
         .filter(i => i >= 0);
       if (dialogue.length !== 1 || dialogue[0] !== prefix.split('|').length - 2) return '';
       prefix = prefix.slice(prefix.lastIndexOf('|') + 1);
-      if (sentenceMarkup.test((prefix + source + rest.split('|', 1)[0]).trim())) return '';
+      cellTail = rest.split('|', 1)[0];
+      if (sentenceMarkup.test((prefix + source + cellTail).trim())) return '';
     } else {
       const markers = Array.from(draft.matchAll(/^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:【)?(正文|口播正文|口播稿|口播文案|口播内容|台词|标题|封面标题|封面文案|视频标题|发布文案|视频文案|花字|字幕|画面提示|拍摄提示|拍摄说明|制作说明)(?=[：:*】\s]|$)/gm));
       const bodies = markers.filter(marker => /^(?:正文|口播正文|口播稿|口播文案|口播内容|台词)$/.test(marker[1]));
-      if (bodies.length !== 1 || markers.filter(marker => marker.index < index).at(-1) !== bodies[0]) return '';
+      if (!markers.length) {
+        if (/^(?: {4}| {0,3}\t)[ \t]*\S/m.test(draft)) return '';
+        const lines = draft.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        if (!lines.every(line => /[。！？!?][”」』"]?$/.test(line) && !sentenceMarkup.test(line) &&
+            !/^(?:[+=>~【（(-]|[0-9一二三四五六七八九十]+[、.)）]|[\u4e00-\u9fffA-Za-z]{1,6}[：:]|(?:脚本|方案|版本)[一二三四五六七八九十\d])/.test(line))) return '';
+      } else if (bodies.length !== 1 || markers.filter(marker => marker.index < index).at(-1) !== bodies[0]) return '';
       prefix = prefix.replace(/^\s*(?:#{1,6}[ \t]+)?(?:\*\*)?【?(?:正文|口播正文|口播稿|口播文案|口播内容|台词)[：:*】\t ]+/, '');
       if (/^\s*(?:>|#|[-+*] |\d+[.)] )/.test(prefix) || sentenceMarkup.test((prefix + source + rest).trim())) return '';
     }
-    return !prefix.trim() || /[。！？!?]$/.test(prefix.trimEnd()) ? source : '';
+    const introduced = !cellTail.trim() && /[。！？!?][^。！？!?:：]{4,}[：:]$/.test(prefix.trimEnd());
+    return !prefix.trim() || /[。！？!?]$/.test(prefix.trimEnd()) || introduced ? source : '';
   }
 
   function guardCandidate() {

@@ -35,7 +35,7 @@ _SCRIPT_HEADING = re.compile(r"(?m)^[ \t]*(?:#{1,6}[ \t]+)?脚本[一二三四�
 _TASK = re.compile(r"口播|脚本|成稿|定稿|发布文案|封面文案")
 _TERM = r"[\u4e00-\u9fffA-Za-z0-9][\u4e00-\u9fffA-Za-z0-9 _-]{0,15}"
 _WORD = r"[\u4e00-\u9fffA-Za-z0-9_-]{1,12}"
-_TERM_LEAD = r"(?:(?:说了|注意(?:一下|下)?|请记住|记住)[ \t]*[：:，,]?[ \t]*)?"
+_TERM_LEAD = r"(?:然后[ \t]*)?(?:(?:说了|注意(?:一下|下)?|请记住|记住)[ \t]*[：:，,]?[ \t]*)?"
 _UNCLEAR_TERM = re.compile(r"之类|(?:等|都|不|并非)$|^(?:不是|并非|别把|勿将|什么|哪些)")
 _EXPLICIT = re.compile(
     rf'(?P<cancel>取消禁用|允许使用|可以用)[ \t]*[「『“"](?P<allowed>{_TERM})[」』”"]'
@@ -46,14 +46,28 @@ _EXPLICIT = re.compile(
 _FENCE = re.compile(r"(?m)^[ \t]*(?:```|~~~)")
 _SENTENCE = re.compile(r"[^。！？!?\r\n]{4,159}[。！？!?]")
 _SENTENCE_REQUEST = re.compile(
-    r"(?P<source>[^\r\n]{5,162})[ \t，,:：]*(?:\r?\n[ \t]*)?"
+    r"(?P<source>[^\r\n]{5,162}?)[ \t，,:：]*(?:\r?\n[ \t]*)?"
     r"(?:只改这(?:句话|句)(?:[ \t]*换个(?:说法|表述|表达))?|"
-    r"这(?:句话|句)[ \t]*(?:换个(?:说法|表述|表达)|改写(?:一下|下)?|改(?:一下|下)))"
+    r"这(?:句话|句)[ \t]*(?:换个(?:说法|表述|表达)|改写(?:一下|下)?|改(?:一下|下))|"
+    r"(?:这句话(?:感觉)?(?:念|读|说)起来(?:怪怪的|有点别扭|不顺口|不自然)[，, \t]*"
+    r"(?:能不能|能否)?(?:调整|改)(?:一下|下)[，,。？? \t]*)?"
+    r"只(?:需要|用)?(?:调整|改)(?:这个|这一句|这句话)就行)"
     r"[吧哈啊。！! \t]*"
 )
 _SENTENCE_MARKUP = re.compile(r"[<>\[\]`*_\\|#\x00-\x1f]")
 _DIALOGUE = re.compile(r"(?:台词|口播(?:文案|内容|台词)?)(?:[（(][^）)\n]{1,40}[）)])?")
 _DIVIDER = re.compile(r":?-{3,}:?")
+_NON_PROSE = re.compile(r"^(?:[+=>~【（(-]|[0-9一二三四五六七八九十]+[、.)）]|"
+                        r"[\u4e00-\u9fffA-Za-z]{1,6}[：:]|(?:脚本|方案|版本)[一二三四五六七八九十\d])")
+
+
+def _plain_draft(draft):
+    if re.search(r"(?m)^(?: {4}| {0,3}\t)[ \t]*\S", draft):
+        return False
+    lines = [line.strip() for line in draft.splitlines() if line.strip()]
+    return bool(lines) and all(re.search(r'[。！？!?][”」』"]?$', line)
+                               and not (_NON_PROSE.match(line) or _SENTENCE_MARKUP.search(line))
+                               for line in lines)
 _BODY_END = re.compile(r"(?m)^[ \t]*(?:#{1,6}[ \t]+|---+[ \t]*$|"
                        r"(?:\*\*)?【?(?:花字|字幕|画面提示|拍摄提示|拍摄说明|制作说明)(?=[：:*】\s]|$))")
 
@@ -227,6 +241,8 @@ def prepare_sentence(instruction, draft, texts):
         if not bounds:
             raise error
         lo, hi = bounds
+    elif _plain_draft(draft) and writing.manuscript_sections(draft)["status"] == "plain":
+        lo, hi = line_start, line_end
     else:
         parsed = writing.manuscript_sections(draft)
         fields = list(_FIELD.finditer(draft))
@@ -243,12 +259,16 @@ def prepare_sentence(instruction, draft, texts):
         lo, hi = max(line_start, body[0].start("value")), line_end
     context = draft[lo:hi].strip()
     prefix = draft[lo:start].rstrip()
-    if _SENTENCE_MARKUP.search(context) or prefix and prefix[-1] not in "。！？!?":
+    # Allow a concluding quote after a prose lead-in, not arbitrary label values.
+    introduced = not draft[end:hi].strip() and re.search(r"[。！？!?][^。！？!?:：]{4,}[：:]$", prefix)
+    if _SENTENCE_MARKUP.search(context) or prefix and prefix[-1] not in "。！？!?" and not introduced:
         raise error
     return SentenceRevision(draft, (start, end), {
         "sentence": source,
         "before": draft[max(lo, start - 100):start].strip(),
         "after": draft[end:min(hi, end + 100)].strip(),
+        **({"edit_note": "改得自然顺口，便于口播。"} if re.search(r"这句话(?:感觉)?(?:念|读|说)起来", instruction[instruction.find(source) + len(source):])
+           else {}),
     }, explicit_terms(texts))
 
 
