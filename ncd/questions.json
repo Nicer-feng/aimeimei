@@ -1935,33 +1935,33 @@
       ]
     },
     {
-      "id": "5bdffb16638467cd7713",
+      "id": "325c8a6090c61951e0e3",
       "type": "single",
       "category": "系统设备",
       "question": "ETC门架天线捕获率（ ）以上达标",
       "options": [
         {
           "key": "A",
-          "text": "0.965"
+          "text": "96.50%"
         },
         {
           "key": "B",
-          "text": "0.96"
+          "text": "96%"
         },
         {
           "key": "C",
-          "text": "0.995"
+          "text": "99.50%"
         },
         {
           "key": "D",
-          "text": "0.99"
+          "text": "99%"
         }
       ],
       "answer": [
         "C"
       ],
       "answer_text": [
-        "0.995"
+        "99.50%"
       ],
       "sources": [
         {
@@ -4188,33 +4188,33 @@
       ]
     },
     {
-      "id": "3d46c071e078208c36c4",
+      "id": "0c73e4a028d56fb16957",
       "type": "single",
       "category": "票卡稽核",
       "question": "2025年稽核要求表中，“U型行驶”流水的收费站稽核比例要求是？",
       "options": [
         {
           "key": "A",
-          "text": "1"
+          "text": "100%"
         },
         {
           "key": "B",
-          "text": "0.2"
+          "text": "20%"
         },
         {
           "key": "C",
-          "text": "0.1"
+          "text": "10%"
         },
         {
           "key": "D",
-          "text": "0.05"
+          "text": "5%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "1"
+        "100%"
       ],
       "sources": [
         {
@@ -7079,33 +7079,33 @@
       ]
     },
     {
-      "id": "9750e01e6dbedec9b950",
+      "id": "d4aa1c439cf238212ad3",
       "type": "single",
       "category": "系统设备",
       "question": "车道车牌识别率需要达到（ ）以上？",
       "options": [
         {
           "key": "A",
-          "text": "0.95"
+          "text": "95%"
         },
         {
           "key": "B",
-          "text": "0.96"
+          "text": "96%"
         },
         {
           "key": "C",
-          "text": "0.98"
+          "text": "98%"
         },
         {
           "key": "D",
-          "text": "0.99"
+          "text": "99%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "0.95"
+        "95%"
       ],
       "sources": [
         {
@@ -7671,33 +7671,33 @@
       ]
     },
     {
-      "id": "f696e656517f02de51e4",
+      "id": "709efd3e1151e6aa7eb2",
       "type": "single",
       "category": "票卡稽核",
       "question": "省联网中心对收费站与路段分中心稽查结论不一致的流水稽核比例是多少？",
       "options": [
         {
           "key": "A",
-          "text": "0.99"
+          "text": "99%"
         },
         {
           "key": "B",
-          "text": "0.98"
+          "text": "98%"
         },
         {
           "key": "C",
-          "text": "1"
+          "text": "100%"
         },
         {
           "key": "D",
-          "text": "0.95"
+          "text": "95%"
         }
       ],
       "answer": [
         "C"
       ],
       "answer_text": [
-        "1"
+        "100%"
       ],
       "sources": [
         {
@@ -7708,33 +7708,33 @@
       ]
     },
     {
-      "id": "ea0cd5b6e4a7aa68575c",
+      "id": "2e690136e0ab4da39a37",
       "type": "single",
       "category": "票卡稽核",
       "question": "某站2022年6月车流量为2455辆，7月车流量2689辆，7月日均环比（）",
       "options": [
         {
           "key": "A",
-          "text": "0.04"
+          "text": "4%"
         },
         {
           "key": "B",
-          "text": "0.05"
+          "text": "5%"
         },
         {
           "key": "C",
-          "text": "0.06"
+          "text": "6%"
         },
         {
           "key": "D",
-          "text": "0.07"
+          "text": "7%"
         }
       ],
       "answer": [
         "C"
       ],
       "answer_text": [
-        "0.06"
+        "6%"
       ],
       "sources": [
         {
@@ -7967,33 +7967,33 @@
       ]
     },
     {
-      "id": "e35c95c67e24e1e1603f",
+      "id": "6c6d81c300930f270eea",
       "type": "single",
       "category": "票卡稽核",
       "question": "某站2024年7月车流量为2455辆，2023年7月车流量2689辆，2024年7月车流量同比为（）",
       "options": [
         {
           "key": "A",
-          "text": "-0.087"
+          "text": "-8.70%"
         },
         {
           "key": "B",
-          "text": "0.087"
+          "text": "8.70%"
         },
         {
           "key": "C",
-          "text": "-0.095"
+          "text": "-9.50%"
         },
         {
           "key": "D",
-          "text": "0.095"
+          "text": "9.50%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "-0.087"
+        "-8.70%"
       ],
       "sources": [
         {
@@ -8041,33 +8041,33 @@
       ]
     },
     {
-      "id": "17fa871d87be3f4d8ffd",
+      "id": "548532d45e4148bd4ce3",
       "type": "single",
       "category": "企业文化",
       "question": "被誉为\"江西第一路\"的昌九高速公路，于（）建成通车，是中国最早的高速公路之一。",
       "options": [
         {
           "key": "A",
-          "text": "32112"
+          "text": "1987年12月"
         },
         {
           "key": "B",
-          "text": "33573"
+          "text": "1991年12月"
         },
         {
           "key": "C",
-          "text": "33970"
+          "text": "1993年1月"
         },
         {
           "key": "D",
-          "text": "31778"
+          "text": "1987年1月"
         }
       ],
       "answer": [
         "C"
       ],
       "answer_text": [
-        "33970"
+        "1993年1月"
       ],
       "sources": [
         {
@@ -10360,33 +10360,33 @@
       ]
     },
     {
-      "id": "192a64d1c37aba0fb75a",
+      "id": "900c31f4d938f5c62141",
       "type": "single",
       "category": "票卡稽核",
       "question": "根据《路网运营公司收费稽核管理细则（试行）》奖励要求，打逃直接奖励比例为奖励基数的（ ）。",
       "options": [
         {
           "key": "A",
-          "text": "0.05"
+          "text": "5%"
         },
         {
           "key": "B",
-          "text": "0.1"
+          "text": "10%"
         },
         {
           "key": "C",
-          "text": "0.15"
+          "text": "15%"
         },
         {
           "key": "D",
-          "text": "0.3"
+          "text": "30%"
         }
       ],
       "answer": [
         "C"
       ],
       "answer_text": [
-        "0.15"
+        "15%"
       ],
       "sources": [
         {
@@ -11322,33 +11322,33 @@
       ]
     },
     {
-      "id": "658bb28fb7cd93b8461f",
+      "id": "0c487f8afedf729290ff",
       "type": "single",
       "category": "收费操作",
       "question": "我省补录的新鲜活农产品运输车辆，从（ ）起不再享受“绿色通道”免费政策？",
       "options": [
         {
           "key": "A",
-          "text": "43831"
+          "text": "2020年1月1日"
         },
         {
           "key": "B",
-          "text": "40179"
+          "text": "2010年1月1日"
         },
         {
           "key": "C",
-          "text": "40175"
+          "text": "2009年12月28日"
         },
         {
           "key": "D",
-          "text": "40206"
+          "text": "2010年1月28日"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "43831"
+        "2020年1月1日"
       ],
       "sources": [
         {
@@ -11470,33 +11470,33 @@
       ]
     },
     {
-      "id": "e309c2f4a3a0f4f72b15",
+      "id": "51815d6b0c99d7cfba34",
       "type": "single",
       "category": "票卡稽核",
       "question": "2025年稽核要求表中，“大件运输车”流水的收费站稽核比例要求是？",
       "options": [
         {
           "key": "A",
-          "text": "1"
+          "text": "100%"
         },
         {
           "key": "B",
-          "text": "0.5"
+          "text": "50%"
         },
         {
           "key": "C",
-          "text": "0.2"
+          "text": "20%"
         },
         {
           "key": "D",
-          "text": "0.1"
+          "text": "10%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "1"
+        "100%"
       ],
       "sources": [
         {
@@ -11618,33 +11618,33 @@
       ]
     },
     {
-      "id": "4d3c3943ec3a1d5b999e",
+      "id": "fde9890cf92c0b6be0ff",
       "type": "single",
       "category": "收费操作",
       "question": "自（ ）起，《收费公路管理条例》开始施行？（ ）",
       "options": [
         {
           "key": "A",
-          "text": "38169"
+          "text": "2004年7月1日"
         },
         {
           "key": "B",
-          "text": "38292"
+          "text": "2004年11月1日"
         },
         {
           "key": "C",
-          "text": "38231"
+          "text": "2004年9月1日"
         },
         {
           "key": "D",
-          "text": "38412"
+          "text": "2005年3月1日"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "38292"
+        "2004年11月1日"
       ],
       "sources": [
         {
@@ -12469,33 +12469,33 @@
       ]
     },
     {
-      "id": "a28b0ddffe7acf9435d2",
+      "id": "a694404b655967369508",
       "type": "single",
       "category": "收费操作",
       "question": "运输种猪及冷冻猪肉的车辆自（）起不再享受绿通免费政策。",
       "options": [
         {
           "key": "A",
-          "text": "44012"
+          "text": "2020年6月30日"
         },
         {
           "key": "B",
-          "text": "44196"
+          "text": "2020年12月31日"
         },
         {
           "key": "C",
-          "text": "44072"
+          "text": "2020年8月29日"
         },
         {
           "key": "D",
-          "text": "44013"
+          "text": "2020年7月1日"
         }
       ],
       "answer": [
         "D"
       ],
       "answer_text": [
-        "44013"
+        "2020年7月1日"
       ],
       "sources": [
         {
@@ -14891,33 +14891,33 @@
       ]
     },
     {
-      "id": "5099a3e40ae14933af13",
+      "id": "88be29fc2b66fa8efcbc",
       "type": "single",
       "category": "票卡稽核",
       "question": "CPC卡对电量不足（）不得进行调拨或在车道发放",
       "options": [
         {
           "key": "A",
-          "text": "0.08"
+          "text": "8%"
         },
         {
           "key": "B",
-          "text": "0.07"
+          "text": "7%"
         },
         {
           "key": "C",
-          "text": "0.06"
+          "text": "6%"
         },
         {
           "key": "D",
-          "text": "0.05"
+          "text": "5%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "0.08"
+        "8%"
       ],
       "sources": [
         {
@@ -14965,33 +14965,33 @@
       ]
     },
     {
-      "id": "ca706c3b69fd085ce9be",
+      "id": "c1efbce2d326604148ec",
       "type": "single",
       "category": "企业文化",
       "question": "江西省交通投资集团是在省高等级公路管理局基础上整合省属高速公路管理单位设立的国有独资企业，于______挂牌成立。",
       "options": [
         {
           "key": "A",
-          "text": "40544"
+          "text": "2011年1月1日"
         },
         {
           "key": "B",
-          "text": "39448"
+          "text": "2008年1月1日"
         },
         {
           "key": "C",
-          "text": "40145"
+          "text": "2009年11月28日"
         },
         {
           "key": "D",
-          "text": "40510"
+          "text": "2010年11月28日"
         }
       ],
       "answer": [
         "C"
       ],
       "answer_text": [
-        "40145"
+        "2009年11月28日"
       ],
       "sources": [
         {
@@ -15002,7 +15002,7 @@
       ]
     },
     {
-      "id": "b4d3c89c1758ca634cce",
+      "id": "5a916ef52d6147c913b0",
       "type": "single",
       "category": "收费操作",
       "question": "自2013年4月1日起，江西省对超限（ ）%以上的鲜活农产品运输车辆，不再给予绿色通道优惠政策。",
@@ -15017,18 +15017,18 @@
         },
         {
           "key": "C",
-          "text": "0.15"
+          "text": "15%"
         },
         {
           "key": "D",
-          "text": "0.05"
+          "text": "5%"
         }
       ],
       "answer": [
         "D"
       ],
       "answer_text": [
-        "0.05"
+        "5%"
       ],
       "sources": [
         {
@@ -15409,33 +15409,33 @@
       ]
     },
     {
-      "id": "44b6b1da8ffe3eac7d43",
+      "id": "4db9f9e56da83ad7fe3a",
       "type": "single",
       "category": "收费操作",
       "question": "江西省高速公路入口称重检测中，车货总重未超过限重多少的货车可正常放行？",
       "options": [
         {
           "key": "A",
-          "text": "0.03"
+          "text": "3%"
         },
         {
           "key": "B",
-          "text": "0.05"
+          "text": "5%"
         },
         {
           "key": "C",
-          "text": "0.1"
+          "text": "10%"
         },
         {
           "key": "D",
-          "text": "0.15"
+          "text": "15%"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "0.05"
+        "5%"
       ],
       "sources": [
         {
@@ -15594,33 +15594,33 @@
       ]
     },
     {
-      "id": "ddb42022bd22c0cd7741",
+      "id": "2bff7b7fe679be662b45",
       "type": "single",
       "category": "收费操作",
       "question": "鲜活农产品运输车辆混装其他农产品的，其他农产品占比不超过多少可享受绿通政策？",
       "options": [
         {
           "key": "A",
-          "text": "0.1"
+          "text": "10%"
         },
         {
           "key": "B",
-          "text": "0.2"
+          "text": "20%"
         },
         {
           "key": "C",
-          "text": "0.3"
+          "text": "30%"
         },
         {
           "key": "D",
-          "text": "0.4"
+          "text": "40%"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "0.2"
+        "20%"
       ],
       "sources": [
         {
@@ -19109,33 +19109,33 @@
       ]
     },
     {
-      "id": "5c9284204157543936c7",
+      "id": "9fd1f72d7d48baea116c",
       "type": "single",
       "category": "收费操作",
       "question": "整车装载是指享受绿色通道的车辆，装载鲜活农产品应占车辆核定载质量或车厢容积（ ）以上，且没有与非鲜活农产品混装等行为。",
       "options": [
         {
           "key": "A",
-          "text": "0.6"
+          "text": "60%"
         },
         {
           "key": "B",
-          "text": "0.7"
+          "text": "70%"
         },
         {
           "key": "C",
-          "text": "0.8"
+          "text": "80%"
         },
         {
           "key": "D",
-          "text": "0.9"
+          "text": "90%"
         }
       ],
       "answer": [
         "C"
       ],
       "answer_text": [
-        "0.8"
+        "80%"
       ],
       "sources": [
         {
@@ -20474,33 +20474,33 @@
       ]
     },
     {
-      "id": "a108255f48c70f58c1f0",
+      "id": "e04c72ffd3a934782c7a",
       "type": "single",
       "category": "票卡稽核",
       "question": "收费站稽核工作中，日常稽核率须达到（ ）%。",
       "options": [
         {
           "key": "A",
-          "text": "0.7"
+          "text": "70%"
         },
         {
           "key": "B",
-          "text": "0.8"
+          "text": "80%"
         },
         {
           "key": "C",
-          "text": "0.9"
+          "text": "90%"
         },
         {
           "key": "D",
-          "text": "1"
+          "text": "100%"
         }
       ],
       "answer": [
         "D"
       ],
       "answer_text": [
-        "1"
+        "100%"
       ],
       "sources": [
         {
@@ -21251,33 +21251,33 @@
       ]
     },
     {
-      "id": "ec8500d37dd347cf4bf7",
+      "id": "6158d83e5ac714cc5015",
       "type": "single",
       "category": "综合管理",
       "question": "从2020年1月1日起,启用电子不停车收费功能ETC单卡用户(未安装车载装置的ETC用户)不再享受原则上不小于( )的车辆通行费基本优惠政策。",
       "options": [
         {
           "key": "A",
-          "text": "0.05"
+          "text": "5%"
         },
         {
           "key": "B",
-          "text": "0.07"
+          "text": "7%"
         },
         {
           "key": "C",
-          "text": "0.08"
+          "text": "8%"
         },
         {
           "key": "D",
-          "text": "0.09"
+          "text": "9%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "0.05"
+        "5%"
       ],
       "sources": [
         {
@@ -21695,33 +21695,33 @@
       ]
     },
     {
-      "id": "33a5ae7c4f87537d0e9a",
+      "id": "f1e68cba41947af96b02",
       "type": "single",
       "category": "收费操作",
       "question": "整车合法装载运输指车货总质量(以出口重量为主)和外尺寸均未超过国家规定的最大限值且所载鲜活农产品应占车辆核定载质量或车厢容积的( )以上、没有与非鲜活农产品混装等行为。",
       "options": [
         {
           "key": "A",
-          "text": "0.5"
+          "text": "50%"
         },
         {
           "key": "B",
-          "text": "0.6"
+          "text": "60%"
         },
         {
           "key": "C",
-          "text": "0.7"
+          "text": "70%"
         },
         {
           "key": "D",
-          "text": "0.8"
+          "text": "80%"
         }
       ],
       "answer": [
         "D"
       ],
       "answer_text": [
-        "0.8"
+        "80%"
       ],
       "sources": [
         {
@@ -22509,33 +22509,33 @@
       ]
     },
     {
-      "id": "c12d4e3ee88c81775b54",
+      "id": "339832a538883c66bdc9",
       "type": "single",
       "category": "综合管理",
       "question": "无法读写或电量低于( )的CPC卡应及时回收做坏卡处理，不得进行调拨或在车道发放。",
       "options": [
         {
           "key": "A",
-          "text": "0.08"
+          "text": "8%"
         },
         {
           "key": "B",
-          "text": "0.06"
+          "text": "6%"
         },
         {
           "key": "C",
-          "text": "0.1"
+          "text": "10%"
         },
         {
           "key": "D",
-          "text": "0.15"
+          "text": "15%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "0.08"
+        "8%"
       ],
       "sources": [
         {
@@ -23693,18 +23693,18 @@
       ]
     },
     {
-      "id": "84e31d0674b2d4247471",
+      "id": "492126d6c1b65729fee7",
       "type": "single",
       "category": "收费操作",
       "question": "五星级收费站指标考核中，员工测评满意度需达到（ ）以上",
       "options": [
         {
           "key": "A",
-          "text": "0.95"
+          "text": "95%"
         },
         {
           "key": "B",
-          "text": "0.98"
+          "text": "98%"
         },
         {
           "key": "C",
@@ -23719,7 +23719,7 @@
         "B"
       ],
       "answer_text": [
-        "0.98"
+        "98%"
       ],
       "sources": [
         {
@@ -23730,33 +23730,33 @@
       ]
     },
     {
-      "id": "31eb0b8e81ea1ea31bcd",
+      "id": "5403a877b8e7521d975e",
       "type": "single",
       "category": "收费操作",
       "question": "根据交通运输部办公厅关于贯彻《收费公路车辆通行费车型分类》，从（ ）起，货车统一按车（轴）型收费。",
       "options": [
         {
           "key": "A",
-          "text": "43709"
+          "text": "2019年9月1日"
         },
         {
           "key": "B",
-          "text": "43724"
+          "text": "2019年9月16日"
         },
         {
           "key": "C",
-          "text": "43800"
+          "text": "2019年12月1日"
         },
         {
           "key": "D",
-          "text": "43831"
+          "text": "2020年1月1日"
         }
       ],
       "answer": [
         "D"
       ],
       "answer_text": [
-        "43831"
+        "2020年1月1日"
       ],
       "sources": [
         {
@@ -24322,33 +24322,33 @@
       ]
     },
     {
-      "id": "542c3bf0d7c770fef322",
+      "id": "98652d111c066bb3a851",
       "type": "single",
       "category": "收费操作",
       "question": "根据《交通运输部办公厅关于大力推动高速公路ETC发展应用工作的通知》精神，从（ ）起，严格落实对ETC用户不少于5%的车辆通行费基本优惠政策",
       "options": [
         {
           "key": "A",
-          "text": "43466"
+          "text": "2019年1月1日"
         },
         {
           "key": "B",
-          "text": "43831"
+          "text": "2020年1月1日"
         },
         {
           "key": "C",
-          "text": "43647"
+          "text": "2019年7月1日"
         },
         {
           "key": "D",
-          "text": "43709"
+          "text": "2019年9月1日"
         }
       ],
       "answer": [
         "C"
       ],
       "answer_text": [
-        "43647"
+        "2019年7月1日"
       ],
       "sources": [
         {
@@ -25765,33 +25765,33 @@
       ]
     },
     {
-      "id": "9d6151d23abe5f7bec23",
+      "id": "09a0b8f07d45a05fe29b",
       "type": "single",
       "category": "收费操作",
       "question": "三星级收费站指标考核中，本年度 ETC专用车道通过率达（）以上。",
       "options": [
         {
           "key": "A",
-          "text": "0.99"
+          "text": "99%"
         },
         {
           "key": "B",
-          "text": "0.98"
+          "text": "98%"
         },
         {
           "key": "C",
-          "text": "0.97"
+          "text": "97%"
         },
         {
           "key": "D",
-          "text": "0.96"
+          "text": "96%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "0.99"
+        "99%"
       ],
       "sources": [
         {
@@ -29046,33 +29046,33 @@
       ]
     },
     {
-      "id": "240d8cf4abf548212000",
+      "id": "1bf40a62246c11e002d0",
       "type": "single",
       "category": "票卡稽核",
       "question": "根据《江西省交通投资集团通行费稽查管理办法（试行）》要求，路网运营公司每季度应组织一次追交案卷的倒查审查工作，抽查率不低于（ ）。",
       "options": [
         {
           "key": "A",
-          "text": "0.1"
+          "text": "10%"
         },
         {
           "key": "B",
-          "text": "0.2"
+          "text": "20%"
         },
         {
           "key": "C",
-          "text": "0.3"
+          "text": "30%"
         },
         {
           "key": "D",
-          "text": "0.4"
+          "text": "40%"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "0.2"
+        "20%"
       ],
       "sources": [
         {
@@ -29231,33 +29231,33 @@
       ]
     },
     {
-      "id": "3e8ae67659dcd56bedc5",
+      "id": "9319dcfed3a7f048fd07",
       "type": "single",
       "category": "票卡稽核",
       "question": "根据《路网运营公司收费稽核管理细则（试行）》奖励要求，中路段统筹激励资金比例为基数的（ ）。",
       "options": [
         {
           "key": "A",
-          "text": "0.05"
+          "text": "5%"
         },
         {
           "key": "B",
-          "text": "0.1"
+          "text": "10%"
         },
         {
           "key": "C",
-          "text": "0.12"
+          "text": "12%"
         },
         {
           "key": "D",
-          "text": "0.15"
+          "text": "15%"
         }
       ],
       "answer": [
         "C"
       ],
       "answer_text": [
-        "0.12"
+        "12%"
       ],
       "sources": [
         {
@@ -29268,33 +29268,33 @@
       ]
     },
     {
-      "id": "7299ea68afe4bf75e7f7",
+      "id": "bb372e2978987035db3a",
       "type": "single",
       "category": "票卡稽核",
       "question": "根据《路网运营公司收费稽核管理细则（试行）》奖励要求，重大案件（司法立案办理）按实际情况核定相关奖励经费，不超过奖励基数的 ( )。",
       "options": [
         {
           "key": "A",
-          "text": "0.15"
+          "text": "15%"
         },
         {
           "key": "B",
-          "text": "0.2"
+          "text": "20%"
         },
         {
           "key": "C",
-          "text": "0.27"
+          "text": "27%"
         },
         {
           "key": "D",
-          "text": "0.3"
+          "text": "30%"
         }
       ],
       "answer": [
         "C"
       ],
       "answer_text": [
-        "0.27"
+        "27%"
       ],
       "sources": [
         {
@@ -31451,33 +31451,33 @@
       ]
     },
     {
-      "id": "96e40b59d5d42fa1bb5a",
+      "id": "9cfce57b9efb56090f6a",
       "type": "single",
       "category": "收费操作",
       "question": "从 2020 年1月1日起，ETC单卡用户（未安装车载装置的ETC用户）原则上不在享受不小于（）的车辆通行费基本优惠政。",
       "options": [
         {
           "key": "A",
-          "text": "0.05"
+          "text": "5%"
         },
         {
           "key": "B",
-          "text": "0.03"
+          "text": "3%"
         },
         {
           "key": "C",
-          "text": "0.1"
+          "text": "10%"
         },
         {
           "key": "D",
-          "text": "0.08"
+          "text": "8%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "0.05"
+        "5%"
       ],
       "sources": [
         {
@@ -34917,7 +34917,7 @@
       ]
     },
     {
-      "id": "0b30ce280d7c0b0cd98d",
+      "id": "920c6122d7b7463027d2",
       "type": "single",
       "category": "综合管理",
       "question": "我省对开放式高速公路及开放式连接线通行费有关政策延期（ ）。",
@@ -34932,18 +34932,18 @@
         },
         {
           "key": "C",
-          "text": "44560"
+          "text": "12月30日"
         },
         {
           "key": "D",
-          "text": "44377"
+          "text": "6月30日"
         }
       ],
       "answer": [
         "D"
       ],
       "answer_text": [
-        "44377"
+        "6月30日"
       ],
       "sources": [
         {
@@ -36027,33 +36027,33 @@
       ]
     },
     {
-      "id": "80b9a43c53d0377dff27",
+      "id": "38a4b1e4a608438cb94b",
       "type": "single",
       "category": "综合管理",
       "question": "按照《江西省高速公路联网收费收费稽查工作规程》要求，数据分析稽查由路段经营管理单位负责稽查，需按照异常流水总数多少比例完成？",
       "options": [
         {
           "key": "A",
-          "text": "0.1"
+          "text": "10%"
         },
         {
           "key": "B",
-          "text": "0.4"
+          "text": "40%"
         },
         {
           "key": "C",
-          "text": "0.6"
+          "text": "60%"
         },
         {
           "key": "D",
-          "text": "0.8"
+          "text": "80%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "0.1"
+        "10%"
       ],
       "sources": [
         {
@@ -36138,7 +36138,7 @@
       ]
     },
     {
-      "id": "12def2247503ab5e3542",
+      "id": "03f9a9a3dc2ced4ac652",
       "type": "single",
       "category": "收费操作",
       "question": "根据省财政厅和省税务局要求，在2022年1月底前，全省高速公路须实现现金收费（含移动支付）开具电子化票据，从（ ）起，江西省高速公路通行费不再使用纸质发票。",
@@ -36149,15 +36149,15 @@
         },
         {
           "key": "B",
-          "text": "44588"
+          "text": "1月27日"
         },
         {
           "key": "C",
-          "text": "44589"
+          "text": "1月28日"
         },
         {
           "key": "D",
-          "text": "44592"
+          "text": "1月31日"
         }
       ],
       "answer": [
@@ -36915,33 +36915,33 @@
       ]
     },
     {
-      "id": "b815d2c908ff7fa6bb10",
+      "id": "42716c3feb89c03e1371",
       "type": "single",
       "category": "收费操作",
       "question": "2022年7月1日开始，江西省部分车型开展高速公路差异化收费，优惠期限至（）",
       "options": [
         {
           "key": "A",
-          "text": "44926"
+          "text": "2022年12月31日"
         },
         {
           "key": "B",
-          "text": "45657"
+          "text": "2024年12月31日"
         },
         {
           "key": "C",
-          "text": "45108"
+          "text": "2023年7月1日"
         },
         {
           "key": "D",
-          "text": "45107"
+          "text": "2023年6月30日"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "45657"
+        "2024年12月31日"
       ],
       "sources": [
         {
@@ -38675,33 +38675,33 @@
       ]
     },
     {
-      "id": "a8b9db45320a5ef3d7e5",
+      "id": "e406f13e953ee086ca72",
       "type": "single",
       "category": "票卡稽核",
       "question": "CPC卡计费成功率在（ ）以上为达标。",
       "options": [
         {
           "key": "A",
-          "text": "0.96"
+          "text": "96%"
         },
         {
           "key": "B",
-          "text": "0.97"
+          "text": "97%"
         },
         {
           "key": "C",
-          "text": "0.98"
+          "text": "98%"
         },
         {
           "key": "D",
-          "text": "0.99"
+          "text": "99%"
         }
       ],
       "answer": [
         "D"
       ],
       "answer_text": [
-        "0.99"
+        "99%"
       ],
       "sources": [
         {
@@ -40044,7 +40044,7 @@
       ]
     },
     {
-      "id": "07590c83a33ac2bcef71",
+      "id": "6ef2cfc0cda506bfb12b",
       "type": "single",
       "category": "收费操作",
       "question": "现阶段对入口称重检测收费软件显示超限率百分之（）以内的货车，考虑到称重设备精度误差，暂按未超限超载处理。",
@@ -40059,11 +40059,11 @@
         },
         {
           "key": "C",
-          "text": "0.05"
+          "text": "5%"
         },
         {
           "key": "D",
-          "text": "0.1"
+          "text": "10%"
         }
       ],
       "answer": [
@@ -41413,33 +41413,33 @@
       ]
     },
     {
-      "id": "38249faeb7e85ce853cb",
+      "id": "8990e03d0425c00607f7",
       "type": "single",
       "category": "综合管理",
       "question": "收费站应对回收和库存的 CPC 卡，采取喷洒（ ）浓度的酒精溶液或含氯消毒药水等方式进行消毒。",
       "options": [
         {
           "key": "A",
-          "text": "0.75"
+          "text": "75%"
         },
         {
           "key": "B",
-          "text": "0.7"
+          "text": "70%"
         },
         {
           "key": "C",
-          "text": "0.85"
+          "text": "85%"
         },
         {
           "key": "D",
-          "text": "0.8"
+          "text": "80%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "0.75"
+        "75%"
       ],
       "sources": [
         {
@@ -43300,33 +43300,33 @@
       ]
     },
     {
-      "id": "5b6b87c875dfe0e2c60f",
+      "id": "1320d04b482211672ebd",
       "type": "single",
       "category": "收费操作",
       "question": "三星级收费站指标考核中，入口严格执行“货车必检，超限禁入”要求，本年度入口超限超载率不超过 （ ）？",
       "options": [
         {
           "key": "A",
-          "text": "0.005"
+          "text": "0.50%"
         },
         {
           "key": "B",
-          "text": "0.01"
+          "text": "1%"
         },
         {
           "key": "C",
-          "text": "0.008"
+          "text": "0.80%"
         },
         {
           "key": "D",
-          "text": "0.003"
+          "text": "0.30%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "0.005"
+        "0.50%"
       ],
       "sources": [
         {
@@ -43337,33 +43337,33 @@
       ]
     },
     {
-      "id": "ad6a25378c2ffd533e17",
+      "id": "7432ae4a15590caa0ff1",
       "type": "single",
       "category": "收费操作",
       "question": "从（）开始全省高速公路客车1类车辆通行费收费标准调为0.45元/公里",
       "options": [
         {
           "key": "A",
-          "text": "41091"
+          "text": "2012年7月1日"
         },
         {
           "key": "B",
-          "text": "41365"
+          "text": "2013年4月1日"
         },
         {
           "key": "C",
-          "text": "41609"
+          "text": "2013年12月1日"
         },
         {
           "key": "D",
-          "text": "41244"
+          "text": "2012年12月1日"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "41365"
+        "2013年4月1日"
       ],
       "sources": [
         {
@@ -45722,33 +45722,33 @@
       ]
     },
     {
-      "id": "1a405c699c68f21261a7",
+      "id": "84b28137edae405a816e",
       "type": "single",
       "category": "收费操作",
       "question": "车货总重超限超载幅度未超过多少的鲜活农产品运输车辆，比照合法装载执行？",
       "options": [
         {
           "key": "A",
-          "text": "0.03"
+          "text": "3%"
         },
         {
           "key": "B",
-          "text": "0.05"
+          "text": "5%"
         },
         {
           "key": "C",
-          "text": "0.1"
+          "text": "10%"
         },
         {
           "key": "D",
-          "text": "0.15"
+          "text": "15%"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "0.05"
+        "5%"
       ],
       "sources": [
         {
@@ -46536,33 +46536,33 @@
       ]
     },
     {
-      "id": "ec3f3017a091f7881641",
+      "id": "92c0784823f87bb80f5e",
       "type": "single",
       "category": "综合管理",
       "question": "加大ETC车辆通行费优惠力度，从2019年7月1日起严格落实对ETC用户不少于( )的车辆通行费基本优惠政策。",
       "options": [
         {
           "key": "A",
-          "text": "0.03"
+          "text": "3%"
         },
         {
           "key": "B",
-          "text": "0.05"
+          "text": "5%"
         },
         {
           "key": "C",
-          "text": "0.07"
+          "text": "7%"
         },
         {
           "key": "D",
-          "text": "0.1"
+          "text": "10%"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "0.05"
+        "5%"
       ],
       "sources": [
         {
@@ -50409,33 +50409,33 @@
       ]
     },
     {
-      "id": "4ee9caa6846232fe15b0",
+      "id": "d5321253ad10a9c568a8",
       "type": "single",
       "category": "收费操作",
       "question": "江西省部分车型从什么时候开展高速公路差异化收费",
       "options": [
         {
           "key": "A",
-          "text": "44926"
+          "text": "2022年12月31日"
         },
         {
           "key": "B",
-          "text": "44743"
+          "text": "2022年7月1日"
         },
         {
           "key": "C",
-          "text": "45108"
+          "text": "2023年7月1日"
         },
         {
           "key": "D",
-          "text": "45107"
+          "text": "2023年6月30日"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "44743"
+        "2022年7月1日"
       ],
       "sources": [
         {
@@ -52333,33 +52333,33 @@
       ]
     },
     {
-      "id": "b0b986d164430acb6ce5",
+      "id": "23ab8a2963462c14b79a",
       "type": "single",
       "category": "企业文化",
       "question": "“高速映山红”运营品牌于 正式向社会发布。",
       "options": [
         {
           "key": "A",
-          "text": "43831"
+          "text": "2020年1月1日"
         },
         {
           "key": "B",
-          "text": "44680"
+          "text": "2022年4月29日"
         },
         {
           "key": "C",
-          "text": "47450"
+          "text": "2029年11月28日"
         },
         {
           "key": "D",
-          "text": "44774"
+          "text": "2022年8月1日"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "44680"
+        "2022年4月29日"
       ],
       "sources": [
         {
@@ -52370,33 +52370,33 @@
       ]
     },
     {
-      "id": "e398a1bea04c094ff7e6",
+      "id": "541d250f2a5296c41abd",
       "type": "single",
       "category": "企业文化",
       "question": "“江西省高速公路投资集团有限责任公司”于 经江西省人民政府批准同意，正式更名为“江西省交通投资集团有限责任公司”。",
       "options": [
         {
           "key": "A",
-          "text": "44680"
+          "text": "2022年4月29日"
         },
         {
           "key": "B",
-          "text": "44195"
+          "text": "2020年12月30日"
         },
         {
           "key": "C",
-          "text": "43831"
+          "text": "2020年1月1日"
         },
         {
           "key": "D",
-          "text": "44560"
+          "text": "2021年12月30日"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "44195"
+        "2020年12月30日"
       ],
       "sources": [
         {
@@ -53813,33 +53813,33 @@
       ]
     },
     {
-      "id": "d65fd5aae4da539ba6cc",
+      "id": "49d02a99b3125ba84d0b",
       "type": "single",
       "category": "“高速映山红”",
       "question": "江西交投“高速映山红”运营品牌正式对外发布时间为（）",
       "options": [
         {
           "key": "A",
-          "text": "44315"
+          "text": "2021年4月29日"
         },
         {
           "key": "B",
-          "text": "44680"
+          "text": "2022年4月29日"
         },
         {
           "key": "C",
-          "text": "45045"
+          "text": "2023年4月29日"
         },
         {
           "key": "D",
-          "text": "45411"
+          "text": "2024年4月29日"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "44680"
+        "2022年4月29日"
       ],
       "sources": [
         {
@@ -57242,33 +57242,33 @@
       ]
     },
     {
-      "id": "acd105c6832cf282d457",
+      "id": "df25d675cec0f7b730a3",
       "type": "single",
       "category": "“高速映山红”",
       "question": "“高速映山红”服务日是哪一天？",
       "options": [
         {
           "key": "A",
-          "text": "46103"
+          "text": "2026年3月22日"
         },
         {
           "key": "B",
-          "text": "46141"
+          "text": "2026年4月29日"
         },
         {
           "key": "C",
-          "text": "46152"
+          "text": "2026年5月10日"
         },
         {
           "key": "D",
-          "text": "46202"
+          "text": "2026年6月29日"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "46141"
+        "2026年4月29日"
       ],
       "sources": [
         {
@@ -57904,33 +57904,33 @@
       ]
     },
     {
-      "id": "c9efc0d5668262255344",
+      "id": "2efdbb0c266b837685d1",
       "type": "single",
       "category": "综合管理",
       "question": "修订通过后的《江西省公路条例》什么时候开始实施？（ ）。",
       "options": [
         {
           "key": "A",
-          "text": "45992"
+          "text": "2025年12月1日"
         },
         {
           "key": "B",
-          "text": "45717"
+          "text": "2025年3月1日"
         },
         {
           "key": "C",
-          "text": "45731"
+          "text": "2025年3月15日"
         },
         {
           "key": "D",
-          "text": "45870"
+          "text": "2025年8月1日"
         }
       ],
       "answer": [
         "B"
       ],
       "answer_text": [
-        "45717"
+        "2025年3月1日"
       ],
       "sources": [
         {
@@ -57941,33 +57941,33 @@
       ]
     },
     {
-      "id": "bb4c91c87fedad39c5f3",
+      "id": "d29b32ba067f102ed3a1",
       "type": "single",
       "category": "综合管理",
       "question": "货运车辆超限运输未超过车货总质量最高限值（ ），没有造成危害后果的，给予批评教育，可以不予处罚。",
       "options": [
         {
           "key": "A",
-          "text": "0.2"
+          "text": "20%"
         },
         {
           "key": "B",
-          "text": "0.05"
+          "text": "5%"
         },
         {
           "key": "C",
-          "text": "0.15"
+          "text": "15%"
         },
         {
           "key": "D",
-          "text": "0.1"
+          "text": "10%"
         }
       ],
       "answer": [
         "A"
       ],
       "answer_text": [
-        "0.2"
+        "20%"
       ],
       "sources": [
         {

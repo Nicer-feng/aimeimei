@@ -120,6 +120,19 @@ class NcdTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["items"], [])
 
+    def test_formatted_dates_and_percentages(self):
+        cookie = self.login()
+        samples = [
+            ("运营品牌于 正式向社会发布", ["2020年1月1日", "2022年4月29日", "2029年11月28日", "2022年8月1日"], ["2022年4月29日"]),
+            ("ETC门架天线捕获率", ["96.50%", "96%", "99.50%", "99%"], ["99.50%"]),
+        ]
+        for query, options, answer_text in samples:
+            status, _, body = self.request("/ncd/api/search?" + urlencode({"q": query}), cookie=cookie)
+            self.assertEqual(status, 200)
+            item = json.loads(body)["items"][0]
+            self.assertEqual([option["text"] for option in item["options"]], options)
+            self.assertEqual(item["answer_text"], answer_text)
+
     def test_cookie_flags_and_cross_origin(self):
         status, headers, _ = self.request("/ncd/api/login", "POST", {"password": "first-test-only"}, headers={"Host": "feng.asia", "Origin": "https://feng.asia"})
         self.assertEqual(status, 200)
