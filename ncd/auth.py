@@ -12,6 +12,7 @@ from pathlib import Path
 
 SESSION_TTL = 12 * 60 * 60
 PASSWORD_ROUNDS = 310000
+MAX_PASSWORDS = 10
 LOGIN_WINDOW = 15 * 60
 LOGIN_LIMIT = 10
 
@@ -39,8 +40,8 @@ def verify_password(password, encoded):
 
 
 def configure_passwords(data_dir, passwords):
-    if len(passwords) != 2 or any(not isinstance(p, str) or not 6 <= len(p) <= 256 for p in passwords):
-        raise ValueError("需设置两个长度为 6 至 256 的密码")
+    if not isinstance(passwords, (list, tuple)) or not 1 <= len(passwords) <= MAX_PASSWORDS or any(not isinstance(p, str) or not 6 <= len(p) <= 256 for p in passwords):
+        raise ValueError(f"需设置 1 至 {MAX_PASSWORDS} 个长度为 6 至 256 的密码")
     target_dir = Path(data_dir)
     target_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     target = target_dir / "secrets.json"
@@ -92,7 +93,7 @@ class NcdAuth:
         if not isinstance(data, dict):
             raise ValueError("访问密码尚未配置")
         hashes = data.get("password_hashes")
-        if not isinstance(hashes, list) or len(hashes) != 2 or not all(isinstance(p, str) for p in hashes):
+        if not isinstance(hashes, list) or not 1 <= len(hashes) <= MAX_PASSWORDS or not all(isinstance(p, str) for p in hashes):
             raise ValueError("访问密码尚未配置")
         version = hashlib.sha256(json.dumps(hashes).encode()).hexdigest()
         return hashes, version
@@ -109,7 +110,7 @@ class NcdAuth:
             if count >= LOGIN_LIMIT:
                 raise LoginLimited()
             conn.execute("INSERT INTO login_attempts VALUES (?, ?)", (ip_hash, now))
-        # 两个哈希都校验，不通过响应时间暴露命中的是哪个口令。
+        # 全部哈希都校验，不通过响应时间暴露命中的是哪个口令。
         matches = [verify_password(password, encoded) for encoded in hashes]
         if not any(matches):
             return None

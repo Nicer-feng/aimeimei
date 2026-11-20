@@ -1,4 +1,4 @@
-"""临时目录内验证题库双口令、访问隔离、查询及会话生命周期。"""
+"""临时目录内验证题库多口令、访问隔离、查询及会话生命周期。"""
 
 import hashlib
 import http.client
@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ncd.auth import LOGIN_LIMIT, NcdAuth, configure_passwords
+from ncd.auth import LOGIN_LIMIT, MAX_PASSWORDS, NcdAuth, configure_passwords, hash_password
 from ncd.handlers import NcdHandlersMixin
 
 
@@ -37,7 +37,7 @@ class NcdTests(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory(prefix="ncd-test-")
         cls.previous = os.environ.get("NCD_DATA_DIR")
         os.environ["NCD_DATA_DIR"] = cls.temp.name
-        configure_passwords(cls.temp.name, ["first-test-only", "second-test-only"])
+        configure_passwords(cls.temp.name, ["first-test-only", "second-test-only", "third-test-only"])
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -76,8 +76,8 @@ class NcdTests(unittest.TestCase):
         self.assertEqual(status, 200, body)
         return response_headers["Set-Cookie"].split(";")[0]
 
-    def test_both_passwords_and_private_page(self):
-        for password in ("first-test-only", "second-test-only"):
+    def test_three_passwords_and_private_page(self):
+        for password in ("first-test-only", "second-test-only", "third-test-only"):
             cookie = self.login(password)
             status, headers, body = self.request("/ncd/", cookie=cookie)
             self.assertEqual(status, 200)
@@ -170,10 +170,31 @@ class NcdTests(unittest.TestCase):
             self.assertIsNone(auth.login("old-first", "127.0.0.1"))
             self.assertIsNotNone(auth.login("new-second", "127.0.0.1"))
 
+    def test_adding_password_keeps_existing_passwords(self):
+        with tempfile.TemporaryDirectory() as directory:
+            passwords = ["existing-first", "existing-second"]
+            configure_passwords(directory, passwords)
+            auth = NcdAuth(directory)
+            old_token = auth.login(passwords[0], "127.0.0.1")
+            hashes, _ = auth.credentials()
+            payload = {"password_hashes": hashes + [hash_password("added-third")]}
+            auth.config_path.write_text(json.dumps(payload))
+            self.assertFalse(auth.authenticated(old_token))
+            self.assertEqual(auth.credentials()[0][:2], hashes)
+            for password in passwords + ["added-third"]:
+                token = auth.login(password, "127.0.0.1")
+                self.assertTrue(auth.authenticated(token))
+            self.assertIsNone(auth.login("unlisted-password", "127.0.0.1"))
+            original = auth.config_path.read_bytes()
+            for invalid in ([], ["too-short" * 30], ["valid-length"] * (MAX_PASSWORDS + 1), [None], "valid-length"):
+                with self.assertRaises(ValueError):
+                    configure_passwords(directory, invalid)
+                self.assertEqual(auth.config_path.read_bytes(), original)
+
     def test_invalid_configuration_has_controlled_error(self):
         with tempfile.TemporaryDirectory() as directory:
             auth = NcdAuth(directory)
-            for payload in ("[]", "null"):
+            for payload in ("[]", "null", '{"password_hashes":[]}', json.dumps({"password_hashes": ["invalid"] * 11})):
                 auth.config_path.write_text(payload)
                 with self.assertRaises(ValueError):
                     auth.credentials()

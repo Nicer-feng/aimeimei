@@ -16,13 +16,13 @@
 
 ## 口令和会话
 
-运行目录默认是 `$AI_PLATFORM_DATA/ncd-data`（主站默认 `/opt/ai-platform/ncd-data`），可通过 `NCD_DATA_DIR` 指定。口令配置只保存两个 PBKDF2 哈希至 `secrets.json`，会话存放于 `sessions.db`；均不进入 Git 或公开静态目录。
+运行目录默认是 `$AI_PLATFORM_DATA/ncd-data`（主站默认 `/opt/ai-platform/ncd-data`），可通过 `NCD_DATA_DIR` 指定。支持 1 至 10 个统一访问密码，口令配置只保存 PBKDF2 哈希至 `secrets.json`，会话存放于 `sessions.db`；均不进入 Git 或公开静态目录。
 
 ```sh
-python3 -m ncd.configure --data-dir /受保护的运行目录/ncd-data
+python3 -m ncd.configure --data-dir /受保护的运行目录/ncd-data --count 3
 ```
 
-命令分别隐藏输入两个密码。更换口令后旧会话自动失效。生产目录应仅允许服务用户读写。登录有效期为 12 小时；同一来源地址 15 分钟内最多连续尝试 10 次。Cookie 为 `ncd_session`，限定 `/ncd/`，设置 HttpOnly、SameSite=Lax；线上域名同时设置 Secure。
+命令按数量分别隐藏输入密码，并替换全部现有密码；`--count` 默认值为 2，设置三个密码时须明确传入 `--count 3`。修改口令配置后旧会话自动失效。生产目录应仅允许服务用户读写。登录有效期为 12 小时；同一来源地址 15 分钟内最多连续尝试 10 次。Cookie 为 `ncd_session`，限定 `/ncd/`，设置 HttpOnly、SameSite=Lax；线上域名同时设置 Secure。
 
 ## 接口
 
