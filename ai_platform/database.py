@@ -1,6 +1,6 @@
 import sqlite3
 
-from .runtime import b64_token, now, password_hash, read_json
+from .runtime import b64_token, now, password_hash, read_json, token_hash
 from .reading import init_reading_tables
 from .usage_time import init_usage_time_tables
 from .daily_reports import init_daily_report_tables
@@ -23,6 +23,17 @@ def db():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def session_user(conn, token):
+    if not token:
+        return None
+    return conn.execute(
+        """SELECT u.* FROM sessions AS s
+           JOIN users AS u ON u.id = s.user_id
+           WHERE s.token_hash=? AND s.expires_at>? AND u.is_active=1""",
+        (token_hash(token), now()),
+    ).fetchone()
 
 
 def table_columns(conn, table):
@@ -113,6 +124,25 @@ def init_db(secrets_data=None):
               is_active INTEGER NOT NULL DEFAULT 1,
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sroom_access (
+              user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+              role TEXT NOT NULL CHECK(role IN ('admin', 'reader')),
+              unit_id INTEGER,
+              CHECK((role = 'admin' AND unit_id IS NULL) OR
+                    (role = 'reader' AND unit_id IS NOT NULL AND unit_id > 0))
+            );
+
+            CREATE TABLE IF NOT EXISTS sroom_access_audit (
+              id INTEGER PRIMARY KEY,
+              actor_user_id TEXT,
+              target_user_id TEXT NOT NULL,
+              old_role TEXT NOT NULL,
+              old_unit_id INTEGER,
+              role TEXT NOT NULL,
+              unit_id INTEGER,
+              created_at INTEGER NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS conversations (

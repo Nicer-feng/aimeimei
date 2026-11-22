@@ -91,6 +91,7 @@
 	      adminOverview: null,
 	      adminModels: [],
 	      adminUsers: [],
+	      accountSroomEditor: null,
 	      adminSearch: null,
 	      ttsConfig: null,
 	      adminTts: null,
@@ -469,6 +470,7 @@
 	    function applyCurrentUser(user) {
           if (state.user?.id !== user?.id) globalThis.MeimeiOpenAIEgress?.accountChanged();
           if (state.user?.id !== user?.id || user?.role !== 'admin') globalThis.MeimeiLoginHistory?.clear();
+          if (state.accountSroomEditor && (state.user?.id !== user?.id || user?.role !== "admin")) closeSroomAccessEditor();
           if (state.user?.id !== user?.id) resetTokenStats();
 	      state.user = user || null;
           globalThis.MeimeiSuper?.accountChanged();
@@ -4468,7 +4470,7 @@
 	      const box = $("messages");
 	      box.innerHTML = `
 	        <div class="empty">
-	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.32.8" alt="槑槑欢迎插画">
+	          <img class="empty-hero" src="/res/meimei-empty-state.png?v=2.32.9" alt="槑槑欢迎插画">
 	          <div class="empty-copy">
 	            <div class="empty-kicker">家庭 AI 助手 · 槑槑在这里</div>
 	            <h2><span>你好，我是槑槑</span><i data-lucide="paw-print" aria-hidden="true"></i></h2>
@@ -8716,7 +8718,7 @@
 
 	    const adminSections = {
 	      overview: { title: "概览", desc: "查看平台状态、用量和关键配置。" },
-	      accounts: { title: "账号管理", desc: "创建、编辑和禁用家庭账号。" },
+	      accounts: { title: "账号管理", desc: "管理家庭账号和机房访问权限。" },
           logins: { title: "登录记录", desc: "设备、成功登录与会话状态 · 北京时间" },
 	      models: { title: "模型管理", desc: "维护模型名称、供应商、Endpoint、System Prompt 和能力标签。" },
 	      keys: { title: "密钥管理", desc: "集中维护管理密钥、模型 API Key 和搜索 API Key。" },
@@ -10340,6 +10342,8 @@
 
 	    async function loadAdminUsers() {
 	      const box = $("accountList");
+          closeSroomAccessEditor();
+          $("accountSroomAuthHint").hidden = state.user?.role === "admin";
 	      if (!hasAdminAccess()) {
 	        state.adminUsers = [];
 	        box.innerHTML = '<div class="status">管理员账号或管理密钥可管理家庭账号。</div>';
@@ -10386,11 +10390,105 @@
             const devices = createIconButton('smartphone', '设备记录');
             devices.addEventListener('click', () => { switchAdminSection('logins'); globalThis.MeimeiLoginHistory?.open(user.id, 'devices'); });
             actions.append(devices);
+            if (state.user?.role === "admin") {
+              const permissions = document.createElement("button");
+              permissions.type = "button";
+              permissions.className = "ui-btn ui-btn-secondary";
+              permissions.textContent = "机房权限";
+              permissions.setAttribute("aria-label", `${user.username} 的机房权限`);
+              permissions.setAttribute("aria-controls", "accountSroomPanel");
+              permissions.setAttribute("aria-expanded", "false");
+              permissions.addEventListener("click", () => openSroomAccessEditor(user, permissions));
+              actions.append(permissions);
+            }
 	        row.append(info, actions);
 	        box.appendChild(row);
 	      }
 	      queueLucideRefresh();
 	    }
+
+    function closeSroomAccessEditor(restoreFocus = false) {
+      const editor = state.accountSroomEditor;
+      state.accountSroomEditor = null;
+      $("accountSroomPanel").hidden = true;
+      editor?.opener.setAttribute("aria-expanded", "false");
+      if (restoreFocus && editor?.opener.isConnected) editor.opener.focus();
+    }
+
+    function syncSroomAccessEditor() {
+      const editor = state.accountSroomEditor;
+      const role = $("accountSroomRole");
+      const unit = $("accountSroomUnit");
+      const reader = role.value === "reader";
+      const noUnits = unit.options.length < 2;
+      role.disabled = !editor?.ready || editor.saving;
+      $("accountSroomUnitField").hidden = !reader;
+      unit.disabled = role.disabled || !reader || noUnits;
+      $("accountSroomNoUnits").hidden = !reader || !noUnits;
+      $("saveAccountSroom").disabled = role.disabled || (reader && !unit.value);
+    }
+
+    async function openSroomAccessEditor(user, opener) {
+      closeSroomAccessEditor();
+      const editor = { userId: user.id, opener, ready: false, saving: false };
+      state.accountSroomEditor = editor;
+      opener.setAttribute("aria-expanded", "true");
+      $("accountSroomPanel").hidden = false;
+      const account = user.display_name && user.display_name !== user.username
+        ? `${user.display_name}（${user.username}）` : user.username;
+      $("accountSroomTarget").textContent = account + (user.is_active ? "" : "（账号已禁用）");
+      $("accountSroomRole").value = "off";
+      $("accountSroomUnit").replaceChildren(new Option("请选择辖区", ""));
+      syncSroomAccessEditor();
+      setStatus("accountSroomStatus", "正在读取机房权限…");
+      $("accountSroomTitle").focus();
+      try {
+        const res = await request("/api/admin/sroom-access");
+        if (!res.ok) throw new Error(await readSroomAccessError(res, "机房权限读取失败，请稍后重试。"));
+        const { grants, units } = await res.json();
+        if (state.accountSroomEditor !== editor) return;
+        const grant = grants.find((item) => item.user_id === user.id);
+        for (const unit of units) $("accountSroomUnit").add(new Option(unit.name, String(unit.id)));
+        $("accountSroomRole").value = grant?.role || "off";
+        $("accountSroomUnit").value = grant?.unit_id == null ? "" : String(grant.unit_id);
+        editor.ready = true;
+        syncSroomAccessEditor();
+        setStatus("accountSroomStatus", "");
+      } catch (error) {
+        if (state.accountSroomEditor === editor) setStatus("accountSroomStatus", friendlyError(error, "机房权限读取失败，请稍后重试。"), "err");
+      }
+    }
+
+    function readSroomAccessError(res, fallback) {
+      if (res.status === 401 || res.status === 403) return "请使用 AI 槑槑管理员账号重新登录。";
+      return readError(res, fallback);
+    }
+
+    async function saveSroomAccess(event) {
+      event.preventDefault();
+      const editor = state.accountSroomEditor;
+      if (!editor?.ready || editor.saving || $("saveAccountSroom").disabled) return;
+      const role = $("accountSroomRole").value;
+      const unitId = role === "reader" ? Number($("accountSroomUnit").value) : null;
+      editor.saving = true;
+      syncSroomAccessEditor();
+      setStatus("accountSroomStatus", "正在保存…");
+      try {
+        const res = await request(`/api/admin/sroom-access/${encodeURIComponent(editor.userId)}`, {
+          method: "PUT",
+          body: JSON.stringify({ role, unit_id: unitId })
+        });
+        if (!res.ok) throw new Error(await readSroomAccessError(res, "机房权限保存失败，请稍后重试。"));
+        if (state.accountSroomEditor === editor) {
+          setStatus("accountSroomStatus", role === "off" ? "已撤销机房权限。" : "机房权限已保存。", "ok");
+        }
+      } catch (error) {
+        if (state.accountSroomEditor === editor) setStatus("accountSroomStatus", friendlyError(error, "机房权限保存失败，请稍后重试。"), "err");
+      } finally {
+        editor.saving = false;
+        if (state.accountSroomEditor === editor) syncSroomAccessEditor();
+      }
+    }
 
     function syncProductReportAccountControls() {
       const allowed = ["feng", "czq"].includes($("accountUsername").value.trim());
@@ -10896,6 +10994,10 @@
 	    $("accountUsername").addEventListener("input", syncProductReportAccountControls);
 		    $("saveAccount").addEventListener("click", saveAccount);
 		    $("resetAccountForm").addEventListener("click", resetAccountForm);
+    $("accountSroomForm").addEventListener("submit", saveSroomAccess);
+    $("accountSroomRole").addEventListener("change", syncSroomAccessEditor);
+    $("accountSroomUnit").addEventListener("change", syncSroomAccessEditor);
+    $("closeAccountSroom").addEventListener("click", () => closeSroomAccessEditor(true));
         $("adminKey").addEventListener("change", () => {
           resetTokenStats();
           switchAdminSection(state.adminSection);

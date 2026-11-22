@@ -89,6 +89,12 @@ class AuthHandlersMixin:
     def login_client_ip_hash(self):
         return token_hash(request_ip(self)[0] or "unknown")
 
+    def ai_session_cookie(self, token, max_age):
+        host = self.headers.get("Host", "").lower()
+        canonical = host in {"feng.asia", "feng.asia:443", "www.feng.asia", "www.feng.asia:443"}
+        secure = "; Secure" if canonical and self.headers.get_all("X-Forwarded-Proto", []) == ["https"] else ""
+        return f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}"
+
     def send_login_success(self, user, client=None):
         token = b64_token(32)
         # 平台声明只选择会话期限，不授予权限；浏览器和旧客户端仍使用默认期限。
@@ -107,10 +113,7 @@ class AuthHandlersMixin:
                 self.headers.get("User-Agent", ""), ip, source)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header(
-            "Set-Cookie",
-            f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={ttl}",
-        )
+        self.send_header("Set-Cookie", self.ai_session_cookie(token, ttl))
         raw = json.dumps(
             {"ok": True, "expires_at": expires, "user": ai_user_public(user)},
             ensure_ascii=False,
@@ -259,10 +262,7 @@ class AuthHandlersMixin:
                 conn.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash(token),))
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header(
-            "Set-Cookie",
-            f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-        )
+        self.send_header("Set-Cookie", self.ai_session_cookie("", 0))
         raw = b'{"ok":true}'
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()

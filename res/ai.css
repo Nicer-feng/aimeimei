@@ -8778,6 +8778,7 @@
   font-size: 12px;
   line-height: 1.55;
 }
+#accountSroomStatus:not(:empty) { display: block; }
 @media (max-width: 420px) {
   .sms-code-row { grid-template-columns: minmax(0, 1fr) 104px; }
   .sms-code-row button { padding: 0 8px; font-size: 13px; }

@@ -17,7 +17,7 @@ from file_share.handlers import FileShareHandlersMixin
 from file_share.database import init_share_db
 from ncd.handlers import NcdHandlersMixin
 
-from ai_platform.database import db, init_db
+from ai_platform.database import db, init_db, session_user
 from ai_platform.handlers.reading import ReadingHandlersMixin
 from ai_platform.handlers.usage_time import UsageTimeHandlersMixin
 from ai_platform.handlers.daily_reports import DailyReportHandlersMixin
@@ -25,6 +25,7 @@ from ai_platform.handlers.product_reports import ProductReportHandlersMixin
 from ai_platform.handlers.login_history import LoginHistoryHandlersMixin
 from ai_platform.handlers.openai_egress import OpenAIEgressHandlersMixin
 from ai_platform.handlers.super_writing import SuperWritingHandlersMixin
+from ai_platform.handlers.sroom_access import SroomAccessHandlersMixin
 from ai_platform.login_history import cleanup_history, request_ip, touch_session
 from ai_platform.handlers import (
     AdminHandlersMixin,
@@ -64,6 +65,7 @@ from ai_platform.settings import (
 
 class AppHandler(
     NcdHandlersMixin,
+    SroomAccessHandlersMixin,
     SuperWritingHandlersMixin,
     OpenAIEgressHandlersMixin,
     LoginHistoryHandlersMixin,
@@ -95,6 +97,10 @@ class AppHandler(
         path = urlparse(self.path).path
         if path == "/ncd" or path.startswith("/ncd/"):
             return self.ncd_dispatch()
+        if path == "/api/sroom/access":
+            return self.handle_sroom_access()
+        if path == "/api/admin/sroom-access":
+            return self.handle_admin_sroom_access()
         if path == "/api/admin/openai-egress":
             return self.require_admin(self.handle_admin_openai_egress)
         if path == "/api/admin/openai-budget":
@@ -390,6 +396,9 @@ class AppHandler(
 
     def do_PUT(self):
         path = urlparse(self.path).path
+        sroom_target = re.fullmatch(r"/api/admin/sroom-access/([A-Za-z0-9_-]{1,80})", path)
+        if sroom_target:
+            return self.handle_admin_sroom_access(sroom_target[1])
         if path == "/api/product-reports" or path.startswith("/api/product-reports/"):
             return self.require_user(self.handle_product_reports)
         if path == "/api/daily-reports" or path.startswith("/api/daily-reports/"):
@@ -599,15 +608,7 @@ class AppHandler(
             self._current_user_cache = None
             return None
         with db() as conn:
-            row = conn.execute(
-                """
-                SELECT u.*
-                FROM sessions s
-                JOIN users u ON u.id = s.user_id
-                WHERE s.token_hash=? AND s.expires_at>? AND u.is_active=1
-                """,
-                (token_hash(token), now()),
-            ).fetchone()
+            row = session_user(conn, token)
         self._current_user_cache = row
         return row
 
