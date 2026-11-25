@@ -1,0 +1,24 @@
+[Unit]
+Description=Asset ledger prototype
+After=network.target
+
+[Service]
+Type=simple
+User=asset-ledger
+Group=asset-ledger
+WorkingDirectory=/opt/asset-ledger
+StateDirectory=asset-ledger
+StateDirectoryMode=0750
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m ledger serve --data-dir /var/lib/asset-ledger --port 18761
+Restart=on-failure
+RestartSec=3s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>机房与联网设备台账</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/rack.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#page">跳到主要内容</a>
+  <main id="login" class="login-screen">
+    <section class="login-card" aria-labelledby="login-title">
+      <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+      <h1 id="login-title">机房与联网设备台账</h1>
+      <p class="muted">登录后查看授权范围内的台账与档案。</p>
+      <form id="login-form" class="stack">
+        <label>用户名<input name="username" autocomplete="username" required></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+        <p id="login-error" class="form-error" role="alert" hidden></p>
+        <button class="button primary" type="submit" disabled>登录</button>
+      </form>
+    </section>
+  </main>
+
+  <div id="workspace" class="workspace" hidden>
+    <aside class="sidebar" aria-label="工作区">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div><strong>联网设备台账</strong><span>机房与资产管理</span></div>
+      </div>
+      <nav class="nav" aria-label="主要导航">
+        <a href="#rack" data-route="rack"><span class="nav-icon" data-icon="rack" aria-hidden="true"></span>机柜视图</a>
+        <a href="#devices" data-route="devices"><span class="nav-icon" data-icon="devices" aria-hidden="true"></span>设备台账</a>
+        <a href="#systems" data-route="systems"><span class="nav-icon" data-icon="systems" aria-hidden="true"></span>业务系统</a>
+        <a href="#projects" data-route="projects"><span class="nav-icon" data-icon="projects" aria-hidden="true"></span>项目档案</a>
+      </nav>
+      <div class="sidebar-footer"><span aria-hidden="true"></span>模拟数据</div>
+    </aside>
+    <div class="workspace-main">
+      <header class="topbar">
+        <div id="breadcrumb" class="breadcrumb"></div>
+        <div class="session">
+          <span id="scope" class="scope"></span>
+          <button id="logout" class="button quiet small" type="button">退出</button>
+        </div>
+      </header>
+      <main id="page" class="page" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <dialog id="drawer" class="drawer" aria-labelledby="drawer-title">
+    <div id="drawer-content" class="drawer-content"></div>
+  </dialog>
+  <dialog id="editor" class="editor" aria-labelledby="editor-title">
+    <div id="editor-content" class="editor-content"></div>
+  </dialog>
+  <dialog id="pdf-preview" class="pdf-preview" aria-labelledby="pdf-title">
+    <div id="pdf-content" class="pdf-content"></div>
+  </dialog>
+  <div id="status-message" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
