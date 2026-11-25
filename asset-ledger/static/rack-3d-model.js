@@ -1,21 +1,11 @@
 import * as THREE from './vendor/three/three.module.min.js';
+import {
+  DEPTH_COLORS, DETAIL_Z, OPERATING_LAMP_X, OPERATING_LAMP_Z, PANEL_Z,
+  RACK_DEPTH, RACK_WIDTH, STATUS_COLORS, SURFACES, TYPE_ACCENTS,
+  deviceMetrics, normalizeDepth, normalizeStatus, rackSummaryColor,
+} from './rack-geometry.js';
+import { createDeviceLabelTexture, createRackScaleTexture } from './rack-textures.js';
 
-const SURFACES = {
-  frame: [0x232b31, .57, .27],
-  rail: [0x525d64, .55, .34],
-  trim: [0x3b454d, .52, .30],
-  cover: [0x303a41, .65, .23],
-  chassis: [0x3c454c, .68, .16],
-  panel: [0x48515a, .62, .18],
-  inset: [0x131a20, .78, .10],
-  socket: [0x151d22, .74, .20],
-  screw: [0x79848c, .49, .46],
-  scale: [0x9ba9ae, .62, .16],
-  foot: [0x252a2c, .86, .08],
-};
-const TYPE_ACCENTS = { server: 0x7295b6, network: 0x547780, power: 0xd1a157, storage: 0x9d8daf };
-const PANEL_Z = .573;
-const DETAIL_Z = .596;
 const LAMP_PERIOD_MS = 3200;
 const LAMP_FRAME_MS = 80;
 
@@ -43,19 +33,49 @@ function beveledBox(width, height, depth, edge) {
 
 const accent = (kind) => `accent/${kind}`;
 
-function rackPalette() {
+export function createRackPalette() {
   const materials = new Map();
-  return (surface) => {
+  const scaleMaterials = new Map();
+  const textures = [];
+
+  function materialFor(surface) {
     if (!materials.has(surface)) {
       if (SURFACES[surface]) {
         materials.set(surface, material(...SURFACES[surface]));
       } else {
         const color = TYPE_ACCENTS[surface.slice('accent/'.length)] ?? TYPE_ACCENTS.server;
-        materials.set(surface, material(color, .72, .10));
+        materials.set(surface, material(color, 0.72, 0.10));
       }
     }
     return materials.get(surface);
-  };
+  }
+
+  function scaleMaterial(rackHeight) {
+    if (!scaleMaterials.has(rackHeight)) {
+      const texture = createRackScaleTexture(rackHeight);
+      if (!texture) return null;
+      textures.push(texture);
+      scaleMaterials.set(rackHeight, new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+      }));
+    }
+    return scaleMaterials.get(rackHeight);
+  }
+
+  function dispose() {
+    for (const mat of materials.values()) mat.dispose();
+    for (const mat of scaleMaterials.values()) mat.dispose();
+    for (const tex of textures) tex.dispose();
+    materials.clear();
+    scaleMaterials.clear();
+    textures.length = 0;
+  }
+
+  return Object.assign(materialFor, { scaleMaterial, dispose });
 }
 
 function instancedBoxes(parent, materialFor) {
@@ -80,7 +100,6 @@ function instancedBoxes(parent, materialFor) {
       const mesh = new THREE.InstancedMesh(geometry, materialFor(surface), matrices.length);
       matrices.forEach((transform, index) => mesh.setMatrixAt(index, transform));
       mesh.instanceMatrix.needsUpdate = true;
-      mesh.receiveShadow = true;
       parent.add(mesh);
       meshes.push(mesh);
     }
@@ -89,6 +108,21 @@ function instancedBoxes(parent, materialFor) {
   }
 
   return { add, finish };
+}
+
+function addScaleStrips(parent, rackHeight, unit, scaleMat) {
+  if (!scaleMat) return;
+  const stripHeight = rackHeight * unit;
+  const geometry = new THREE.PlaneGeometry(0.088, stripHeight);
+  const centerY = stripHeight / 2;
+  for (const face of [-1, 1]) {
+    for (const side of [-1, 1]) {
+      const strip = new THREE.Mesh(geometry, scaleMat);
+      strip.position.set(side * 0.905, centerY, face * (DETAIL_Z + 0.008));
+      if (face < 0) strip.rotation.y = Math.PI;
+      parent.add(strip);
+    }
+  }
 }
 
 function buildOperatingLamps(parent, entries, unit) {
@@ -112,7 +146,7 @@ function buildOperatingLamps(parent, entries, unit) {
     for (const device of running) {
       const onFront = device.face === 'front';
       const height = (device.u_start - 1 + device.u_height / 2) * unit;
-      position.set(.778, height, (onFront ? 1 : -1) * (DETAIL_Z + .009));
+      position.set(OPERATING_LAMP_X, height, (onFront ? 1 : -1) * OPERATING_LAMP_Z);
       indices.push(matrices.length);
       matrices.push(local.compose(position, onFront ? front : rear, normalSize).clone().premultiply(world));
     }
@@ -125,7 +159,7 @@ function buildOperatingLamps(parent, entries, unit) {
   const brightColor = new THREE.Color(0x8ce9a9);
   const pulseColor = new THREE.Color();
   const nearScale = new THREE.Vector3(1.30, 1.30, 1);
-  const mesh = new THREE.InstancedMesh(new THREE.CircleGeometry(.023, 8),
+  const mesh = new THREE.InstancedMesh(new THREE.CircleGeometry(0.023, 8),
     new THREE.MeshBasicMaterial({ toneMapped: false }), matrices.length);
   mesh.name = 'running-device-lamps';
   matrices.forEach((matrix, index) => {
@@ -144,7 +178,11 @@ function buildOperatingLamps(parent, entries, unit) {
     mesh.instanceColor.needsUpdate = true;
   }
   return {
+    mesh,
     hasNearbyLamps: () => animated.length > 0,
+    setVisible(visible) {
+      mesh.visible = visible;
+    },
     setNearbyRacks(rackIds) {
       paint(steadyColor);
       for (const index of animated) mesh.setMatrixAt(index, matrices[index]);
@@ -159,7 +197,7 @@ function buildOperatingLamps(parent, entries, unit) {
     steady: () => paint(steadyColor),
     pulse(time) {
       const phase = (time % LAMP_PERIOD_MS) / LAMP_PERIOD_MS;
-      const amount = .5 - .5 * Math.cos(phase * Math.PI * 2);
+      const amount = 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
       paint(pulseColor.lerpColors(dimColor, brightColor, amount));
     },
   };
@@ -186,7 +224,7 @@ export function animateOperatingLamps(viewport, lamps, redraw) {
 
   function canAnimate() {
     // 观察器异步回调可能滞后，以当前画布位置决定是否继续刷帧。
-    return !disposed && !document.hidden && !motion.matches && lamps.hasNearbyLamps() && isInViewport();
+    return !disposed && !document.hidden && !motion.matches && lamps.mesh.visible && lamps.hasNearbyLamps() && isInViewport();
   }
   function sync() {
     if (!canAnimate()) {
@@ -223,132 +261,233 @@ export function animateOperatingLamps(viewport, lamps, redraw) {
 }
 
 // 机柜本地空间的 +Z 为正面。medium 标记用于总览也需要保留的外形细节。
-function describeRack({ rack, devices, deviceKind, unit }, { solid, detail }, includeFine = true) {
+function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = false }, { solid, detail }, includeFine = true) {
   const height = rack.height * unit;
-  solid('cover', [1.98, .077, 1.27], [0, height + .065, 0], .012);
-  solid('cover', [1.98, .077, 1.27], [0, -.070, 0], .012);
+  solid('cover', [RACK_WIDTH, 0.077, RACK_DEPTH], [0, height + 0.065, 0], 0.012);
+  solid('cover', [RACK_WIDTH, 0.077, RACK_DEPTH], [0, -0.070, 0], 0.012);
   for (const side of [-1, 1]) {
-    detail('trim', [.07, .038, 1.15], [side * .89, height + .012, 0], true);
-    detail('trim', [.07, .038, 1.15], [side * .89, -.018, 0], true);
+    detail('trim', [0.07, 0.038, 1.15], [side * 0.89, height + 0.012, 0], true);
+    detail('trim', [0.07, 0.038, 1.15], [side * 0.89, -0.018, 0], true);
     for (const face of [-1, 1]) {
-      solid('frame', [.095, height + .10, .095], [side * .92, height / 2, face * .553], .009);
-      detail('rail', [.055, height + .018, .035], [side * .844, height / 2, face * .568], true);
-      detail('trim', [.022, height + .018, .046], [side * .885, height / 2, face * .555], true);
-      detail('foot', [.13, .053, .14], [side * .89, -.134, face * .50], true);
-      if (!includeFine) continue;
+      solid('frame', [0.095, height + 0.10, 0.095], [side * 0.92, height / 2, face * 0.553], 0.009);
+      detail('rail', [0.055, height + 0.018, 0.035], [side * 0.844, height / 2, face * 0.568], true);
+      detail('trim', [0.022, height + 0.018, 0.046], [side * 0.885, height / 2, face * 0.555], true);
+      detail('foot', [0.13, 0.053, 0.14], [side * 0.89, -0.134, face * 0.50], true);
+      if (!includeFine || reserveNameplate) continue;
       for (let u = 1; u <= rack.height; u += 1) {
-        const center = (u - .5) * unit;
-        for (const offset of [-.26, 0, .26]) {
-          detail('inset', [.020, unit * .115, .004], [side * .844, center + offset * unit, face * .588]);
+        const center = (u - 0.5) * unit;
+        for (const offset of [-0.26, 0, 0.26]) {
+          detail('inset', [0.020, unit * 0.115, 0.004], [side * 0.844, center + offset * unit, face * 0.588]);
         }
         if (u === 1 || u === rack.height || u % 5 === 0) {
-          detail('scale', [.022, .006, .003], [side * .918, center, face * .603]);
+          detail('scale', [0.022, 0.006, 0.003], [side * 0.918, center, face * 0.603]);
         }
       }
     }
   }
   if (includeFine) {
     for (let slot = -7; slot <= 7; slot += 1) {
-      detail('inset', [.045, .003, .34], [slot * .072, height + .105, 0]);
+      detail('inset', [0.045, 0.003, 0.34], [slot * 0.072, height + 0.105, 0]);
     }
   }
 
   function metalFace(device, sign, center, faceHeight, kind) {
-    solid('panel', [1.738, faceHeight, .040], [0, center, sign * PANEL_Z], .005, device, kind);
+    solid('panel', [1.738, faceHeight, 0.040], [0, center, sign * PANEL_Z], 0.005, device, kind);
     if (!includeFine) return;
     // 面板耳与螺栓只提供外观，拾取使用背后的整块面板。
     for (const side of [-1, 1]) {
-      detail('trim', [.050, faceHeight * .86, .008], [side * .833, center, sign * DETAIL_Z]);
-      detail('screw', [.018, .018, .003], [side * .834, center, sign * (DETAIL_Z + .005)]);
+      detail('trim', [0.050, faceHeight * 0.86, 0.008], [side * 0.833, center, sign * DETAIL_Z]);
+      detail('screw', [0.018, 0.018, 0.003], [side * 0.834, center, sign * (DETAIL_Z + 0.005)]);
     }
   }
 
   function frontDetail(kind, sign, center, faceHeight, units) {
     const frontZ = sign * DETAIL_Z;
-    detail(accent(kind), [.039, Math.min(.040, faceHeight * .34), .004], [-.762, center, frontZ],
-      [.080, Math.min(.052, faceHeight * .46), .004]);
+    if (!reserveNameplate) {
+      detail(accent(kind), [0.039, Math.min(0.040, faceHeight * 0.34), 0.004], [-0.762, center, frontZ],
+        [0.080, Math.min(0.052, faceHeight * 0.46), 0.004]);
+    }
     if (!includeFine) return;
+    const areaCenter = reserveNameplate ? 0.25 : 0;
+    const areaWidth = reserveNameplate ? 0.86 : 1.14;
     if (kind === 'network') {
+      const portsPerBank = reserveNameplate ? 5 : 6;
+      const step = reserveNameplate ? 0.075 : 0.087;
       for (const bank of [-1, 1]) {
-        for (let port = 0; port < 6; port += 1) {
-          const x = bank * .316 + (port - 2.5) * .087;
+        for (let port = 0; port < portsPerBank; port += 1) {
+          const x = areaCenter + bank * (reserveNameplate ? 0.22 : 0.316) + (port - (portsPerBank - 1) / 2) * step;
           for (const row of [-1, 1]) {
-            const y = center + row * Math.min(.022, faceHeight * .19);
-            detail('rail', [.071, .027, .004], [x, y, frontZ]);
-            detail('socket', [.052, .017, .004], [x, y, sign * (DETAIL_Z + .003)]);
+            const y = center + row * Math.min(0.022, faceHeight * 0.19);
+            detail('rail', [step * 0.82, 0.027, 0.004], [x, y, frontZ]);
+            detail('socket', [step * 0.60, 0.017, 0.004], [x, y, sign * (DETAIL_Z + 0.003)]);
           }
         }
       }
-      for (const offset of [-.012, .012]) {
-        detail('inset', [.014, .006, .005], [.737, center + offset, frontZ]);
+      for (const offset of [-0.012, 0.012]) {
+        detail('inset', [0.014, 0.006, 0.005], [0.737, center + offset, frontZ]);
       }
       return;
     }
     if (kind === 'power') {
-      for (let outlet = 0; outlet < 6; outlet += 1) {
-        const x = (outlet - 2.5) * .172;
-        detail('rail', [.111, .066, .005], [x, center, frontZ]);
-        detail('socket', [.093, .048, .005], [x, center, sign * (DETAIL_Z + .003)]);
-        for (const offset of [-.024, .024]) {
-          detail('screw', [.011, .014, .003], [x + offset, center, sign * (DETAIL_Z + .005)]);
+      const outlets = reserveNameplate ? 5 : 6;
+      const pitch = reserveNameplate ? 0.165 : 0.172;
+      for (let outlet = 0; outlet < outlets; outlet += 1) {
+        const x = areaCenter + (outlet - (outlets - 1) / 2) * pitch;
+        detail('rail', [0.105, 0.066, 0.005], [x, center, frontZ]);
+        detail('socket', [0.088, 0.048, 0.005], [x, center, sign * (DETAIL_Z + 0.003)]);
+        for (const offset of [-0.022, 0.022]) {
+          detail('screw', [0.011, 0.014, 0.003], [x + offset, center, sign * (DETAIL_Z + 0.005)]);
         }
       }
-      detail(accent(kind), [.055, .043, .008], [.685, center, frontZ]);
+      detail(accent(kind), [0.048, 0.043, 0.008], [0.705, center, frontZ]);
       return;
     }
 
-    const columns = kind === 'storage' ? 5 : 7;
+    const columns = kind === 'storage' ? (reserveNameplate ? 4 : 5) : (reserveNameplate ? 5 : 7);
     const rows = Math.min(3, Math.max(1, Math.ceil(units / 1.7)));
-    const pitch = 1.14 / columns;
-    const rowHeight = Math.min(.080, faceHeight * .86 / rows);
+    const pitch = areaWidth / columns;
+    const rowHeight = Math.min(0.080, faceHeight * 0.86 / rows);
     for (let row = 0; row < rows; row += 1) {
       const y = center + (row - (rows - 1) / 2) * rowHeight;
       for (let bay = 0; bay < columns; bay += 1) {
-        const x = -.07 + (bay - (columns - 1) / 2) * pitch;
-        detail('inset', [pitch - .013, rowHeight * .80, .006], [x, y, frontZ]);
-        detail('trim', [pitch - .031, .013, .005], [x, y - rowHeight * .13, sign * (DETAIL_Z + .004)]);
+        const x = (reserveNameplate ? areaCenter : -0.07) + (bay - (columns - 1) / 2) * pitch;
+        detail('inset', [pitch - 0.013, rowHeight * 0.80, 0.006], [x, y, frontZ]);
+        detail('trim', [pitch - 0.031, 0.013, 0.005], [x, y - rowHeight * 0.13, sign * (DETAIL_Z + 0.004)]);
       }
     }
-    for (const offset of [-.024, 0, .024]) {
-      detail('inset', [.014, .006, .004], [.683, center + offset, frontZ]);
+    for (const offset of [-0.024, 0, 0.024]) {
+      detail('inset', [0.014, 0.006, 0.004], [0.715, center + offset, frontZ]);
     }
   }
 
   function backDetail(kind, sign, center, faceHeight) {
     if (includeFine) {
-      for (const centerX of [-.57, -.30]) {
+      const shift = reserveNameplate ? 0.24 : 0;
+      for (const centerX of (reserveNameplate ? [shift - 0.16, shift + 0.10] : [-0.57, -0.30])) {
         for (let slot = 0; slot < 5; slot += 1) {
-          const y = center + (slot - 2) * Math.min(.017, faceHeight * .16);
-          detail('inset', [.206, .008, .004], [centerX, y, sign * DETAIL_Z]);
+          const y = center + (slot - 2) * Math.min(0.017, faceHeight * 0.16);
+          detail('inset', [0.206, 0.008, 0.004], [centerX, y, sign * DETAIL_Z]);
         }
       }
-      for (const x of [-.04, .08, .20, .37]) {
-        detail('rail', [.072, .039, .005], [x, center, sign * DETAIL_Z]);
-        detail('socket', [.054, .025, .005], [x, center, sign * (DETAIL_Z + .003)]);
+      for (const x of (reserveNameplate ? [shift + 0.28, shift + 0.39] : [-0.04, 0.08, 0.20, 0.37])) {
+        detail('rail', [0.072, 0.039, 0.005], [x, center, sign * DETAIL_Z]);
+        detail('socket', [0.054, 0.025, 0.005], [x, center, sign * (DETAIL_Z + 0.003)]);
       }
-      detail('inset', [.115, .053, .006], [.61, center, sign * DETAIL_Z]);
+      if (!reserveNameplate) detail('inset', [0.115, 0.053, 0.006], [0.61, center, sign * DETAIL_Z]);
     }
-    detail(accent(kind), [.018, .009, .004], [.710, center, sign * DETAIL_Z], [.042, .017, .004]);
+    if (!reserveNameplate) {
+      detail(accent(kind), [0.018, 0.009, 0.004], [0.710, center, sign * DETAIL_Z], [0.042, 0.017, 0.004]);
+    }
   }
 
   for (const device of devices) {
-    const sign = device.face === 'front' ? 1 : -1;
-    const full = device.mount_depth === 'full';
-    const center = (device.u_start - 1 + device.u_height / 2) * unit;
-    const faceHeight = device.u_height * unit - .006;
+    const metrics = deviceMetrics(device, unit);
     const kind = deviceKind(device);
-    solid('chassis', [1.665, faceHeight, full ? 1.11 : .53], [0, center, full ? 0 : .29 * sign], .007, device);
-    metalFace(device, sign, center, faceHeight, kind);
-    frontDetail(kind, sign, center, faceHeight, device.u_height);
-    if (full) {
-      metalFace(device, -sign, center, faceHeight, kind);
-      backDetail(kind, -sign, center, faceHeight);
+    solid('chassis', [1.665, metrics.faceHeight, metrics.chassisDepth], [0, metrics.centerY, metrics.chassisCenterZ], 0.007, device);
+    metalFace(device, metrics.sign, metrics.centerY, metrics.faceHeight, kind);
+    frontDetail(kind, metrics.sign, metrics.centerY, metrics.faceHeight, device.u_height);
+    if (metrics.full) {
+      metalFace(device, -metrics.sign, metrics.centerY, metrics.faceHeight, kind);
+      backDetail(kind, -metrics.sign, metrics.centerY, metrics.faceHeight);
     }
   }
 }
 
-export function buildRackOverviewLayer(scene, { entries, unit, deviceKind }) {
-  const batches = instancedBoxes(scene, rackPalette());
+function buildSemanticOverlay(scene, entries, unit) {
+  const world = new THREE.Matrix4();
+  const local = new THREE.Matrix4();
+  const axis = new THREE.Vector3(0, 1, 0);
+  const pos = new THREE.Vector3();
+  const rot = new THREE.Quaternion();
+  const scl = new THREE.Vector3();
+
+  const rackMatrices = [];
+  const rackEntries = [];
+  const deviceMatrices = [];
+  const deviceEntries = [];
+
+  for (const entry of entries) {
+    const { rack, devices, x, y, z } = entry;
+    world.compose(pos.set(x, y, z), rot.setFromAxisAngle(axis, THREE.MathUtils.degToRad(entry.rotation)), scl.setScalar(entry.scale));
+    const height = rack.height * unit;
+    local.compose(pos.set(0, height + 0.125, 0), rot.identity(), scl.set(RACK_WIDTH * 0.96, 0.036, RACK_DEPTH * 0.96));
+    rackEntries.push({ rack, devices });
+    rackMatrices.push(local.clone().premultiply(world));
+
+    for (const device of devices) {
+      const m = deviceMetrics(device, unit);
+      local.compose(pos.set(0, m.centerY, m.sign * (DETAIL_Z + 0.014)), rot.identity(), scl.set(1.75, m.faceHeight, 0.018));
+      deviceEntries.push(device);
+      deviceMatrices.push(local.clone().premultiply(world));
+      if (m.full) {
+        local.compose(pos.set(0, m.centerY, -m.sign * (DETAIL_Z + 0.014)), rot.identity(), scl.set(1.75, m.faceHeight, 0.018));
+        deviceEntries.push(device);
+        deviceMatrices.push(local.clone().premultiply(world));
+      }
+    }
+  }
+
+  const group = new THREE.Group();
+  group.name = 'room-semantic-overlay';
+  group.visible = false;
+  const box = new THREE.BoxGeometry(1, 1, 1);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.08 });
+  const color = new THREE.Color();
+
+  let rackMesh;
+  if (rackMatrices.length) {
+    rackMesh = new THREE.InstancedMesh(box, mat, rackMatrices.length);
+    rackMatrices.forEach((m, i) => {
+      rackMesh.setMatrixAt(i, m);
+      rackMesh.setColorAt(i, color.setHex(0xffffff));
+    });
+    rackMesh.instanceMatrix.needsUpdate = true;
+    rackMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    group.add(rackMesh);
+  }
+
+  let deviceMesh;
+  if (deviceMatrices.length) {
+    deviceMesh = new THREE.InstancedMesh(box, mat, deviceMatrices.length);
+    deviceMatrices.forEach((m, i) => {
+      deviceMesh.setMatrixAt(i, m);
+      deviceMesh.setColorAt(i, color.setHex(0xffffff));
+    });
+    deviceMesh.instanceMatrix.needsUpdate = true;
+    deviceMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    group.add(deviceMesh);
+  }
+
+  scene.add(group);
+
+  function setMode(mode) {
+    if (mode === 'appearance') {
+      group.visible = false;
+      return;
+    }
+    if (rackMesh) {
+      rackEntries.forEach(({ rack, devices }, i) => {
+        rackMesh.setColorAt(i, color.setHex(rackSummaryColor(rack, devices, mode)));
+      });
+      rackMesh.instanceColor.needsUpdate = true;
+    }
+    if (deviceMesh) {
+      deviceEntries.forEach((device, i) => {
+        const hex = mode === 'status'
+          ? STATUS_COLORS[normalizeStatus(device)]
+          : DEPTH_COLORS[normalizeDepth(device)];
+        deviceMesh.setColorAt(i, color.setHex(hex));
+      });
+      deviceMesh.instanceColor.needsUpdate = true;
+    }
+    group.visible = true;
+  }
+
+  return { group, setMode };
+}
+
+export function buildRackOverviewLayer(scene, { entries, unit, deviceKind, palette = createRackPalette() }) {
+  const batches = instancedBoxes(scene, palette);
   const world = new THREE.Matrix4();
   const axis = new THREE.Vector3(0, 1, 0);
   const position = new THREE.Vector3();
@@ -369,31 +508,46 @@ export function buildRackOverviewLayer(scene, { entries, unit, deviceKind }) {
       },
     }, false);
   }
-  return { meshes: batches.finish(), lamps: buildOperatingLamps(scene, entries, unit) };
+  const meshes = batches.finish();
+  const lamps = buildOperatingLamps(scene, entries, unit);
+  const semantic = buildSemanticOverlay(scene, entries, unit);
+  return {
+    meshes,
+    lamps,
+    setMode(mode) {
+      lamps?.setVisible(mode === 'appearance');
+      semantic.setMode(mode);
+    },
+  };
 }
 
 export function buildRackFineDetails(group, options) {
-  const batches = instancedBoxes(group, rackPalette());
+  const palette = options.palette ?? createRackPalette();
+  const batches = instancedBoxes(group, palette);
   describeRack(options, {
     solid() {},
     detail(surface, size, center, medium) {
       if (!medium) batches.add(surface, size, center);
     },
   });
-  return { meshes: batches.finish() };
+  const meshes = batches.finish();
+  addScaleStrips(group, options.rack.height, options.unit, palette.scaleMaterial(options.rack.height));
+  return { meshes };
 }
 
 export function buildRackModel(scene, options) {
-  const materialFor = rackPalette();
+  const materialFor = createRackPalette();
   const details = instancedBoxes(scene, materialFor);
   const solids = new Map();
   const frontPanels = new Map();
+  const deviceMeshes = new Map();
   const parts = [];
+  const labelTextures = [];
 
   function panelFor(device, kind) {
     const id = String(device.id);
     if (!frontPanels.has(id)) {
-      // 同一设备正背面的高亮由同一材质控制。
+      // 同一设备正背面的高亮与状态着色由同一材质控制。
       const panel = material(...SURFACES.panel);
       panel.emissive.setHex(TYPE_ACCENTS[kind] ?? TYPE_ACCENTS.server);
       panel.emissiveIntensity = 0;
@@ -407,32 +561,103 @@ export function buildRackModel(scene, options) {
     if (!solids.has(key)) solids.set(key, beveledBox(...size, edge));
     const mesh = new THREE.Mesh(solids.get(key), surface === 'panel' ? panelFor(device, kind) : materialFor(surface));
     mesh.position.set(...center);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
     scene.add(mesh);
     if (device) {
       mesh.userData.device = device;
       parts.push(mesh);
+      const id = String(device.id);
+      if (surface === 'panel' && !deviceMeshes.has(id)) {
+        deviceMeshes.set(id, { device, panel: mesh.material, kind });
+      }
     }
   }
 
-  describeRack(options, {
+  describeRack({ ...options, reserveNameplate: true }, {
     solid,
     detail(surface, size, center) { details.add(surface, size, center); },
   });
   details.finish();
+  addScaleStrips(scene, options.rack.height, options.unit, materialFor.scaleMaterial(options.rack.height));
 
-  let selected;
-  function highlight(deviceId) {
-    const panel = deviceId == null ? undefined : frontPanels.get(String(deviceId));
-    if (panel === selected) return;
-    if (selected) selected.emissiveIntensity = 0;
-    if (panel) panel.emissiveIntensity = .24;
-    selected = panel;
+  // 为每台设备添加正面（及全深背面）铭牌贴图。
+  const plateGeomCache = new Map();
+  for (const device of options.devices) {
+    const kind = options.deviceKind(device);
+    const texture = createDeviceLabelTexture(device, kind);
+    if (!texture) continue;
+    labelTextures.push(texture);
+    const m = deviceMetrics(device, options.unit);
+    const plateH = Math.min(0.088, m.faceHeight * 0.78);
+    const plateW = 0.62;
+    const key = `${plateW}/${plateH.toFixed(4)}`;
+    if (!plateGeomCache.has(key)) plateGeomCache.set(key, new THREE.PlaneGeometry(plateW, plateH));
+    const plateMat = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    });
+    const addPlate = (sign) => {
+      const plate = new THREE.Mesh(plateGeomCache.get(key), plateMat);
+      plate.position.set(-0.46, m.centerY, sign * (DETAIL_Z + 0.005));
+      if (sign < 0) plate.rotation.y = Math.PI;
+      scene.add(plate);
+    };
+    addPlate(m.sign);
+    if (m.full) addPlate(-m.sign);
   }
 
-  const lamps = buildOperatingLamps(scene, [{ rack: options.rack, devices: options.devices, x: 0, y: 0, z: 0,
-    rotation: 0, scale: 1 }], options.unit);
+  let selected;
+  let currentMode = 'appearance';
+
+  function applyPanelStyle(entry, isHovered) {
+    const panel = entry.panel;
+    if (!panel) return;
+    if (currentMode === 'appearance') {
+      panel.color.setHex(SURFACES.panel[0]);
+      panel.emissive.setHex(TYPE_ACCENTS[entry.kind] ?? TYPE_ACCENTS.server);
+      panel.emissiveIntensity = isHovered ? 0.24 : 0;
+    } else if (currentMode === 'status') {
+      const hex = STATUS_COLORS[normalizeStatus(entry.device)];
+      panel.color.setHex(hex);
+      panel.emissive.setHex(hex);
+      panel.emissiveIntensity = isHovered ? 0.42 : 0.14;
+    } else if (currentMode === 'depth') {
+      const hex = DEPTH_COLORS[normalizeDepth(entry.device)];
+      panel.color.setHex(hex);
+      panel.emissive.setHex(hex);
+      panel.emissiveIntensity = isHovered ? 0.42 : 0.14;
+    }
+  }
+
+  function highlight(deviceId) {
+    const nextId = deviceId == null ? undefined : String(deviceId);
+    if (nextId === selected) return;
+    const prevId = selected;
+    selected = nextId;
+    if (prevId && deviceMeshes.has(prevId)) applyPanelStyle(deviceMeshes.get(prevId), false);
+    if (nextId && deviceMeshes.has(nextId)) applyPanelStyle(deviceMeshes.get(nextId), true);
+  }
+
+  const lamps = buildOperatingLamps(scene, [{
+    rack: options.rack, devices: options.devices, x: 0, y: 0, z: 0, rotation: 0, scale: 1,
+  }], options.unit);
   lamps?.setNearbyRacks([options.rack.id]);
-  return { parts, highlight, lamps };
+
+  function setMode(mode) {
+    currentMode = mode;
+    lamps?.setVisible(mode === 'appearance');
+    for (const [id, entry] of deviceMeshes) applyPanelStyle(entry, id === selected);
+  }
+
+  return {
+    parts,
+    highlight,
+    lamps,
+    setMode,
+    disposeExtra() {
+      materialFor.dispose();
+      for (const tex of labelTextures) tex.dispose();
+    },
+  };
 }

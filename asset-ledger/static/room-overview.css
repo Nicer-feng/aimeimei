@@ -125,6 +125,46 @@ button.room-3d-label { pointer-events: auto; }
   background: var(--surface);
 }
 
+.room-3d-toolbar-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.room-3d-legend {
+  position: absolute;
+  left: 0.65rem;
+  bottom: 0.65rem;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  max-width: calc(100% - 1.3rem);
+  padding: 0.34rem 0.62rem;
+  border: 1px solid #c3d3cb;
+  border-radius: 0.48rem;
+  background: #fcfefde8;
+  box-shadow: 0 2px 8px #1e392718;
+  font-size: 0.76rem;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.room-3d-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+  white-space: nowrap;
+}
+
+.room-3d-legend-dot {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
 .room-3d-hint { color: var(--muted); font-size: 0.82rem; }
 .room-overview-plan { padding: clamp(0.55rem, 2.8vw, 1.2rem); background: #eef5ef; }
 .room-overview-plan-scroll { max-height: min(70vh, 34rem); overflow: auto; padding: 0.35rem; }

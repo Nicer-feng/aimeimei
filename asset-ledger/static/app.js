@@ -23,6 +23,7 @@ const state = {
   roomOverview: null,
   roomViews: new Map(),
   rackOverviewRoomId: null,
+  pendingRackDevice: null,
 };
 const titles = { rooms: '机房总览', rack: '机柜视图', devices: '设备台账', systems: '业务系统', projects: '项目档案' };
 const collectionRoutes = { device: 'devices', system: 'systems', project: 'projects' };
@@ -107,6 +108,7 @@ function showLogin(message = '') {
   disposeRoomOverview();
   state.roomViews.clear();
   state.rackOverviewRoomId = null;
+  state.pendingRackDevice = null;
   state.user = null;
   state.catalog = null;
   state.deviceFilters = blankFilters();
@@ -346,8 +348,9 @@ function renderRoomPage(requestedId, filterChanged) {
   page.append(host);
   const controller = renderRoomOverview(host, {
     room, layout, racks, devices, deviceKind, units, view: previous?.view,
-    onRack: (rack) => {
+    onRack: (rack, device) => {
       if (state.roomOverview) state.roomOverview.leavingScroll = window.scrollY;
+      state.pendingRackDevice = device ? { rackId: rack.id, device } : null;
       location.hash = `rack/${rack.id}`;
     },
     onEdit: userCanWrite() ? () => openRoomLayoutEditor(room, layout, racks) : undefined,
@@ -396,13 +399,17 @@ function renderRackPage(requestedId, view) {
     element('strong', {}, `${rack.name} · ${rack.height}U`),
     element('span', {}, joinedPath(unit?.name, site?.name, room?.name)),
   ));
+  const pending = state.pendingRackDevice?.rackId === rack.id ? state.pendingRackDevice : null;
+  state.pendingRackDevice = null;
   const rackHost = element('section', { id: 'rack-viewport', 'aria-label': `${rack.name} 机柜立面` });
   page.append(rackHost);
   state.rackView = renderRack(rackHost, {
     rack, devices, onDevice: openDeviceDrawer,
     onEmpty: userCanWrite() ? (slot) => openDeviceEditor(null, rack, slot) : undefined,
     view: view?.rackId === rack.id ? view : undefined,
+    initialDeviceId: pending?.device?.id,
   });
+  if (pending?.device) openDeviceDrawer(pending.device);
 }
 
 function systemMatchIds(query) {

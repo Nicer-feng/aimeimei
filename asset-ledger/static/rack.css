@@ -168,6 +168,46 @@
   border-top: 1px solid #dce5e9;
 }
 
+.rack-spatial-toolbar-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.rack-spatial-legend {
+  position: absolute;
+  left: 0.65rem;
+  bottom: 0.65rem;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  max-width: calc(100% - 1.3rem);
+  padding: 0.34rem 0.62rem;
+  border: 1px solid #cbd9df;
+  border-radius: 0.48rem;
+  background: #fdfefee8;
+  box-shadow: 0 2px 8px #22384418;
+  font-size: 0.76rem;
+  color: #243b47;
+  pointer-events: none;
+}
+
+.rack-spatial-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+  white-space: nowrap;
+}
+
+.rack-spatial-legend-dot {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
 .rack-camera-controls, .rack-spatial-devices { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .rack-camera-controls {
   gap: 0.14rem;

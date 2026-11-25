@@ -155,7 +155,7 @@ function elevation(rack, devices, face, onDevice, onEmpty) {
   return side;
 }
 
-export function renderRack(host, { rack, devices, onDevice, onEmpty, view }) {
+export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initialDeviceId }) {
   const viewBar = element('div', 'rack-view-bar');
   const modes = element('div', 'rack-mode-switch');
   modes.setAttribute('role', 'group');
@@ -208,7 +208,7 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view }) {
       const { mountRackScene } = await import('./rack-3d.js');
       if (removed || request !== generation) return;
       scene = mountRackScene(spatial, {
-        rack, devices, onDevice, deviceKind, units, depthLabel, initialCamera,
+        rack, devices, onDevice, deviceKind, units, depthLabel, initialCamera, initialDeviceId,
         onContextLost: () => showElevation('3D 已断开，已返回立面。'),
       });
       status.textContent = '';

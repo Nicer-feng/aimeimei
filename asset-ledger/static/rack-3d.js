@@ -1,14 +1,34 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
-import { animateOperatingLamps, buildRackModel } from './rack-3d-model.js?v=operating-status';
+import { RACK_UNIT } from './rack-geometry.js';
+import { animateOperatingLamps, buildRackModel } from './rack-3d-model.js';
 import { operatingStatusLabel } from './rack.js?v=operating-status';
 
-const UNIT = 0.12;
 const CAMERA_VIEWS = [
   { label: '斜视', direction: [0.65, 0.29, 1] },
   { label: '看正面', direction: [0, 0.035, 1] },
   { label: '看背面', direction: [0, 0.035, -1] },
 ];
+
+const RACK_MODES = [
+  { id: 'appearance', label: '外观' },
+  { id: 'status', label: '运行状态' },
+  { id: 'depth', label: '深度核查' },
+];
+
+const RACK_LEGENDS = {
+  status: [
+    ['#3fa86b', '运行中'],
+    ['#d14d43', '未通电'],
+    ['#7b8a94', '已停用'],
+    ['#d89b32', '待核实'],
+  ],
+  depth: [
+    ['#3b6998', '全深（占正背面）'],
+    ['#4b93a8', '半深（可共享 U 位）'],
+    ['#e5a131', '深度待核'],
+  ],
+};
 
 function addContactShadow(scene, bounds) {
   const stamp = document.createElement('canvas');
@@ -36,8 +56,12 @@ function addContactShadow(scene, bounds) {
   scene.add(shadow);
 }
 
-export function mountRackScene(host, { rack, devices, onDevice, deviceKind, units, depthLabel, onContextLost, initialCamera }) {
-  const initialView = initialCamera ?? { direction: CAMERA_VIEWS[0].direction, zoom: 1, activeView: 0 };
+export function mountRackScene(host, {
+  rack, devices, onDevice, deviceKind, units, depthLabel, onContextLost, initialCamera, initialDeviceId,
+}) {
+  const initialView = initialCamera ?? { direction: CAMERA_VIEWS[0].direction, zoom: 1, activeView: 0, viewMode: 'appearance' };
+  let viewMode = RACK_MODES.some((m) => m.id === initialView.viewMode) ? initialView.viewMode : 'appearance';
+
   const panel = document.createElement('div');
   panel.className = 'rack-spatial-panel';
   const viewport = document.createElement('div');
@@ -56,11 +80,16 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
   const tooltipName = document.createElement('strong');
   const tooltipPosition = document.createElement('span');
   tooltip.append(tooltipName, tooltipPosition);
-  viewport.append(canvas, tooltip);
+  const legend = document.createElement('div');
+  legend.className = 'rack-spatial-legend';
+  legend.hidden = true;
+  viewport.append(canvas, legend, tooltip);
   panel.append(viewport);
 
   const toolbar = document.createElement('div');
   toolbar.className = 'rack-spatial-toolbar';
+  const toolbarGroups = document.createElement('div');
+  toolbarGroups.className = 'rack-spatial-toolbar-groups';
   const rotation = document.createElement('div');
   rotation.className = 'rack-camera-controls';
   rotation.setAttribute('role', 'group');
@@ -72,16 +101,36 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     button.setAttribute('aria-pressed', String(index === initialView.activeView));
     button.addEventListener('click', () => {
       setActiveView(index);
-      frameView(new THREE.Vector3(...direction).normalize());
+      frameView(new THREE.Vector3(...direction).normalize(), 1, center);
     });
     rotation.append(button);
     return button;
   });
+
+  const modeGroup = document.createElement('div');
+  modeGroup.className = 'rack-camera-controls';
+  modeGroup.setAttribute('role', 'group');
+  modeGroup.setAttribute('aria-label', '着色模式');
+  const modeButtons = new Map();
+  for (const { id, label } of RACK_MODES) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.addEventListener('click', () => {
+      if (viewMode === id) return;
+      applyViewMode(id);
+      draw();
+    });
+    modeGroup.append(button);
+    modeButtons.set(id, button);
+  }
+  toolbarGroups.append(rotation, modeGroup);
+
   const hover = document.createElement('span');
   hover.className = 'rack-spatial-hover';
-  const hint = '拖动旋转，滚动缩放';
+  const hint = '左键旋转 · 右键平移 · 滚轮缩放';
   hover.textContent = hint;
-  toolbar.append(rotation, hover);
+  toolbar.append(toolbarGroups, hover);
   panel.append(toolbar);
 
   const shortcuts = document.createElement('div');
@@ -103,7 +152,7 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
   addLight(0xfff2e3, 3.3, [-4, 8, 6]);
   addLight(0xc2d9f6, 1.5, [4, 3, 3]);
   addLight(0xecf5ff, 2.6, [1, 5, -7]);
-  const model = buildRackModel(scene, { rack, devices, deviceKind, unit: UNIT });
+  const model = buildRackModel(scene, { rack, devices, deviceKind, unit: RACK_UNIT });
   const bounds = new THREE.Box3().setFromObject(scene);
   const center = bounds.getCenter(new THREE.Vector3());
   const corners = [];
@@ -123,19 +172,24 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
   let activeView = initialView.activeView;
   let applyingView = false;
   let sized = false;
-  controls.enablePan = false;
-  controls.minDistance = 1.32;
-  controls.minPolarAngle = 0.35;
-  controls.maxPolarAngle = 1.78;
+  controls.enablePan = true;
+  controls.screenSpacePanning = true;
+  controls.minDistance = 0.90;
+  controls.minPolarAngle = 0.25;
+  controls.maxPolarAngle = 1.82;
   controls.addEventListener('change', () => {
     if (applyingView) return;
+    clampTarget();
     setActiveView(-1);
     clearHover();
     draw();
   });
+
   const observer = new ResizeObserver(resize);
   observer.observe(viewport);
   const lampAnimation = animateOperatingLamps(viewport, model.lamps, draw);
+  applyViewMode(viewMode);
+  if (initialDeviceId != null) model.highlight(initialDeviceId);
   resize();
 
   canvas.addEventListener('pointerdown', (event) => {
@@ -172,11 +226,43 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
 
   return Object.assign(dispose, { snapshot });
 
+  function clampTarget() {
+    controls.target.x = THREE.MathUtils.clamp(controls.target.x, -1.0, 1.0);
+    controls.target.z = THREE.MathUtils.clamp(controls.target.z, -0.8, 0.8);
+    controls.target.y = THREE.MathUtils.clamp(controls.target.y, bounds.min.y, bounds.max.y);
+  }
+
+  function applyViewMode(mode) {
+    viewMode = mode;
+    for (const [id, button] of modeButtons) {
+      button.setAttribute('aria-pressed', String(id === mode));
+    }
+    model.setMode(mode);
+    const entries = RACK_LEGENDS[mode];
+    if (!entries) {
+      legend.hidden = true;
+      legend.replaceChildren();
+    } else {
+      legend.replaceChildren(...entries.map(([color, text]) => {
+        const item = document.createElement('span');
+        item.className = 'rack-spatial-legend-item';
+        const dot = document.createElement('i');
+        dot.className = 'rack-spatial-legend-dot';
+        dot.style.backgroundColor = color;
+        item.append(dot, text);
+        return item;
+      }));
+      legend.hidden = false;
+    }
+    lampAnimation?.sync();
+  }
+
   function dispose() {
     observer.disconnect();
     lampAnimation?.dispose();
     canvas.removeEventListener('webglcontextlost', contextLost);
     controls.dispose();
+    model.disposeExtra?.();
     const geometries = new Set();
     const materials = new Set();
     const textures = new Set();
@@ -198,10 +284,16 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
 
   function snapshot() {
     if (!sized) return undefined;
-    const offset = camera.position.clone().sub(center);
+    const offset = camera.position.clone().sub(controls.target);
     const distance = offset.length();
     const direction = offset.normalize();
-    return { direction: direction.toArray(), zoom: distance / fittedDistance(direction), activeView };
+    return {
+      direction: direction.toArray(),
+      zoom: distance / fittedDistance(direction),
+      target: controls.target.toArray(),
+      activeView,
+      viewMode,
+    };
   }
 
   function addLight(color, intensity, position) {
@@ -230,12 +322,13 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     )));
   }
 
-  function frameView(direction, zoom = 1) {
+  function frameView(direction, zoom = 1, target = center) {
     clearHover();
     const distance = fittedDistance(direction);
     controls.maxDistance = distance * 2.8;
-    controls.target.copy(center);
-    camera.position.copy(center).addScaledVector(direction, distance * zoom);
+    controls.target.copy(target);
+    clampTarget();
+    camera.position.copy(controls.target).addScaledVector(direction, distance * zoom);
     applyingView = true;
     controls.update();
     applyingView = false;
@@ -250,12 +343,14 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     const width = viewport.clientWidth;
     const viewportHeight = viewport.clientHeight;
     if (!width || !viewportHeight) return;
-    const { direction, zoom } = snapshot() ?? initialView;
+    const current = snapshot() ?? initialView;
     renderer.setSize(width, viewportHeight, false);
     camera.aspect = width / viewportHeight;
     camera.updateProjectionMatrix();
     sized = true;
-    frameView(new THREE.Vector3(...direction).normalize(), zoom);
+    const targetVec = Array.isArray(current.target) && current.target.length === 3
+      ? new THREE.Vector3(...current.target) : center;
+    frameView(new THREE.Vector3(...current.direction).normalize(), current.zoom, targetVec);
   }
 
   function pick(event) {
@@ -275,7 +370,7 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     tooltip.hidden = true;
     hover.textContent = hint;
     canvas.classList.remove('rack-spatial-hit');
-    model.highlight(null);
+    model.highlight(initialDeviceId ?? null);
     return true;
   }
 
