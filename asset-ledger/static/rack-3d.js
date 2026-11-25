@@ -1,29 +1,80 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
+import { buildRackModel } from './rack-3d-model.js';
 
 const UNIT = 0.12;
-const COLORS = { network: 0x36736d, power: 0x806429, storage: 0x60598b, server: 0x3a627e };
+const CAMERA_VIEWS = [
+  { label: '斜视', direction: [0.65, 0.29, 1] },
+  { label: '看正面', direction: [0, 0.035, 1] },
+  { label: '看背面', direction: [0, 0.035, -1] },
+];
+
+function addContactShadow(scene, bounds) {
+  const stamp = document.createElement('canvas');
+  stamp.width = stamp.height = 128;
+  const context = stamp.getContext('2d');
+  if (!context) return;
+  const fade = context.createRadialGradient(64, 64, 2, 64, 64, 64);
+  fade.addColorStop(0, '#283e4a51');
+  fade.addColorStop(0.52, '#283e4a35');
+  fade.addColorStop(0.79, '#283e4a16');
+  fade.addColorStop(1, '#283e4a00');
+  context.fillStyle = fade;
+  context.fillRect(0, 0, 128, 128);
+
+  const map = new THREE.CanvasTexture(stamp);
+  map.colorSpace = THREE.SRGBColorSpace;
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(size.x * 1.48, size.z * 1.65),
+    new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, toneMapped: false }),
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.set(center.x, bounds.min.y - 0.008, center.z);
+  scene.add(shadow);
+}
 
 export function mountRackScene(host, { rack, devices, onDevice, deviceKind, units, depthLabel, onContextLost }) {
   const panel = document.createElement('div');
   panel.className = 'rack-spatial-panel';
   const viewport = document.createElement('div');
   viewport.className = 'rack-spatial-viewport';
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.domElement.setAttribute('aria-label', `${rack.name} 三维机柜`);
-  renderer.domElement.setAttribute('role', 'img');
-  viewport.append(renderer.domElement);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.16;
+  const canvas = renderer.domElement;
+  canvas.setAttribute('aria-label', `${rack.name} 三维机柜`);
+  canvas.setAttribute('role', 'img');
+  const tooltip = document.createElement('div');
+  tooltip.className = 'rack-spatial-tooltip';
+  tooltip.hidden = true;
+  tooltip.setAttribute('aria-hidden', 'true');
+  const tooltipName = document.createElement('strong');
+  const tooltipPosition = document.createElement('span');
+  tooltip.append(tooltipName, tooltipPosition);
+  viewport.append(canvas, tooltip);
   panel.append(viewport);
 
   const toolbar = document.createElement('div');
   toolbar.className = 'rack-spatial-toolbar';
   const rotation = document.createElement('div');
   rotation.className = 'rack-camera-controls';
+  rotation.setAttribute('role', 'group');
   rotation.setAttribute('aria-label', '相机方向');
-  nextCameraButton('斜视', 0.7, 1);
-  nextCameraButton('看正面', 0, 1);
-  nextCameraButton('看背面', 0, -1);
+  const viewButtons = CAMERA_VIEWS.map(({ label, direction }, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.setAttribute('aria-pressed', String(index === 0));
+    button.addEventListener('click', () => {
+      setActiveView(index);
+      frameView(new THREE.Vector3(...direction).normalize());
+    });
+    rotation.append(button);
+    return button;
+  });
   const hover = document.createElement('span');
   hover.className = 'rack-spatial-hover';
   const hint = '拖动旋转，滚动缩放';
@@ -45,86 +96,71 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
   if (devices.length) panel.append(shortcuts);
   host.replaceChildren(panel);
 
-  const height = rack.height * UNIT;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xe9eef0);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x627682, 2.4));
-  const light = new THREE.DirectionalLight(0xffffff, 2.0);
-  light.position.set(4, 7, 5);
-  scene.add(light);
-
-  const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x405968, roughness: 0.72 });
-  const slotMaterial = new THREE.MeshStandardMaterial({ color: 0x9eafba, roughness: 0.9 });
-  const darkMaterial = new THREE.MeshStandardMaterial({ color: 0x24333e, roughness: 0.85 });
-  const labels = new THREE.MeshBasicMaterial({ color: 0xc7dade });
-  const materials = Object.fromEntries(Object.entries(COLORS).map(([kind, color]) => (
-    [kind, new THREE.MeshStandardMaterial({ color, roughness: 0.72 })]
-  )));
-  const parts = [];
-  for (const side of [-1, 1]) {
-    for (const face of [-1, 1]) {
-      box([0.095, height + 0.13, 0.095], [side * 0.90, height / 2, face * 0.56], frameMaterial);
-      for (let unit = 1; unit <= rack.height; unit += 1) {
-        box([0.062, 0.012, 0.102], [side * 0.84, (unit - 0.5) * UNIT, face * 0.56], slotMaterial);
-      }
+  scene.add(new THREE.HemisphereLight(0xf2f8ff, 0x687788, 1.8));
+  addLight(0xfff2e3, 3.3, [-4, 8, 6]);
+  addLight(0xc2d9f6, 1.5, [4, 3, 3]);
+  addLight(0xecf5ff, 2.6, [1, 5, -7]);
+  const model = buildRackModel(scene, { rack, devices, deviceKind, unit: UNIT });
+  const bounds = new THREE.Box3().setFromObject(scene);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const corners = [];
+  for (const x of [bounds.min.x, bounds.max.x]) {
+    for (const y of [bounds.min.y, bounds.max.y]) {
+      for (const z of [bounds.min.z, bounds.max.z]) corners.push(new THREE.Vector3(x, y, z).sub(center));
     }
   }
-  box([1.96, 0.085, 1.27], [0, height + 0.07, 0], frameMaterial);
-  box([1.96, 0.085, 1.27], [0, -0.07, 0], frameMaterial);
-  box([200, 0.1, 200], [0, -0.20, 0], new THREE.MeshStandardMaterial({ color: 0xe5ebee }));
+  addContactShadow(scene, bounds);
 
-  for (const device of devices) {
-    const face = device.face === 'front' ? 1 : -1;
-    const center = (device.u_start - 1 + device.u_height / 2) * UNIT;
-    const size = device.u_height * UNIT - 0.006;
-    const material = materials[deviceKind(device)];
-    const full = device.mount_depth === 'full';
-    const chassis = box([1.67, size, full ? 1.11 : 0.53], [0, center, full ? 0 : 0.29 * face], material);
-    chassis.userData.device = device;
-    const bezel = box([1.74, size, 0.045], [0, center, 0.57 * face], material);
-    bezel.userData.device = device;
-    parts.push(chassis, bezel);
-    box([0.46, Math.min(0.045, size * 0.52), 0.012], [-0.31, center, face * 0.599], darkMaterial);
-    for (let index = 0; index < 3; index += 1) {
-      box([0.06, 0.012, 0.013], [0.35 + 0.10 * index, center, face * 0.599], labels);
-    }
-  }
-
-  const camera = new THREE.PerspectiveCamera(38, 1, 0.06, 300);
+  const camera = new THREE.PerspectiveCamera(36, 1, 0.04, 120);
   const controls = new OrbitControls(camera, renderer.domElement);
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  let down;
+  let hovered;
+  let activeView = 0;
+  let applyingView = false;
+  let sized = false;
   controls.enablePan = false;
-  controls.minDistance = 1.4;
-  controls.maxDistance = Math.max(height * 4.0, 12);
+  controls.minDistance = 1.32;
   controls.minPolarAngle = 0.35;
-  controls.maxPolarAngle = 1.83;
-  controls.addEventListener('change', draw);
-  setCamera(0.7, 1);
-
+  controls.maxPolarAngle = 1.78;
+  controls.addEventListener('change', () => {
+    if (applyingView) return;
+    setActiveView(-1);
+    clearHover();
+    draw();
+  });
+  frameView(new THREE.Vector3(...CAMERA_VIEWS[0].direction).normalize());
   const observer = new ResizeObserver(resize);
   observer.observe(viewport);
   resize();
 
-  const raycaster = new THREE.Raycaster();
-  const pointer = new THREE.Vector2();
-  let down;
-  const canvas = renderer.domElement;
-  canvas.addEventListener('pointerdown', (event) => { down = [event.clientX, event.clientY]; });
+  canvas.addEventListener('pointerdown', (event) => {
+    if (event.button === 0 && event.isPrimary) {
+      down = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+    }
+  });
   canvas.addEventListener('pointercancel', () => { down = undefined; });
   canvas.addEventListener('pointermove', (event) => {
-    const hit = pick(event);
-    hover.textContent = hit ? `${hit.name} · ${units(hit)} · ${hit.u_height}U · ${depthLabel(hit)}` : hint;
-    canvas.classList.toggle('rack-spatial-hit', Boolean(hit));
+    if (down) {
+      if (Math.hypot(event.clientX - down.x, event.clientY - down.y) > 5) down.moved = true;
+      return;
+    }
+    if (event.pointerType === 'touch') return;
+    const device = pick(event);
+    if (device) showHover(device, event);
+    else if (clearHover()) draw();
   });
-  canvas.addEventListener('pointerleave', () => {
-    hover.textContent = hint;
-    canvas.classList.remove('rack-spatial-hit');
-  });
+  canvas.addEventListener('pointerleave', () => { if (clearHover()) draw(); });
   canvas.addEventListener('pointerup', (event) => {
-    const isClick = down && Math.hypot(event.clientX - down[0], event.clientY - down[1]) <= 5;
+    const isClick = down?.pointerId === event.pointerId && !down.moved &&
+      Math.hypot(event.clientX - down.x, event.clientY - down.y) <= 5;
     down = undefined;
     if (!isClick) return;
-    const hit = pick(event);
-    if (hit) onDevice(hit);
+    const device = pick(event);
+    if (clearHover()) draw();
+    if (device) onDevice(device);
   });
   const contextLost = (event) => {
     event.preventDefault();
@@ -136,35 +172,60 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     observer.disconnect();
     canvas.removeEventListener('webglcontextlost', contextLost);
     controls.dispose();
-    for (const mesh of scene.children) {
-      if (mesh.isMesh) mesh.geometry.dispose();
-    }
-    const usedMaterials = new Set(scene.children.filter((object) => object.isMesh).map((mesh) => mesh.material));
-    for (const material of usedMaterials) material.dispose();
+    const geometries = new Set();
+    const materials = new Set();
+    const textures = new Set();
+    scene.traverse((object) => {
+      if (!object.isMesh) return;
+      geometries.add(object.geometry);
+      for (const material of [].concat(object.material)) {
+        materials.add(material);
+        if (material.map) textures.add(material.map);
+      }
+      if (object.isInstancedMesh) object.dispose();
+    });
+    for (const geometry of geometries) geometry.dispose();
+    for (const material of materials) material.dispose();
+    for (const texture of textures) texture.dispose();
     renderer.dispose();
     renderer.forceContextLoss();
   };
 
-  function box(dimensions, position, material) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...dimensions), material);
-    mesh.position.set(...position);
-    scene.add(mesh);
-    return mesh;
+  function addLight(color, intensity, position) {
+    const light = new THREE.DirectionalLight(color, intensity);
+    light.position.set(...position);
+    scene.add(light);
   }
 
-  function nextCameraButton(label, side, face) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = label;
-    button.addEventListener('click', () => setCamera(side, face));
-    rotation.append(button);
+  function setActiveView(index) {
+    if (index === activeView) return;
+    activeView = index;
+    for (const [position, button] of viewButtons.entries()) {
+      button.setAttribute('aria-pressed', String(position === index));
+    }
   }
 
-  function setCamera(side, face) {
-    const distance = Math.max(height * 1.75, 4.4);
-    controls.target.set(0, height / 2, 0);
-    camera.position.set(side * distance * 0.57, height / 2 + distance * (side ? 0.23 : 0.015), distance * face);
+  function fittedDistance(direction) {
+    const right = new THREE.Vector3().crossVectors(camera.up, direction).normalize();
+    const up = new THREE.Vector3().crossVectors(direction, right);
+    const vertical = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.82;
+    const horizontal = vertical * camera.aspect;
+    // 按当前相机方向投影柜体的八个角，兼顾纵向高柜和窄屏横向空间。
+    return Math.max(...corners.map((corner) => corner.dot(direction) + Math.max(
+      Math.abs(corner.dot(right)) / horizontal,
+      Math.abs(corner.dot(up)) / vertical,
+    )));
+  }
+
+  function frameView(direction, zoom = 1) {
+    clearHover();
+    const distance = fittedDistance(direction);
+    controls.maxDistance = distance * 2.8;
+    controls.target.copy(center);
+    camera.position.copy(center).addScaledVector(direction, distance * zoom);
+    applyingView = true;
     controls.update();
+    applyingView = false;
     draw();
   }
 
@@ -174,12 +235,17 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
 
   function resize() {
     const width = viewport.clientWidth;
-    const height = viewport.clientHeight;
-    if (!width || !height) return;
-    renderer.setSize(width, height, false);
-    camera.aspect = width / height;
+    const viewportHeight = viewport.clientHeight;
+    if (!width || !viewportHeight) return;
+    const offset = camera.position.clone().sub(center);
+    const distance = offset.length();
+    const direction = offset.normalize();
+    const zoom = sized ? distance / fittedDistance(direction) : 1;
+    renderer.setSize(width, viewportHeight, false);
+    camera.aspect = width / viewportHeight;
     camera.updateProjectionMatrix();
-    draw();
+    sized = true;
+    frameView(direction, zoom);
   }
 
   function pick(event) {
@@ -189,7 +255,40 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
       -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
     );
     raycaster.setFromCamera(pointer, camera);
-    const hit = raycaster.intersectObjects(parts, false)[0];
+    const hit = raycaster.intersectObjects(model.parts, false)[0];
     return hit?.object.userData.device;
+  }
+
+  function clearHover() {
+    if (!hovered) return false;
+    hovered = undefined;
+    tooltip.hidden = true;
+    hover.textContent = hint;
+    canvas.classList.remove('rack-spatial-hit');
+    model.highlight(null);
+    return true;
+  }
+
+  function showHover(device, event) {
+    if (hovered !== device) {
+      hovered = device;
+      const face = device.face === 'front' ? '正面' : '背面';
+      tooltipName.textContent = device.name;
+      tooltipPosition.textContent = `${face} ${units(device)} · ${device.u_height}U · ${depthLabel(device)}`;
+      hover.textContent = `${device.name} · ${tooltipPosition.textContent}`;
+      tooltip.hidden = false;
+      canvas.classList.add('rack-spatial-hit');
+      model.highlight(device.id);
+      draw();
+    }
+    const bounds = canvas.getBoundingClientRect();
+    const x = event.clientX - bounds.left;
+    const y = event.clientY - bounds.top;
+    const width = tooltip.offsetWidth;
+    const height = tooltip.offsetHeight;
+    const left = x + width + 24 > bounds.width ? x - width - 14 : x + 14;
+    const top = y - height - 14 < 10 ? y + 14 : y - height - 14;
+    tooltip.style.left = `${Math.max(10, Math.min(bounds.width - width - 10, left))}px`;
+    tooltip.style.top = `${Math.max(10, Math.min(bounds.height - height - 10, top))}px`;
   }
 }
