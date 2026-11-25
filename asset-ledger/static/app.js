@@ -19,6 +19,11 @@ const state = {
 const titles = { rack: '机柜视图', devices: '设备台账', systems: '业务系统', projects: '项目档案' };
 const collectionRoutes = { device: 'devices', system: 'systems', project: 'projects' };
 const mountDepthLabels = { unknown: '深度待核', half: '半深', full: '全深' };
+const documentTypes = new Map([
+  ['pdf', 'PDF'],
+  ['png', '图片'], ['jpg', '图片'], ['jpeg', '图片'], ['gif', '图片'], ['webp', '图片'],
+  ['doc', 'Word'], ['docx', 'Word'], ['xls', 'Excel'], ['xlsx', 'Excel'],
+]);
 
 function element(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
@@ -400,33 +405,85 @@ function serviceEntries(entries) {
   }));
 }
 
-function fileAddress(document, download = false) {
-  return apiUrl(`documents/${document.id}/file${download ? '?download=1' : ''}`);
+function fileAddress(record, download = false) {
+  return apiUrl(`documents/${record.id}/file${download ? '?download=1' : ''}`);
 }
 
-function openPdf(document) {
-  const source = fileAddress(document);
-  const url = document.page ? `${source}#page=${document.page}` : source;
+function documentType(filename) {
+  const extension = /\.([a-z\d]+)$/i.exec(filename ?? '')?.[1].toLowerCase();
+  return documentTypes.get(extension);
+}
+
+let disposePdfViewer;
+function clearPdfViewer() {
+  disposePdfViewer?.();
+  disposePdfViewer = undefined;
+}
+
+async function loadReferencePreview(host, url, startPage) {
+  try {
+    const { mountPdfPreview } = await import('./pdf-preview.js');
+    if (preview.open && host.isConnected) disposePdfViewer = mountPdfPreview(host, { url, startPage });
+  } catch {
+    if (preview.open && host.isConnected) {
+      host.replaceChildren(element('p', { class: 'preview-message', role: 'alert' },
+        'PDF 预览加载失败。可在新标签页打开原件。'));
+    }
+  }
+}
+
+function imagePreview(source, title) {
+  const body = element('div', { class: 'document-image-preview' });
+  const image = element('img', {
+    src: source, alt: title, decoding: 'async',
+    onerror: () => body.replaceChildren(element('p', { class: 'preview-message', role: 'alert' },
+      '图片预览加载失败。可下载原件查看。')),
+  });
+  body.append(image);
+  return body;
+}
+
+function openDocumentPreview(record, kind) {
+  clearPdfViewer();
+  const source = fileAddress(record);
+  const startPage = kind === 'PDF' ? record.page : null;
+  const originalUrl = startPage ? `${source}#page=${startPage}` : source;
+  let body;
+  if (kind === '图片') {
+    body = imagePreview(source, record.title);
+  } else if (startPage) {
+    body = element('div', { class: 'document-reference-preview' },
+      element('p', { class: 'preview-message', role: 'status' }, '正在加载 PDF 预览…'));
+  } else {
+    body = element('iframe', { src: source, title: `${record.title} PDF 预览`, class: 'pdf-frame', referrerpolicy: 'same-origin' });
+  }
   byId('pdf-content').replaceChildren(
-    dialogHeader('pdf-title', document.title, document.page ? `参考页码 · 第 ${document.page} 页` : document.category, preview),
-    element('iframe', { src: url, title: `${document.title} PDF 预览`, class: 'pdf-frame', referrerpolicy: 'same-origin' }),
+    dialogHeader('pdf-title', record.title, startPage ? `参考页码 · 第 ${startPage} 页` : record.category, preview),
+    body,
     element('div', { class: 'pdf-fallback row-actions' },
-      element('a', { href: url, target: '_blank', rel: 'noopener', class: 'button small' }, '在新标签页打开'),
-      element('a', { href: fileAddress(document, true), class: 'button small' }, '下载原件')),
+      element('a', { href: originalUrl, target: '_blank', rel: 'noopener', class: 'button small' }, '在新标签页打开'),
+      element('a', { href: fileAddress(record, true), class: 'button small' }, '下载原件')),
   );
   if (!preview.open) preview.showModal();
+  if (startPage) void loadReferencePreview(body, source, startPage);
 }
 
 function documentList(documents, message = '暂无档案。') {
   if (!documents.length) return empty(message);
-  return element('ul', { class: 'plain-list' }, documents.map((document) => element('li', { class: 'list-row' },
-    element('div', { class: 'description' },
-      element('strong', {}, document.title),
-      element('div', { class: 'muted small-text' }, [document.category, document.page && `第 ${document.page} 页`, document.note].filter(Boolean).join(' · '))),
-    element('div', { class: 'row-actions' },
-      button('预览', () => openPdf(document), 'small', { 'aria-label': `预览 ${document.title}` }),
-      element('a', { href: fileAddress(document, true), class: 'button small', 'aria-label': `下载 ${document.title}` }, '下载')),
-  )));
+  return element('ul', { class: 'plain-list' }, documents.map((record) => {
+    const kind = documentType(record.filename);
+    const canPreview = kind === 'PDF' || kind === '图片';
+    const reference = kind === 'PDF' && record.page ? `第 ${record.page} 页` : null;
+    const meta = [record.category, kind, reference, record.note].filter(Boolean).join(' · ');
+    return element('li', { class: 'list-row' },
+      element('div', { class: 'description' },
+        element('strong', {}, record.title),
+        element('div', { class: 'muted small-text' }, meta)),
+      element('div', { class: 'row-actions' },
+        canPreview && button('预览', () => openDocumentPreview(record, kind), 'small', { 'aria-label': `预览 ${record.title}` }),
+        element('a', { href: fileAddress(record, true), class: 'button small', 'aria-label': `下载 ${record.title}` }, '下载')),
+    );
+  }));
 }
 
 function systemAssociations(device) {
@@ -861,6 +918,18 @@ function readFileBase64(file) {
 function openDocumentEditor(type, record) {
   const wasInDrawer = drawer.open;
   const categories = ['工程量清单', '施工设计图', '合同', '验收报告', '设备资料', '其他'];
+  const acceptedExtensions = Array.from(documentTypes.keys(), (extension) => `.${extension}`).join(',');
+  const fileInput = element('input', { name: 'file', type: 'file', accept: acceptedExtensions, required: true,
+    'aria-describedby': 'document-file-hint' });
+  const referenceInput = element('input', { name: 'page', type: 'number', min: 1, max: 9999, step: 1, disabled: true });
+  const referenceField = labelInput('参考页码', referenceInput);
+  referenceField.hidden = true;
+  fileInput.addEventListener('change', () => {
+    const allowsPage = documentType(fileInput.files[0]?.name) === 'PDF';
+    referenceField.hidden = !allowsPage;
+    referenceInput.disabled = !allowsPage;
+    if (!allowsPage) referenceInput.value = '';
+  });
   showEditor({
     title: '添加档案', id: 'document-form',
     fields: [
@@ -869,21 +938,25 @@ function openDocumentEditor(type, record) {
         inputField('档案名称', 'title', null, { required: true, maxlength: 160 }),
         labeledSelect('档案类别', 'category', categories.map((value) => [value, value]),
           '', '选择类别', { required: true }),
-        inputField('PDF 原件（最多 8 MiB）', 'file', null, { type: 'file', accept: 'application/pdf,.pdf', required: true }, 'wide'),
-        inputField('参考页码', 'page', null, { type: 'number', min: 1, max: 9999, step: 1 }),
+        labelInput('档案原件（最多 8 MiB）', fileInput, 'wide'),
+        element('p', { id: 'document-file-hint', class: 'muted small-text wide' },
+          '支持 PDF、PNG、JPEG、GIF、WebP、Word 和 Excel。'),
+        referenceField,
         textAreaField('备注', 'note', '', { maxlength: 800 })),
     ],
     save: async (form) => {
       const values = new FormData(form);
       const file = values.get('file');
-      if (!file?.size || !file.name.toLowerCase().endsWith('.pdf')) throw new Error('请选择 PDF 文件。');
-      if (file.size > 8 * 1024 * 1024) throw new Error('PDF 原件大小不能超过 8 MiB。');
+      if (!file?.size) throw new Error('请选择档案文件。');
+      const kind = documentType(file.name);
+      if (!kind) throw new Error('请选择受支持的档案格式。');
+      if (file.size > 8 * 1024 * 1024) throw new Error('档案原件大小不能超过 8 MiB。');
       return request('documents', {
         method: 'POST',
         data: {
           title: values.get('title'),
           category: values.get('category'),
-          page: numberOrNull(values.get('page')),
+          page: kind === 'PDF' ? numberOrNull(values.get('page')) : null,
           note: values.get('note'),
           filename: file.name,
           content_base64: await readFileBase64(file),
@@ -960,7 +1033,10 @@ drawer.addEventListener('click', (event) => {
 });
 
 preview.addEventListener('close', () => {
-  if (!preview.open) byId('pdf-content').replaceChildren();
+  if (!preview.open) {
+    clearPdfViewer();
+    byId('pdf-content').replaceChildren();
+  }
 });
 
 request('me')

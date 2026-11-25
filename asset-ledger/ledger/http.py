@@ -9,6 +9,7 @@ import sqlite3
 import sys
 from urllib.parse import quote, urlsplit
 
+from .attachment_formats import FORMATS, extension
 from .data import (
     ApiError, PROJECT_ROOT, SESSION_SECONDS, catalog, database, document_file,
     invalid, log_in, log_out, profile, save_device, save_document, save_project,
@@ -33,6 +34,8 @@ STATIC_TYPES = {
     ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
     ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon",
     ".txt": "text/plain; charset=utf-8",
+    ".bcmap": "application/octet-stream", ".pfb": "application/x-font-type1",
+    ".ttf": "font/ttf", ".wasm": "application/wasm", ".icc": "application/vnd.iccprofile",
 }
 
 
@@ -191,7 +194,7 @@ class LedgerHandler(BaseHTTPRequestHandler):
                     raise ApiError(404, "页面或记录不存在。")
                 filename, contents = document_file(conn, user, int(match[1]))
                 conn.rollback()
-                self.pdf(filename, contents, download=query == "download=1")
+                self.attachment(filename, contents, download=query == "download=1")
             return
 
         if self.command == "POST" and path == "/api/logout":
@@ -229,29 +232,35 @@ class LedgerHandler(BaseHTTPRequestHandler):
             raise ApiError(404, "页面或记录不存在。")
         self.respond(200, resolved.read_bytes(), mime)
 
-    def pdf(self, filename, contents, download):
-        disposition = "attachment" if download else "inline"
+    def attachment(self, filename, contents, download):
+        suffix = extension(filename)
+        file_format = FORMATS.get(suffix)
+        if file_format is None:
+            raise ApiError(404, "档案文件格式无法识别。")
+        disposition = "inline" if file_format.inline and not download else "attachment"
         extra = {
-            "Content-Disposition": f"{disposition}; filename=\"document.pdf\"; filename*=UTF-8''{quote(filename, safe='')}",
+            "Content-Disposition": (
+                f"{disposition}; filename=\"document{suffix}\"; filename*=UTF-8''{quote(filename, safe='')}"
+            ),
             "Accept-Ranges": "bytes",
         }
         requested_range = self.headers.get("Range")
         if requested_range is None:
-            self.respond(200, contents, "application/pdf", extra)
+            self.respond(200, contents, file_format.mime, extra)
             return
         length = len(contents)
         match = BYTE_RANGE.fullmatch(requested_range)
         if not match or not any(match.groups()):
-            self.respond(416, b"", "application/pdf", {"Content-Range": f"bytes */{length}"})
+            self.respond(416, b"", file_format.mime, {"Content-Range": f"bytes */{length}"})
             return
         first, last = match.groups()
         start = int(first) if first else max(0, length - int(last))
         end = min(int(last), length - 1) if first and last else length - 1
         if start > end:
-            self.respond(416, b"", "application/pdf", {"Content-Range": f"bytes */{length}"})
+            self.respond(416, b"", file_format.mime, {"Content-Range": f"bytes */{length}"})
             return
         extra["Content-Range"] = f"bytes {start}-{end}/{length}"
-        self.respond(206, contents[start:end + 1], "application/pdf", extra)
+        self.respond(206, contents[start:end + 1], file_format.mime, extra)
 
     def json_response(self, status, value, headers=None):
         body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -269,6 +278,7 @@ class LedgerHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", (
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob:; frame-src 'self'; frame-ancestors 'self'; "
+            "font-src 'self' blob:; worker-src 'self'; "
             "object-src 'none'; form-action 'self'; base-uri 'none'"
         ))
         for name, value in (headers or {}).items():

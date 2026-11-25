@@ -13,11 +13,12 @@ import sqlite3
 import time
 from urllib.parse import urlsplit
 
+from .attachment_formats import FORMATS, extension, valid_attachment
 from .samples import seed
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PDF_LIMIT = 8 * 1024 * 1024
+ATTACHMENT_LIMIT = 8 * 1024 * 1024
 SESSION_SECONDS = 8 * 60 * 60
 HASH_ROUNDS = 600_000
 MOUNT_DEPTHS = ("unknown", "half", "full")
@@ -495,17 +496,22 @@ def save_document(conn, payload):
     if (values["project_id"] is None) == (values["device_id"] is None):
         raise invalid("档案需关联一个项目或一台设备。")
     filename = values["filename"]
-    if not filename.lower().endswith(".pdf") or any(ord(char) < 32 or char in "/\\" for char in filename):
-        raise invalid("请选择扩展名为 .pdf 的文件。")
+    suffix = extension(filename)
+    if suffix not in FORMATS or any(ord(char) < 32 or char in "/\\" for char in filename):
+        raise invalid("请选择 PDF、图片、Word 或 Excel 文件。")
+    if values["page"] is not None and suffix != ".pdf":
+        raise invalid("参考页码只适用于 PDF 档案。")
     encoded = payload.get("content_base64")
-    if not isinstance(encoded, str) or len(encoded) > ((PDF_LIMIT + 2) // 3) * 4:
-        raise invalid("请选择不超过 8 MiB 的 PDF 文件。")
+    if not isinstance(encoded, str) or len(encoded) > ((ATTACHMENT_LIMIT + 2) // 3) * 4:
+        raise invalid("请选择不超过 8 MiB 的文件。")
     try:
         content = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError):
         raise invalid("无法读取文件内容。") from None
-    if len(content) > PDF_LIMIT or not content.startswith(b"%PDF-") or not content.rstrip().endswith(b"%%EOF"):
-        raise invalid("请选择不超过 8 MiB 的有效 PDF 文件。")
+    if len(content) > ATTACHMENT_LIMIT:
+        raise invalid("请选择不超过 8 MiB 的文件。")
+    if not valid_attachment(content, suffix):
+        raise invalid("文件内容无效或与扩展名不一致，请检查原件。")
     digest = hashlib.sha256(content).hexdigest()
     with conn:
         conn.execute("BEGIN IMMEDIATE")

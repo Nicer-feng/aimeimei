@@ -148,6 +148,9 @@ dialog::backdrop { background: #172d2769; }
 .editor-actions { position: sticky; bottom: 0; z-index: 2; display: flex; justify-content: flex-end; gap: .45rem; border-top: 1px solid var(--line); background: var(--surface); padding: .6rem 1.1rem; }
 .pdf-preview { width: min(95vw, 65rem); max-height: min(94dvh, 61rem); }
 .pdf-frame { display: block; width: 100%; min-height: 55vh; height: clamp(16rem, 74vh, 54rem); border: 0; background: var(--canvas); }
+.document-image-preview { min-height: 12rem; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: .75rem 1rem; background: var(--canvas); }
+.document-image-preview img { display: block; max-width: 100%; max-height: min(73dvh, 51rem); width: auto; height: auto; object-fit: contain; }
+.preview-message { padding: 1rem; color: var(--muted); }
 .pdf-fallback { padding: .55rem 1.1rem; border-top: 1px solid var(--line); }
 .toast { position: fixed; bottom: .85rem; right: .85rem; z-index: 5; padding: .63rem .9rem; border-radius: .5rem; color: white; background: #173c33; box-shadow: 0 4px 15px #18312c45; max-width: min(90vw, 29rem); }
 

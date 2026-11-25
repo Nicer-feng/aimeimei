@@ -1,0 +1,40 @@
+.pdf-page-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .55rem;
+  padding: .55rem .8rem;
+  border-bottom: 1px solid var(--line, #d8e1e2);
+}
+
+.pdf-page-toolbar button { flex-shrink: 0; }
+
+.pdf-page-status {
+  margin: 0;
+  color: var(--muted, #4f6268);
+  font-size: .875rem;
+  text-align: center;
+}
+
+.pdf-page-error { color: var(--danger, #8a4321); }
+
+.pdf-page-stage {
+  min-height: 10rem;
+  max-height: 65vh;
+  max-height: min(65dvh, 46rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: .65rem .75rem;
+  background: var(--canvas, #eef3f2);
+}
+
+.pdf-page-canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+  background: white;
+  box-shadow: 0 1px 5px #233a4635;
+}
+
+.pdf-page-canvas[hidden] { display: none; }
