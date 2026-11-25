@@ -121,9 +121,10 @@ function buildOperatingLamps(parent, entries, unit) {
   if (!matrices.length) return undefined;
 
   const steadyColor = new THREE.Color(0x4b7b60);
-  const dimColor = new THREE.Color(0x56906a);
-  const brightColor = new THREE.Color(0x70a785);
+  const dimColor = new THREE.Color(0x4a875f);
+  const brightColor = new THREE.Color(0x8ce9a9);
   const pulseColor = new THREE.Color();
+  const nearScale = new THREE.Vector3(1.30, 1.30, 1);
   const mesh = new THREE.InstancedMesh(new THREE.CircleGeometry(.023, 8),
     new THREE.MeshBasicMaterial({ toneMapped: false }), matrices.length);
   mesh.name = 'running-device-lamps';
@@ -131,6 +132,7 @@ function buildOperatingLamps(parent, entries, unit) {
     mesh.setMatrixAt(index, matrix);
     mesh.setColorAt(index, steadyColor);
   });
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.instanceMatrix.needsUpdate = true;
   mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
   parent.add(mesh);
@@ -145,11 +147,14 @@ function buildOperatingLamps(parent, entries, unit) {
     hasNearbyLamps: () => animated.length > 0,
     setNearbyRacks(rackIds) {
       paint(steadyColor);
+      for (const index of animated) mesh.setMatrixAt(index, matrices[index]);
       animated = [];
       for (const id of rackIds) {
         const indices = indicesByRack.get(String(id));
         if (indices) animated.push(...indices);
       }
+      for (const index of animated) mesh.setMatrixAt(index, local.copy(matrices[index]).scale(nearScale));
+      mesh.instanceMatrix.needsUpdate = true;
     },
     steady: () => paint(steadyColor),
     pulse(time) {
