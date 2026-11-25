@@ -4,7 +4,7 @@ import { OrbitControls } from './vendor/three/OrbitControls.js';
 const UNIT = 0.12;
 const COLORS = { network: 0x36736d, power: 0x806429, storage: 0x60598b, server: 0x3a627e };
 
-export function mountRackScene(host, { rack, devices, onDevice, deviceKind, units, onContextLost }) {
+export function mountRackScene(host, { rack, devices, onDevice, deviceKind, units, depthLabel, onContextLost }) {
   const panel = document.createElement('div');
   panel.className = 'rack-spatial-panel';
   const viewport = document.createElement('div');
@@ -38,7 +38,7 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.deviceId = device.id;
-    button.textContent = `${device.face === 'front' ? '正面' : '背面'} ${units(device)} · ${device.name}`;
+    button.textContent = `${device.face === 'front' ? '正面' : '背面'} ${units(device)} · ${device.name} · ${depthLabel(device)}`;
     button.addEventListener('click', () => onDevice(device));
     shortcuts.append(button);
   }
@@ -78,7 +78,8 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     const center = (device.u_start - 1 + device.u_height / 2) * UNIT;
     const size = device.u_height * UNIT - 0.006;
     const material = materials[deviceKind(device)];
-    const chassis = box([1.67, size, 0.53], [0, center, 0.29 * face], material);
+    const full = device.mount_depth === 'full';
+    const chassis = box([1.67, size, full ? 1.11 : 0.53], [0, center, full ? 0 : 0.29 * face], material);
     chassis.userData.device = device;
     const bezel = box([1.74, size, 0.045], [0, center, 0.57 * face], material);
     bezel.userData.device = device;
@@ -111,7 +112,7 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
   canvas.addEventListener('pointercancel', () => { down = undefined; });
   canvas.addEventListener('pointermove', (event) => {
     const hit = pick(event);
-    hover.textContent = hit ? `${hit.name} · ${units(hit)} · ${hit.u_height}U` : hint;
+    hover.textContent = hit ? `${hit.name} · ${units(hit)} · ${hit.u_height}U · ${depthLabel(hit)}` : hint;
     canvas.classList.toggle('rack-spatial-hit', Boolean(hit));
   });
   canvas.addEventListener('pointerleave', () => {

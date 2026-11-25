@@ -24,7 +24,10 @@ def seed(conn, directory):
         ],
     )
     conn.executemany(
-        """INSERT INTO devices VALUES (
+        """INSERT INTO devices (
+            id, code, name, type, model, serial, room_id, rack_id, face, u_start, u_height,
+            workstation, purpose, ownership, reporter, maintainer, verified_on, purchased_on, price
+        ) VALUES (
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )""",
         [

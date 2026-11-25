@@ -6,7 +6,7 @@ from pathlib import Path
 import sqlite3
 import sys
 
-from .data import database, initialize, reset_password
+from .data import database, initialize, migrate_mount_depth, reset_password
 from .edge import PublicSite
 from .http import LedgerServer
 
@@ -42,6 +42,7 @@ def serve(data_dir, port, public_site=None):
     with database(data_dir) as conn:
         if conn.execute("SELECT 1 FROM users WHERE password_hash IS NULL").fetchone():
             raise ValueError("请先为 admin 和 region-reader 设置密码。")
+        migrate_mount_depth(conn)
     with LedgerServer(port, data_dir, public_site) as server:
         print(f"台账已监听 http://127.0.0.1:{server.server_port}/", flush=True)
         try:

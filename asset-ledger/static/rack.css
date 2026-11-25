@@ -108,6 +108,12 @@
   font-size: 10px;
 }
 
+.rack-svg-cross-face .rack-svg-device-body { fill: #dceaf0; stroke: #4a7184; stroke-dasharray: 3 2; }
+.rack-svg-cross-face .rack-svg-device-mark { fill: #5b879d; }
+.rack-svg-cross-face .rack-svg-device-name, .rack-svg-cross-face .rack-svg-device-u { fill: #24495c; }
+.rack-elevation-svg [data-blocked='unknown'] .rack-svg-slot { fill: #fff2d9; stroke: #d9be8d; }
+.rack-svg-pending-label { fill: #785314; font-size: 10px; pointer-events: none; }
+
 .rack-spatial-panel {
   border: 1px solid var(--line, #d8e1e2);
   border-radius: 0.7rem;

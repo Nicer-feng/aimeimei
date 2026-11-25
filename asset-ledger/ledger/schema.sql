@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS devices (
     purpose TEXT NOT NULL, ownership TEXT NOT NULL, reporter TEXT NOT NULL,
     maintainer TEXT NOT NULL, verified_on TEXT, purchased_on TEXT,
     price REAL CHECK (price >= 0),
+    mount_depth TEXT NOT NULL DEFAULT 'unknown' CHECK (
+        mount_depth IN ('unknown', 'half', 'full') AND (rack_id IS NOT NULL OR mount_depth = 'unknown')
+    ),
     CHECK ((rack_id IS NULL AND face IS NULL AND u_start IS NULL AND u_height IS NULL) OR
            (rack_id IS NOT NULL AND face IS NOT NULL AND face IN ('front', 'rear') AND
             u_start IS NOT NULL AND u_start > 0 AND u_height IS NOT NULL AND u_height > 0))

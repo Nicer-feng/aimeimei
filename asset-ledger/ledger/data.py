@@ -20,6 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PDF_LIMIT = 8 * 1024 * 1024
 SESSION_SECONDS = 8 * 60 * 60
 HASH_ROUNDS = 600_000
+MOUNT_DEPTHS = ("unknown", "half", "full")
 
 
 class ApiError(Exception):
@@ -54,11 +55,22 @@ def initialize(data_dir):
         (data_dir / "ledger.sqlite3").chmod(0o600)
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript((Path(__file__).parent / "schema.sql").read_text(encoding="utf-8"))
+        migrate_mount_depth(conn)
         with conn:
             conn.execute("BEGIN IMMEDIATE")
             if conn.execute("SELECT 1 FROM metadata WHERE key = 'samples'").fetchone() is None:
                 seed(conn, PROJECT_ROOT / "samples")
                 conn.execute("INSERT INTO metadata VALUES ('samples', '1')")
+
+
+def migrate_mount_depth(conn):
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if any(column["name"] == "mount_depth" for column in conn.execute("PRAGMA table_info(devices)")):
+            return
+        conn.execute("""ALTER TABLE devices ADD COLUMN mount_depth TEXT NOT NULL DEFAULT 'unknown' CHECK (
+            mount_depth IN ('unknown', 'half', 'full') AND (rack_id IS NOT NULL OR mount_depth = 'unknown')
+        )""")
 
 
 def password_hash(password, salt):
@@ -301,6 +313,9 @@ def write_record(conn, table, ident, values):
 
 
 def save_device(conn, user, payload, ident=None):
+    mount_depth = payload.get("mount_depth", "unknown")
+    if mount_depth not in MOUNT_DEPTHS:
+        raise invalid("设备深度应为待核、半深或全深。")
     values = {
         "code": string(payload, "code", "设备编号", 80, required=True),
         "name": string(payload, "name", "设备名称", required=True),
@@ -309,7 +324,7 @@ def save_device(conn, user, payload, ident=None):
         "serial": string(payload, "serial", "序列号"),
         "room_id": integer(payload, "room_id", "机房", required=True),
         "rack_id": integer(payload, "rack_id", "机柜"),
-        "face": None, "u_start": None, "u_height": None,
+        "face": None, "u_start": None, "u_height": None, "mount_depth": "unknown",
         "workstation": string(payload, "workstation", "工位"),
         "purpose": string(payload, "purpose", "用途", 500),
         "ownership": string(payload, "ownership", "归属"),
@@ -328,11 +343,13 @@ def save_device(conn, user, payload, ident=None):
     project_ids = id_list(payload, "project_ids", "项目") if "project_ids" in payload else None
     with conn:
         conn.execute("BEGIN IMMEDIATE")
-        if ident is not None:
-            ensure_record(conn, "devices", ident, "设备", 404)
+        previous = conn.execute("SELECT * FROM devices WHERE id = ?", (ident,)).fetchone() if ident is not None else None
+        if ident is not None and previous is None:
+            raise ApiError(404, "设备不存在。")
         ensure_record(conn, "rooms", values["room_id"], "机房")
         if values["rack_id"] is not None:
-            validate_rack_position(conn, values, ident)
+            values["mount_depth"] = previous["mount_depth"] if previous is not None and "mount_depth" not in payload else mount_depth
+            validate_rack_position(conn, values, ident, previous)
         if conn.execute(
             "SELECT 1 FROM devices WHERE code = ? AND id != ?", (values["code"], ident or 0)
         ).fetchone():
@@ -346,7 +363,7 @@ def save_device(conn, user, payload, ident=None):
         return next(device for device in catalog(conn, user)["devices"] if device["id"] == saved_id)
 
 
-def validate_rack_position(conn, values, ident):
+def validate_rack_position(conn, values, ident, previous=None):
     rack = conn.execute("SELECT room_id, height FROM racks WHERE id = ?", (values["rack_id"],)).fetchone()
     if rack is None or rack["room_id"] != values["room_id"]:
         raise invalid("所选机柜须属于所选机房。")
@@ -354,13 +371,25 @@ def validate_rack_position(conn, values, ident):
     end = start + values["u_height"] - 1
     if end > rack["height"]:
         raise invalid(f"设备超出机柜的 {rack['height']}U 范围。")
-    blocker = conn.execute(
-        """SELECT code FROM devices WHERE rack_id = ? AND face = ? AND id != ?
-           AND u_start <= ? AND u_start + u_height - 1 >= ? LIMIT 1""",
-        (values["rack_id"], values["face"], ident or 0, end, start),
-    ).fetchone()
-    if blocker:
-        raise ApiError(409, f"对应的 U 位与设备 {blocker['code']} 重叠。")
+    depth = values.get("mount_depth", "unknown")
+    # 旧记录可能在前后面共享 U 位。可就地保留或补核半深，改位置时按新规则核对。
+    legacy_position = (
+        previous is not None and all(previous[key] == values[key] for key in ("rack_id", "face", "u_start", "u_height"))
+        and (previous["mount_depth"] == depth or (previous["mount_depth"] == "unknown" and depth == "half"))
+    )
+    blockers = conn.execute(
+        """SELECT code, face, mount_depth FROM devices WHERE rack_id = ? AND id != ?
+           AND u_start <= ? AND u_start + u_height - 1 >= ?
+           ORDER BY face = ? DESC, mount_depth = 'full' DESC, id""",
+        (values["rack_id"], ident or 0, end, start, values["face"]),
+    )
+    for blocker in blockers:
+        if blocker["face"] == values["face"]:
+            raise ApiError(409, f"同一安装面的 U 位与设备 {blocker['code']} 重叠。")
+        if depth == "full" or blocker["mount_depth"] == "full":
+            raise ApiError(409, f"全深设备同时占用正背面 U 位，与对面设备 {blocker['code']} 冲突。")
+        if not legacy_position and (depth == "unknown" or blocker["mount_depth"] == "unknown"):
+            raise ApiError(409, f"与对面设备 {blocker['code']} 共用 U 位前，需核实两台设备均为半深。")
 
 
 def save_project(conn, user, payload, ident=None):

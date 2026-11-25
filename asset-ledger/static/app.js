@@ -18,6 +18,7 @@ const state = {
 };
 const titles = { rack: '机柜视图', devices: '设备台账', systems: '业务系统', projects: '项目档案' };
 const collectionRoutes = { device: 'devices', system: 'systems', project: 'projects' };
+const mountDepthLabels = { unknown: '深度待核', half: '半深', full: '全深' };
 
 function element(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
@@ -172,6 +173,10 @@ function joinedPath(...parts) {
 
 function faceLabel(face) {
   return face === 'rear' ? '背面' : '正面';
+}
+
+function mountDepth(device) {
+  return Object.hasOwn(mountDepthLabels, device.mount_depth) ? device.mount_depth : 'unknown';
 }
 
 function rackSpan(device) {
@@ -465,6 +470,7 @@ function deviceFacts(device) {
     ['设备编号', device.code], ['设备类型', device.type],
     ['品牌型号', device.model], ['序列号', device.serial],
     ['位置', deviceLocation(device, true), true],
+    ...(device.rack_id ? [['安装深度', mountDepthLabels[mountDepth(device)], true]] : []),
     ['用途', device.purpose || '用途待查', true],
     ['归属', device.ownership || '未登记'], ['最近核实', device.verified_on || '待核实'],
     ['填报人', device.reporter || '未登记'], ['维护人', device.maintainer || '责任人未确认'],
@@ -651,8 +657,12 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
   const startInput = element('input', { name: 'u_start', type: 'number', min: 1, step: 1,
     value: original.u_start ?? slot?.u_start ?? 1 });
   const heightInput = element('input', { name: 'u_height', type: 'number', min: 1, step: 1, value: original.u_height ?? 1 });
+  const depthChoice = selectInput('mount_depth', Object.entries(mountDepthLabels), mountDepth(original), null,
+    { 'aria-describedby': 'mount-depth-hint' });
   const rackSlots = element('div', { class: 'field-grid wide' },
-    labelInput('安装面', faceChoice), labelInput('起始 U 位', startInput), labelInput('占用高度（U）', heightInput));
+    labelInput('安装面', faceChoice), labelInput('起始 U 位', startInput),
+    labelInput('占用高度（U）', heightInput), labelInput('安装深度', depthChoice),
+    element('p', { class: 'muted small-text wide', id: 'mount-depth-hint' }, '前后共用 U 位时，两台设备均需为半深。'));
   const workstation = inputField('工位', 'workstation', original.workstation, { maxlength: 180 }, 'wide');
 
   function syncMountFields() {
@@ -660,7 +670,7 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
     rackSlots.hidden = !choice;
     workstation.hidden = Boolean(choice);
     workstation.querySelector('input').disabled = Boolean(choice);
-    for (const input of [faceChoice, startInput, heightInput]) {
+    for (const input of [faceChoice, startInput, heightInput, depthChoice]) {
       input.disabled = !choice;
       input.required = Boolean(choice);
     }
