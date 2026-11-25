@@ -227,7 +227,10 @@ export function mountRoomScene(host, {
     modeButtons.set(id, button);
   }
   toolbarGroups.append(presets, modesGroup);
-  toolbar.append(toolbarGroups, node('span', 'room-3d-hint', '左键旋转 · 右键平移 · 滚轮缩放'));
+  const hint = window.matchMedia('(pointer: coarse)').matches
+    ? '单指旋转 · 双指缩放和平移'
+    : '左键旋转 · 右键平移 · 滚轮缩放';
+  toolbar.append(toolbarGroups, node('span', 'room-3d-hint', hint));
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.7));

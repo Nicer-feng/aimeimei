@@ -128,7 +128,9 @@ export function mountRackScene(host, {
 
   const hover = document.createElement('span');
   hover.className = 'rack-spatial-hover';
-  const hint = '左键旋转 · 右键平移 · 滚轮缩放';
+  const hint = window.matchMedia('(pointer: coarse)').matches
+    ? '单指旋转 · 双指缩放和平移'
+    : '左键旋转 · 右键平移 · 滚轮缩放';
   hover.textContent = hint;
   toolbar.append(toolbarGroups, hover);
   panel.append(toolbar);
