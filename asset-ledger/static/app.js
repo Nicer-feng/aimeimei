@@ -1,4 +1,5 @@
 import { renderRack } from './rack.js';
+import { renderRoomOverview } from './room-overview.js';
 
 const byId = (id) => document.getElementById(id);
 const page = byId('page');
@@ -13,10 +14,14 @@ const state = {
   catalog: null,
   deviceFilters: blankFilters(),
   rackFilters: blankFilters(),
+  roomFilters: blankFilters(),
   deviceSearch: '',
   rackView: null,
+  roomOverview: null,
+  roomViews: new Map(),
+  rackOverviewRoomId: null,
 };
-const titles = { rack: '机柜视图', devices: '设备台账', systems: '业务系统', projects: '项目档案' };
+const titles = { rooms: '机房总览', rack: '机柜视图', devices: '设备台账', systems: '业务系统', projects: '项目档案' };
 const collectionRoutes = { device: 'devices', system: 'systems', project: 'projects' };
 const mountDepthLabels = { unknown: '深度待核', half: '半深', full: '全深' };
 const documentTypes = new Map([
@@ -95,10 +100,14 @@ function showLogin(message = '') {
   const wasAuthenticated = state.user !== null;
   state.rackView?.();
   state.rackView = null;
+  disposeRoomOverview();
+  state.roomViews.clear();
+  state.rackOverviewRoomId = null;
   state.user = null;
   state.catalog = null;
   state.deviceFilters = blankFilters();
   state.rackFilters = blankFilters();
+  state.roomFilters = blankFilters();
   state.deviceSearch = '';
   closeDialogs();
   page.replaceChildren();
@@ -246,27 +255,96 @@ function filterControls(filters, options = {}) {
     });
     group.append(labelInput('搜索设备', input, 'search-field'));
   }
-  for (const [field, source, caption, later] of [
+  const choices = [
     ['unit', 'units', '单位', ['site', 'room', 'rack']],
     ['site', 'sites', '站点', ['room', 'rack']],
     ['room', 'rooms', '机房／房间', ['rack']],
-    ['rack', 'racks', '机柜', []],
-  ]) {
-    const blank = field === 'rack' && options.onlyRack ? '选择机柜' : `全部${caption}`;
+  ];
+  if (!options.overview) choices.push(['rack', 'racks', '机柜', []]);
+  const idPrefix = options.overview ? 'room' : options.onlyRack ? 'rack' : 'device';
+  for (const [field, source, caption, later] of choices) {
+    const chosenLocation = (field === 'rack' && options.onlyRack) || (field === 'room' && options.overview);
+    const blank = chosenLocation ? `选择${caption}` : `全部${caption}`;
     const selection = selectInput(field, locations[source].map((item) => [item.id, item.name]), filters[field], blank, {
-      id: field === 'rack' && options.onlyRack ? 'rack-select' : `${options.onlyRack ? 'rack' : 'device'}-filter-${field}`,
+      id: field === 'rack' && options.onlyRack ? 'rack-select' : `${idPrefix}-filter-${field}`,
       onchange: (event) => {
         const control = event.currentTarget;
         const restoreFocus = document.activeElement === control;
         filters[field] = control.value;
         for (const child of later) filters[child] = '';
         options.change(field);
-        if (restoreFocus) byId(control.id)?.focus();
+        if (restoreFocus) byId(control.id)?.focus({ preventScroll: true });
       },
     });
+    if (options.overview && field === 'room' && locations.rooms.length) selection.options[0].disabled = true;
     group.append(labelInput(caption, selection));
   }
   return group;
+}
+
+function selectOverviewRoom(filters) {
+  const { rooms } = filteredLocations(filters);
+  return rooms.find((room) => String(room.id) === filters.room) || rooms[0];
+}
+
+function disposeRoomOverview(remember = false) {
+  const overview = state.roomOverview;
+  if (!overview) return;
+  if (remember) {
+    state.roomViews.set(overview.roomId, {
+      view: overview.controller.snapshot?.(),
+      filters: overview.filters,
+      scroll: overview.leavingScroll ?? window.scrollY,
+    });
+  }
+  overview.controller();
+  state.roomOverview = null;
+}
+
+function renderRoomPage(requestedId, filterChanged) {
+  const filters = state.roomFilters;
+  const room = requestedId ? lookup('rooms', requestedId) : selectOverviewRoom(filters);
+  if (room && requestedId && !filterChanged && filters.room !== String(room.id)) {
+    const previous = state.roomViews.get(room.id);
+    const { site, unit } = roomContext(room.id);
+    Object.assign(filters, previous?.filters ?? { unit: String(unit?.id ?? ''), site: String(site?.id ?? '') });
+  }
+  filters.room = room ? String(room.id) : '';
+  const filterPanel = element('section', { class: 'panel' }, filterControls(filters, {
+    overview: true,
+    change: () => {
+      const selected = selectOverviewRoom(filters);
+      history.replaceState(null, '', selected ? `#rooms/${selected.id}` : '#rooms');
+      renderPage({ roomFilterChanged: true });
+    },
+  }));
+  page.append(pageHeading(titles.rooms), filterPanel);
+  if (!room) {
+    page.append(empty('当前范围内没有可查看的机房。'));
+    window.scrollTo(0, 0);
+    return;
+  }
+  const { site, unit } = roomContext(room.id);
+  filterPanel.append(element('div', { class: 'rack-context' }, joinedPath(unit?.name, site?.name, room.name)));
+  const racks = state.catalog.racks.filter((rack) => rack.room_id === room.id);
+  const layout = (state.catalog.room_layouts ?? []).find((item) => item.room_id === room.id);
+  const previous = state.roomViews.get(room.id);
+  const host = element('section', { id: 'room-overview', 'aria-label': `${room.name}机柜总览` });
+  page.append(host);
+  const controller = renderRoomOverview(host, {
+    room, layout, racks, view: previous?.view,
+    onRack: (rack) => {
+      if (state.roomOverview) state.roomOverview.leavingScroll = window.scrollY;
+      location.hash = `rack/${rack.id}`;
+    },
+    onEdit: userCanWrite() ? () => openRoomLayoutEditor(room, layout, racks) : undefined,
+  });
+  const overview = { roomId: room.id, filters: { ...filters }, controller };
+  state.roomOverview = overview;
+  const scroll = filterChanged ? 0 : (previous?.scroll ?? 0);
+  return Promise.resolve(controller.ready).then(() => {
+    if (state.roomOverview === overview) window.scrollTo(0, scroll);
+  });
 }
 
 function renderRackPage(requestedId, view) {
@@ -281,6 +359,12 @@ function renderRackPage(requestedId, view) {
   filters.rack = rack ? String(rack.id) : '';
   const devices = rack ? state.catalog.devices.filter((device) => device.rack_id === rack.id) : [];
   const actions = userCanWrite() ? [button('新增设备', () => openDeviceEditor(null, rack), 'primary')] : [];
+  const overviewRoomId = state.rackOverviewRoomId ?? rack?.room_id;
+  byId('breadcrumb').replaceChildren(
+    internalLink('rooms', overviewRoomId, titles.rooms),
+    ' / ', element('span', { 'aria-current': 'page' }, titles.rack),
+  );
+  page.append(internalLink('rooms', overviewRoomId, '返回机房总览', { class: 'back-link' }));
   page.append(pageHeading(titles.rack, null, actions));
   const filterPanel = element('section', { class: 'panel' }, filterControls(filters, {
     onlyRack: true,
@@ -613,22 +697,27 @@ function renderProjectPage(project) {
 function readRoute() {
   const [kind, id] = location.hash.slice(1).split('/');
   if (Object.hasOwn(collectionRoutes, kind)) return { kind, id, section: collectionRoutes[kind] };
+  if (kind === 'rack') return { kind, id, section: 'rooms' };
   if (Object.hasOwn(titles, kind)) return { kind, id, section: kind };
-  return { kind: 'rack', id: null, section: 'rack' };
+  return { kind: 'rooms', id: null, section: 'rooms' };
 }
 
-function renderPage({ preserveRackView = false } = {}) {
+function renderPage({ preserveRackView = false, roomFilterChanged = false } = {}) {
   if (!state.catalog) return;
   const view = preserveRackView ? state.rackView?.snapshot?.() : undefined;
   state.rackView?.();
   state.rackView = null;
   const { kind, id, section } = readRoute();
-  byId('breadcrumb').textContent = titles[section];
+  if (kind === 'rack' && state.roomOverview) state.rackOverviewRoomId = state.roomOverview.roomId;
+  else if (kind !== 'rack') state.rackOverviewRoomId = null;
+  disposeRoomOverview(true);
+  byId('breadcrumb').replaceChildren(element('span', { 'aria-current': 'page' }, titles[section]));
   document.querySelectorAll('.nav [data-route]').forEach((link) => {
     if (link.dataset.route === section) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   });
   page.replaceChildren();
+  if (kind === 'rooms') return renderRoomPage(id, roomFilterChanged);
   if (kind === 'rack') renderRackPage(id, view);
   if (kind === 'devices') renderDevicesPage();
   if (kind === 'systems') renderSystemsPage();
@@ -673,7 +762,7 @@ function showEditor({ title, id, fields, save, success, afterSave }) {
   const form = element('form', { id, onsubmit: async (event) => {
     event.preventDefault();
     const origin = location.hash;
-    const originView = state.rackView;
+    const originView = state.rackView ?? state.roomOverview;
     submit.disabled = true;
     showError(errorBox);
     let record;
@@ -691,7 +780,7 @@ function showEditor({ title, id, fields, save, success, afterSave }) {
     try {
       state.catalog = await request('catalog');
       const route = location.hash;
-      const restoreOrigin = restoreContext && route === origin && state.rackView === originView;
+      const restoreOrigin = restoreContext && route === origin && (state.rackView ?? state.roomOverview) === originView;
       const scroll = restoreOrigin ? initialScroll : window.scrollY;
       await renderPage({ preserveRackView: true });
       if (location.hash === route) {
@@ -813,6 +902,60 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
       openDeviceDrawer(updated);
       drawer.scrollTop = drawerScroll;
     },
+  });
+}
+
+function openRoomLayoutEditor(room, layout, racks) {
+  const positions = new Map((layout?.positions ?? []).map((position) => [position.rack_id, position]));
+  const rotations = [
+    [0, '0° 朝近侧'],
+    [90, '90° 朝右'],
+    [180, '180° 朝远侧'],
+    [270, '270° 朝左'],
+  ];
+  const rackRows = racks.map((rack) => {
+    const position = positions.get(rack.id);
+    return [
+      rack.name,
+      element('input', {
+        type: 'number', name: `row-${rack.id}`, value: position?.row ?? '',
+        min: 1, max: 12, step: 1, 'aria-label': `${rack.name} 排`,
+      }),
+      element('input', {
+        type: 'number', name: `slot-${rack.id}`, value: position?.slot ?? '',
+        min: 1, max: 20, step: 1, 'aria-label': `${rack.name} 柜位`,
+      }),
+      selectInput(`rotation-${rack.id}`, rotations, position?.rotation ?? 0, null, {
+        'aria-label': `${rack.name} 朝向`,
+      }),
+    ];
+  });
+  showEditor({
+    title: '编辑机柜布局', id: 'room-layout-form',
+    fields: [
+      element('div', { class: 'field-grid' },
+        inputField('排数', 'rows', layout?.rows ?? 2, { type: 'number', min: 1, max: 12, step: 1, required: true }),
+        inputField('每排柜位数', 'columns', layout?.columns ?? 5, { type: 'number', min: 1, max: 20, step: 1, required: true })),
+      element('p', { class: 'muted small-text' },
+        '以正俯视为准，第一排在下方，柜位从左向右编号。排和柜位均留空时，机柜显示在「待摆放」。'),
+      table(['机柜', '排', '柜位', '朝向'], rackRows, '本机房暂未登记机柜。'),
+    ],
+    save: (form) => {
+      const values = new FormData(form);
+      const updated = [];
+      for (const rack of racks) {
+        const row = numberOrNull(values.get(`row-${rack.id}`));
+        const slot = numberOrNull(values.get(`slot-${rack.id}`));
+        if (row == null && slot == null) continue;
+        if (row == null || slot == null) throw new Error(`请同时填写 ${rack.name} 的排和柜位。`);
+        updated.push({ rack_id: rack.id, row, slot, rotation: Number(values.get(`rotation-${rack.id}`)) });
+      }
+      return request(`rooms/${room.id}/layout`, {
+        method: 'PATCH',
+        data: { rows: Number(values.get('rows')), columns: Number(values.get('columns')), positions: updated },
+      });
+    },
+    success: '机房布局已保存。',
   });
 }
 
@@ -1031,8 +1174,8 @@ window.addEventListener('hashchange', () => {
   closeDialogs();
   renderPage();
   if (state.user) {
-    window.scrollTo(0, 0);
-    page.focus();
+    if (readRoute().kind !== 'rooms') window.scrollTo(0, 0);
+    page.focus({ preventScroll: true });
   }
 });
 

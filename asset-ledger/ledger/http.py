@@ -13,7 +13,7 @@ from .attachment_formats import FORMATS, extension
 from .data import (
     ApiError, PROJECT_ROOT, SESSION_SECONDS, catalog, database, document_file,
     invalid, log_in, log_out, profile, save_device, save_document, save_project,
-    save_system, session_user, string,
+    save_room_layout, save_system, session_user, string,
 )
 from .edge import LoginThrottle
 
@@ -24,6 +24,7 @@ LOCAL_HOST = re.compile(r"(?:127\.0\.0\.1|localhost|\[::1\])(?::[0-9]{1,5})?", r
 TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 FILE_ROUTE = re.compile(r"/api/documents/([1-9][0-9]{0,9})/file")
 EDIT_ROUTE = re.compile(r"/api/(devices|systems|projects)/([1-9][0-9]{0,9})")
+ROOM_LAYOUT_ROUTE = re.compile(r"/api/rooms/([1-9][0-9]{0,9})/layout")
 ASSET_ROUTE = re.compile(r"/static/([a-zA-Z0-9_-][a-zA-Z0-9._-]*(?:/[a-zA-Z0-9_-][a-zA-Z0-9._-]*)*)")
 ENCODING_QUALITY = re.compile(r"\s*q\s*=\s*(0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)\s*", re.I)
 BYTE_RANGE = re.compile(r"bytes=([0-9]{0,10})-([0-9]{0,10})")
@@ -231,6 +232,10 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 self.json_response(201, writer(conn, user, self.payload()))
                 return
         if self.command == "PATCH":
+            layout = ROOM_LAYOUT_ROUTE.fullmatch(path)
+            if layout:
+                self.json_response(200, save_room_layout(conn, self.payload(), int(layout[1])))
+                return
             match = EDIT_ROUTE.fullmatch(path)
             if match:
                 self.json_response(200, RESOURCE_WRITERS[match[1]](conn, user, self.payload(), int(match[2])))

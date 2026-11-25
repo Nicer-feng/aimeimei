@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 import hashlib
 import hmac
+import json
 from pathlib import Path
 import secrets
 import sqlite3
@@ -22,6 +23,9 @@ ATTACHMENT_LIMIT = 8 * 1024 * 1024
 SESSION_SECONDS = 8 * 60 * 60
 HASH_ROUNDS = 600_000
 MOUNT_DEPTHS = ("unknown", "half", "full")
+LAYOUT_MAX_ROWS = 12
+LAYOUT_MAX_COLUMNS = 20
+LAYOUT_ROTATIONS = (0, 90, 180, 270)
 
 
 class ApiError(Exception):
@@ -55,13 +59,17 @@ def initialize(data_dir):
     with database(data_dir) as conn:
         (data_dir / "ledger.sqlite3").chmod(0o600)
         conn.execute("PRAGMA journal_mode = WAL")
-        conn.executescript((Path(__file__).parent / "schema.sql").read_text(encoding="utf-8"))
-        migrate_mount_depth(conn)
+        migrate_schema(conn)
         with conn:
             conn.execute("BEGIN IMMEDIATE")
             if conn.execute("SELECT 1 FROM metadata WHERE key = 'samples'").fetchone() is None:
                 seed(conn, PROJECT_ROOT / "samples")
                 conn.execute("INSERT INTO metadata VALUES ('samples', '1')")
+
+
+def migrate_schema(conn):
+    conn.executescript((Path(__file__).parent / "schema.sql").read_text(encoding="utf-8"))
+    migrate_mount_depth(conn)
 
 
 def migrate_mount_depth(conn):
@@ -168,6 +176,45 @@ def project_lists(conn, site_ids, is_admin):
     return projects
 
 
+def room_layout_record(room_id, rows, columns, positions, illustrative=False):
+    return {"room_id": room_id, "rows": rows, "columns": columns,
+            "positions": sorted(positions, key=lambda position: (position["row"], position["slot"])),
+            "illustrative": illustrative}
+
+
+def illustrative_room_layout(rooms, sites, units, racks):
+    room = rooms.get(1)
+    site = next((site for site in sites if site["id"] == 1), None)
+    unit = units.get(2)
+    if (not room or room["site_id"] != 1 or room["name"] != "综合机房" or not site or
+            site["unit_id"] != 2 or site["name"] != "青岚站" or not unit or unit["name"] != "演示东区"):
+        return None
+    rack_names = {rack["id"]: rack["name"] for rack in racks if rack["room_id"] == room["id"]}
+    positions = []
+    for number in range(1, 10):
+        rack_id = 1 if number == 1 else number + 1
+        if rack_names.get(rack_id) == f"A{number:02d}":
+            row, offset = divmod(number - 1, 5)
+            # 第一排位于正 Z 方向，两排柜的正面都朝向中央通道。
+            positions.append({"rack_id": rack_id, "row": row + 1, "slot": offset + 1, "rotation": 180 if row == 0 else 0})
+    return room_layout_record(room["id"], 2, 5, positions, illustrative=True)
+
+
+def room_layouts(conn, rooms, sites, units, racks):
+    rack_rooms = {rack["id"]: rack["room_id"] for rack in racks}
+    layouts = {}
+    for layout in conn.execute("SELECT * FROM room_layouts ORDER BY room_id"):
+        room_id = layout["room_id"]
+        if room_id in rooms:
+            positions = [position for position in json.loads(layout["positions_json"])
+                         if rack_rooms.get(position["rack_id"]) == room_id]
+            layouts[room_id] = room_layout_record(room_id, layout["row_count"], layout["column_count"], positions)
+    demo = illustrative_room_layout(rooms, sites, units, racks)
+    if demo:
+        layouts.setdefault(demo["room_id"], demo)
+    return [layouts[room_id] for room_id in sorted(layouts)]
+
+
 def catalog(conn, user):
     is_admin = user["role"] == "admin"
     site_ids = visible_sites(conn, user)
@@ -212,6 +259,7 @@ def catalog(conn, user):
         "units": list(units.values()), "sites": sites, "rooms": list(rooms.values()), "racks": racks,
         "devices": list(devices.values()), "systems": [system for system in systems.values() if is_admin or system["deployments"]],
         "projects": list(projects.values()), "documents": documents,
+        "room_layouts": room_layouts(conn, rooms, sites, units, racks),
     }
 
 
@@ -299,6 +347,45 @@ def asset_price(payload):
 def ensure_record(conn, table, ident, label, status=400):
     if conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (ident,)).fetchone() is None:
         raise ApiError(status, f"{label}不存在。")
+
+
+def save_room_layout(conn, payload, room_id):
+    rows = integer(payload, "rows", "排数", required=True, maximum=LAYOUT_MAX_ROWS)
+    columns = integer(payload, "columns", "每排格数", required=True, maximum=LAYOUT_MAX_COLUMNS)
+    if "positions" not in payload:
+        raise invalid("请提供机柜摆位列表。")
+    positions = []
+    assigned_racks = set()
+    occupied_slots = set()
+    for position in items(payload, "positions", "机柜摆位", maximum=rows * columns):
+        if not isinstance(position, dict):
+            raise invalid("机柜摆位应为对象。")
+        rack_id = integer(position, "rack_id", "机柜", required=True)
+        row = integer(position, "row", "所在排", required=True, maximum=rows)
+        slot = integer(position, "slot", "所在格", required=True, maximum=columns)
+        rotation = position.get("rotation")
+        if type(rotation) is not int or rotation not in LAYOUT_ROTATIONS:
+            raise invalid("机柜朝向须为 0、90、180 或 270 度。")
+        if rack_id in assigned_racks or (row, slot) in occupied_slots:
+            raise invalid("同一机柜或格位不能重复摆放。")
+        assigned_racks.add(rack_id)
+        occupied_slots.add((row, slot))
+        positions.append({"rack_id": rack_id, "row": row, "slot": slot, "rotation": rotation})
+
+    layout = room_layout_record(room_id, rows, columns, positions)
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        ensure_record(conn, "rooms", room_id, "机房", 404)
+        available = {row["id"] for row in conn.execute("SELECT id FROM racks WHERE room_id = ?", (room_id,))}
+        if not assigned_racks <= available:
+            raise invalid("布局中的机柜须属于当前机房。")
+        conn.execute(
+            """INSERT INTO room_layouts(room_id, row_count, column_count, positions_json) VALUES (?, ?, ?, ?)
+               ON CONFLICT(room_id) DO UPDATE SET row_count = excluded.row_count,
+               column_count = excluded.column_count, positions_json = excluded.positions_json""",
+            (room_id, rows, columns, json.dumps(layout["positions"], separators=(",", ":"))),
+        )
+    return layout
 
 
 def write_record(conn, table, ident, values):

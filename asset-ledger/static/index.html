@@ -7,6 +7,7 @@
   <title>机房与联网设备台账</title>
   <link rel="stylesheet" href="./static/app.css">
   <link rel="stylesheet" href="./static/rack.css">
+  <link rel="stylesheet" href="./static/room-overview.css">
   <link rel="stylesheet" href="./static/pdf-preview.css">
   <script type="module" src="./static/app.js"></script>
 </head>
@@ -33,7 +34,7 @@
         <div><strong>联网设备台账</strong><span>机房与资产管理</span></div>
       </div>
       <nav class="nav" aria-label="主要导航">
-        <a href="#rack" data-route="rack"><span class="nav-icon" data-icon="rack" aria-hidden="true"></span>机柜视图</a>
+        <a href="#rooms" data-route="rooms"><span class="nav-icon" data-icon="rack" aria-hidden="true"></span>机房总览</a>
         <a href="#devices" data-route="devices"><span class="nav-icon" data-icon="devices" aria-hidden="true"></span>设备台账</a>
         <a href="#systems" data-route="systems"><span class="nav-icon" data-icon="systems" aria-hidden="true"></span>业务系统</a>
         <a href="#projects" data-route="projects"><span class="nav-icon" data-icon="projects" aria-hidden="true"></span>项目档案</a>
@@ -42,7 +43,7 @@
     </aside>
     <div class="workspace-main">
       <header class="topbar">
-        <div id="breadcrumb" class="breadcrumb"></div>
+        <nav id="breadcrumb" class="breadcrumb" aria-label="当前位置"></nav>
         <div class="session">
           <span id="scope" class="scope"></span>
           <button id="logout" class="button quiet small" type="button">退出</button>
