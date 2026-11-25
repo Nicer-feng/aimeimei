@@ -1,4 +1,5 @@
 const VENDOR = new URL('./vendor/pdfjs/', import.meta.url);
+const PDFJS_VERSION = '6.5.438';
 const MAX_CANVAS_SIDE = 3200;
 const MAX_CANVAS_PIXELS = 4_000_000;
 const MAX_ACTIVE_PAGES = 6;
@@ -223,9 +224,9 @@ export function mountPdfPreview(host, { url, startPage }) {
       const fileUrl = new URL(url, window.location.href);
       if (fileUrl.origin !== window.location.origin) throw new Error(LOAD_ERROR);
       fileUrl.hash = '';
-      const pdfjs = await import('./vendor/pdfjs/pdf.min.mjs');
+      const pdfjs = await import(new URL(`pdf.min.mjs?v=${PDFJS_VERSION}`, VENDOR).href);
       if (disposed) return;
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.mjs', VENDOR).href;
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL(`pdf.worker.min.mjs?v=${PDFJS_VERSION}`, VENDOR).href;
       loadingTask = pdfjs.getDocument({
         url: fileUrl.href,
         cMapUrl: new URL('cmaps/', VENDOR).href,

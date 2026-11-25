@@ -25,10 +25,15 @@ TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 FILE_ROUTE = re.compile(r"/api/documents/([1-9][0-9]{0,9})/file")
 EDIT_ROUTE = re.compile(r"/api/(devices|systems|projects)/([1-9][0-9]{0,9})")
 ASSET_ROUTE = re.compile(r"/static/([a-zA-Z0-9_-][a-zA-Z0-9._-]*(?:/[a-zA-Z0-9_-][a-zA-Z0-9._-]*)*)")
+ENCODING_QUALITY = re.compile(r"\s*q\s*=\s*(0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)\s*", re.I)
 BYTE_RANGE = re.compile(r"bytes=([0-9]{0,10})-([0-9]{0,10})")
 RESOURCE_WRITERS = {"devices": save_device, "systems": save_system, "projects": save_project}
 WRITE_LIMIT = 1024 * 1024
 UPLOAD_LIMIT = 12 * 1024 * 1024
+PDFJS_CACHE_QUERY = "v=6.5.438"
+PDFJS_CACHE_FILES = {"vendor/pdfjs/pdf.min.mjs", "vendor/pdfjs/pdf.worker.min.mjs"}
+PRIVATE_CACHE = "private, no-store"
+VERSIONED_CACHE = "public, max-age=31536000, immutable"
 STATIC_TYPES = {
     ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
@@ -37,6 +42,20 @@ STATIC_TYPES = {
     ".bcmap": "application/octet-stream", ".pfb": "application/x-font-type1",
     ".ttf": "font/ttf", ".wasm": "application/wasm", ".icc": "application/vnd.iccprofile",
 }
+
+
+def accepts_gzip(headers):
+    qualities = {}
+    for field in headers:
+        for item in field.split(","):
+            coding, separator, parameter = item.partition(";")
+            coding = coding.strip().lower()
+            if coding not in ("gzip", "*"):
+                continue
+            match = ENCODING_QUALITY.fullmatch(parameter) if separator else None
+            quality = float(match[1]) if match else (0 if separator else 1)
+            qualities[coding] = min(quality, qualities.get(coding, 1))
+    return qualities.get("gzip", qualities.get("*", 0)) > 0
 
 
 class LedgerServer(ThreadingHTTPServer):
@@ -78,7 +97,7 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 raise invalid("请求地址格式不正确。")
             path = self.route_path(target.path)
             if self.command in ("GET", "HEAD") and not path.startswith("/api/"):
-                self.static(path)
+                self.static(path, target.query)
             elif path == "/api/health" and self.command in ("GET", "HEAD"):
                 self.json_response(200, {"status": "ok"})
             else:
@@ -218,19 +237,31 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 return
         raise ApiError(404, "页面或记录不存在。")
 
-    def static(self, path):
+    def static(self, path, query):
         if path in ("/", "/index.html"):
-            file = STATIC_DIR / "index.html"
+            asset = "index.html"
         else:
             match = ASSET_ROUTE.fullmatch(path)
             if not match:
                 raise ApiError(404, "页面或记录不存在。")
-            file = STATIC_DIR / match[1]
+            asset = match[1]
+        static_root = STATIC_DIR.resolve()
+        file = static_root / asset
         resolved = file.resolve()
         mime = STATIC_TYPES.get(file.suffix)
-        if not mime or not resolved.is_relative_to(STATIC_DIR.resolve()) or not resolved.is_file():
+        if not mime or not resolved.is_relative_to(static_root) or not resolved.is_file():
             raise ApiError(404, "页面或记录不存在。")
-        self.respond(200, resolved.read_bytes(), mime)
+        if asset not in PDFJS_CACHE_FILES or query != PDFJS_CACHE_QUERY or resolved != file:
+            self.respond(200, resolved.read_bytes(), mime)
+            return
+
+        headers = {"Vary": "Accept-Encoding"}
+        sidecar = file.with_name(file.name + ".gz")
+        # 只为两个已知公开模块读取同目录的预压缩副本。
+        if accepts_gzip(self.headers.get_all("Accept-Encoding", [])) and not sidecar.is_symlink() and sidecar.is_file():
+            resolved = sidecar
+            headers["Content-Encoding"] = "gzip"
+        self.respond(200, resolved.read_bytes(), mime, headers, cache_control=VERSIONED_CACHE)
 
     def attachment(self, filename, contents, download):
         suffix = extension(filename)
@@ -266,11 +297,11 @@ class LedgerHandler(BaseHTTPRequestHandler):
         body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.respond(status, body, "application/json; charset=utf-8", headers)
 
-    def respond(self, status, content, mime, headers=None):
+    def respond(self, status, content, mime, headers=None, *, cache_control=PRIVATE_CACHE):
         self.send_response(status)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "private, no-store")
+        self.send_header("Cache-Control", cache_control)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "SAMEORIGIN")
