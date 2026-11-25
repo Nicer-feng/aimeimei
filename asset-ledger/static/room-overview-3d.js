@@ -195,9 +195,11 @@ export function mountRoomScene(host, {
   scene.add(new THREE.HemisphereLight(0xf8fcff, 0x748282, 2.1));
   const key = new THREE.DirectionalLight(0xfff2de, 2.4);
   key.position.set(-5, 12, 9);
+  const fill = new THREE.DirectionalLight(0xf4f6f8, .52);
+  fill.position.set(0, 3, 8);
   const rim = new THREE.DirectionalLight(0xc8e3f4, 1.30);
   rim.position.set(8, 6, -9);
-  scene.add(key, rim);
+  scene.add(key, fill, rim);
   const model = makeRoom(scene, { room: layout, racks, devices, deviceKind });
   const center = model.bounds.getCenter(new THREE.Vector3());
   const corners = [];
