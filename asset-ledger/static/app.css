@@ -60,6 +60,9 @@ hr { border: 0; border-top: 1px solid var(--line); }
 .login-card h1 { margin: 1.05rem 0 .38rem; font-size: 1.48rem; }
 .login-card form { margin-top: 1.45rem; }
 .login-card .button { width: 100%; margin-top: .3rem; }
+.login-captcha { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .65rem; }
+.login-card .captcha-refresh { min-width: 130px; min-height: 48px; padding: 0; overflow: hidden; }
+.captcha-refresh img { display: block; }
 .brand-mark { display: grid; align-content: center; gap: 3px; flex: 0 0 auto; width: 2.18rem; height: 2.18rem; padding: 7px 8px; border-radius: .54rem; background: #34705f; }
 .brand-mark i { display: block; border: 1px solid #e5f6ed; border-radius: 2px; height: 4px; position: relative; }
 .brand-mark i::after { content: ""; position: absolute; inset: 0 auto 0 2px; width: 2px; background: #e5f6ed; }

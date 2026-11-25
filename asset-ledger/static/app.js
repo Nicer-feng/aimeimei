@@ -5,6 +5,9 @@ const byId = (id) => document.getElementById(id);
 const page = byId('page');
 const workspace = byId('workspace');
 const login = byId('login');
+const loginForm = byId('login-form');
+const loginSubmit = loginForm.querySelector('button[type=submit]');
+const auth = { mode: null, captchaId: '', refreshing: false, submitting: false };
 const editor = byId('editor');
 const drawer = byId('drawer');
 const preview = byId('pdf-preview');
@@ -65,8 +68,8 @@ function apiUrl(path) {
   return new URL(`./api/${path}`, document.baseURI).href;
 }
 
-async function request(path, { method = 'GET', data } = {}) {
-  const result = await fetch(apiUrl(path), {
+async function request(path, { method = 'GET', data, ai = false } = {}) {
+  const result = await fetch(ai ? `/api/${path}` : apiUrl(path), {
     method,
     credentials: 'same-origin',
     headers: data === undefined ? {} : { 'Content-Type': 'application/json' },
@@ -77,8 +80,9 @@ async function request(path, { method = 'GET', data } = {}) {
   if (!result.ok) {
     const error = new Error(payload.error || `请求失败（${result.status}）`);
     error.status = result.status;
-    if (result.status === 401 && state.user) {
-      showLogin('登录已过期，请重新登录。');
+    if (!ai && state.user) {
+      if (result.status === 401) showLogin('登录已过期，请重新登录。');
+      if (result.status === 403 && payload.code === 'sroom_identity') showLogin(error.message);
     }
     throw error;
   }
@@ -113,10 +117,11 @@ function showLogin(message = '') {
   page.replaceChildren();
   workspace.hidden = true;
   login.hidden = false;
-  if (wasAuthenticated) byId('login-form').elements.password.value = '';
+  if (wasAuthenticated) loginForm.elements.password.value = '';
   showError(byId('login-error'), message);
   byId('drawer-content').replaceChildren();
   byId('editor-content').replaceChildren();
+  if (auth.mode === 'ai' && !auth.captchaId && !auth.submitting) void refreshCaptcha();
 }
 
 async function openWorkspace(user) {
@@ -1142,30 +1147,86 @@ function openDocumentEditor(type, record) {
   });
 }
 
-const loginForm = byId('login-form');
+function syncLoginControls() {
+  loginSubmit.disabled = auth.submitting || !auth.mode || (auth.mode === 'ai' && !auth.captchaId);
+  byId('captcha-refresh').disabled = auth.refreshing || auth.submitting;
+}
+
+async function refreshCaptcha() {
+  if (auth.refreshing || auth.submitting) return;
+  auth.captchaId = '';
+  auth.refreshing = true;
+  syncLoginControls();
+  const image = byId('captcha-image');
+  const placeholder = byId('captcha-placeholder');
+  image.hidden = true;
+  image.removeAttribute('src');
+  placeholder.hidden = false;
+  placeholder.textContent = '正在加载…';
+  loginForm.elements.captcha.value = '';
+  try {
+    const { captcha_id: id, image_svg: svg } = await request('captcha', { ai: true });
+    if (!id || typeof svg !== 'string' || !svg.startsWith('<svg')) throw new Error('验证码响应无效。');
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    image.hidden = false;
+    placeholder.hidden = true;
+    auth.captchaId = id;
+  } catch {
+    placeholder.textContent = '重新获取';
+    if (byId('login-error').hidden) showError(byId('login-error'), '验证码加载失败，请重新获取。');
+  } finally {
+    auth.refreshing = false;
+    syncLoginControls();
+  }
+}
+
+async function loginWithAi(credentials) {
+  const captcha = loginForm.elements.captcha.value.trim().toUpperCase();
+  const captchaId = auth.captchaId;
+  auth.captchaId = '';
+  try {
+    await request('login', { ai: true, method: 'POST', data: { ...credentials, captcha_id: captchaId, captcha } });
+  } catch (error) {
+    if (error.status === 401) throw new Error('账号、密码或验证码不正确。');
+    throw error;
+  }
+  loginForm.elements.password.value = '';
+  return request('me');
+}
+
+byId('captcha-refresh').addEventListener('click', () => {
+  showError(byId('login-error'));
+  void refreshCaptcha();
+});
+
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const submit = loginForm.querySelector('button[type=submit]');
-  submit.disabled = true;
+  if (loginSubmit.disabled) return;
+  auth.submitting = true;
+  syncLoginControls();
   showError(byId('login-error'));
   try {
-    const user = await request('login', { method: 'POST', data: {
+    const credentials = {
       username: loginForm.elements.username.value.trim(), password: loginForm.elements.password.value,
-    } });
+    };
+    const user = auth.mode === 'ai' ? await loginWithAi(credentials)
+      : await request('login', { method: 'POST', data: credentials });
     loginForm.elements.password.value = '';
     await openWorkspace(user);
     page.focus();
   } catch (error) {
     showError(byId('login-error'), error.message);
-    loginForm.elements.password.focus();
+    (auth.mode === 'ai' ? loginForm.elements.captcha : loginForm.elements.password).focus();
   } finally {
-    submit.disabled = false;
+    auth.submitting = false;
+    syncLoginControls();
+    if (auth.mode === 'ai' && !state.user) void refreshCaptcha();
   }
 });
 
 byId('logout').addEventListener('click', async () => {
   try {
-    await request('logout', { method: 'POST', data: {} });
+    await request('logout', { method: 'POST', data: {}, ai: auth.mode === 'ai' });
     showLogin();
     loginForm.elements.username.focus();
   } catch (error) {
@@ -1212,7 +1273,24 @@ preview.addEventListener('close', () => {
   }
 });
 
-request('me')
-  .then(openWorkspace)
-  .catch((error) => showLogin(error.status === 401 ? '' : error.message))
-  .finally(() => { loginForm.querySelector('button[type=submit]').disabled = false; });
+async function loadWorkspace() {
+  try {
+    const { mode } = await request('auth-config');
+    if (mode !== 'ai' && mode !== 'local') throw new Error('登录配置无效，请刷新页面。');
+    auth.mode = mode;
+    if (mode === 'ai') {
+      byId('login-hint').textContent = '使用已开通机房权限的 AI 槑槑账号登录。';
+      byId('login-captcha').hidden = false;
+      loginForm.elements.captcha.disabled = false;
+      loginForm.elements.captcha.required = true;
+      byId('logout').textContent = '退出统一登录';
+    }
+    await openWorkspace(await request('me'));
+  } catch (error) {
+    showLogin(error.status === 401 ? '' : error.message);
+  } finally {
+    syncLoginControls();
+  }
+}
+
+void loadWorkspace();

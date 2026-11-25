@@ -37,13 +37,13 @@ def set_password(data_dir, username, from_stdin):
         reset_password(conn, username, password)
 
 
-def serve(data_dir, port, public_site=None):
+def serve(data_dir, port, public_site=None, *, ai_sso=False):
     ensure_initialized(data_dir)
     with database(data_dir) as conn:
-        if conn.execute("SELECT 1 FROM users WHERE password_hash IS NULL").fetchone():
+        if not ai_sso and conn.execute("SELECT 1 FROM users WHERE password_hash IS NULL").fetchone():
             raise ValueError("请先为 admin 和 region-reader 设置密码。")
         migrate_schema(conn)
-    with LedgerServer(port, data_dir, public_site) as server:
+    with LedgerServer(port, data_dir, public_site, ai_sso=ai_sso) as server:
         print(f"台账已监听 http://127.0.0.1:{server.server_port}/", flush=True)
         try:
             server.serve_forever()
@@ -64,6 +64,7 @@ def main():
     run.add_argument("--data-dir", required=True, type=data_path)
     run.add_argument("--port", type=int, default=18754)
     run.add_argument("--public-url", help="Caddy HTTPS 转发地址，包含以斜杠结尾的路径")
+    run.add_argument("--ai-sso", action="store_true", help="使用本机 AI 槑槑的统一登录与授权")
     args = parser.parse_args()
     try:
         if args.command == "init":
@@ -75,7 +76,12 @@ def main():
         else:
             if not 1 <= args.port <= 65535:
                 raise ValueError("端口须在 1 至 65535 之间。")
-            serve(args.data_dir, args.port, PublicSite.parse(args.public_url) if args.public_url else None)
+            if args.ai_sso and not args.public_url:
+                raise ValueError("统一登录需要设置 --public-url。")
+            serve(
+                args.data_dir, args.port, PublicSite.parse(args.public_url) if args.public_url else None,
+                ai_sso=args.ai_sso,
+            )
     except (OSError, ValueError, sqlite3.Error, EOFError) as error:
         print(error, file=sys.stderr)
         return 1

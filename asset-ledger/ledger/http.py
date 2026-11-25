@@ -16,6 +16,7 @@ from .data import (
     save_room_layout, save_system, session_user, string,
 )
 from .edge import LoginThrottle
+from .identity import AI_COOKIE, IdentityError, sroom_user
 
 
 STATIC_DIR = PROJECT_ROOT / "static"
@@ -60,9 +61,10 @@ def accepts_gzip(headers):
 
 
 class LedgerServer(ThreadingHTTPServer):
-    def __init__(self, port, data_dir, public_site=None):
+    def __init__(self, port, data_dir, public_site=None, *, ai_sso=False):
         self.data_dir = data_dir
         self.public_site = public_site
+        self.ai_sso = ai_sso
         self.login_throttle = LoginThrottle()
         super().__init__(("127.0.0.1", port), LedgerHandler)
 
@@ -101,11 +103,16 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 self.static(path, target.query)
             elif path == "/api/health" and self.command in ("GET", "HEAD"):
                 self.json_response(200, {"status": "ok"})
+            elif path == "/api/auth-config" and self.command in ("GET", "HEAD"):
+                self.json_response(200, {"mode": "ai" if self.server.ai_sso else "local"})
             else:
                 with database(self.server.data_dir) as conn:
                     self.api(conn, path, target.query)
         except ApiError as error:
-            self.json_response(error.status, {"error": str(error)})
+            payload = {"error": str(error)}
+            if isinstance(error, IdentityError):
+                payload["code"] = "sroom_identity"
+            self.json_response(error.status, payload)
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             return
         except (sqlite3.Error, OSError, ValueError) as error:
@@ -144,12 +151,15 @@ class LedgerHandler(BaseHTTPRequestHandler):
         if self.headers.get("Sec-Fetch-Site") in ("cross-site", "same-site"):
             raise ApiError(403, "请在台账页面内提交请求。")
 
-    def session_token(self):
+    def session_token(self, name=COOKIE):
         try:
-            cookies = SimpleCookie(self.headers.get("Cookie", ""))
+            headers = self.headers.get_all("Cookie", [])
+            if len(headers) != 1:
+                return None
+            cookies = SimpleCookie(headers[0])
         except CookieError:
             return None
-        token = cookies.get(COOKIE)
+        token = cookies.get(name)
         return token.value if token and TOKEN.fullmatch(token.value) else None
 
     def session_cookie(self, token, max_age):
@@ -182,7 +192,10 @@ class LedgerHandler(BaseHTTPRequestHandler):
         writing = self.command in ("POST", "PATCH")
         if writing:
             self.check_origin()
-        token = self.session_token()
+        managed = self.server.ai_sso
+        if managed and self.command == "POST" and path in ("/api/login", "/api/logout"):
+            raise ApiError(404, "请使用 AI 槑槑登录或退出。")
+        token = self.session_token(AI_COOKIE if managed else COOKIE)
         if self.command == "POST" and path == "/api/login":
             payload = self.payload(4096)
             if self.public_peer is not None and not self.server.login_throttle.allow(self.public_peer):
@@ -197,12 +210,19 @@ class LedgerHandler(BaseHTTPRequestHandler):
             self.json_response(200, profile(conn, user), {"Set-Cookie": self.session_cookie(new_token, SESSION_SECONDS)})
             return
 
+        if managed:
+            user = sroom_user(token)
         if not writing:
             # 授权范围与返回内容使用同一个读取快照。
             conn.execute("BEGIN")
-        user = session_user(conn, token)
+        if not managed:
+            user = session_user(conn, token)
         if user is None:
             raise ApiError(401, "请登录台账。")
+        if managed and user["role"] == "reader" and not conn.execute(
+            "SELECT 1 FROM units WHERE id = ?", (user["unit_id"],),
+        ).fetchone():
+            raise IdentityError(403, "当前账号的机房辖区不可用，请联系管理员。")
         if not writing:
             if path == "/api/me":
                 self.json_response(200, profile(conn, user))
