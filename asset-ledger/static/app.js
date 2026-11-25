@@ -50,8 +50,12 @@ function lookup(list, id) {
   return state.catalog[list].find((item) => String(item.id) === String(id));
 }
 
+function apiUrl(path) {
+  return new URL(`./api/${path}`, document.baseURI).href;
+}
+
 async function request(path, { method = 'GET', data } = {}) {
-  const result = await fetch(`/api/${path}`, {
+  const result = await fetch(apiUrl(path), {
     method,
     credentials: 'same-origin',
     headers: data === undefined ? {} : { 'Content-Type': 'application/json' },
@@ -392,7 +396,7 @@ function serviceEntries(entries) {
 }
 
 function fileAddress(document, download = false) {
-  return `/api/documents/${document.id}/file${download ? '?download=1' : ''}`;
+  return apiUrl(`documents/${document.id}/file${download ? '?download=1' : ''}`);
 }
 
 function openPdf(document) {

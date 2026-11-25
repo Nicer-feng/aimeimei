@@ -1,0 +1,13 @@
+# 将这一段放在 feng.asia, www.feng.asia 的站点块中。
+@asset_ledger_www {
+	host www.feng.asia
+	path /asset-ledger /asset-ledger/*
+}
+redir @asset_ledger_www https://feng.asia{uri} 308
+redir /asset-ledger /asset-ledger/ 308
+
+handle /asset-ledger/* {
+	reverse_proxy 127.0.0.1:18761 {
+		header_up X-Ledger-Client-IP {http.request.remote.host}
+	}
+}

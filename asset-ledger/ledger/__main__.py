@@ -7,6 +7,7 @@ import sqlite3
 import sys
 
 from .data import database, initialize, reset_password
+from .edge import PublicSite
 from .http import LedgerServer
 
 
@@ -36,12 +37,12 @@ def set_password(data_dir, username, from_stdin):
         reset_password(conn, username, password)
 
 
-def serve(data_dir, port):
+def serve(data_dir, port, public_site=None):
     ensure_initialized(data_dir)
     with database(data_dir) as conn:
         if conn.execute("SELECT 1 FROM users WHERE password_hash IS NULL").fetchone():
             raise ValueError("请先为 admin 和 region-reader 设置密码。")
-    with LedgerServer(port, data_dir) as server:
+    with LedgerServer(port, data_dir, public_site) as server:
         print(f"台账已监听 http://127.0.0.1:{server.server_port}/", flush=True)
         try:
             server.serve_forever()
@@ -61,6 +62,7 @@ def main():
     run = actions.add_parser("serve", help="启动仅本机监听的服务")
     run.add_argument("--data-dir", required=True, type=data_path)
     run.add_argument("--port", type=int, default=18754)
+    run.add_argument("--public-url", help="Caddy HTTPS 转发地址，包含以斜杠结尾的路径")
     args = parser.parse_args()
     try:
         if args.command == "init":
@@ -72,7 +74,7 @@ def main():
         else:
             if not 1 <= args.port <= 65535:
                 raise ValueError("端口须在 1 至 65535 之间。")
-            serve(args.data_dir, args.port)
+            serve(args.data_dir, args.port, PublicSite.parse(args.public_url) if args.public_url else None)
     except (OSError, ValueError, sqlite3.Error, EOFError) as error:
         print(error, file=sys.stderr)
         return 1

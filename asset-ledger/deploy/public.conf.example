@@ -1,0 +1,3 @@
+[Service]
+ExecStart=
+ExecStart=/usr/bin/python3 -m ledger serve --data-dir /var/lib/asset-ledger --port 18761 --public-url https://feng.asia/asset-ledger/

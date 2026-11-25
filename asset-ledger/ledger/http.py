@@ -2,6 +2,7 @@
 
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import ip_address
 import json
 import re
 import sqlite3
@@ -13,6 +14,7 @@ from .data import (
     invalid, log_in, log_out, profile, save_device, save_document, save_project,
     save_system, session_user, string,
 )
+from .edge import LoginThrottle
 
 
 STATIC_DIR = PROJECT_ROOT / "static"
@@ -35,8 +37,10 @@ STATIC_TYPES = {
 
 
 class LedgerServer(ThreadingHTTPServer):
-    def __init__(self, port, data_dir):
+    def __init__(self, port, data_dir, public_site=None):
         self.data_dir = data_dir
+        self.public_site = public_site
+        self.login_throttle = LoginThrottle()
         super().__init__(("127.0.0.1", port), LedgerHandler)
 
 
@@ -66,17 +70,17 @@ class LedgerHandler(BaseHTTPRequestHandler):
 
     def handle_request(self):
         try:
-            self.check_host()
             target = urlsplit(self.path)
             if target.scheme or target.netloc or target.fragment:
                 raise invalid("请求地址格式不正确。")
-            if self.command in ("GET", "HEAD") and not target.path.startswith("/api/"):
-                self.static(target.path)
-            elif target.path == "/api/health" and self.command in ("GET", "HEAD"):
+            path = self.route_path(target.path)
+            if self.command in ("GET", "HEAD") and not path.startswith("/api/"):
+                self.static(path)
+            elif path == "/api/health" and self.command in ("GET", "HEAD"):
                 self.json_response(200, {"status": "ok"})
             else:
                 with database(self.server.data_dir) as conn:
-                    self.api(conn, target.path, target.query)
+                    self.api(conn, path, target.query)
         except ApiError as error:
             self.json_response(error.status, {"error": str(error)})
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
@@ -85,14 +89,34 @@ class LedgerHandler(BaseHTTPRequestHandler):
             print(f"台账服务请求失败（{type(error).__name__}）。", file=sys.stderr)
             self.json_response(500, {"error": "服务暂时无法完成请求。"})
 
-    def check_host(self):
+    def route_path(self, path):
         hosts = self.headers.get_all("Host", [])
-        if len(hosts) != 1 or not LOCAL_HOST.fullmatch(hosts[0]):
-            raise ApiError(403, "请通过本地地址访问台账。")
+        host = hosts[0].lower() if len(hosts) == 1 else ""
+        self.public_peer = None
+        self.cookie_path = "/"
+        if LOCAL_HOST.fullmatch(host):
+            self.request_origin = "http://" + host
+            return path
+
+        site = self.server.public_site
+        if (site is None or host not in (site.host, site.host + ":443") or
+                self.headers.get_all("X-Forwarded-Proto", []) != ["https"]):
+            raise ApiError(403, "请通过台账的指定访问地址打开。")
+        if not path.startswith(site.prefix):
+            raise ApiError(404, "页面或记录不存在。")
+        # 该字段由监听公网 HTTPS 的 Caddy 写入，应用本身仍只监听回环地址。
+        peers = self.headers.get_all("X-Ledger-Client-IP", [])
+        try:
+            self.public_peer = str(ip_address(peers[0] if len(peers) == 1 else ""))
+        except ValueError:
+            raise ApiError(403, "台账入口校验失败。") from None
+        self.request_origin = site.origin
+        self.cookie_path = site.prefix
+        return "/" + path[len(site.prefix):]
 
     def check_origin(self):
         origins = self.headers.get_all("Origin", [])
-        if len(origins) > 1 or (origins and origins[0].lower() != "http://" + self.headers["Host"].lower()):
+        if len(origins) > 1 or (origins and origins[0].lower() != self.request_origin):
             raise ApiError(403, "请求来源与台账访问地址不一致。")
         if self.headers.get("Sec-Fetch-Site") in ("cross-site", "same-site"):
             raise ApiError(403, "请在台账页面内提交请求。")
@@ -104,6 +128,12 @@ class LedgerHandler(BaseHTTPRequestHandler):
             return None
         token = cookies.get(COOKIE)
         return token.value if token and TOKEN.fullmatch(token.value) else None
+
+    def session_cookie(self, token, max_age):
+        flags = "; HttpOnly; SameSite=Strict"
+        if self.public_peer is not None:
+            flags += "; Secure"
+        return f"{COOKIE}={token}; Path={self.cookie_path}; Max-Age={max_age}{flags}"
 
     def payload(self, limit=WRITE_LIMIT):
         if self.headers.get("Transfer-Encoding") or self.headers.get_content_type() != "application/json":
@@ -132,14 +162,16 @@ class LedgerHandler(BaseHTTPRequestHandler):
         token = self.session_token()
         if self.command == "POST" and path == "/api/login":
             payload = self.payload(4096)
+            if self.public_peer is not None and not self.server.login_throttle.allow(self.public_peer):
+                self.json_response(429, {"error": "登录请求过于频繁，请稍后重试。"}, {"Retry-After": "60"})
+                return
             user, new_token = log_in(
                 conn,
                 string(payload, "username", "账号", 100, required=True),
                 string(payload, "password", "密码", 256, required=True, trim=False),
             )
             log_out(conn, token)
-            cookie = f"{COOKIE}={new_token}; Path=/; Max-Age={SESSION_SECONDS}; HttpOnly; SameSite=Strict"
-            self.json_response(200, profile(conn, user), {"Set-Cookie": cookie})
+            self.json_response(200, profile(conn, user), {"Set-Cookie": self.session_cookie(new_token, SESSION_SECONDS)})
             return
 
         if not writing:
@@ -164,7 +196,7 @@ class LedgerHandler(BaseHTTPRequestHandler):
 
         if self.command == "POST" and path == "/api/logout":
             log_out(conn, token)
-            self.json_response(200, {}, {"Set-Cookie": f"{COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"})
+            self.json_response(200, {}, {"Set-Cookie": self.session_cookie("", 0)})
             return
         if user["role"] != "admin":
             raise ApiError(403, "当前账号只有辖区内的查阅权限。")
