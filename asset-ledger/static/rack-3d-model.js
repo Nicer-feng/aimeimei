@@ -164,19 +164,24 @@ function buildOperatingLamps(parent, entries, unit) {
 export function animateOperatingLamps(viewport, lamps, redraw) {
   if (!lamps) return undefined;
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let visible = false;
   let timer;
   let disposed = false;
-  const observer = new IntersectionObserver(([entry]) => {
-    visible = entry.isIntersecting;
-    sync();
-  });
+  const observer = new IntersectionObserver(sync);
   observer.observe(viewport);
   motion.addEventListener('change', changeMotion);
   document.addEventListener('visibilitychange', sync);
+  window.addEventListener('scroll', sync, { capture: true, passive: true });
+  window.addEventListener('resize', sync);
+  sync();
+
+  function isInViewport() {
+    const { top, right, bottom, left, width, height } = viewport.getBoundingClientRect();
+    return width > 0 && height > 0 && right > 0 && bottom > 0 && left < window.innerWidth && top < window.innerHeight;
+  }
 
   function canAnimate() {
-    return !disposed && visible && !document.hidden && !motion.matches && lamps.hasNearbyLamps();
+    // 观察器异步回调可能滞后，以当前画布位置决定是否继续刷帧。
+    return !disposed && !document.hidden && !motion.matches && lamps.hasNearbyLamps() && isInViewport();
   }
   function sync() {
     if (!canAnimate()) {
@@ -191,12 +196,12 @@ export function animateOperatingLamps(viewport, lamps, redraw) {
     if (!canAnimate()) return;
     lamps.pulse(performance.now());
     redraw();
-    sync();
+    timer = window.setTimeout(tick, LAMP_FRAME_MS);
   }
   function changeMotion() {
     if (motion.matches) {
       lamps.steady();
-      if (visible && !document.hidden) redraw();
+      if (!document.hidden && isInViewport()) redraw();
     }
     sync();
   }
@@ -205,6 +210,8 @@ export function animateOperatingLamps(viewport, lamps, redraw) {
     observer.disconnect();
     motion.removeEventListener('change', changeMotion);
     document.removeEventListener('visibilitychange', sync);
+    window.removeEventListener('scroll', sync, true);
+    window.removeEventListener('resize', sync);
     clearTimeout(timer);
   }
   return { sync, dispose };
