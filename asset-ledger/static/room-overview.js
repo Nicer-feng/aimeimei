@@ -81,7 +81,7 @@ function floorPlan(room, layout, racksById, onRack) {
   return plan;
 }
 
-export function renderRoomOverview(host, { room, layout, racks, onRack, onEdit, view }) {
+export function renderRoomOverview(host, { room, layout, racks, devices = [], deviceKind, units, onRack, onEdit, view }) {
   const racksById = new Map(racks.map((rack) => [rack.id, rack]));
   const positions = layout?.positions.filter((position) => racksById.has(position.rack_id)) ?? [];
   const placed = new Set(positions.map((position) => position.rack_id));
@@ -170,8 +170,10 @@ export function renderRoomOverview(host, { room, layout, racks, onRack, onEdit, 
     try {
       const { mountRoomScene } = await import('./room-overview-3d.js');
       if (disposed || ticket !== generation) return;
-      const mounted = mountRoomScene(spatial, { layout: { ...layout, positions }, racks, initialCamera: camera, onRack,
-        onFallback: () => fallback(ticket) });
+      const mounted = mountRoomScene(spatial, {
+        layout: { ...layout, positions }, racks, devices, deviceKind, units, initialCamera: camera, onRack,
+        onFallback: () => fallback(ticket),
+      });
       if (disposed || ticket !== generation) {
         mounted?.();
         return;

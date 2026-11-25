@@ -18,14 +18,14 @@ function svg(tag, attributes, label) {
   return node;
 }
 
-function deviceKind(device) {
+export function deviceKind(device) {
   if (/交换|路由|防火墙|网关/.test(device.type)) return 'network';
   if (/配电|电源|UPS/i.test(device.type)) return 'power';
   if (/存储|磁盘/.test(device.type)) return 'storage';
   return 'server';
 }
 
-function units(device) {
+export function units(device) {
   const end = device.u_start + device.u_height - 1;
   return end === device.u_start ? `U${end}` : `U${device.u_start}–U${end}`;
 }

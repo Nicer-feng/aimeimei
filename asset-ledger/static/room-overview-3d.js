@@ -1,14 +1,32 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
+import { buildRackFineDetails, buildRackOverviewLayer } from './rack-3d-model.js?v=room-detail';
 
 const COLUMN_GAP = 1.21;
 const ROW_GAP = 2.30;
-const CABINET_WIDTH = 1.06;
-const CABINET_DEPTH = 1.10;
+const RACK_SCALE = .535;
+const RACK_UNIT = .12;
+const RACK_BASE_Y = .100;
+const RACK_BOTTOM = -.1605;
+const RACK_TOP_MARGIN = .1065;
+const CABINET_WIDTH = 1.98 * RACK_SCALE;
+const CABINET_DEPTH = 1.27 * RACK_SCALE;
+const MIN_ZOOM = .32;
 const ANGLED = [.42, 2.30, 1.12];
 const TOP = [0, 1, .001];
-const CABINET_COLOR = 0x29353d;
-const FOCUS_COLOR = 0x3c7067;
+
+function disposeObjects(root) {
+  const geometries = new Set();
+  const materials = new Set();
+  root.traverse((object) => {
+    if (!object.isMesh && !object.isLineSegments) return;
+    geometries.add(object.geometry);
+    materials.add(object.material);
+    if (object.isInstancedMesh) object.dispose();
+  });
+  for (const geometry of geometries) geometry.dispose();
+  for (const material of materials) material.dispose();
+}
 
 function node(tag, className, label) {
   const element = document.createElement(tag);
@@ -17,17 +35,24 @@ function node(tag, className, label) {
   return element;
 }
 
-function makeRoom(scene, { room, racks }) {
+function makeRoom(scene, { room, racks, devices, deviceKind }) {
   const racksById = new Map(racks.map((rack) => [String(rack.id), rack]));
+  const devicesByRack = new Map();
+  for (const device of devices) {
+    const id = String(device.rack_id);
+    if (!racksById.has(id)) continue;
+    if (!devicesByRack.has(id)) devicesByRack.set(id, []);
+    devicesByRack.get(id).push(device);
+  }
   const placements = new Map(room.positions.map((entry) => [`${entry.row}/${entry.slot}`, entry]));
   const width = room.columns * COLUMN_GAP + .68;
   const depth = (room.rows - 1) * ROW_GAP + 2.26;
-  const graphite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .68, metalness: .18 });
   const finishes = new Map();
   const boxes = new Map();
   const symbols = [];
   const targets = [];
-  const cabinetSlots = new Map();
+  const entries = [];
+  const targetsById = new Map();
   const bounds = new THREE.Box3(
     new THREE.Vector3(-width / 2, -.16, -depth / 2), new THREE.Vector3(width / 2, 0, depth / 2),
   );
@@ -37,8 +62,6 @@ function makeRoom(scene, { room, racks }) {
   const location = new THREE.Vector3();
   const scale = new THREE.Vector3();
   const level = new THREE.Quaternion();
-  const angle = new THREE.Quaternion();
-  const yAxis = new THREE.Vector3(0, 1, 0);
 
   function finish(color) {
     if (!finishes.has(color)) {
@@ -47,16 +70,11 @@ function makeRoom(scene, { room, racks }) {
     return finishes.get(color);
   }
 
-  function box(material, position, size, rotation = level) {
-    if (!boxes.has(material)) boxes.set(material, []);
-    const batch = boxes.get(material);
-    transform.compose(position, rotation, scale.fromArray(size));
-    batch.push(transform.clone());
-    return batch.length - 1;
-  }
-
   function flat(color, x, y, z, size) {
-    box(finish(color), location.set(x, y, z), size);
+    const material = finish(color);
+    if (!boxes.has(material)) boxes.set(material, []);
+    transform.compose(location.set(x, y, z), level, scale.fromArray(size));
+    boxes.get(material).push(transform.clone());
   }
 
   flat(0xafc0c0, 0, -.116, 0, [width, .088, depth]);
@@ -90,73 +108,64 @@ function makeRoom(scene, { room, racks }) {
       }
 
       const id = String(rack.id);
-      const h = Math.max(.60, rack.height * .058);
-      const origin = new THREE.Vector3(x, 0, z);
-      const rotation = THREE.MathUtils.degToRad(Number(entry.rotation) || 0);
-      angle.setFromAxisAngle(yAxis, rotation);
-      const cabinetBox = (material, px, py, pz, size) => box(
-        material, location.set(px, py, pz).applyQuaternion(angle).add(origin), size, angle,
-      );
-      cabinetSlots.set(id, cabinetBox(graphite, 0, h * .50 + .04, 0, [.986, h, 1.018]));
-      cabinetBox(finish(0x46555d), 0, h + .048, 0, [CABINET_WIDTH, .072, CABINET_DEPTH]);
-      cabinetBox(finish(0x46555d), 0, .043, 0, [CABINET_WIDTH, .058, CABINET_DEPTH]);
-      cabinetBox(finish(0x1d2930), 0, h * .50 + .04, .523, [.889, h - .085, .041]);
-      cabinetBox(finish(0x1d2930), 0, h * .50 + .04, -.523, [.89, h - .085, .041]);
-      for (const side of [-1, 1]) {
-        for (const face of [-1, 1]) {
-          cabinetBox(finish(0x46555d), side * .506, h * .50 + .04, face * .52, [.043, h + .011, .053]);
-        }
-      }
-      cabinetBox(finish(0x608c80), -.325, h - .080, .550, [.142, .045, .014]);
-      cabinetBox(finish(0x53666b), 0, h * .64 + .035, .550, [.665, .024, .014]);
-      cabinetBox(finish(0x53666b), 0, h * .32 + .035, .550, [.665, .024, .014]);
-      cabinetBox(finish(0x53666b), -.328, h * .51 + .038, -.548, [.033, h * .16, .012]);
-      bounds.max.y = Math.max(bounds.max.y, h + .24);
+      const top = RACK_BASE_Y + (rack.height * RACK_UNIT + RACK_TOP_MARGIN) * RACK_SCALE;
+      const bottom = RACK_BASE_Y + RACK_BOTTOM * RACK_SCALE;
+      bounds.max.y = Math.max(bounds.max.y, top + .12);
+      const rackEntry = { rack, devices: devicesByRack.get(id) ?? [], x, y: RACK_BASE_Y, z, rotation: entry.rotation,
+        scale: RACK_SCALE, middle: (top + bottom) / 2 };
+      entries.push(rackEntry);
 
       const target = new THREE.Mesh(block, pickMaterial);
-      target.position.set(x, h / 2 + .04, z);
-      target.scale.set(CABINET_WIDTH, h + .08, CABINET_DEPTH);
-      target.quaternion.copy(angle);
+      target.position.set(x, rackEntry.middle, z);
+      target.scale.set(CABINET_WIDTH, top - bottom, CABINET_DEPTH);
+      target.rotation.y = THREE.MathUtils.degToRad(rackEntry.rotation);
       target.visible = false;
-      target.userData.rack = rack;
+      target.userData.entry = rackEntry;
       scene.add(target);
       targets.push(target);
-      symbols.push({ row, slot, rack, point: new THREE.Vector3(x, h + .114, z) });
+      targetsById.set(id, target);
+      symbols.push({ row, slot, rack, point: new THREE.Vector3(x, top + .04, z) });
     }
   }
 
-  let cabinetBatch;
   for (const [material, matrices] of boxes) {
     const mesh = new THREE.InstancedMesh(block, material, matrices.length);
-    const cabinet = material === graphite;
-    const color = new THREE.Color(CABINET_COLOR);
-    matrices.forEach((matrix, index) => {
-      mesh.setMatrixAt(index, matrix);
-      if (cabinet) mesh.setColorAt(index, color);
-    });
+    matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
     mesh.instanceMatrix.needsUpdate = true;
-    if (cabinet) cabinetBatch = mesh;
     scene.add(mesh);
   }
-  if (!cabinetBatch) graphite.dispose();
+  buildRackOverviewLayer(scene, { entries, unit: RACK_UNIT, deviceKind });
   if (!targets.length) pickMaterial.dispose();
 
-  const tone = new THREE.Color();
-  function tint(id, hovered) {
-    const index = cabinetSlots.get(id);
-    if (!cabinetBatch || index == null) return;
-    cabinetBatch.setColorAt(index, tone.setHex(hovered ? FOCUS_COLOR : CABINET_COLOR));
-    cabinetBatch.instanceColor.needsUpdate = true;
+  const outline = new THREE.LineSegments(new THREE.EdgesGeometry(block), new THREE.LineBasicMaterial({ color: 0x538f80 }));
+  outline.visible = false;
+  scene.add(outline);
+  function highlight(id) {
+    const target = targetsById.get(id);
+    outline.visible = Boolean(target);
+    if (!target) return;
+    outline.position.copy(target.position);
+    outline.rotation.copy(target.rotation);
+    outline.scale.copy(target.scale).multiplyScalar(1.014);
   }
-  return { bounds, symbols, targets, tint };
+  return { bounds, entries, highlight, symbols, targets };
 }
 
-export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onFallback }) {
+export function mountRoomScene(host, {
+  layout, racks, initialCamera, onRack, onFallback, devices = [], deviceKind = () => 'server', units = (device) => `U${device.u_start}`,
+}) {
   const panel = node('section', 'room-3d');
   panel.setAttribute('aria-label', '机房三维总览');
   const viewport = node('div', 'room-3d-viewport');
   const labels = node('div', 'room-3d-labels');
   labels.setAttribute('aria-label', '机柜及预留位');
+  const tooltip = node('div', 'rack-spatial-tooltip room-3d-device-tooltip');
+  tooltip.hidden = true;
+  tooltip.setAttribute('aria-hidden', 'true');
+  tooltip.style.zIndex = '3';
+  const tooltipName = node('strong', '');
+  const tooltipPosition = node('span', '');
+  tooltip.append(tooltipName, tooltipPosition);
   const toolbar = node('div', 'room-3d-toolbar');
   const presets = node('div', 'room-3d-presets');
   presets.setAttribute('role', 'group');
@@ -175,7 +184,9 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
   canvas.className = 'room-3d-canvas';
   canvas.setAttribute('role', 'img');
   canvas.setAttribute('aria-label', '三维机柜布局');
-  viewport.append(canvas, labels);
+  canvas.dataset.detailCount = '0';
+  canvas.dataset.detailRacks = '';
+  viewport.append(canvas, labels, tooltip);
   panel.append(viewport, toolbar);
   host.replaceChildren(panel);
 
@@ -187,7 +198,7 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
   const rim = new THREE.DirectionalLight(0xc8e3f4, 1.30);
   rim.position.set(8, 6, -9);
   scene.add(key, rim);
-  const model = makeRoom(scene, { room: layout, racks });
+  const model = makeRoom(scene, { room: layout, racks, devices, deviceKind });
   const center = model.bounds.getCenter(new THREE.Vector3());
   const corners = [];
   for (const x of [model.bounds.min.x, model.bounds.max.x]) {
@@ -197,13 +208,22 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
   }
 
   const camera = new THREE.PerspectiveCamera(35, 1, .04, 400);
-  const controls = new OrbitControls(camera, canvas);
+  const controls = new OrbitControls(camera, viewport);
   controls.enablePan = false;
   controls.minPolarAngle = .001;
   controls.maxPolarAngle = Math.PI / 2 - .12;
   const ray = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const projected = new THREE.Vector3();
+  const projectedEdge = new THREE.Vector3();
+  const otherEdge = new THREE.Vector3();
+  const localRay = new THREE.Ray();
+  const hitPoint = new THREE.Vector3();
+  const localTransform = new THREE.Matrix4();
+  const localRotation = new THREE.Quaternion();
+  const yAxis = new THREE.Vector3(0, 1, 0);
+  const fineLayers = new Map();
+  let deviceHitCache;
   let frame;
   let disposed = false;
   let applyingPreset = false;
@@ -218,7 +238,7 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
   const initial = {
     direction: restored ? initialCamera.direction : ANGLED,
     activeView: restored ? preset : 'angled',
-    zoom: Number.isFinite(initialCamera?.zoom) ? THREE.MathUtils.clamp(initialCamera.zoom, .4, 3) : 1,
+    zoom: Number.isFinite(initialCamera?.zoom) ? THREE.MathUtils.clamp(initialCamera.zoom, MIN_ZOOM, 3) : 1,
   };
   setActive(initial.activeView);
 
@@ -233,7 +253,10 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
       item.dataset.rackId = rack.id;
       item.title = `${rack.name} · ${rack.height}U`;
       item.setAttribute('aria-label', `查看机柜 ${rack.name}，${rack.height}U`);
-      item.addEventListener('click', () => onRack(rack));
+      item.addEventListener('click', (event) => {
+        // 指针点击统一交给视口，键盘或辅助技术仍可触发按钮。
+        if (event.detail === 0) onRack(rack);
+      });
       item.addEventListener('pointerenter', () => setHover(rack));
       item.addEventListener('pointerleave', () => setHover(null));
       item.addEventListener('focus', () => setHover(rack));
@@ -251,30 +274,44 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
     if (applyingPreset) return;
     setActive(null);
     setHover(null);
+    hideTooltip();
     invalidate();
   });
-  canvas.addEventListener('pointerdown', (event) => {
-    if (event.button === 0 && event.isPrimary) pressed = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
-    else if (pressed && event.pointerType === 'touch') pressed.moved = true;
+  viewport.addEventListener('pointerdown', (event) => {
+    hideTooltip();
+    if (event.button === 0 && event.isPrimary) {
+      const label = event.target.closest('button.room-3d-label');
+      const rack = label ? racks.find((item) => String(item.id) === label.dataset.rackId) : undefined;
+      pressed = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, rack };
+    } else if (pressed && event.pointerType === 'touch') pressed.moved = true;
   });
-  canvas.addEventListener('pointermove', (event) => {
+  viewport.addEventListener('pointermove', (event) => {
     if (pressed) {
       pressed.moved ||= Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > 5;
-    } else if (event.pointerType !== 'touch') {
-      setHover(pick(event));
+    } else if (event.pointerType !== 'touch' && event.target === canvas) {
+      const hit = pick(event);
+      const rack = hit?.object.userData.entry.rack;
+      setHover(rack);
+      showTooltip(pickDevice(hit), rack, event);
+    } else {
+      hideTooltip();
     }
   });
-  canvas.addEventListener('pointerup', (event) => {
+  viewport.addEventListener('pointerup', (event) => {
     const clicked = pressed?.id === event.pointerId && !pressed.moved &&
       Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) <= 5;
+    const labelRack = pressed?.rack;
     pressed = undefined;
     if (clicked) {
-      const rack = pick(event);
+      const rack = labelRack ?? pick(event)?.object.userData.entry.rack;
       if (rack) onRack(rack);
     }
   });
-  canvas.addEventListener('pointercancel', () => { pressed = undefined; });
-  canvas.addEventListener('pointerleave', () => setHover(null));
+  viewport.addEventListener('pointercancel', () => { pressed = undefined; });
+  viewport.addEventListener('pointerleave', () => {
+    setHover(null);
+    hideTooltip();
+  });
   const contextLost = (event) => {
     event.preventDefault();
     onFallback();
@@ -299,7 +336,7 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
 
   function placeView(direction, zoom) {
     const fit = fittedDistance(direction);
-    controls.minDistance = Math.max(1, fit * .4);
+    controls.minDistance = Math.max(1, fit * MIN_ZOOM);
     controls.maxDistance = fit * 3;
     controls.target.copy(center);
     camera.position.copy(center).addScaledVector(direction, fit * zoom);
@@ -318,6 +355,7 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
   function usePreset(view, direction) {
     setActive(view);
     setHover(null);
+    hideTooltip();
     placeView(new THREE.Vector3(...direction).normalize(), 1);
   }
 
@@ -346,9 +384,11 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
   function draw() {
     frame = undefined;
     if (disposed) return;
-    renderer.render(scene, camera);
     const width = viewport.clientWidth;
     const height = viewport.clientHeight;
+    camera.updateMatrixWorld();
+    updateDetails(width);
+    renderer.render(scene, camera);
     const labelLimit = width < 520 ? 12 : 24;
     labelItems.forEach(({ item, point, rack }, index) => {
       projected.copy(point).project(camera);
@@ -367,19 +407,124 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
     if (!rect.width || !rect.height) return null;
     pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, 1 - (event.clientY - rect.top) / rect.height * 2);
     ray.setFromCamera(pointer, camera);
-    return ray.intersectObjects(model.targets, false)[0]?.object.userData.rack ?? null;
+    return ray.intersectObjects(model.targets, false)[0] ?? null;
   }
 
   function setHover(rack) {
     const id = rack ? String(rack.id) : undefined;
     if (hovered === id) return;
-    model.tint(hovered, false);
-    model.tint(id, true);
+    model.highlight(id);
     hovered = id;
     canvas.dataset.pickable = String(Boolean(id));
     if (id) canvas.dataset.hoveredRackId = id;
     else delete canvas.dataset.hoveredRackId;
     invalidate();
+  }
+
+  function updateDetails(width) {
+    const { direction, zoom } = snapshot();
+    const narrow = width < 520;
+    const candidates = [];
+    if (zoom <= .91 && direction[1] < .985) {
+      for (const entry of model.entries) {
+        const id = String(entry.rack.id);
+        const active = fineLayers.has(id);
+        if (zoom > (active ? .91 : .83)) continue;
+        projected.set(entry.x, entry.middle, entry.z).project(camera);
+        if (Math.abs(projected.x) > .95 || Math.abs(projected.y) > .95 || projected.z < -1 || projected.z > 1) continue;
+        const angle = THREE.MathUtils.degToRad(entry.rotation);
+        const offsetX = Math.cos(angle) * CABINET_WIDTH / 2;
+        const offsetZ = Math.sin(angle) * CABINET_WIDTH / 2;
+        projectedEdge.set(entry.x + offsetX, entry.middle, entry.z - offsetZ).project(camera);
+        otherEdge.set(entry.x - offsetX, entry.middle, entry.z + offsetZ).project(camera);
+        const pixels = Math.abs(projectedEdge.x - otherEdge.x) * width / 2;
+        const threshold = narrow ? (active ? 94 : 110) : (active ? 104 : 122);
+        if (pixels >= threshold) candidates.push({ id, entry, priority: pixels + (active ? 16 : 0) });
+      }
+    }
+    candidates.sort((a, b) => b.priority - a.priority);
+    const selected = new Map(candidates.slice(0, narrow ? 2 : 4).map(({ id, entry }) => [id, entry]));
+    let changed = false;
+    for (const [id, group] of fineLayers) {
+      if (selected.has(id)) continue;
+      scene.remove(group);
+      disposeObjects(group);
+      fineLayers.delete(id);
+      changed = true;
+    }
+    for (const [id, entry] of selected) {
+      if (fineLayers.has(id)) continue;
+      const group = new THREE.Group();
+      group.position.set(entry.x, entry.y, entry.z);
+      group.rotation.y = THREE.MathUtils.degToRad(entry.rotation);
+      group.scale.setScalar(entry.scale);
+      buildRackFineDetails(group, { rack: entry.rack, devices: entry.devices, unit: RACK_UNIT, deviceKind });
+      fineLayers.set(id, group);
+      scene.add(group);
+      changed = true;
+    }
+    if (changed) {
+      canvas.dataset.detailRacks = [...fineLayers.keys()].join(' ');
+      canvas.dataset.detailCount = String(fineLayers.size);
+    }
+  }
+
+  function pickDevice(hit) {
+    if (!hit || Math.abs(hit.face.normal.y) > .5) return undefined;
+    const entry = hit.object.userData.entry;
+    if (!entry.devices.length) return undefined;
+    if (deviceHitCache?.entry !== entry) {
+      localRotation.setFromAxisAngle(yAxis, THREE.MathUtils.degToRad(entry.rotation));
+      localTransform.compose(new THREE.Vector3(entry.x, entry.y, entry.z), localRotation, new THREE.Vector3().setScalar(entry.scale));
+      localTransform.invert();
+      // Scale and mount ranges are the same as the shared rack model.
+      const parts = entry.devices.map((device) => {
+        const lower = (device.u_start - 1) * RACK_UNIT + .003;
+        const upper = (device.u_start - 1 + device.u_height) * RACK_UNIT - .003;
+        const full = device.mount_depth === 'full';
+        const front = device.face === 'front';
+        const minZ = full || !front ? -.593 : .025;
+        const maxZ = full || front ? .593 : -.025;
+        const box = new THREE.Box3(new THREE.Vector3(-.869, lower, minZ), new THREE.Vector3(.869, upper, maxZ));
+        return { device, box };
+      });
+      deviceHitCache = { entry, parts };
+    }
+    localRay.copy(ray.ray).applyMatrix4(localTransform);
+    let nearest;
+    let distance = Infinity;
+    for (const { device, box } of deviceHitCache.parts) {
+      if (!localRay.intersectBox(box, hitPoint)) continue;
+      const next = hitPoint.distanceToSquared(localRay.origin);
+      if (next >= distance) continue;
+      nearest = device;
+      distance = next;
+    }
+    return nearest;
+  }
+
+  function showTooltip(device, rack, event) {
+    if (!device) {
+      hideTooltip();
+      return;
+    }
+    const id = String(device.id);
+    if (tooltip.dataset.deviceId !== id) {
+      tooltip.dataset.deviceId = id;
+      tooltipName.textContent = device.name;
+      tooltipPosition.textContent = `${rack.name} · ${device.face === 'front' ? '正面' : '背面'} ${units(device)}`;
+      tooltip.hidden = false;
+    }
+    const bounds = viewport.getBoundingClientRect();
+    const left = event.clientX - bounds.left + 12;
+    const top = event.clientY - bounds.top + 12;
+    tooltip.style.left = `${Math.max(6, Math.min(left, bounds.width - tooltip.offsetWidth - 6))}px`;
+    tooltip.style.top = `${Math.max(6, Math.min(top, bounds.height - tooltip.offsetHeight - 6))}px`;
+  }
+
+  function hideTooltip() {
+    tooltip.hidden = true;
+    delete tooltip.dataset.deviceId;
   }
 
   function dispose() {
@@ -389,16 +534,8 @@ export function mountRoomScene(host, { layout, racks, initialCamera, onRack, onF
     if (frame != null) cancelAnimationFrame(frame);
     canvas.removeEventListener('webglcontextlost', contextLost);
     controls.dispose();
-    const geometries = new Set();
-    const materials = new Set();
-    for (const object of scene.children) {
-      if (!object.isMesh) continue;
-      geometries.add(object.geometry);
-      materials.add(object.material);
-      if (object.isInstancedMesh) object.dispose();
-    }
-    for (const geometry of geometries) geometry.dispose();
-    for (const material of materials) material.dispose();
+    disposeObjects(scene);
+    fineLayers.clear();
     renderer.dispose();
     renderer.forceContextLoss();
     panel.remove();
