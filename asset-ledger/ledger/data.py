@@ -23,6 +23,7 @@ ATTACHMENT_LIMIT = 8 * 1024 * 1024
 SESSION_SECONDS = 8 * 60 * 60
 HASH_ROUNDS = 600_000
 MOUNT_DEPTHS = ("unknown", "half", "full")
+OPERATING_STATUSES = ("unknown", "running", "disabled", "unpowered")
 LAYOUT_MAX_ROWS = 12
 LAYOUT_MAX_COLUMNS = 20
 LAYOUT_ROTATIONS = (0, 90, 180, 270)
@@ -70,6 +71,7 @@ def initialize(data_dir):
 def migrate_schema(conn):
     conn.executescript((Path(__file__).parent / "schema.sql").read_text(encoding="utf-8"))
     migrate_mount_depth(conn)
+    migrate_operating_status(conn)
 
 
 def migrate_mount_depth(conn):
@@ -79,6 +81,16 @@ def migrate_mount_depth(conn):
             return
         conn.execute("""ALTER TABLE devices ADD COLUMN mount_depth TEXT NOT NULL DEFAULT 'unknown' CHECK (
             mount_depth IN ('unknown', 'half', 'full') AND (rack_id IS NOT NULL OR mount_depth = 'unknown')
+        )""")
+
+
+def migrate_operating_status(conn):
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if any(column["name"] == "operating_status" for column in conn.execute("PRAGMA table_info(devices)")):
+            return
+        conn.execute("""ALTER TABLE devices ADD COLUMN operating_status TEXT NOT NULL DEFAULT 'unknown' CHECK (
+            operating_status IN ('unknown', 'running', 'disabled', 'unpowered')
         )""")
 
 
@@ -404,6 +416,9 @@ def save_device(conn, user, payload, ident=None):
     mount_depth = payload.get("mount_depth", "unknown")
     if mount_depth not in MOUNT_DEPTHS:
         raise invalid("设备深度应为待核、半深或全深。")
+    operating_status = payload.get("operating_status", "unknown")
+    if operating_status not in OPERATING_STATUSES:
+        raise invalid("运行状态应为待核实、运行中、已停用或未通电。")
     values = {
         "code": string(payload, "code", "设备编号", 80, required=True),
         "name": string(payload, "name", "设备名称", required=True),
@@ -413,6 +428,7 @@ def save_device(conn, user, payload, ident=None):
         "room_id": integer(payload, "room_id", "机房", required=True),
         "rack_id": integer(payload, "rack_id", "机柜"),
         "face": None, "u_start": None, "u_height": None, "mount_depth": "unknown",
+        "operating_status": operating_status,
         "workstation": string(payload, "workstation", "工位"),
         "purpose": string(payload, "purpose", "用途", 500),
         "ownership": string(payload, "ownership", "归属"),
@@ -434,6 +450,8 @@ def save_device(conn, user, payload, ident=None):
         previous = conn.execute("SELECT * FROM devices WHERE id = ?", (ident,)).fetchone() if ident is not None else None
         if ident is not None and previous is None:
             raise ApiError(404, "设备不存在。")
+        if previous is not None and "operating_status" not in payload:
+            values["operating_status"] = previous["operating_status"]
         ensure_record(conn, "rooms", values["room_id"], "机房")
         if values["rack_id"] is not None:
             values["mount_depth"] = previous["mount_depth"] if previous is not None and "mount_depth" not in payload else mount_depth

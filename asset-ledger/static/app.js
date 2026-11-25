@@ -1,4 +1,4 @@
-import { deviceKind, renderRack, units } from './rack.js';
+import { deviceKind, operatingStatus, operatingStatusLabel, OPERATING_STATUS_LABELS, renderRack, units } from './rack.js?v=operating-status';
 import { renderRoomOverview } from './room-overview.js';
 
 const byId = (id) => document.getElementById(id);
@@ -431,12 +431,13 @@ function renderDevicesPage() {
       element('div', { class: 'results-head' },
         element('h2', { id: 'device-results-title' }, '设备列表'),
         element('span', { class: 'muted small-text', 'aria-live': 'polite' }, `${matches.length} 台设备`)),
-      table(['设备', '类型', '位置', '维护人', '最近核实'],
+      table(['设备', '类型', '位置', '运行状态', '维护人', '最近核实'],
         matches.map((device) => [
           element('div', {}, internalLink('device', device.id, device.name),
             element('div', { class: 'muted small-text code' }, device.code)),
           element('span', { class: 'tag' }, device.type),
           deviceLocation(device, true),
+          operatingStatusLabel(device),
           device.maintainer || '责任人未确认',
           device.verified_on || '待核实',
         ]),
@@ -626,6 +627,7 @@ function deviceFacts(device) {
     ['品牌型号', device.model], ['序列号', device.serial],
     ['位置', deviceLocation(device, true), true],
     ...(device.rack_id ? [['安装深度', mountDepthLabels[mountDepth(device)], true]] : []),
+    ['运行状态（人工登记）', operatingStatusLabel(device)],
     ['用途', device.purpose || '用途待查', true],
     ['归属', device.ownership || '未登记'], ['最近核实', device.verified_on || '待核实'],
     ['填报人', device.reporter || '未登记'], ['维护人', device.maintainer || '责任人未确认'],
@@ -875,6 +877,9 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
         inputField('设备名称', 'name', original.name, { required: true, maxlength: 160 }),
         inputField('设备类型', 'type', original.type, { required: true, maxlength: 80, placeholder: '例如服务器、交换机、打印机' }),
         inputField('品牌型号', 'model', original.model, { maxlength: 160 }),
+        labelInput('运行状态（人工登记）', selectInput(
+          'operating_status', Object.entries(OPERATING_STATUS_LABELS), operatingStatus(original), null,
+        )),
         inputField('序列号', 'serial', original.serial, { maxlength: 160 }),
         inputField('归属', 'ownership', original.ownership, { maxlength: 160 }),
         labelInput('机房／房间', roomChoice), labelInput('机柜', rackChoice),

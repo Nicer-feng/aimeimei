@@ -3,6 +3,18 @@ const UNIT = 22;
 const FRAME_TOP = 10;
 const FACE_NAMES = { front: '正面', rear: '背面' };
 const DEPTH_NAMES = { full: '全深', half: '半深', unknown: '深度待核' };
+export const OPERATING_STATUS_LABELS = Object.freeze({
+  unknown: '待核实', running: '运行中', disabled: '已停用', unpowered: '未通电',
+});
+
+export function operatingStatus(device) {
+  const status = device?.operating_status;
+  return Object.hasOwn(OPERATING_STATUS_LABELS, status) ? status : 'unknown';
+}
+
+export function operatingStatusLabel(device) {
+  return OPERATING_STATUS_LABELS[operatingStatus(device)];
+}
 
 function element(tag, className, label) {
   const node = document.createElement(tag);

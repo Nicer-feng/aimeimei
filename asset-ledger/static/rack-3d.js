@@ -1,6 +1,7 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
-import { buildRackModel } from './rack-3d-model.js';
+import { animateOperatingLamps, buildRackModel } from './rack-3d-model.js?v=operating-status';
+import { operatingStatusLabel } from './rack.js?v=operating-status';
 
 const UNIT = 0.12;
 const CAMERA_VIEWS = [
@@ -90,7 +91,7 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.deviceId = device.id;
-    button.textContent = `${device.face === 'front' ? '正面' : '背面'} ${units(device)} · ${device.name} · ${depthLabel(device)}`;
+    button.textContent = `${device.face === 'front' ? '正面' : '背面'} ${units(device)} · ${device.name} · ${depthLabel(device)} · ${operatingStatusLabel(device)}`;
     button.addEventListener('click', () => onDevice(device));
     shortcuts.append(button);
   }
@@ -134,6 +135,7 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
   });
   const observer = new ResizeObserver(resize);
   observer.observe(viewport);
+  const lampAnimation = animateOperatingLamps(viewport, model.lamps, draw);
   resize();
 
   canvas.addEventListener('pointerdown', (event) => {
@@ -172,6 +174,7 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
 
   function dispose() {
     observer.disconnect();
+    lampAnimation?.dispose();
     canvas.removeEventListener('webglcontextlost', contextLost);
     controls.dispose();
     const geometries = new Set();
@@ -281,7 +284,7 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
       hovered = device;
       const face = device.face === 'front' ? '正面' : '背面';
       tooltipName.textContent = device.name;
-      tooltipPosition.textContent = `${face} ${units(device)} · ${device.u_height}U · ${depthLabel(device)}`;
+      tooltipPosition.textContent = `${face} ${units(device)} · ${device.u_height}U · ${depthLabel(device)} · ${operatingStatusLabel(device)}`;
       hover.textContent = `${device.name} · ${tooltipPosition.textContent}`;
       tooltip.hidden = false;
       canvas.classList.add('rack-spatial-hit');

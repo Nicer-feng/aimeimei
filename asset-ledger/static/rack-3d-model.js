@@ -13,9 +13,11 @@ const SURFACES = {
   scale: [0x9ba9ae, .62, .16],
   foot: [0x252a2c, .86, .08],
 };
-const TYPE_ACCENTS = { server: 0x7295b6, network: 0x539e8b, power: 0xd1a157, storage: 0x9d8daf };
+const TYPE_ACCENTS = { server: 0x7295b6, network: 0x547780, power: 0xd1a157, storage: 0x9d8daf };
 const PANEL_Z = .573;
 const DETAIL_Z = .596;
+const LAMP_PERIOD_MS = 3200;
+const LAMP_FRAME_MS = 80;
 
 function material(color, roughness, metalness) {
   return new THREE.MeshStandardMaterial({ color, roughness, metalness });
@@ -49,10 +51,7 @@ function rackPalette() {
         materials.set(surface, material(...SURFACES[surface]));
       } else {
         const color = TYPE_ACCENTS[surface.slice('accent/'.length)] ?? TYPE_ACCENTS.server;
-        const light = material(color, .63, .10);
-        light.emissive.setHex(color);
-        light.emissiveIntensity = .12;
-        materials.set(surface, light);
+        materials.set(surface, material(color, .72, .10));
       }
     }
     return materials.get(surface);
@@ -90,6 +89,125 @@ function instancedBoxes(parent, materialFor) {
   }
 
   return { add, finish };
+}
+
+function buildOperatingLamps(parent, entries, unit) {
+  const indicesByRack = new Map();
+  const matrices = [];
+  const world = new THREE.Matrix4();
+  const local = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  const normalSize = new THREE.Vector3(1, 1, 1);
+  const yAxis = new THREE.Vector3(0, 1, 0);
+  const rotation = new THREE.Quaternion();
+  const front = new THREE.Quaternion();
+  const rear = new THREE.Quaternion().setFromAxisAngle(yAxis, Math.PI);
+
+  for (const { rack, devices, x, y, z, rotation: angle, scale } of entries) {
+    const running = devices.filter((device) => device.operating_status === 'running');
+    if (!running.length) continue;
+    world.compose(position.set(x, y, z), rotation.setFromAxisAngle(yAxis, THREE.MathUtils.degToRad(angle)), size.setScalar(scale));
+    const indices = [];
+    for (const device of running) {
+      const onFront = device.face === 'front';
+      const height = (device.u_start - 1 + device.u_height / 2) * unit;
+      position.set(.778, height, (onFront ? 1 : -1) * (DETAIL_Z + .009));
+      indices.push(matrices.length);
+      matrices.push(local.compose(position, onFront ? front : rear, normalSize).clone().premultiply(world));
+    }
+    indicesByRack.set(String(rack.id), indices);
+  }
+  if (!matrices.length) return undefined;
+
+  const steadyColor = new THREE.Color(0x4b7b60);
+  const dimColor = new THREE.Color(0x56906a);
+  const brightColor = new THREE.Color(0x70a785);
+  const pulseColor = new THREE.Color();
+  const mesh = new THREE.InstancedMesh(new THREE.CircleGeometry(.023, 8),
+    new THREE.MeshBasicMaterial({ toneMapped: false }), matrices.length);
+  mesh.name = 'running-device-lamps';
+  matrices.forEach((matrix, index) => {
+    mesh.setMatrixAt(index, matrix);
+    mesh.setColorAt(index, steadyColor);
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  parent.add(mesh);
+
+  let animated = [];
+  function paint(color) {
+    if (!animated.length) return;
+    for (const index of animated) mesh.setColorAt(index, color);
+    mesh.instanceColor.needsUpdate = true;
+  }
+  return {
+    hasNearbyLamps: () => animated.length > 0,
+    setNearbyRacks(rackIds) {
+      paint(steadyColor);
+      animated = [];
+      for (const id of rackIds) {
+        const indices = indicesByRack.get(String(id));
+        if (indices) animated.push(...indices);
+      }
+    },
+    steady: () => paint(steadyColor),
+    pulse(time) {
+      const phase = (time % LAMP_PERIOD_MS) / LAMP_PERIOD_MS;
+      const amount = .5 - .5 * Math.cos(phase * Math.PI * 2);
+      paint(pulseColor.lerpColors(dimColor, brightColor, amount));
+    },
+  };
+}
+
+// 灯效只重绘画布，机房的柜号和细节分层仍由相机操作触发。
+export function animateOperatingLamps(viewport, lamps, redraw) {
+  if (!lamps) return undefined;
+  const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let visible = false;
+  let timer;
+  let disposed = false;
+  const observer = new IntersectionObserver(([entry]) => {
+    visible = entry.isIntersecting;
+    sync();
+  });
+  observer.observe(viewport);
+  motion.addEventListener('change', changeMotion);
+  document.addEventListener('visibilitychange', sync);
+
+  function canAnimate() {
+    return !disposed && visible && !document.hidden && !motion.matches && lamps.hasNearbyLamps();
+  }
+  function sync() {
+    if (!canAnimate()) {
+      clearTimeout(timer);
+      timer = undefined;
+    } else if (timer === undefined) {
+      timer = window.setTimeout(tick, LAMP_FRAME_MS);
+    }
+  }
+  function tick() {
+    timer = undefined;
+    if (!canAnimate()) return;
+    lamps.pulse(performance.now());
+    redraw();
+    sync();
+  }
+  function changeMotion() {
+    if (motion.matches) {
+      lamps.steady();
+      if (visible && !document.hidden) redraw();
+    }
+    sync();
+  }
+  function dispose() {
+    disposed = true;
+    observer.disconnect();
+    motion.removeEventListener('change', changeMotion);
+    document.removeEventListener('visibilitychange', sync);
+    clearTimeout(timer);
+  }
+  return { sync, dispose };
 }
 
 // 机柜本地空间的 +Z 为正面。medium 标记用于总览也需要保留的外形细节。
@@ -150,7 +268,7 @@ function describeRack({ rack, devices, deviceKind, unit }, { solid, detail }, in
         }
       }
       for (const offset of [-.012, .012]) {
-        detail(accent(kind), [.014, .006, .005], [.737, center + offset, frontZ]);
+        detail('inset', [.014, .006, .005], [.737, center + offset, frontZ]);
       }
       return;
     }
@@ -180,7 +298,7 @@ function describeRack({ rack, devices, deviceKind, unit }, { solid, detail }, in
       }
     }
     for (const offset of [-.024, 0, .024]) {
-      detail(accent(kind), [.014, .006, .004], [.683, center + offset, frontZ]);
+      detail('inset', [.014, .006, .004], [.683, center + offset, frontZ]);
     }
   }
 
@@ -239,7 +357,7 @@ export function buildRackOverviewLayer(scene, { entries, unit, deviceKind }) {
       },
     }, false);
   }
-  return { meshes: batches.finish() };
+  return { meshes: batches.finish(), lamps: buildOperatingLamps(scene, entries, unit) };
 }
 
 export function buildRackFineDetails(group, options) {
@@ -301,5 +419,8 @@ export function buildRackModel(scene, options) {
     selected = panel;
   }
 
-  return { parts, highlight };
+  const lamps = buildOperatingLamps(scene, [{ rack: options.rack, devices: options.devices, x: 0, y: 0, z: 0,
+    rotation: 0, scale: 1 }], options.unit);
+  lamps?.setNearbyRacks([options.rack.id]);
+  return { parts, highlight, lamps };
 }

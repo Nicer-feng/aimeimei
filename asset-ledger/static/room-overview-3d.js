@@ -1,6 +1,7 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
-import { buildRackFineDetails, buildRackOverviewLayer } from './rack-3d-model.js?v=room-detail';
+import { animateOperatingLamps, buildRackFineDetails, buildRackOverviewLayer } from './rack-3d-model.js?v=operating-status';
+import { operatingStatusLabel } from './rack.js?v=operating-status';
 
 const COLUMN_GAP = 1.21;
 const ROW_GAP = 2.30;
@@ -134,7 +135,7 @@ function makeRoom(scene, { room, racks, devices, deviceKind }) {
     mesh.instanceMatrix.needsUpdate = true;
     scene.add(mesh);
   }
-  buildRackOverviewLayer(scene, { entries, unit: RACK_UNIT, deviceKind });
+  const { lamps } = buildRackOverviewLayer(scene, { entries, unit: RACK_UNIT, deviceKind });
   if (!targets.length) pickMaterial.dispose();
 
   const outline = new THREE.LineSegments(new THREE.EdgesGeometry(block), new THREE.LineBasicMaterial({ color: 0x538f80 }));
@@ -148,7 +149,7 @@ function makeRoom(scene, { room, racks, devices, deviceKind }) {
     outline.rotation.copy(target.rotation);
     outline.scale.copy(target.scale).multiplyScalar(1.014);
   }
-  return { bounds, entries, highlight, symbols, targets };
+  return { bounds, entries, highlight, lamps, symbols, targets };
 }
 
 export function mountRoomScene(host, {
@@ -321,6 +322,7 @@ export function mountRoomScene(host, {
   canvas.addEventListener('webglcontextlost', contextLost);
   const observer = new ResizeObserver(resize);
   observer.observe(viewport);
+  const lampAnimation = animateOperatingLamps(viewport, model.lamps, () => renderer.render(scene, camera));
   resize();
 
   function fittedDistance(direction) {
@@ -466,6 +468,8 @@ export function mountRoomScene(host, {
       changed = true;
     }
     if (changed) {
+      model.lamps?.setNearbyRacks(fineLayers.keys());
+      lampAnimation?.sync();
       canvas.dataset.detailRacks = [...fineLayers.keys()].join(' ');
       canvas.dataset.detailCount = String(fineLayers.size);
     }
@@ -514,7 +518,7 @@ export function mountRoomScene(host, {
     if (tooltip.dataset.deviceId !== id) {
       tooltip.dataset.deviceId = id;
       tooltipName.textContent = device.name;
-      tooltipPosition.textContent = `${rack.name} · ${device.face === 'front' ? '正面' : '背面'} ${units(device)}`;
+      tooltipPosition.textContent = `${rack.name} · ${device.face === 'front' ? '正面' : '背面'} ${units(device)} · ${operatingStatusLabel(device)}`;
       tooltip.hidden = false;
     }
     const bounds = viewport.getBoundingClientRect();
@@ -533,6 +537,7 @@ export function mountRoomScene(host, {
     if (disposed) return;
     disposed = true;
     observer.disconnect();
+    lampAnimation?.dispose();
     if (frame != null) cancelAnimationFrame(frame);
     canvas.removeEventListener('webglcontextlost', contextLost);
     controls.dispose();

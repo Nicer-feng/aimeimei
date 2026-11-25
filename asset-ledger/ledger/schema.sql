@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS devices (
     mount_depth TEXT NOT NULL DEFAULT 'unknown' CHECK (
         mount_depth IN ('unknown', 'half', 'full') AND (rack_id IS NOT NULL OR mount_depth = 'unknown')
     ),
+    operating_status TEXT NOT NULL DEFAULT 'unknown' CHECK (
+        operating_status IN ('unknown', 'running', 'disabled', 'unpowered')
+    ),
     CHECK ((rack_id IS NULL AND face IS NULL AND u_start IS NULL AND u_height IS NULL) OR
            (rack_id IS NOT NULL AND face IS NOT NULL AND face IN ('front', 'rear') AND
             u_start IS NOT NULL AND u_start > 0 AND u_height IS NOT NULL AND u_height > 0))
