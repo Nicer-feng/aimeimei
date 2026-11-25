@@ -941,6 +941,24 @@ window.addEventListener('hashchange', () => {
   }
 });
 
+function isDrawerBackdrop(event) {
+  if (event.target !== drawer || !drawer.open || editor.open || preview.open) return false;
+  const bounds = drawer.getBoundingClientRect();
+  return event.clientX < bounds.left || event.clientX >= bounds.right
+    || event.clientY < bounds.top || event.clientY >= bounds.bottom;
+}
+
+let drawerBackdropPressed = false;
+drawer.addEventListener('pointerdown', (event) => {
+  drawerBackdropPressed = event.isPrimary && event.button === 0 && isDrawerBackdrop(event);
+});
+drawer.addEventListener('pointercancel', () => { drawerBackdropPressed = false; });
+drawer.addEventListener('click', (event) => {
+  const shouldClose = drawerBackdropPressed && isDrawerBackdrop(event);
+  drawerBackdropPressed = false;
+  if (shouldClose) drawer.close();
+});
+
 preview.addEventListener('close', () => {
   if (!preview.open) byId('pdf-content').replaceChildren();
 });
