@@ -303,8 +303,14 @@ function disposeRoomOverview(remember = false) {
 
 function renderRoomPage(requestedId, filterChanged) {
   const filters = state.roomFilters;
-  const room = requestedId ? lookup('rooms', requestedId) : selectOverviewRoom(filters);
-  if (room && requestedId && !filterChanged && filters.room !== String(room.id)) {
+  let roomId = requestedId;
+  if (!roomId && !filterChanged && !filters.unit && !filters.site && !filters.room) {
+    const populatedLayouts = (state.catalog.room_layouts ?? []).filter((layout) => layout.positions.length);
+    const preferredLayout = populatedLayouts.find((layout) => !layout.illustrative) ?? populatedLayouts[0];
+    roomId = preferredLayout?.room_id;
+  }
+  const room = roomId ? lookup('rooms', roomId) : selectOverviewRoom(filters);
+  if (room && roomId && !filterChanged && filters.room !== String(room.id)) {
     const previous = state.roomViews.get(room.id);
     const { site, unit } = roomContext(room.id);
     Object.assign(filters, previous?.filters ?? { unit: String(unit?.id ?? ''), site: String(site?.id ?? '') });
