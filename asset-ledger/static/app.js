@@ -14,7 +14,7 @@ const state = {
   deviceFilters: blankFilters(),
   rackFilters: blankFilters(),
   deviceSearch: '',
-  rackCleanup: null,
+  rackView: null,
 };
 const titles = { rack: '机柜视图', devices: '设备台账', systems: '业务系统', projects: '项目档案' };
 const collectionRoutes = { device: 'devices', system: 'systems', project: 'projects' };
@@ -93,8 +93,8 @@ function closeDialogs() {
 
 function showLogin(message = '') {
   const wasAuthenticated = state.user !== null;
-  state.rackCleanup?.();
-  state.rackCleanup = null;
+  state.rackView?.();
+  state.rackView = null;
   state.user = null;
   state.catalog = null;
   state.deviceFilters = blankFilters();
@@ -269,7 +269,7 @@ function filterControls(filters, options = {}) {
   return group;
 }
 
-function renderRackPage(requestedId) {
+function renderRackPage(requestedId, view) {
   const filters = state.rackFilters;
   const requested = lookup('racks', requestedId);
   if (requested) {
@@ -301,9 +301,10 @@ function renderRackPage(requestedId) {
   ));
   const rackHost = element('section', { id: 'rack-viewport', 'aria-label': `${rack.name} 机柜立面` });
   page.append(rackHost);
-  state.rackCleanup = renderRack(rackHost, {
+  state.rackView = renderRack(rackHost, {
     rack, devices, onDevice: openDeviceDrawer,
     onEmpty: userCanWrite() ? (slot) => openDeviceEditor(null, rack, slot) : undefined,
+    view: view?.rackId === rack.id ? view : undefined,
   });
 }
 
@@ -616,10 +617,11 @@ function readRoute() {
   return { kind: 'rack', id: null, section: 'rack' };
 }
 
-function renderPage() {
+function renderPage({ preserveRackView = false } = {}) {
   if (!state.catalog) return;
-  state.rackCleanup?.();
-  state.rackCleanup = null;
+  const view = preserveRackView ? state.rackView?.snapshot?.() : undefined;
+  state.rackView?.();
+  state.rackView = null;
   const { kind, id, section } = readRoute();
   byId('breadcrumb').textContent = titles[section];
   document.querySelectorAll('.nav [data-route]').forEach((link) => {
@@ -627,7 +629,7 @@ function renderPage() {
     else link.removeAttribute('aria-current');
   });
   page.replaceChildren();
-  if (kind === 'rack') renderRackPage(id);
+  if (kind === 'rack') renderRackPage(id, view);
   if (kind === 'devices') renderDevicesPage();
   if (kind === 'systems') renderSystemsPage();
   if (kind === 'projects') renderProjectsPage();
@@ -638,6 +640,7 @@ function renderPage() {
     else if (kind === 'system') renderSystemPage(item);
     else renderProjectPage(item);
   }
+  return state.rackView?.ready;
 }
 
 function inputField(label, name, value, attributes = {}, layout = '') {
@@ -669,6 +672,8 @@ function showEditor({ title, id, fields, save, success, afterSave }) {
   const submit = element('button', { class: 'button primary', type: 'submit' }, '保存');
   const form = element('form', { id, onsubmit: async (event) => {
     event.preventDefault();
+    const origin = location.hash;
+    const originView = state.rackView;
     submit.disabled = true;
     showError(errorBox);
     let record;
@@ -676,16 +681,26 @@ function showEditor({ title, id, fields, save, success, afterSave }) {
       record = await save(form);
     } catch (error) {
       showError(errorBox, error.message);
-      if (editor.open) errorBox.focus();
+      if (editor.open && editor.contains(form)) errorBox.focus();
       submit.disabled = false;
       return;
     }
-    closeDialogs();
+    const restoreContext = editor.open && editor.contains(form) && location.hash === origin;
+    const initialScroll = window.scrollY;
+    if (restoreContext) closeDialogs();
     try {
       state.catalog = await request('catalog');
-      renderPage();
-      if (afterSave) afterSave(record);
-      else page.focus({ preventScroll: true });
+      const route = location.hash;
+      const restoreOrigin = restoreContext && route === origin && state.rackView === originView;
+      const scroll = restoreOrigin ? initialScroll : window.scrollY;
+      await renderPage({ preserveRackView: true });
+      if (location.hash === route) {
+        window.scrollTo(0, scroll);
+        if (restoreOrigin && !editor.open && !drawer.open) {
+          page.focus({ preventScroll: true });
+          if (afterSave) afterSave(record);
+        }
+      }
       notify(success);
     } catch {
       if (state.user) notify('已保存。台账刷新失败，请重新加载页面。');
@@ -706,6 +721,7 @@ function roomOptions() {
 
 function openDeviceEditor(device = null, rack = null, slot = null) {
   const original = device || {};
+  const drawerScroll = device && drawer.open ? drawer.scrollTop : null;
   const roomChoice = selectInput('room_id', roomOptions(), original.room_id || rack?.room_id,
     '选择机房或房间', { required: true });
   const rackChoice = selectInput('rack_id', [], '', '非上架设备');
@@ -791,6 +807,12 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
       });
     },
     success: id ? '设备更新成功。' : '设备已添加。',
+    afterSave: drawerScroll == null ? undefined : (record) => {
+      const updated = lookup('devices', record.id);
+      if (!updated) return;
+      openDeviceDrawer(updated);
+      drawer.scrollTop = drawerScroll;
+    },
   });
 }
 

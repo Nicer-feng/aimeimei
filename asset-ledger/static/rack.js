@@ -143,7 +143,7 @@ function elevation(rack, devices, face, onDevice, onEmpty) {
   return side;
 }
 
-export function renderRack(host, { rack, devices, onDevice, onEmpty }) {
+export function renderRack(host, { rack, devices, onDevice, onEmpty, view }) {
   const viewBar = element('div', 'rack-view-bar');
   const modes = element('div', 'rack-mode-switch');
   modes.setAttribute('role', 'group');
@@ -165,7 +165,7 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty }) {
   host.replaceChildren(viewBar, chart, spatial);
 
   let generation = 0;
-  let disposeScene;
+  let scene;
   let removed = false;
   function activate(mode) {
     chart.hidden = mode !== '2d';
@@ -174,25 +174,29 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty }) {
     buttons[1].setAttribute('aria-pressed', String(mode === '3d'));
   }
 
-  function showElevation(message = '') {
+  function clearScene() {
     generation += 1;
-    disposeScene?.();
-    disposeScene = undefined;
+    scene?.();
+    scene = undefined;
     spatial.replaceChildren();
+  }
+
+  function showElevation(message = '') {
+    clearScene();
     activate('2d');
     status.textContent = message;
   }
 
-  async function showScene() {
-    if (!spatial.hidden) return;
+  async function showScene(initialCamera) {
+    if (removed || !spatial.hidden) return;
     const request = ++generation;
     activate('3d');
     status.textContent = '加载 3D 视图…';
     try {
       const { mountRackScene } = await import('./rack-3d.js');
       if (removed || request !== generation) return;
-      disposeScene = mountRackScene(spatial, {
-        rack, devices, onDevice, deviceKind, units, depthLabel,
+      scene = mountRackScene(spatial, {
+        rack, devices, onDevice, deviceKind, units, depthLabel, initialCamera,
         onContextLost: () => showElevation('3D 已断开，已返回立面。'),
       });
       status.textContent = '';
@@ -202,10 +206,16 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty }) {
   }
 
   buttons[0].addEventListener('click', () => showElevation());
-  buttons[1].addEventListener('click', showScene);
-  activate('2d');
-  return () => {
+  buttons[1].addEventListener('click', () => { void showScene(); });
+  const restoreScene = view?.rackId === rack.id && view.mode === '3d';
+  const ready = restoreScene ? showScene(view.camera) : undefined;
+  if (!restoreScene) activate('2d');
+  const dispose = () => {
     removed = true;
-    showElevation();
+    clearScene();
   };
+  const snapshot = () => ({
+    rackId: rack.id, mode: spatial.hidden ? '2d' : '3d', camera: scene?.snapshot?.(),
+  });
+  return Object.assign(dispose, { ready, snapshot });
 }

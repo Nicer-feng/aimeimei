@@ -35,7 +35,8 @@ function addContactShadow(scene, bounds) {
   scene.add(shadow);
 }
 
-export function mountRackScene(host, { rack, devices, onDevice, deviceKind, units, depthLabel, onContextLost }) {
+export function mountRackScene(host, { rack, devices, onDevice, deviceKind, units, depthLabel, onContextLost, initialCamera }) {
+  const initialView = initialCamera ?? { direction: CAMERA_VIEWS[0].direction, zoom: 1, activeView: 0 };
   const panel = document.createElement('div');
   panel.className = 'rack-spatial-panel';
   const viewport = document.createElement('div');
@@ -67,7 +68,7 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = label;
-    button.setAttribute('aria-pressed', String(index === 0));
+    button.setAttribute('aria-pressed', String(index === initialView.activeView));
     button.addEventListener('click', () => {
       setActiveView(index);
       frameView(new THREE.Vector3(...direction).normalize());
@@ -118,7 +119,7 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
   const pointer = new THREE.Vector2();
   let down;
   let hovered;
-  let activeView = 0;
+  let activeView = initialView.activeView;
   let applyingView = false;
   let sized = false;
   controls.enablePan = false;
@@ -131,7 +132,6 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     clearHover();
     draw();
   });
-  frameView(new THREE.Vector3(...CAMERA_VIEWS[0].direction).normalize());
   const observer = new ResizeObserver(resize);
   observer.observe(viewport);
   resize();
@@ -168,7 +168,9 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
   };
   canvas.addEventListener('webglcontextlost', contextLost);
 
-  return () => {
+  return Object.assign(dispose, { snapshot });
+
+  function dispose() {
     observer.disconnect();
     canvas.removeEventListener('webglcontextlost', contextLost);
     controls.dispose();
@@ -189,7 +191,15 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     for (const texture of textures) texture.dispose();
     renderer.dispose();
     renderer.forceContextLoss();
-  };
+  }
+
+  function snapshot() {
+    if (!sized) return undefined;
+    const offset = camera.position.clone().sub(center);
+    const distance = offset.length();
+    const direction = offset.normalize();
+    return { direction: direction.toArray(), zoom: distance / fittedDistance(direction), activeView };
+  }
 
   function addLight(color, intensity, position) {
     const light = new THREE.DirectionalLight(color, intensity);
@@ -237,15 +247,12 @@ export function mountRackScene(host, { rack, devices, onDevice, deviceKind, unit
     const width = viewport.clientWidth;
     const viewportHeight = viewport.clientHeight;
     if (!width || !viewportHeight) return;
-    const offset = camera.position.clone().sub(center);
-    const distance = offset.length();
-    const direction = offset.normalize();
-    const zoom = sized ? distance / fittedDistance(direction) : 1;
+    const { direction, zoom } = snapshot() ?? initialView;
     renderer.setSize(width, viewportHeight, false);
     camera.aspect = width / viewportHeight;
     camera.updateProjectionMatrix();
     sized = true;
-    frameView(direction, zoom);
+    frameView(new THREE.Vector3(...direction).normalize(), zoom);
   }
 
   function pick(event) {
