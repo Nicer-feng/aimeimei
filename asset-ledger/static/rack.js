@@ -123,6 +123,7 @@ function elevationDevice(device, { face, start, count, y, onDevice, crossing = f
     node.append(svg('rect', { class: 'rack-svg-status-badge', x: 215, y: mid - 7, width: 41, height: 14, rx: 3 }));
     node.append(svg('text', { class: 'rack-svg-status-text', x: 235.5, y: mid + 3.1 }, OPERATING_STATUS_LABELS[status]));
   }
+  node.append(svg('circle', { class: 'rack-svg-status', cx: 262, cy: mid, r: 3, 'aria-hidden': 'true' }));
   node.append(svg('text', { class: 'rack-svg-device-u', x: 285, y: mid + 4 }, `${count}U`));
   svgButton(node, () => onDevice(device, node));
   return node;
@@ -147,9 +148,12 @@ function elevation(rack, devices, slots, face, onDevice, onEmpty) {
   });
   const y = (unit) => FRAME_TOP + (rack.height - unit) * UNIT;
   diagram.append(svg('rect', { class: 'rack-svg-frame', x: 32, y: FRAME_TOP - 4, width: 271, height: height + 8, rx: 3 }));
+  for (const [side, x] of [['left', 33], ['right', 295]]) {
+    diagram.append(svg('rect', { class: `rack-svg-rail rack-svg-rail-${side}`, x, y: FRAME_TOP - 2, width: 7, height: height + 4, rx: 1 }));
+  }
   for (let unit = rack.height; unit > 0; unit -= 1) {
     const slot = slots.get(unit);
-    const row = svg('g', { 'data-u': unit, 'data-slot-state': slot.kind });
+    const row = svg('g', { 'data-u': unit, 'data-slot-state': slot.kind, 'data-parity': unit % 2 ? 'odd' : 'even' });
     row.append(svg('text', { class: 'rack-svg-scale', x: 26, y: y(unit) + 15 }, `U${unit}`));
     row.append(svg('rect', { class: 'rack-svg-slot', x: 41, y: y(unit), width: 253, height: UNIT }));
     if (slot.kind === 'cross-face') row.setAttribute('data-blocked', 'full');
@@ -225,10 +229,13 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
   spatial.hidden = true;
   host.replaceChildren(viewBar, chart, spatial);
 
+  const sameRackView = view?.rackId === rack.id ? view : undefined;
+  let lastCamera = sameRackView?.camera;
+  let pendingDeviceId = initialDeviceId;
   let generation = 0;
   let scene;
   let removed = false;
-  const wantedDeviceId = initialDeviceId ?? (view?.rackId === rack.id ? view.selectedDeviceId : null);
+  const wantedDeviceId = initialDeviceId ?? sameRackView?.selectedDeviceId;
   let selectedDeviceId = devices.some((device) => device.id === wantedDeviceId) ? wantedDeviceId : null;
 
   function updateElevationSelection() {
@@ -295,7 +302,7 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
     status.textContent = message;
   }
 
-  async function showScene(initialCamera) {
+  async function showScene() {
     if (removed || !spatial.hidden) return;
     const request = ++generation;
     activate('3d');
@@ -304,11 +311,15 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
       const { mountRackScene } = await import('./rack-3d.js');
       if (removed || request !== generation) return;
       scene = mountRackScene(spatial, {
-        rack, devices, deviceKind, units, depthLabel, initialCamera, faceSlots, onEmpty,
+        rack, devices, deviceKind, units, depthLabel, initialCamera: lastCamera, faceSlots, onEmpty,
         initialDeviceId: selectedDeviceId, onSceneInteraction,
         onDevice: (device, anchor) => onDevice(device, anchor ? bindSelection(device.id, anchor) : undefined),
         onContextLost: () => showElevation('3D 已断开，已返回立面。'),
       });
+      if (lastCamera && pendingDeviceId != null && selectedDeviceId === pendingDeviceId) {
+        scene.focusDevice?.(pendingDeviceId);
+      }
+      pendingDeviceId = undefined;
       status.textContent = '';
     } catch {
       if (!removed && request === generation) showElevation('当前浏览器无法使用 3D，已返回立面。');
@@ -317,6 +328,7 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
 
   buttons[0].addEventListener('click', () => {
     if (spatial.hidden) return;
+    lastCamera = scene?.snapshot?.() ?? lastCamera;
     onSceneInteraction?.();
     showElevation();
   });
@@ -325,15 +337,15 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
     onSceneInteraction?.();
     void showScene();
   });
-  const restoreScene = view?.rackId === rack.id && view.mode === '3d';
-  const ready = restoreScene ? showScene(view.camera) : undefined;
+  const restoreScene = sameRackView?.mode === '3d';
+  const ready = restoreScene ? showScene() : undefined;
   if (!restoreScene) activate('2d');
   const dispose = () => {
     removed = true;
     clearScene();
   };
   const snapshot = () => ({
-    rackId: rack.id, mode: spatial.hidden ? '2d' : '3d', camera: scene?.snapshot?.(), selectedDeviceId,
+    rackId: rack.id, mode: spatial.hidden ? '2d' : '3d', camera: scene?.snapshot?.() ?? lastCamera, selectedDeviceId,
   });
   return Object.assign(dispose, { ready, snapshot, deviceAnchor });
 }

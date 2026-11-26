@@ -50,6 +50,7 @@ const state = {
 let deviceSelection = null;
 let deviceOpenedByScenePointer = false;
 let devicePageScroll = null;
+let drawerClosingAnimation;
 let availabilityCleanup;
 const deviceSheetMedia = window.matchMedia('(max-width: 670px)');
 drawer.before(deviceQuickGuide, deviceQuick);
@@ -483,6 +484,14 @@ function exportDevices(devices, project = null) {
   });
 }
 
+function deviceStatusPill(device, { quick = false } = {}) {
+  const status = operatingStatus(device);
+  return element('span', {
+    class: quick ? 'device-status device-quick-status' : 'device-status',
+    'data-operating-status': status, 'data-status': quick ? status : null,
+  }, operatingStatusLabel(device));
+}
+
 function renderDevicesPage() {
   page.append(pageHeading(titles.devices, null,
     userCanWrite() ? [button('新增设备', () => openDeviceEditor(), 'primary')] : []));
@@ -519,7 +528,7 @@ function renderDevicesPage() {
                 ...addresses.map(deviceAddressLabel)])].join('；'))),
           element('span', { class: 'tag' }, device.type),
           deviceLocation(device, true),
-          operatingStatusLabel(device),
+          deviceStatusPill(device),
           device.maintainer || '责任人未确认',
           device.verified_on || '待核实',
         ]),
@@ -772,7 +781,7 @@ function deviceFacts(device) {
     ['品牌型号', device.model], ['序列号', device.serial],
     ['位置', deviceLocation(device, true), true],
     ...(device.rack_id ? [['安装深度', mountDepthLabels[mountDepth(device)], true]] : []),
-    ['运行状态（人工登记）', operatingStatusLabel(device)],
+    ['运行状态（人工登记）', deviceStatusPill(device)],
     ['用途', device.purpose || '用途待查', true],
     ['归属', device.ownership || '未登记'], ['最近核实', device.verified_on || '待核实'],
     ['填报人', device.reporter || '未登记'], ['维护人', device.maintainer || '责任人未确认'],
@@ -840,10 +849,29 @@ function selectDevice(device, anchor) {
   deviceSelection?.anchor?.setSelected?.(true);
 }
 
-function closeDevicePresentation({ restoreFocus = false } = {}) {
+function cancelDrawerClose() {
+  drawerClosingAnimation = undefined;
+  drawer.classList.remove('drawer-closing');
+}
+
+function closeDevicePresentation({ restoreFocus = false, animate = false } = {}) {
+  if (drawer.open && animate) {
+    if (drawerClosingAnimation) return;
+    drawer.classList.add('drawer-closing');
+    const animation = drawer.getAnimations?.().find((item) => item.animationName === 'device-drawer-exit');
+    if (animation) {
+      drawerClosingAnimation = animation;
+      const finish = () => {
+        if (drawerClosingAnimation === animation) closeDevicePresentation({ restoreFocus });
+      };
+      animation.finished.then(finish, finish);
+      return;
+    }
+  }
   const anchor = deviceSelection?.anchor;
   closeQuickPanel();
   if (drawer.open) drawer.close();
+  cancelDrawerClose();
   selectDevice(null);
   restoreDevicePageScroll();
   if (restoreFocus) {
@@ -998,9 +1026,7 @@ function openDevicePresentation(device, anchor) {
       close),
     element('p', { class: 'small-text' }, deviceLocation(device)),
     device.model && element('p', { class: 'muted small-text' }, device.model),
-    element('div', { class: 'device-quick-actions' },
-      element('span', { class: 'device-quick-status', 'data-status': operatingStatus(device) }, operatingStatusLabel(device)),
-      details));
+    element('div', { class: 'device-quick-actions' }, deviceStatusPill(device, { quick: true }), details));
   if (!deviceQuick.open) deviceQuick.show();
   showDeviceAboveSheet(deviceQuick);
   positionDeviceQuick();
@@ -1009,6 +1035,7 @@ function openDevicePresentation(device, anchor) {
 
 function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview?.controller)?.deviceAnchor?.(device?.id)) {
   if (!device) return;
+  cancelDrawerClose();
   closeQuickPanel();
   selectDevice(device, anchor);
   drawer.dataset.deviceId = device.id;
@@ -1016,7 +1043,7 @@ function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview
   if (userCanWrite() && !device.archived_at) actions.push(button('编辑设备', () => openDeviceEditor(device)));
   byId('drawer-content').replaceChildren(
     dialogHeader('drawer-title', device.name, `${device.code} · ${deviceLocation(device)}`, drawer,
-      () => closeDevicePresentation({ restoreFocus: true })),
+      () => closeDevicePresentation({ restoreFocus: true, animate: true })),
     element('div', { class: 'drawer-body' },
       element('div', { class: 'row-actions' }, actions),
       panel('业务系统与服务入口', systemAssociations(device), deviceSystemActions(device)),
@@ -1742,13 +1769,13 @@ document.addEventListener('click', (event) => {
   // 浏览器可能微调触屏 click 的落点，实际拖动已在 pointermove 时排除。
   if (event.detail && pointer?.panel.open && !editor.open && !preview.open && pointer.selection === deviceSelection
     && !pointer.panel.contains(event.target) && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) <= (pointer.touch ? 14 : 6)) {
-    closeDevicePresentation();
+    closeDevicePresentation({ animate: true });
   }
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !editor.open && !preview.open && (deviceQuick.open || drawer.open)) {
     event.preventDefault();
-    closeDevicePresentation({ restoreFocus: true });
+    closeDevicePresentation({ restoreFocus: true, animate: true });
   }
 });
 window.addEventListener('resize', () => {

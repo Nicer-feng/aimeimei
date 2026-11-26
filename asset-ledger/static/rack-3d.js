@@ -2,8 +2,11 @@ import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
 import { DETAIL_Z, DEVICE_HALF_WIDTH, MOUNT_FULL_Z, RACK_UNIT, deviceMetrics } from './rack-geometry.js';
 import { animateOperatingLamps, buildRackModel, projectCabinetRect, projectScenePoint } from './rack-3d-model.js';
-import { isSelectableRackSlot, operatingStatusLabel, rackFaceSlots, rackSlotSelection } from './rack.js?v=operating-status';
+import { isSelectableRackSlot, operatingStatus, operatingStatusLabel, rackFaceSlots, rackSlotSelection } from './rack.js?v=operating-status';
+import { createContactShadowTexture, createRackEnvironment } from './rack-textures.js';
 
+const CAMERA_TRANSITION_MS = 240;
+const MAX_DAMPING_TAIL_MS = 1000;
 const CAMERA_VIEWS = [
   { label: '斜视', direction: [0.65, 0.29, 1] },
   { label: '看正面', direction: [0, 0.035, 1] },
@@ -115,20 +118,8 @@ function slotControls(faceSlots, onEmpty, initialFace) {
 }
 
 function addContactShadow(scene, bounds) {
-  const stamp = document.createElement('canvas');
-  stamp.width = stamp.height = 128;
-  const context = stamp.getContext('2d');
-  if (!context) return;
-  const fade = context.createRadialGradient(64, 64, 2, 64, 64, 64);
-  fade.addColorStop(0, '#283e4a51');
-  fade.addColorStop(0.52, '#283e4a35');
-  fade.addColorStop(0.79, '#283e4a16');
-  fade.addColorStop(1, '#283e4a00');
-  context.fillStyle = fade;
-  context.fillRect(0, 0, 128, 128);
-
-  const map = new THREE.CanvasTexture(stamp);
-  map.colorSpace = THREE.SRGBColorSpace;
+  const map = createContactShadowTexture();
+  if (!map) return;
   const size = bounds.getSize(new THREE.Vector3());
   const center = bounds.getCenter(new THREE.Vector3());
   const shadow = new THREE.Mesh(
@@ -146,6 +137,7 @@ export function mountRackScene(host, {
 }) {
   const initialView = initialCamera ?? { direction: CAMERA_VIEWS[0].direction, zoom: 1, activeView: 0, viewMode: 'appearance' };
   let viewMode = RACK_MODES.some((m) => m.id === initialView.viewMode) ? initialView.viewMode : 'appearance';
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   const panel = document.createElement('div');
   panel.className = 'rack-spatial-panel';
@@ -159,13 +151,16 @@ export function mountRackScene(host, {
   canvas.tabIndex = -1;
   canvas.setAttribute('aria-label', `${rack.name} 三维机柜`);
   canvas.setAttribute('role', 'img');
+  canvas.dataset.pickable = 'false';
   const tooltip = document.createElement('div');
   tooltip.className = 'rack-spatial-tooltip';
   tooltip.hidden = true;
   tooltip.setAttribute('aria-hidden', 'true');
   const tooltipName = document.createElement('strong');
   const tooltipPosition = document.createElement('span');
-  tooltip.append(tooltipName, tooltipPosition);
+  const tooltipStatus = document.createElement('span');
+  tooltipStatus.className = 'rack-spatial-tooltip-status';
+  tooltip.append(tooltipName, tooltipPosition, tooltipStatus);
   const legend = document.createElement('div');
   legend.className = 'rack-spatial-legend';
   legend.hidden = true;
@@ -187,8 +182,10 @@ export function mountRackScene(host, {
     button.setAttribute('aria-pressed', String(index === initialView.activeView));
     button.addEventListener('click', () => {
       const moved = index !== activeView;
+      markFocusedDevice();
       setActiveView(index);
-      frameView(new THREE.Vector3(...direction).normalize(), 1, center);
+      const directionVector = new THREE.Vector3(...direction).normalize();
+      transitionView(directionVector, fittedDistance(directionVector), center);
       slotPicker?.setFace(index === 2 ? 'rear' : 'front');
       if (moved) onSceneInteraction?.();
     });
@@ -208,7 +205,7 @@ export function mountRackScene(host, {
     button.addEventListener('click', () => {
       if (viewMode === id) return;
       applyViewMode(id);
-      draw();
+      invalidate();
     });
     modeGroup.append(button);
     modeButtons.set(id, button);
@@ -222,7 +219,7 @@ export function mountRackScene(host, {
     : '左键旋转 · 右键平移 · 滚轮缩放';
   hover.textContent = hint;
   toolbar.append(toolbarGroups, hover);
-  panel.append(toolbar);
+  viewport.append(toolbar);
   const slotPicker = onEmpty && slotControls(faceSlots, onEmpty, initialView.direction[2] < 0 ? 'rear' : 'front');
   if (slotPicker) panel.append(slotPicker.group);
 
@@ -233,14 +230,23 @@ export function mountRackScene(host, {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.deviceId = device.id;
+    button.setAttribute('aria-pressed', 'false');
     button.textContent = `${device.face === 'front' ? '正面' : '背面'} ${units(device)} · ${device.name} · ${depthLabel(device)} · ${operatingStatusLabel(device)}`;
-    button.addEventListener('click', () => onDevice(device, makeAnchor(device, button)));
+    button.addEventListener('click', () => {
+      onSceneInteraction?.();
+      focusDevice(device.id, () => onDevice(device, makeAnchor(device, button)));
+    });
     shortcuts.append(button);
   }
   if (devices.length) panel.append(shortcuts);
   host.replaceChildren(panel);
 
   const scene = new THREE.Scene();
+  const environment = createRackEnvironment(renderer);
+  if (environment) {
+    scene.environment = environment.texture;
+    scene.environmentIntensity = 0.48;
+  }
   scene.add(new THREE.HemisphereLight(0xf2f8ff, 0x687788, 1.8));
   addLight(0xfff2e3, 3.3, [-4, 8, 6]);
   addLight(0xc2d9f6, 1.5, [4, 3, 3]);
@@ -267,29 +273,51 @@ export function mountRackScene(host, {
   const controls = new OrbitControls(camera, renderer.domElement);
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
+  const renderSize = new THREE.Vector2();
+  const requestedTarget = new THREE.Vector3();
+  const transitionOffset = new THREE.Vector3();
+  const transitionSpherical = new THREE.Spherical();
   let down;
   let hovered;
   let selectedDeviceId = null;
+  let focusedDeviceId;
+  let pendingDeviceId = initialCamera ? undefined : initialDeviceId;
   let activeView = initialView.activeView;
   let applyingView = false;
   let sized = false;
+  let disposed = false;
+  let renderFrame;
+  let settling = false;
+  let settleBy = 0;
+  let transition;
   controls.enablePan = true;
+  controls.enableDamping = !reducedMotion.matches;
+  controls.dampingFactor = 0.08;
   controls.screenSpacePanning = true;
   controls.minDistance = 0.90;
   controls.minPolarAngle = 0.25;
   controls.maxPolarAngle = 1.82;
+  controls.addEventListener('start', () => {
+    if (transition) setActiveView(-1);
+    transition = undefined;
+    clearHover();
+    invalidate();
+  });
   controls.addEventListener('change', () => {
     if (applyingView) return;
     clampTarget();
     setActiveView(-1);
     clearHover();
-    draw();
+    settling = controls.enableDamping;
+    settleBy = performance.now() + MAX_DAMPING_TAIL_MS;
+    invalidate();
     onSceneInteraction?.();
   });
+  reducedMotion.addEventListener('change', updateMotionPreference);
 
   const observer = new ResizeObserver(resize);
   observer.observe(viewport);
-  const lampAnimation = animateOperatingLamps(viewport, model.lamps, draw);
+  const lampAnimation = animateOperatingLamps(viewport, model.lamps, invalidate);
   applyViewMode(viewMode);
   setSelectedDevice(initialDeviceId ?? null);
   resize();
@@ -309,16 +337,16 @@ export function mountRackScene(host, {
     if (event.pointerType === 'touch') return;
     const hit = pick(event);
     if (hit) showHover(hit, event);
-    else if (clearHover()) draw();
+    else if (clearHover()) invalidate();
   });
-  canvas.addEventListener('pointerleave', () => { if (clearHover()) draw(); });
+  canvas.addEventListener('pointerleave', () => { if (clearHover()) invalidate(); });
   canvas.addEventListener('pointerup', (event) => {
     const isClick = down?.pointerId === event.pointerId && !down.moved &&
       Math.hypot(event.clientX - down.x, event.clientY - down.y) <= 5;
     down = undefined;
     if (!isClick) return;
     const hit = pick(event);
-    if (clearHover()) draw();
+    if (clearHover()) invalidate();
     if (hit?.device) onDevice(hit.device, makeAnchor(hit.device, canvas, { x: event.clientX, y: event.clientY }));
     else if (onEmpty && isSelectableRackSlot(hit?.slot)) onEmpty(rackSlotSelection(hit.slot));
     else if (hit?.slot?.kind === 'unknown' && event.pointerType === 'touch') showHover(hit, event);
@@ -329,7 +357,7 @@ export function mountRackScene(host, {
   };
   canvas.addEventListener('webglcontextlost', contextLost);
 
-  return Object.assign(dispose, { snapshot, deviceAnchor, setSelectedDevice });
+  return Object.assign(dispose, { snapshot, deviceAnchor, setSelectedDevice, focusDevice });
 
   function makeAnchor(device, anchorElement, point) {
     return {
@@ -354,20 +382,19 @@ export function mountRackScene(host, {
   }
 
   function setSelectedDevice(deviceId) {
+    if (disposed) return;
     selectedDeviceId = deviceId;
     if (deviceId == null) delete canvas.dataset.selectedDeviceId;
     else canvas.dataset.selectedDeviceId = deviceId;
-    for (const button of shortcuts.children) {
-      button.setAttribute('aria-pressed', String(button.dataset.deviceId === String(deviceId)));
-    }
-    model.highlight(selectedDeviceId ?? hovered?.device?.id ?? null);
-    if (sized) draw();
+    updateDeviceSelection();
   }
 
   function clampTarget() {
+    requestedTarget.copy(controls.target);
     controls.target.x = THREE.MathUtils.clamp(controls.target.x, -1.0, 1.0);
     controls.target.z = THREE.MathUtils.clamp(controls.target.z, -0.8, 0.8);
     controls.target.y = THREE.MathUtils.clamp(controls.target.y, bounds.min.y, bounds.max.y);
+    if (!requestedTarget.equals(controls.target)) camera.position.sub(requestedTarget).add(controls.target);
   }
 
   function applyViewMode(mode) {
@@ -397,8 +424,12 @@ export function mountRackScene(host, {
   }
 
   function dispose() {
+    if (disposed) return;
+    disposed = true;
+    if (renderFrame != null) cancelAnimationFrame(renderFrame);
     observer.disconnect();
     lampAnimation?.dispose();
+    reducedMotion.removeEventListener('change', updateMotionPreference);
     canvas.removeEventListener('webglcontextlost', contextLost);
     controls.dispose();
     model.disposeExtra?.();
@@ -417,6 +448,7 @@ export function mountRackScene(host, {
     for (const geometry of geometries) geometry.dispose();
     for (const material of materials) material.dispose();
     for (const texture of textures) texture.dispose();
+    environment?.dispose();
     renderer.dispose();
     renderer.forceContextLoss();
   }
@@ -452,7 +484,10 @@ export function mountRackScene(host, {
   function fittedDistance(direction) {
     const right = new THREE.Vector3().crossVectors(camera.up, direction).normalize();
     const up = new THREE.Vector3().crossVectors(direction, right);
-    const vertical = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.82;
+    // 手机上的 HUD 可能换行，给完整机柜留出底部可点击空间。
+    const bottomInset = toolbar.offsetHeight + 14;
+    const frame = THREE.MathUtils.clamp(1 - 2 * bottomInset / Math.max(1, viewport.clientHeight), 0.42, 0.82);
+    const vertical = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * frame;
     const horizontal = vertical * camera.aspect;
     // 按当前相机方向投影柜体的八个角，兼顾纵向高柜和窄屏横向空间。
     return Math.max(...corners.map((corner) => corner.dot(direction) + Math.max(
@@ -461,27 +496,153 @@ export function mountRackScene(host, {
     )));
   }
 
-  function frameView(direction, zoom = 1, target = center) {
-    clearHover();
-    const distance = fittedDistance(direction);
-    controls.maxDistance = distance * 2.8;
+  function placeView(direction, distance, target) {
+    controls.maxDistance = fittedDistance(direction) * 2.8;
     controls.target.copy(target);
+    camera.position.copy(target).addScaledVector(direction, distance);
     clampTarget();
-    camera.position.copy(controls.target).addScaledVector(direction, distance * zoom);
-    applyingView = true;
-    controls.update();
-    applyingView = false;
-    draw();
+    updateControls();
+    camera.updateMatrixWorld();
   }
 
-  function draw() {
+  function updateControls() {
+    applyingView = true;
+    const moved = controls.update();
+    applyingView = false;
+    return moved;
+  }
+
+  function stopDamping() {
+    settling = false;
+    if (!controls.enableDamping) return;
+    const position = camera.position.clone();
+    const target = controls.target.clone();
+    // 清空 OrbitControls 累积的惯性，并恢复切换前这一帧的相机。
+    controls.enableDamping = false;
+    updateControls();
+    controls.target.copy(target);
+    camera.position.copy(position);
+    updateControls();
+    controls.enableDamping = true;
+  }
+
+  function transitionView(direction, distance, target, onArrive) {
+    clearHover();
+    stopDamping();
+    transition = undefined;
+    if (reducedMotion.matches || !sized) {
+      placeView(direction, distance, target);
+      onArrive?.();
+    } else {
+      const start = new THREE.Spherical().setFromVector3(transitionOffset.copy(camera.position).sub(controls.target));
+      const end = new THREE.Spherical().setFromVector3(direction.clone().multiplyScalar(distance));
+      // 用球面方向过渡，切换正背面时相机沿柜外转动。
+      const angle = THREE.MathUtils.euclideanModulo(end.theta - start.theta + Math.PI, 2 * Math.PI) - Math.PI;
+      controls.maxDistance = Math.max(controls.maxDistance, end.radius, fittedDistance(direction) * 2.8);
+      transition = {
+        start, end, angle, fromTarget: controls.target.clone(), target, direction, distance, onArrive, started: performance.now(),
+      };
+    }
+    invalidate();
+  }
+
+  function updateTransition(now) {
+    const { start, end, angle, fromTarget, target, direction, distance, onArrive, started } = transition;
+    const progress = Math.min(1, Math.max(0, (now - started) / CAMERA_TRANSITION_MS));
+    if (progress === 1) {
+      transition = undefined;
+      placeView(direction, distance, target);
+      onArrive?.();
+      return;
+    }
+    const ease = 1 - (1 - progress) ** 3;
+    transitionSpherical.set(
+      THREE.MathUtils.lerp(start.radius, end.radius, ease),
+      THREE.MathUtils.lerp(start.phi, end.phi, ease),
+      start.theta + angle * ease,
+    );
+    controls.target.lerpVectors(fromTarget, target, ease);
+    camera.position.copy(controls.target).add(transitionOffset.setFromSpherical(transitionSpherical));
+    clampTarget();
+    updateControls();
+  }
+
+  function updateMotionPreference() {
+    if (reducedMotion.matches) {
+      stopDamping();
+      if (transition) {
+        const { direction, distance, target, onArrive } = transition;
+        transition = undefined;
+        placeView(direction, distance, target);
+        onArrive?.();
+      }
+      invalidate();
+    }
+    controls.enableDamping = !reducedMotion.matches;
+  }
+
+  function invalidate() {
+    if (!disposed && renderFrame == null) renderFrame = requestAnimationFrame(render);
+  }
+
+  function render(now) {
+    renderFrame = undefined;
+    if (!sized || disposed) return;
+    if (transition) updateTransition(now);
+    else if (settling) {
+      settling = updateControls();
+      clampTarget();
+      if (now >= settleBy) stopDamping();
+    }
+    if (disposed) return;
     renderer.render(scene, camera);
+    if (transition || settling) invalidate();
+  }
+
+  function markFocusedDevice(deviceId) {
+    focusedDeviceId = deviceId;
+    if (deviceId == null) delete canvas.dataset.focusedDeviceId;
+    else canvas.dataset.focusedDeviceId = deviceId;
+    updateDeviceSelection();
+  }
+
+  function updateDeviceSelection() {
+    const activeDeviceId = selectedDeviceId ?? focusedDeviceId;
+    for (const button of shortcuts.children) {
+      button.setAttribute('aria-pressed', String(button.dataset.deviceId === String(activeDeviceId)));
+    }
+    model.highlight(activeDeviceId ?? hovered?.device?.id ?? null);
+    invalidate();
+  }
+
+  function focusDevice(id, onArrive) {
+    if (disposed) return false;
+    const device = devices.find(({ id: itemId }) => String(itemId) === String(id));
+    if (!device) return false;
+    if (!sized) {
+      pendingDeviceId = device.id;
+      return true;
+    }
+    const { centerY, faceHeight, front, minZ, maxZ } = deviceMetrics(device, RACK_UNIT);
+    const direction = new THREE.Vector3(0, 0.035, front ? 1 : -1).normalize();
+    const halfFov = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const distance = Math.max(
+      (DEVICE_HALF_WIDTH + 0.09) / (halfFov * camera.aspect * 0.84),
+      (faceHeight / 2 + RACK_UNIT * 2) / (halfFov * 0.72),
+      1.65,
+    );
+    setActiveView(-1);
+    markFocusedDevice(device.id);
+    slotPicker?.setFace(device.face);
+    transitionView(direction, distance, new THREE.Vector3(0, centerY, front ? maxZ : minZ), onArrive);
+    return true;
   }
 
   function resize() {
     const width = viewport.clientWidth;
     const viewportHeight = viewport.clientHeight;
     if (!width || !viewportHeight) return;
+    if (sized && width === renderSize.x && viewportHeight === renderSize.y) return;
     const current = snapshot() ?? initialView;
     renderer.setSize(width, viewportHeight, false);
     camera.aspect = width / viewportHeight;
@@ -489,15 +650,25 @@ export function mountRackScene(host, {
     sized = true;
     const targetVec = Array.isArray(current.target) && current.target.length === 3
       ? new THREE.Vector3(...current.target) : center;
-    frameView(new THREE.Vector3(...current.direction).normalize(), current.zoom, targetVec);
+    const direction = new THREE.Vector3(...current.direction).normalize();
+    placeView(direction, fittedDistance(direction) * current.zoom, targetVec);
+    renderSize.set(width, viewportHeight);
+    if (pendingDeviceId != null) {
+      const id = pendingDeviceId;
+      pendingDeviceId = undefined;
+      focusDevice(id);
+    }
+    invalidate();
   }
 
   function pick(event) {
     const bounds = canvas.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return undefined;
     pointer.set(
       ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
       -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
     );
+    camera.updateMatrixWorld();
     raycaster.setFromCamera(pointer, camera);
     const slot = rackFaceSlotAt(raycaster.ray, faceSlots);
     if (slot) {
@@ -513,13 +684,13 @@ export function mountRackScene(host, {
     if (!hovered) return false;
     hovered = undefined;
     tooltip.hidden = true;
-    hover.textContent = hint;
     canvas.classList.remove('rack-spatial-hit');
     delete canvas.dataset.slotFace;
     delete canvas.dataset.slotU;
     delete canvas.dataset.slotState;
+    canvas.dataset.pickable = 'false';
     slotHover.visible = false;
-    model.highlight(selectedDeviceId);
+    model.highlight(selectedDeviceId ?? focusedDeviceId ?? null);
     return true;
   }
 
@@ -534,25 +705,29 @@ export function mountRackScene(host, {
         canvas.dataset.slotState = slot.kind;
       }
       const canAdd = Boolean(onEmpty && isSelectableRackSlot(slot));
+      tooltipStatus.hidden = !device;
       if (device) {
         tooltipName.textContent = device.name;
         const cross = slot?.kind === 'cross-face' ? `${FACE_LABELS[slot.face]} U${slot.u_start} 跨面占用 · ` : '';
-        tooltipPosition.textContent = `${cross}${FACE_LABELS[device.face]} ${units(device)} · ${device.u_height}U · ${depthLabel(device)} · ${operatingStatusLabel(device)}`;
+        tooltipPosition.textContent = `${cross}${FACE_LABELS[device.face]} ${units(device)} · ${device.u_height}U · ${depthLabel(device)}`;
+        tooltipStatus.dataset.operatingStatus = operatingStatus(device);
+        tooltipStatus.textContent = operatingStatusLabel(device);
       } else {
         tooltipName.textContent = `${FACE_LABELS[slot.face]} U${slot.u_start} · ${SLOT_MARKS[slot.kind]?.label ?? '空位'}`;
         tooltipPosition.textContent = slot.kind === 'unknown' ? `待核实对面设备「${slot.device.name}」的深度` : canAdd ? '选择此 U 位新增设备' : '';
       }
-      hover.textContent = [tooltipName.textContent, tooltipPosition.textContent].filter(Boolean).join(' · ');
       tooltip.hidden = false;
-      canvas.classList.toggle('rack-spatial-hit', Boolean(device || canAdd));
-      model.highlight(selectedDeviceId ?? device?.id ?? null);
+      const pickable = Boolean(device || canAdd);
+      canvas.classList.toggle('rack-spatial-hit', pickable);
+      canvas.dataset.pickable = String(pickable);
+      model.highlight(selectedDeviceId ?? focusedDeviceId ?? device?.id ?? null);
       if (canAdd) {
         const sign = slot.face === 'front' ? 1 : -1;
         slotHover.position.set(0, (slot.u_start - 0.5) * RACK_UNIT, sign * (DETAIL_Z + 0.008));
         slotHover.rotation.y = sign > 0 ? 0 : Math.PI;
         slotHover.visible = true;
       }
-      draw();
+      invalidate();
     }
     const bounds = canvas.getBoundingClientRect();
     const x = event.clientX - bounds.left;

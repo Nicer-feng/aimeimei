@@ -4,7 +4,7 @@ import {
   RACK_DEPTH, RACK_WIDTH, STATUS_COLORS, SURFACES, TYPE_ACCENTS,
   deviceMetrics, normalizeDepth, normalizeStatus, rackSummaryColor,
 } from './rack-geometry.js';
-import { createDeviceLabelTexture, createRackScaleTexture } from './rack-textures.js';
+import { createDeviceLabelTexture, createOperatingLampTexture, createRackScaleTexture } from './rack-textures.js';
 
 const LAMP_PERIOD_MS = 3200;
 const LAMP_FRAME_MS = 80;
@@ -269,6 +269,24 @@ function addScaleStrips(parent, rackHeight, unit, scaleMat, tint, owner) {
   }
 }
 
+function buildLampGlow(core, texture) {
+  const geometry = new THREE.PlaneGeometry(0.12, 0.12).translate(0, 0, -0.0015);
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    opacity: 0.55,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const glow = new THREE.InstancedMesh(geometry, material, core.count);
+  glow.name = 'running-device-glows';
+  // 两层共用实例矩阵和颜色，灯效每帧仍只改写同一份实例数据。
+  glow.instanceMatrix = core.instanceMatrix;
+  glow.instanceColor = core.instanceColor;
+  return glow;
+}
+
 function buildOperatingLamps(parent, entries, unit) {
   const indicesByRack = new Map();
   const matrices = [];
@@ -307,9 +325,14 @@ function buildOperatingLamps(parent, entries, unit) {
   const brightColor = new THREE.Color(0x8ce9a9);
   const pulseColor = new THREE.Color();
   const nearScale = new THREE.Vector3(1.30, 1.30, 1);
-  const mesh = new THREE.InstancedMesh(new THREE.CircleGeometry(0.023, 8),
-    new THREE.MeshBasicMaterial({ toneMapped: false }), matrices.length);
+  const texture = createOperatingLampTexture();
+  const geometry = texture ? new THREE.PlaneGeometry(0.054, 0.054) : new THREE.CircleGeometry(0.023, 8);
+  const material = new THREE.MeshBasicMaterial({
+    map: texture, transparent: Boolean(texture), depthWrite: !texture, toneMapped: false,
+  });
+  const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
   mesh.name = 'running-device-lamps';
+  mesh.renderOrder = 1;
   matrices.forEach((matrix, index) => {
     mesh.setMatrixAt(index, matrix);
     mesh.setColorAt(index, steadyColor);
@@ -318,6 +341,8 @@ function buildOperatingLamps(parent, entries, unit) {
   mesh.instanceMatrix.needsUpdate = true;
   mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
   parent.add(mesh);
+  const glow = texture ? buildLampGlow(mesh, texture) : null;
+  if (glow) parent.add(glow);
 
   let animated = [];
   let nearby = [];
@@ -336,9 +361,11 @@ function buildOperatingLamps(parent, entries, unit) {
   }
   return {
     mesh,
+    texture,
     hasNearbyLamps: () => animated.length > 0,
     setVisible(visible) {
       mesh.visible = visible;
+      if (glow) glow.visible = visible;
     },
     setNearbyRacks(rackIds) {
       nearby = [];

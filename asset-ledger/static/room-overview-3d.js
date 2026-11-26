@@ -2,21 +2,26 @@ import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
 import {
   DETAIL_Z, DEVICE_HALF_WIDTH, RACK_UNIT,
-  deviceMetrics, normalizeDepth, rackOccupancy, rackVerticalBounds,
+  deviceMetrics, normalizeDepth, normalizeStatus, rackOccupancy, rackVerticalBounds,
 } from './rack-geometry.js';
 import {
   animateOperatingLamps, buildRackFineDetails, buildRackOverviewLayer, createRackPalette,
   projectCabinetRect, projectScenePoint,
 } from './rack-3d-model.js';
+import { createContactShadowTexture, createFloorTileTexture, createRackEnvironment } from './rack-textures.js';
 import { operatingStatusLabel } from './rack.js?v=operating-status';
 
 const COLUMN_GAP = 1.21;
 const ROW_GAP = 2.30;
 const RACK_SCALE = 0.535;
+const FLOOR_TILE_SIZE = RACK_UNIT * RACK_SCALE * 600 / 44.45;
 const CABINET_WIDTH = 1.98 * RACK_SCALE;
 const CABINET_DEPTH = 1.27 * RACK_SCALE;
 const MIN_DISTANCE = 1.05;
 const FINE_CACHE_LIMIT = 12;
+const MAX_DAMPING_FRAMES = 100;
+const MAX_DAMPING_MS = 1050;
+const SINGLE_CLICK_DELAY = 320;
 const ANGLED = [0.42, 2.30, 1.12];
 const TOP = [0, 1, 0.001];
 const SEARCH_OUTLINE_COLORS = [0x0875ba, 0x02836e];
@@ -68,7 +73,7 @@ function node(tag, className, label) {
   return element;
 }
 
-function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
+function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTexture, shadowTexture }) {
   const racksById = new Map(racks.map((rack) => [String(rack.id), rack]));
   const devicesByRack = new Map();
   for (const device of devices) {
@@ -115,8 +120,18 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
     boxes.get(material).push(transform.clone());
   }
 
-  flat(0xafc0c0, 0, -0.116, floorCenter, [width, 0.088, depth]);
-  flat(0xdbe5e4, 0, -0.056, floorCenter, [width + 0.032, 0.110, depth + 0.032]);
+  flat(0xa9babc, 0, -0.116, floorCenter, [width, 0.088, depth]);
+  flat(0xd4dfe1, 0, -0.056, floorCenter, [width + 0.032, 0.110, depth + 0.032]);
+  if (floorTexture) {
+    floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+    floorTexture.repeat.set(width / FLOOR_TILE_SIZE, depth / FLOOR_TILE_SIZE);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), new THREE.MeshStandardMaterial({
+      color: 0xd8e2e5, map: floorTexture, roughness: 0.92, metalness: 0,
+    }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(0, 0.0005, floorCenter);
+    scene.add(floor);
+  }
   const frontAisle = rowExtent + 1.08;
   const rearAisle = -rowExtent - 0.82;
   flat(0xb7d0c2, 0, 0.003, frontAisle, [width - 0.22, 0.008, 0.76]);
@@ -154,8 +169,6 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
       const z = ((room.rows + 1) / 2 - row) * ROW_GAP;
       const entry = placements.get(`${row}/${slot}`);
       const rack = entry && racksById.get(String(entry.rack_id));
-      flat(0xc0cecd, x, 0.002, z, [1.175, 0.008, 1.37]);
-      flat(0xe8efed, x, 0.009, z, [1.135, 0.008, 1.32]);
       if (!rack) {
         for (const sx of [-1, 1]) {
           for (const sz of [-1, 1]) {
@@ -188,7 +201,7 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
       scene.add(target);
       targets.push(target);
       targetsById.set(id, target);
-      symbols.push({ row, slot, rack, point: new THREE.Vector3(x, top + 0.05, z) });
+      symbols.push({ row, slot, rack, stats: rackEntry.stats, point: new THREE.Vector3(x, top + 0.05, z) });
     }
   }
 
@@ -197,6 +210,22 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
     matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
     mesh.instanceMatrix.needsUpdate = true;
     scene.add(mesh);
+  }
+  if (shadowTexture && entries.length) {
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x394c56, map: shadowTexture, opacity: 0.54, transparent: true, depthWrite: false,
+    });
+    const shadows = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), material, entries.length);
+    const horizontal = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    const rotation = new THREE.Quaternion();
+    entries.forEach((entry, index) => {
+      rotation.setFromAxisAngle(yAxis, THREE.MathUtils.degToRad(entry.rotation)).multiply(horizontal);
+      transform.compose(location.set(entry.x, 0.004, entry.z), rotation, scale.set(CABINET_WIDTH * 1.56, CABINET_DEPTH * 1.82, 1));
+      shadows.setMatrixAt(index, transform);
+    });
+    shadows.instanceMatrix.needsUpdate = true;
+    scene.add(shadows);
   }
   const overviewLayer = buildRackOverviewLayer(scene, { entries, unit: RACK_UNIT, deviceKind, palette });
   if (!targets.length) pickMaterial.dispose();
@@ -334,11 +363,11 @@ export function mountRoomScene(host, {
   landmarkLayer.setAttribute('aria-label', '示意方位');
   const tooltip = node('div', 'rack-spatial-tooltip room-3d-device-tooltip');
   tooltip.hidden = true;
-  tooltip.setAttribute('aria-hidden', 'true');
-  tooltip.style.zIndex = '3';
-  const tooltipName = node('strong', '');
-  const tooltipPosition = node('span', '');
-  tooltip.append(tooltipName, tooltipPosition);
+  tooltip.setAttribute('role', 'tooltip');
+  const tooltipName = node('strong', 'room-3d-tooltip-title');
+  const tooltipPosition = node('span', 'room-3d-tooltip-position');
+  const tooltipStatus = node('span', 'room-3d-tooltip-status');
+  tooltip.append(tooltipName, tooltipPosition, tooltipStatus);
 
   const legend = node('div', 'room-3d-legend');
   legend.hidden = true;
@@ -368,8 +397,13 @@ export function mountRoomScene(host, {
   toolbarGroups.append(presets, modesGroup);
   const hint = window.matchMedia('(pointer: coarse)').matches
     ? '单指旋转 · 双指缩放和平移'
-    : '左键旋转 · 右键平移 · 滚轮缩放';
+    : '左键旋转 · 右键平移 · 滚轮缩放 · 双击聚焦';
   toolbar.append(toolbarGroups, node('span', 'room-3d-hint', hint));
+  toolbar.addEventListener('pointerdown', (event) => {
+    clearPendingClick();
+    event.stopPropagation();
+  });
+  toolbar.addEventListener('wheel', (event) => event.stopPropagation(), { passive: true });
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.7));
@@ -382,14 +416,17 @@ export function mountRoomScene(host, {
   canvas.tabIndex = -1;
   canvas.dataset.detailCount = '0';
   canvas.dataset.detailRacks = '';
-  viewport.append(canvas, landmarkLayer, labels, legend, tooltip);
-  panel.append(viewport, toolbar);
+  viewport.append(canvas, landmarkLayer, labels, toolbar, legend, tooltip);
+  panel.append(viewport);
   host.replaceChildren(panel);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xeff4f4);
-  scene.add(new THREE.HemisphereLight(0xf8fcff, 0x748282, 2.1));
-  const key = new THREE.DirectionalLight(0xfff2de, 2.4);
+  scene.background = new THREE.Color(0xe8eff2);
+  const environment = createRackEnvironment(renderer);
+  scene.environment = environment?.texture ?? null;
+  scene.environmentIntensity = 0.78;
+  scene.add(new THREE.HemisphereLight(0xf8fcff, 0x748282, 1.8));
+  const key = new THREE.DirectionalLight(0xfff2de, 2.2);
   key.position.set(-5, 12, 9);
   const fill = new THREE.DirectionalLight(0xf4f6f8, 0.52);
   fill.position.set(0, 3, 8);
@@ -398,7 +435,11 @@ export function mountRoomScene(host, {
   scene.add(key, fill, rim);
 
   const palette = createRackPalette();
-  const model = makeRoom(scene, { room: layout, racks, devices, deviceKind, palette });
+  const floorTexture = createFloorTileTexture();
+  const shadowTexture = createContactShadowTexture();
+  const model = makeRoom(scene, { room: layout, racks, devices, deviceKind, palette, floorTexture, shadowTexture });
+  const roomSize = model.bounds.getSize(new THREE.Vector3());
+  scene.fog = new THREE.FogExp2(scene.background, Math.min(0.023, 0.18 / Math.hypot(roomSize.x, roomSize.z)));
   const landmarkItems = model.landmarks.map(({ id, text, point }) => {
     const item = node('span', 'room-3d-landmark', text);
     item.dataset.landmark = id;
@@ -415,8 +456,11 @@ export function mountRoomScene(host, {
 
   const camera = new THREE.PerspectiveCamera(35, 1, 0.04, 400);
   const controls = new OrbitControls(camera, viewport);
+  const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
   controls.enablePan = true;
   controls.screenSpacePanning = false;
+  controls.enableDamping = !motion.matches;
+  controls.dampingFactor = 0.08;
   controls.minPolarAngle = 0.001;
   controls.maxPolarAngle = Math.PI / 2 - 0.12;
   const ray = new THREE.Raycaster();
@@ -429,12 +473,18 @@ export function mountRoomScene(host, {
   const localTransform = new THREE.Matrix4();
   const localRotation = new THREE.Quaternion();
   const yAxis = new THREE.Vector3(0, 1, 0);
+  const previousPosition = new THREE.Vector3();
+  const previousTarget = new THREE.Vector3();
+  const offset = new THREE.Vector3();
   const fineLayers = new Map();
   let deviceHitCache;
   let frame;
-  let flyFrame;
+  let flight;
+  let dampingFrames = 0;
+  let dampingDeadline = 0;
+  let pendingClick;
   let disposed = false;
-  let applyingPreset = false;
+  let updatingControls = false;
   let sized = false;
   let pressed;
   let hovered;
@@ -466,18 +516,23 @@ export function mountRoomScene(host, {
   }
 
   const labelItems = model.symbols.map((symbol) => {
-    const rack = symbol.rack;
-    const item = node(rack ? 'button' : 'span', `room-3d-label${rack ? '' : ' room-3d-label-reserved'}`,
-      rack?.name ?? (layout.illustrative ? '预留' : '空位'));
+    const { rack, stats } = symbol;
+    const item = node(rack ? 'button' : 'span', `room-3d-label${rack ? '' : ' room-3d-label-reserved'}`);
+    item.append(node('span', 'room-3d-label-name', rack?.name ?? (layout.illustrative ? '预留' : '空位')));
     item.dataset.roomRow = symbol.row;
     item.dataset.roomSlot = symbol.slot;
     if (rack) {
       item.type = 'button';
       item.dataset.rackId = rack.id;
+      item.dataset.expanded = 'false';
       item.title = `${rack.name} · ${rack.height}U`;
       item.setAttribute('aria-label', `查看机柜 ${rack.name}，${rack.height}U`);
+      item.append(node('span', 'room-3d-label-meta', `${rack.height}U`),
+        node('span', 'room-3d-label-meta', `已用 ${stats.usedU}/${rack.height}U`));
       item.addEventListener('click', (event) => {
-        if (event.detail === 0) onRack(rack);
+        if (event.detail !== 0) return;
+        clearPendingClick();
+        onRack(rack);
       });
       item.addEventListener('pointerenter', () => setHover(rack));
       item.addEventListener('pointerleave', () => setHover(null));
@@ -500,19 +555,22 @@ export function mountRoomScene(host, {
     });
   }
 
+  controls.addEventListener('start', () => { flight = undefined; });
   controls.addEventListener('change', () => {
-    if (applyingPreset) return;
+    if (updatingControls) return;
     onSceneInteraction?.();
-    cancelFly();
-    clampTarget();
+    flight = undefined;
+    clampTarget(true);
     setActive(null);
     setHover(null);
     hideTooltip();
-    invalidate();
+    queueDamping();
   });
+  controls.addEventListener('end', queueDamping);
+  motion.addEventListener('change', changeMotion);
 
   viewport.addEventListener('pointerdown', (event) => {
-    cancelFly();
+    flight = undefined;
     hideTooltip();
     if (event.button === 0 && event.isPrimary) {
       const label = event.target.closest('button.room-3d-label');
@@ -523,6 +581,10 @@ export function mountRoomScene(host, {
   viewport.addEventListener('pointermove', (event) => {
     if (pressed) {
       pressed.moved ||= Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > 5;
+      if (pressed.moved) {
+        clearPendingClick();
+        queueDamping();
+      }
     } else if (event.pointerType !== 'touch' && event.target === canvas) {
       const hit = pick(event);
       const entry = hit?.object.userData.entry;
@@ -542,13 +604,14 @@ export function mountRoomScene(host, {
       const hit = labelRack ? null : pick(event);
       const entry = hit?.object.userData.entry;
       const rack = labelRack ?? entry?.rack;
-      if (!rack) return;
-      const device = pickDevice(hit);
-      if (device && onDevice) onDevice(device, makeDeviceAnchor(entry, device, event));
-      else onRack(rack, device);
+      if (rack) selectRack(rack, entry, pickDevice(hit), event);
     }
   });
-  viewport.addEventListener('pointercancel', () => { pressed = undefined; });
+  viewport.addEventListener('pointercancel', () => {
+    pressed = undefined;
+    clearPendingClick();
+  });
+  viewport.addEventListener('wheel', clearPendingClick, { passive: true });
   viewport.addEventListener('pointerleave', () => {
     setHover(null);
     hideTooltip();
@@ -560,15 +623,19 @@ export function mountRoomScene(host, {
   canvas.addEventListener('webglcontextlost', contextLost);
   const observer = new ResizeObserver(resize);
   observer.observe(viewport);
-  const lampAnimation = animateOperatingLamps(viewport, model.lamps, () => renderer.render(scene, camera));
+  const lampAnimation = animateOperatingLamps(viewport, model.lamps, () => {
+    if (frame == null && sized && !disposed) renderer.render(scene, camera);
+  });
   applyViewMode(viewMode);
   setSearchFilter(initialSearchFilter);
   resize();
 
-  function clampTarget() {
+  function clampTarget(keepOrbit = false) {
+    offset.copy(controls.target);
     controls.target.x = THREE.MathUtils.clamp(controls.target.x, model.bounds.min.x, model.bounds.max.x);
     controls.target.z = THREE.MathUtils.clamp(controls.target.z, model.bounds.min.z, model.bounds.max.z);
     controls.target.y = THREE.MathUtils.clamp(controls.target.y, 0, Math.max(0.4, model.bounds.max.y * 0.7));
+    if (keepOrbit) camera.position.add(offset.subVectors(controls.target, offset));
   }
 
   function applyViewMode(mode) {
@@ -614,50 +681,136 @@ export function mountRoomScene(host, {
     controls.target.copy(target);
     clampTarget();
     camera.position.copy(controls.target).addScaledVector(direction, fit * zoom);
-    applyingPreset = true;
-    controls.update();
-    applyingPreset = false;
+    updateControls();
     invalidate();
   }
 
-  function cancelFly() {
-    if (flyFrame != null) {
-      cancelAnimationFrame(flyFrame);
-      flyFrame = undefined;
+  function updateControls() {
+    updatingControls = true;
+    controls.update();
+    updatingControls = false;
+  }
+
+  function clearDamping() {
+    dampingFrames = 0;
+    if (!controls.enableDamping) return;
+    previousPosition.copy(camera.position);
+    previousTarget.copy(controls.target);
+    controls.enableDamping = false;
+    updateControls();
+    camera.position.copy(previousPosition);
+    controls.target.copy(previousTarget);
+    controls.enableDamping = !motion.matches;
+    updateControls();
+  }
+
+  function queueDamping() {
+    if (controls.enableDamping && !flight) {
+      dampingFrames = MAX_DAMPING_FRAMES;
+      dampingDeadline = performance.now() + MAX_DAMPING_MS;
+    }
+    invalidate();
+  }
+
+  function changeMotion() {
+    clearDamping();
+    controls.enableDamping = !motion.matches;
+    if (motion.matches && flight) {
+      const { direction, zoom, endTarget } = flight;
+      flight = undefined;
+      placeView(direction, zoom, endTarget);
     }
   }
 
-  function flyTo(direction, zoom, target) {
-    cancelFly();
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduced || !sized) {
+  function flyTo(direction, zoom, target, duration = 260) {
+    clearPendingClick();
+    clearDamping();
+    flight = undefined;
+    if (motion.matches || !sized) {
       placeView(direction, zoom, target);
       return;
     }
-    const startTarget = controls.target.clone();
-    const startPos = camera.position.clone();
     const endTarget = target.clone();
     const fit = fittedDistance(direction);
-    const endPos = endTarget.clone().addScaledVector(direction, fit * zoom);
-    const startTime = performance.now();
-    const duration = 260;
+    flight = {
+      direction, zoom, fit, duration, endTarget, startTime: performance.now(),
+      startTarget: controls.target.clone(), startPosition: camera.position.clone(),
+      endPosition: endTarget.clone().addScaledVector(direction, fit * zoom),
+    };
+    invalidate();
+  }
 
-    function step(now) {
-      if (disposed) return;
-      const t = Math.min(1, (now - startTime) / duration);
+  function advanceCamera(now) {
+    if (flight) {
+      const t = Math.min(1, (now - flight.startTime) / flight.duration);
       const ease = 1 - (1 - t) ** 3;
       controls.minDistance = MIN_DISTANCE;
-      controls.maxDistance = fit * 3;
-      controls.target.lerpVectors(startTarget, endTarget, ease);
-      camera.position.lerpVectors(startPos, endPos, ease);
-      applyingPreset = true;
-      controls.update();
-      applyingPreset = false;
-      invalidate();
-      if (t < 1) flyFrame = requestAnimationFrame(step);
-      else flyFrame = undefined;
+      controls.maxDistance = flight.fit * 3;
+      controls.target.lerpVectors(flight.startTarget, flight.endTarget, ease);
+      camera.position.lerpVectors(flight.startPosition, flight.endPosition, ease);
+      updateControls();
+      if (t === 1) flight = undefined;
+      return;
     }
-    flyFrame = requestAnimationFrame(step);
+    if (!dampingFrames) return;
+    previousPosition.copy(camera.position);
+    previousTarget.copy(controls.target);
+    updateControls();
+    clampTarget(true);
+    const shift = camera.position.distanceToSquared(previousPosition) + controls.target.distanceToSquared(previousTarget);
+    dampingFrames -= 1;
+    if (shift < 0.00000001 || dampingFrames === 0 || now >= dampingDeadline) clearDamping();
+  }
+
+  function clearPendingClick() {
+    if (!pendingClick) return;
+    clearTimeout(pendingClick.timer);
+    pendingClick = undefined;
+  }
+
+  function selectRack(rack, entry, device, event) {
+    const anchor = device && onDevice ? makeDeviceAnchor(entry, device, event) : null;
+    const open = () => {
+      if (disposed) return;
+      if (anchor) onDevice(device, anchor);
+      else onRack(rack, device);
+    };
+    if (event.pointerType !== 'mouse') {
+      clearPendingClick();
+      open();
+      return;
+    }
+    const { clientX: x, clientY: y } = event;
+    const twice = pendingClick?.rackId === rack.id && Math.hypot(x - pendingClick.x, y - pendingClick.y) <= 12;
+    clearPendingClick();
+    if (twice) {
+      focusFromClick(model.entryForRack(rack.id));
+      return;
+    }
+    pendingClick = { rackId: rack.id, x, y, timer: window.setTimeout(() => {
+      pendingClick = undefined;
+      open();
+    }, SINGLE_CLICK_DELAY) };
+  }
+
+  function focusFromClick(entry) {
+    onSceneInteraction?.();
+    const target = new THREE.Vector3(entry.x, entry.middle, entry.z);
+    const angle = THREE.MathUtils.degToRad(entry.rotation);
+    const direction = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
+    const approach = new THREE.Vector3().subVectors(camera.position, target);
+    if (direction.dot(approach) < -0.1) direction.negate();
+    direction.addScaledVector(new THREE.Vector3().crossVectors(yAxis, direction), 0.24);
+    direction.y = 0.21;
+    direction.normalize();
+    const rackHeight = rackVerticalBounds(entry.rack.height, RACK_UNIT);
+    const vertical = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.74;
+    const distance = Math.max((rackHeight.top - rackHeight.bottom) * entry.scale / (2 * vertical),
+      CABINET_WIDTH / (2 * vertical * camera.aspect)) + CABINET_DEPTH * 0.72;
+    setActive(null);
+    setHover(null);
+    hideTooltip();
+    flyTo(direction, distance / fittedDistance(direction), target, 420);
   }
 
   function setActive(view) {
@@ -783,6 +936,9 @@ export function mountRoomScene(host, {
   function resize() {
     if (!viewport.clientWidth || !viewport.clientHeight) return;
     const current = snapshot();
+    const destination = flight;
+    flight = undefined;
+    clearDamping();
     renderer.setSize(viewport.clientWidth, viewport.clientHeight, false);
     camera.aspect = viewport.clientWidth / viewport.clientHeight;
     camera.updateProjectionMatrix();
@@ -790,6 +946,10 @@ export function mountRoomScene(host, {
     const targetVec = current.target instanceof THREE.Vector3
       ? current.target : new THREE.Vector3(...(current.target ?? center.toArray()));
     placeView(new THREE.Vector3(...current.direction).normalize(), current.zoom, targetVec);
+    if (destination) {
+      const remaining = Math.max(1, destination.startTime + destination.duration - performance.now());
+      flyTo(destination.direction, destination.zoom, destination.endTarget, remaining);
+    }
   }
 
   function invalidate() {
@@ -800,6 +960,7 @@ export function mountRoomScene(host, {
     const narrow = width < 520;
     const maxLabels = narrow ? 18 : 48;
     const showEmpty = model.symbols.length <= 24;
+    const labelDetailDistance = height * CABINET_WIDTH / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * (narrow ? 98 : 112));
     const placedBoxes = [];
     const candidates = [];
 
@@ -832,10 +993,11 @@ export function mountRoomScene(host, {
     });
 
     let visibleCount = 0;
-    for (const { entry, left, top, isHovered, isLocated, priority } of candidates) {
+    for (const { entry, left, top, dist, isHovered, isLocated, priority } of candidates) {
       const { item, rack } = entry;
-      const estW = Math.min(120, Math.max(46, (rack ? rack.name.length : 2) * 9 + 18));
-      const estH = 22;
+      const expanded = Boolean(rack && (isHovered || dist < labelDetailDistance ** 2));
+      const estW = Math.min(148, Math.max(expanded ? 104 : 46, (rack ? rack.name.length : 2) * 9 + 18));
+      const estH = expanded ? 56 : 22;
       const box = { l: left - estW / 2 - 4, r: left + estW / 2 + 4, t: top - estH - 4, b: top + 2 };
       const important = isHovered || isLocated;
       const collides = !important && placedBoxes.some((p) => box.l < p.r && box.r > p.l && box.t < p.b && box.b > p.t);
@@ -849,6 +1011,7 @@ export function mountRoomScene(host, {
         visibleCount += 1;
       }
       item.dataset.highlighted = String(isHovered);
+      if (rack) item.dataset.expanded = String(expanded);
       item.dataset.located = String(isLocated);
     }
 
@@ -867,15 +1030,17 @@ export function mountRoomScene(host, {
     }
   }
 
-  function draw() {
+  function draw(now) {
     frame = undefined;
     if (disposed) return;
+    advanceCamera(now);
     const width = viewport.clientWidth;
     const height = viewport.clientHeight;
     camera.updateMatrixWorld();
     updateDetails(width);
     renderer.render(scene, camera);
     layoutLabels(width, height);
+    if (flight || dampingFrames) invalidate();
   }
 
   function pick(event) {
@@ -1052,10 +1217,6 @@ export function mountRoomScene(host, {
       return;
     }
     if (!device) {
-      if (viewMode === 'appearance') {
-        hideTooltip();
-        return;
-      }
       const key = `rack:${entry.rack.id}:${viewMode}`;
       if (tooltip.dataset.deviceId !== key) {
         tooltip.dataset.deviceId = key;
@@ -1064,6 +1225,7 @@ export function mountRoomScene(host, {
         tooltipPosition.textContent = viewMode === 'status'
           ? `运行 ${s.statusCounts.running} · 未通电 ${s.statusCounts.unpowered} · 停用 ${s.statusCounts.disabled} · 待核 ${s.statusCounts.unknown}`
           : `已用 ${s.usedU}/${entry.rack.height}U（空闲 ${s.freeU}U）${s.unknownDepthCount ? ` · 深度待核 ${s.unknownDepthCount} 台` : ''}`;
+        tooltipStatus.hidden = true;
         tooltip.hidden = false;
       }
     } else {
@@ -1072,7 +1234,10 @@ export function mountRoomScene(host, {
         tooltip.dataset.deviceId = id;
         tooltipName.textContent = device.name;
         const depth = DEPTH_LABELS[normalizeDepth(device)];
-        tooltipPosition.textContent = `${entry.rack.name} · ${device.face === 'front' ? '正面' : '背面'} ${units(device)} · ${depth} · ${operatingStatusLabel(device)}`;
+        tooltipPosition.textContent = `${entry.rack.name} · ${device.face === 'front' ? '正面' : '背面'} ${units(device)} · ${depth}`;
+        tooltipStatus.dataset.operatingStatus = normalizeStatus(device);
+        tooltipStatus.textContent = operatingStatusLabel(device);
+        tooltipStatus.hidden = false;
         tooltip.hidden = false;
       }
     }
@@ -1091,7 +1256,9 @@ export function mountRoomScene(host, {
   function dispose() {
     if (disposed) return;
     disposed = true;
-    cancelFly();
+    flight = undefined;
+    clearPendingClick();
+    motion.removeEventListener('change', changeMotion);
     observer.disconnect();
     lampAnimation?.dispose();
     if (frame != null) cancelAnimationFrame(frame);
@@ -1099,6 +1266,10 @@ export function mountRoomScene(host, {
     controls.dispose();
     disposeObjects(scene);
     palette.dispose();
+    floorTexture?.dispose();
+    shadowTexture?.dispose();
+    model.lamps?.texture?.dispose();
+    environment?.dispose();
     fineLayers.clear();
     renderer.dispose();
     renderer.forceContextLoss();

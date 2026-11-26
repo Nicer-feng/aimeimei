@@ -95,9 +95,13 @@
   margin-inline: auto;
 }
 
-.rack-svg-frame { fill: #263c47; }
-.rack-svg-slot { fill: #eef2f3; stroke: #c5d4d8; stroke-width: 0.6; }
-.rack-svg-screw { fill: #94a7b0; }
+.rack-svg-frame { fill: #2a3b46; stroke: #1c2a33; stroke-width: 0.75; }
+.rack-svg-rail { fill: #586b75; stroke: #748691; stroke-width: 0.65; }
+.rack-svg-rail-right { fill: #485d69; }
+.rack-svg-slot { fill: #edf2f4; stroke: #c5d4d9; stroke-width: 0.6; }
+.rack-elevation-svg [data-slot-state=free][data-parity=odd] .rack-svg-slot { fill: #f0f5f7; }
+.rack-elevation-svg [data-slot-state=free][data-parity=even] .rack-svg-slot { fill: #e5ecef; }
+.rack-svg-screw { fill: #a6b7bf; stroke: #304450; stroke-width: 0.48; }
 
 .rack-svg-scale {
   font: 10px ui-monospace, monospace;
@@ -108,8 +112,8 @@
 .rack-svg-device { cursor: pointer; }
 .rack-slot-selectable { cursor: pointer; }
 .rack-slot-selectable:focus-visible { outline: none; }
-.rack-elevation-svg .rack-slot-selectable:hover .rack-svg-slot,
-.rack-elevation-svg .rack-slot-selectable:focus-visible .rack-svg-slot { fill: #d5ebe6; }
+.rack-elevation-svg [data-empty=true].rack-slot-selectable:hover .rack-svg-slot,
+.rack-elevation-svg [data-empty=true].rack-slot-selectable:focus-visible .rack-svg-slot { fill: #d5ebe6; }
 .rack-slot-selectable:focus-visible .rack-svg-slot { stroke: #1b6359; stroke-width: 2; }
 .rack-svg-device-body { fill: #2d536b; stroke: #263c47; stroke-width: 0.85; }
 .rack-svg-device-mark { fill: #9cc7e2; }
@@ -124,6 +128,19 @@
 .rack-svg-device[aria-pressed='true'] .rack-svg-device-mark { fill: #9be3cc; }
 .rack-svg-device:focus-visible { outline: none; }
 .rack-svg-device:focus-visible .rack-svg-device-body { stroke: #ffda71; stroke-width: 2; }
+.rack-svg-status { fill: var(--rack-status-dot, #d89b32); stroke: #fff9; stroke-width: 0.65; pointer-events: none; }
+:is(.rack-svg-device, .rack-spatial-tooltip-status, .room-3d-tooltip-status)[data-operating-status=running] {
+  --rack-status-dot: var(--device-status-running, #3fa86b);
+}
+:is(.rack-svg-device, .rack-spatial-tooltip-status, .room-3d-tooltip-status)[data-operating-status=unpowered] {
+  --rack-status-dot: var(--device-status-unpowered, #d14d43);
+}
+:is(.rack-svg-device, .rack-spatial-tooltip-status, .room-3d-tooltip-status)[data-operating-status=disabled] {
+  --rack-status-dot: var(--device-status-disabled, #7b8a94);
+}
+:is(.rack-svg-device, .rack-spatial-tooltip-status, .room-3d-tooltip-status)[data-operating-status=unknown] {
+  --rack-status-dot: var(--device-status-unknown, #d89b32);
+}
 
 .rack-svg-device-name, .rack-svg-device-u {
   font-size: 11.4px;
@@ -162,6 +179,13 @@
   box-shadow: 0 4px 18px #293c4510;
 }
 
+.rack-spatial-panel, .room-3d {
+  --scene-glass: rgba(249, 252, 252, 0.84);
+  --scene-glass-border: rgba(85, 111, 118, 0.25);
+  --scene-glass-shadow: 0 3px 14px rgba(32, 53, 61, 0.12);
+  --scene-glass-filter: blur(10px) saturate(1.15);
+}
+
 .rack-spatial-viewport {
   position: relative;
   isolation: isolate;
@@ -180,32 +204,61 @@
 
 .rack-spatial-tooltip {
   position: absolute;
-  z-index: 1;
+  z-index: 5;
   width: max-content;
   max-width: min(17rem, calc(100% - 1rem));
   padding: 0.48rem 0.65rem;
-  border: 1px solid #cbd9df;
-  border-radius: 0.5rem;
-  background: #fdfefe;
-  box-shadow: 0 3px 12px #22384429;
+  border: 1px solid var(--scene-glass-border, #cbd9df);
+  border-radius: 0.6rem;
+  background: rgba(250, 253, 253, 0.94);
+  backdrop-filter: var(--scene-glass-filter, none);
+  box-shadow: var(--scene-glass-shadow, 0 3px 12px #22384429);
   color: #243b47;
   pointer-events: none;
   overflow-wrap: anywhere;
 }
 
 .rack-spatial-tooltip[hidden] { display: none; }
+.rack-spatial-tooltip:not([hidden]) { animation: rack-tooltip-reveal 130ms ease-out both; }
+@keyframes rack-tooltip-reveal {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rack-spatial-tooltip:not([hidden]) { animation: none; }
+}
 .rack-spatial-tooltip strong, .rack-spatial-tooltip span { display: block; }
 .rack-spatial-tooltip strong { font-size: 0.9rem; line-height: 1.3; }
 .rack-spatial-tooltip span { margin-top: 0.14rem; font-size: 0.79rem; color: #516875; line-height: 1.4; }
-
-.rack-spatial-toolbar {
+.rack-spatial-tooltip :is(.rack-spatial-tooltip-status, .room-3d-tooltip-status) {
   display: flex;
   align-items: center;
+  gap: 0.32rem;
+  margin-top: 0.28rem;
+  font-size: 0.73rem;
+  color: #334f58;
+}
+.rack-spatial-tooltip .rack-spatial-tooltip-status[hidden] { display: none; }
+.rack-spatial-tooltip :is(.rack-spatial-tooltip-status, .room-3d-tooltip-status)::before {
+  content: '';
+  width: 0.42rem;
+  height: 0.42rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--rack-status-dot, #d89b32);
+}
+
+.rack-spatial-toolbar {
+  position: absolute;
+  inset-inline: 0.72rem;
+  bottom: 0.72rem;
+  z-index: 3;
+  display: flex;
+  align-items: end;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 0.55rem 0.85rem;
-  padding: 0.62rem 0.8rem;
-  border-top: 1px solid #dce5e9;
+  gap: 0.38rem 0.7rem;
+  pointer-events: none;
 }
 
 .rack-spatial-toolbar-groups {
@@ -217,18 +270,19 @@
 
 .rack-spatial-legend {
   position: absolute;
-  left: 0.65rem;
-  bottom: 0.65rem;
-  z-index: 1;
+  inset-inline-start: 0.72rem;
+  top: 0.72rem;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem 0.75rem;
   max-width: calc(100% - 1.3rem);
   padding: 0.34rem 0.62rem;
-  border: 1px solid #cbd9df;
-  border-radius: 0.48rem;
-  background: #fdfefee8;
-  box-shadow: 0 2px 8px #22384418;
+  border: 1px solid var(--scene-glass-border);
+  border-radius: 1rem;
+  background: var(--scene-glass);
+  backdrop-filter: var(--scene-glass-filter);
+  box-shadow: var(--scene-glass-shadow);
   font-size: 0.76rem;
   color: #243b47;
   pointer-events: none;
@@ -254,14 +308,24 @@
 .rack-camera-controls {
   gap: 0.14rem;
   padding: 0.18rem;
-  border: 1px solid #dce5e9;
-  border-radius: 0.53rem;
-  background: #f3f6f7;
+  border: 1px solid var(--scene-glass-border);
+  border-radius: 0.95rem;
+  background: var(--scene-glass);
+  backdrop-filter: var(--scene-glass-filter);
+  box-shadow: var(--scene-glass-shadow);
 }
+.rack-camera-controls button { pointer-events: auto; }
 
 .rack-spatial-hover {
+  max-width: 100%;
+  padding: 0.14rem 0.55rem;
+  border: 1px solid var(--scene-glass-border);
+  border-radius: 0.9rem;
+  background: var(--scene-glass);
+  backdrop-filter: var(--scene-glass-filter);
   color: var(--muted, #4f6268);
-  font-size: 0.84rem;
+  font-size: 0.74rem;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
@@ -302,7 +366,7 @@
   cursor: pointer;
 }
 
-.rack-camera-controls button { min-height: 2rem; font-weight: 650; }
+.rack-camera-controls button { min-height: 2rem; border-radius: 0.7rem; font-weight: 650; }
 .rack-spatial-devices button {
   max-width: 100%;
   border-color: #dce5e9;
@@ -336,7 +400,12 @@
   .rack-2d { grid-template-columns: 1fr; }
   .rack-elevation-caption { padding-inline: 0.2rem; }
   .rack-spatial-viewport {
-    height: clamp(21rem, 56vh, 32rem);
-    height: clamp(21rem, 56svh, 32rem);
+    height: clamp(24rem, 57vh, 33rem);
+    height: clamp(24rem, 57svh, 33rem);
   }
+  .rack-spatial-toolbar { inset-inline: 0.45rem; bottom: 0.5rem; justify-content: center; }
+  .rack-spatial-toolbar-groups { justify-content: center; gap: 0.25rem; }
+  .rack-camera-controls { gap: 0.05rem; padding: 0.13rem; }
+  .rack-camera-controls button { min-height: 2.2rem; padding-inline: 0.36rem; font-size: 0.75rem; }
+  .rack-spatial-legend { inset-inline-start: 0.45rem; top: 0.5rem; }
 }

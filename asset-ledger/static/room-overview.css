@@ -155,7 +155,7 @@
     linear-gradient(142deg, #edf3ef, #dceae3);
 }
 
-.room-3d { display: grid; grid-template-rows: minmax(0, 1fr) auto; height: 100%; }
+.room-3d, .room-3d-viewport { height: 100%; }
 .room-3d-viewport { position: relative; min-height: 0; isolation: isolate; overflow: hidden; }
 .room-3d-canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 .room-3d-canvas:active { cursor: grabbing; }
@@ -181,26 +181,41 @@
   transform: translate(-50%, -100%);
   z-index: 1;
   max-width: min(8.5rem, 25%);
-  padding: 0.13rem 0.36rem;
-  border: 1px solid #bdcec6;
-  border-radius: 0.33rem;
-  background: #fcfefd;
-  color: #173a30;
-  box-shadow: 0 1px 5px #1e392729;
-  font-size: 0.77rem;
-  font-weight: 750;
+  padding: 0.08rem 0.32rem;
+  border: 1px solid rgba(65, 94, 101, 0.22);
+  border-radius: 0.44rem;
+  background: rgba(238, 249, 249, 0.66);
+  backdrop-filter: blur(7px) saturate(1.12);
+  color: #294951;
+  box-shadow: 0 1px 4px rgba(20, 42, 50, 0.12);
+  font-size: 0.72rem;
+  font-weight: 720;
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: start;
 }
 
 button.room-3d-label { pointer-events: auto; }
+.room-3d-label-name { display: block; overflow: hidden; text-overflow: ellipsis; }
+.room-3d-label-meta { display: none; }
+.room-3d-label:is([data-expanded=true], :focus-visible, :hover) {
+  max-width: min(10rem, 42%);
+  padding: 0.2rem 0.48rem;
+}
+.room-3d-label:is([data-expanded=true], :focus-visible, :hover) .room-3d-label-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.65rem;
+  font-weight: 540;
+}
 .room-3d-label[data-search-match=true] { border-color: #7aafce; color: #075786; background: #eaf6ff; }
 .room-3d-label[data-search-direct=true] { border-color: #519987; color: #155246; background: #e0f5eb; }
 .room-3d-label[data-search-match=false]:not([data-highlighted=true], [data-located=true], :hover, :focus-visible) { opacity: 0.62; }
 .room-3d-label[data-highlighted=true], .room-3d-label[data-located=true], button.room-3d-label:hover, .room-3d-label:focus-visible {
-  z-index: 2;
+  z-index: 3;
   border-color: var(--accent);
   background: var(--accent);
   color: white;
@@ -208,14 +223,16 @@ button.room-3d-label { pointer-events: auto; }
 
 .room-3d-label-reserved { border-style: dashed; box-shadow: none; color: #64766d; background: #f4f8f5eb; }
 .room-3d-toolbar {
+  position: absolute;
+  inset-inline: 0.72rem;
+  bottom: 0.72rem;
+  z-index: 4;
   display: flex;
-  align-items: center;
+  align-items: end;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 0.45rem 1rem;
-  padding: 0.55rem clamp(0.8rem, 2.8vw, 1.35rem);
-  border-top: 1px solid var(--line);
-  background: var(--surface);
+  gap: 0.38rem 0.7rem;
+  pointer-events: none;
 }
 
 .room-3d-toolbar-groups {
@@ -224,21 +241,31 @@ button.room-3d-label { pointer-events: auto; }
   align-items: center;
   gap: 0.45rem;
 }
+.room-3d-toolbar .room-3d-presets {
+  border-color: var(--scene-glass-border);
+  border-radius: 0.95rem;
+  background: var(--scene-glass);
+  backdrop-filter: var(--scene-glass-filter);
+  box-shadow: var(--scene-glass-shadow);
+  pointer-events: auto;
+}
+.room-3d-toolbar .room-3d-presets button { border-radius: 0.7rem; pointer-events: auto; }
 
 .room-3d-legend {
   position: absolute;
-  left: 0.65rem;
-  bottom: 0.65rem;
+  inset-inline-start: 0.72rem;
+  top: 0.72rem;
   z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem 0.75rem;
   max-width: calc(100% - 1.3rem);
   padding: 0.34rem 0.62rem;
-  border: 1px solid #c3d3cb;
-  border-radius: 0.48rem;
-  background: #fcfefde8;
-  box-shadow: 0 2px 8px #1e392718;
+  border: 1px solid var(--scene-glass-border);
+  border-radius: 1rem;
+  background: var(--scene-glass);
+  backdrop-filter: var(--scene-glass-filter);
+  box-shadow: var(--scene-glass-shadow);
   font-size: 0.76rem;
   color: var(--ink);
   pointer-events: none;
@@ -258,7 +285,16 @@ button.room-3d-label { pointer-events: auto; }
   flex: 0 0 auto;
 }
 
-.room-3d-hint { color: var(--muted); font-size: 0.82rem; }
+.room-3d-hint {
+  padding: 0.14rem 0.55rem;
+  border: 1px solid var(--scene-glass-border);
+  border-radius: 0.9rem;
+  background: var(--scene-glass);
+  backdrop-filter: var(--scene-glass-filter);
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
 .room-overview-plan { padding: clamp(0.55rem, 2.8vw, 1.2rem); background: #eef5ef; }
 .room-overview-plan-scroll { max-height: min(70vh, 34rem); overflow: auto; padding: 0.35rem; }
 .room-overview-grid {
@@ -376,10 +412,15 @@ button.room-3d-label { pointer-events: auto; }
   .room-overview-search input { flex: 1 1 auto; width: auto; }
   .room-overview-search-results { max-height: min(7.5rem, 19vh); }
   .room-overview-render-host {
-    height: clamp(18rem, 46vh, 29rem);
-    height: clamp(18rem, 46svh, 29rem);
+    height: clamp(22rem, 51vh, 31rem);
+    height: clamp(22rem, 51svh, 31rem);
   }
-  .room-3d-label { font-size: 0.68rem; padding: 0.08rem 0.22rem; }
+  .room-3d-label { font-size: 0.65rem; padding: 0.07rem 0.22rem; }
+  .room-3d-toolbar { inset-inline: 0.45rem; bottom: 0.5rem; justify-content: center; }
+  .room-3d-toolbar-groups { justify-content: center; gap: 0.25rem; }
+  .room-3d-toolbar .room-3d-presets { gap: 0.05rem; padding: 0.13rem; }
+  .room-3d-toolbar .room-3d-presets button { min-height: 2.2rem; padding-inline: 0.38rem; font-size: 0.75rem; }
+  .room-3d-legend { inset-inline-start: 0.45rem; top: 0.5rem; }
   .room-overview-grid {
     grid-template-columns: 2.02rem repeat(var(--room-columns), minmax(2.85rem, 1fr));
     gap: 0.24rem;

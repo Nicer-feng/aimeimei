@@ -11,6 +11,10 @@
   --sidebar: #142a28;
   --sidebar-muted: #a9bdb5;
   --danger: #9f321e;
+  --device-status-running: #3fa86b;
+  --device-status-disabled: #7b8a94;
+  --device-status-unpowered: #d14d43;
+  --device-status-unknown: #d89b32;
   --font: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
   font: 16px/1.6 var(--font);
   color: var(--ink);
@@ -180,14 +184,22 @@ dialog::backdrop { background: #172d2769; }
 .device-quick-head h2 { font-size: 1.04rem; }
 .device-quick-close.button { font-size: 1.27rem; min-width: 2.15rem; padding: 0; line-height: 1; }
 .device-quick-actions { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-top: .33rem; }
-.device-quick-status { display: inline-flex; gap: .38rem; align-items: center; padding: .14rem .45rem; border-radius: .36rem; background: #eef2ef; color: var(--muted); font-size: .79rem; }
-.device-quick-status::before { content: ""; width: .38rem; height: .38rem; border-radius: 50%; background: currentColor; }
-.device-quick-status[data-status=running] { color: #237348; background: #e6f5eb; }
+.device-status {
+  --device-status-dot: var(--device-status-unknown);
+  display: inline-flex; align-items: center; gap: .33rem;
+  border-radius: 999px; padding: .12rem .52rem; white-space: nowrap;
+  font-size: .79rem; font-weight: 680; color: #795119; background: #fff3dc;
+}
+.device-status::before { content: ''; width: .38rem; height: .38rem; flex: none; border-radius: 50%; background: var(--device-status-dot); }
+.device-status[data-operating-status='running'] { --device-status-dot: var(--device-status-running); color: #17683b; background: #e7f5eb; }
+.device-status[data-operating-status='disabled'] { --device-status-dot: var(--device-status-disabled); color: #41525c; background: #edf1f3; }
+.device-status[data-operating-status='unpowered'] { --device-status-dot: var(--device-status-unpowered); color: #942f2a; background: #ffedeb; }
 @keyframes device-quick-enter {
   from { opacity: 0; scale: .95; }
   to { opacity: 1; scale: 1; }
 }
 .drawer {
+  --drawer-motion: 180ms cubic-bezier(.2, .8, .2, 1);
   position: fixed;
   inset: .85rem .85rem .85rem auto;
   z-index: 8;
@@ -201,11 +213,13 @@ dialog::backdrop { background: #172d2769; }
   overflow: hidden auto;
   overscroll-behavior: contain;
 }
-.drawer[open] { animation: device-drawer-enter 230ms cubic-bezier(.22,.7,.28,1) both; }
+.drawer[open] { animation: device-drawer-enter var(--drawer-motion) both; }
+.drawer.drawer-closing[open] { animation-name: device-drawer-exit; }
 @keyframes device-drawer-enter {
   from { opacity: 0; transform: translateX(.9rem); }
   to { opacity: 1; transform: none; }
 }
+@keyframes device-drawer-exit { to { opacity: 0; } }
 .drawer-content, .editor-content, .pdf-content { min-width: 0; }
 .drawer-body { padding: 1rem 1.12rem 1.45rem; display: grid; gap: 1rem; }
 .drawer-body .panel { padding: .75rem; }
@@ -271,5 +285,5 @@ dialog::backdrop { background: #172d2769; }
   to { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .device-quick[open], .drawer[open] { animation: none; }
+  .device-quick[open], .drawer[open], .drawer.drawer-closing[open] { animation: none; }
 }
