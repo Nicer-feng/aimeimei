@@ -79,9 +79,35 @@
   overflow-wrap: anywhere;
 }
 .room-overview-search-devices { padding: 0; margin: 0.24rem 0 0; list-style: none; }
-.room-overview-search-device { padding: 0.27rem 0; border-top: 1px solid #e3ece6; }
+.room-overview-search-device {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.27rem 0;
+  border-top: 1px solid #e3ece6;
+}
+.room-overview-search-device[data-located] { background: #fff7e8; }
+.room-overview-search-device-info { min-width: 0; }
 .room-overview-search-device .code { font-size: 0.72rem; overflow-wrap: anywhere; }
 .room-overview-search-device-meta { color: var(--muted); font-size: 0.75rem; overflow-wrap: anywhere; }
+.room-overview-device-locate {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid #c5d8ce;
+  border-radius: 0.4rem;
+  color: var(--accent-dark);
+  background: #f6faf7;
+}
+.room-overview-device-locate:hover, .room-overview-device-locate:focus-visible { background: var(--accent-soft); }
+.room-overview-device-locate[aria-pressed=true] { color: #875414; background: #fff0d4; border-color: #dcb36d; }
+.room-overview-device-locate svg { width: 1.15rem; height: 1.15rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+@media (pointer: coarse) {
+  .room-overview-device-locate { width: 2.75rem; height: 2.75rem; }
+}
 
 .room-overview-switch, .room-3d-presets {
   display: inline-flex;

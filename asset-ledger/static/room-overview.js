@@ -23,6 +23,28 @@ function action(label, className, onClick) {
   return button;
 }
 
+function locateIcon() {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(namespace, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const ring = document.createElementNS(namespace, 'circle');
+  ring.setAttribute('cx', '12');
+  ring.setAttribute('cy', '12');
+  ring.setAttribute('r', '6');
+  const marks = document.createElementNS(namespace, 'path');
+  marks.setAttribute('d', 'M12 2v4m0 12v4M2 12h4m12 0h4');
+  const center = document.createElementNS(namespace, 'circle');
+  center.setAttribute('cx', '12');
+  center.setAttribute('cy', '12');
+  center.setAttribute('r', '1.4');
+  center.setAttribute('fill', 'currentColor');
+  center.setAttribute('stroke', 'none');
+  svg.append(ring, marks, center);
+  return svg;
+}
+
 function cabinetLink(rack, onRack, className) {
   const link = element('a', className);
   link.href = `#rack/${rack.id}`;
@@ -170,6 +192,8 @@ export function renderRoomOverview(host, {
   const savedView = view?.roomId === room.id ? view : undefined;
   let camera = savedView?.camera;
   let locatedRack = placed.has(savedView?.locatedRackId) ? racksById.get(savedView.locatedRackId) : undefined;
+  let locatedDevice = locatedRack && roomDevices.find((device) =>
+    device.id === savedView?.locatedDeviceId && device.rack_id === locatedRack.id);
   let locatedFace = savedView?.locatedFace === 'rear' ? 'rear' : 'front';
   let focusOnMount = Boolean(savedView?.focusOnMount);
   let mode;
@@ -198,10 +222,16 @@ export function renderRoomOverview(host, {
       groupsByRack.get(rack.id).matches.push(match);
     }
     const groups = racks.map((rack) => groupsByRack.get(rack.id)).filter(Boolean);
+    groups.sort((left, right) => Number(right.matches.some(({ exactAddress }) => exactAddress))
+      - Number(left.matches.some(({ exactAddress }) => exactAddress)));
     return { groups, unmounted, deviceCount: matches.length };
   }
 
-  function deviceResults(matches, mounted) {
+  function deviceLocationLabel(device) {
+    return `${device.face === 'rear' ? '背面' : '正面'} ${units?.(device) ?? `U${device.u_start}`}`;
+  }
+
+  function deviceResults(matches, rack) {
     const list = element('ul', 'room-overview-search-devices');
     for (const { device, matchedModel, systems: names, entries, addresses } of matches) {
       const item = element('li', 'room-overview-search-device');
@@ -211,15 +241,25 @@ export function renderRoomOverview(host, {
       const title = element('span', 'room-overview-search-device-main');
       title.append(deviceLink);
       if (device.code) title.append(element('span', 'code muted', device.code));
-      const location = mounted ? `${device.face === 'rear' ? '背面' : '正面'} ${units?.(device) ?? `U${device.u_start}`}`
+      const location = rack ? deviceLocationLabel(device)
         : (device.workstation ? `工位 ${device.workstation}` : '');
       const context = [location, matchedModel, names.length ? `业务系统 ${names.join('、')}` : ''].filter(Boolean).join(' · ');
-      item.append(title);
-      if (context) item.append(element('span', 'room-overview-search-device-meta', context));
+      const info = element('div', 'room-overview-search-device-info');
+      info.append(title);
+      if (context) info.append(element('div', 'room-overview-search-device-meta', context));
       const endpoints = [...new Set(entries.map(endpointLabel).filter(Boolean))];
       const addressLabels = [...new Set(addresses.map(deviceAddressLabel).filter(Boolean))];
-      if (endpoints.length) item.append(element('span', 'room-overview-search-device-meta', `入口 ${endpoints.join('、')}`));
-      if (addressLabels.length) item.append(element('span', 'room-overview-search-device-meta', `设备地址 ${addressLabels.join('、')}`));
+      if (endpoints.length) info.append(element('div', 'room-overview-search-device-meta', `入口 ${endpoints.join('、')}`));
+      if (addressLabels.length) info.append(element('div', 'room-overview-search-device-meta', `设备地址 ${addressLabels.join('、')}`));
+      item.append(info);
+      if (placed.has(rack?.id)) {
+        const locateButton = action('', 'room-overview-device-locate', () => locate(rack, device.face, device));
+        const label = `定位 ${device.name}（${rack.name} ${location}）`;
+        locateButton.title = label;
+        locateButton.setAttribute('aria-label', label);
+        locateButton.append(locateIcon());
+        item.append(locateButton);
+      }
       list.append(item);
     }
     return list;
@@ -229,8 +269,28 @@ export function renderRoomOverview(host, {
     return group.matches.length && group.matches.every(({ device }) => device.face === 'rear') ? 'rear' : 'front';
   }
 
-  function displayResults(message) {
+  function resultStatus(message) {
     const { groups, unmounted, deviceCount } = results;
+    const hasMatches = groups.length || unmounted.length;
+    const summary = hasMatches ? `找到 ${groups.length} 台机柜、${deviceCount} 台设备。` : '当前机房没有匹配的机柜或设备。';
+    searchStatus.textContent = message ? `${message}${hasMatches ? ` · ${summary}` : ''}` : summary;
+  }
+
+  function deviceLocationStatus() {
+    return `已定位 ${locatedDevice.name} · ${locatedRack.name} · ${deviceLocationLabel(locatedDevice)}`;
+  }
+
+  function markDeviceResult() {
+    for (const button of searchResults.querySelectorAll('.room-overview-device-locate')) {
+      const row = button.closest('.room-overview-search-device');
+      const selected = row.dataset.deviceId === String(locatedDevice?.id);
+      row.toggleAttribute('data-located', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    }
+  }
+
+  function displayResults(message) {
+    const { groups, unmounted } = results;
     const lines = [];
     for (const group of groups) {
       const { rack, matches } = group;
@@ -248,17 +308,20 @@ export function renderRoomOverview(host, {
         head.append(locateButton);
       }
       item.append(head);
-      if (matches.length) item.append(deviceResults(matches, true));
+      if (matches.length) item.append(deviceResults(matches, rack));
       lines.push(item);
     }
     if (unmounted.length) {
       const item = element('li', 'room-overview-search-group room-overview-search-unmounted');
-      item.append(element('h3', 'room-overview-search-group-head', '未上架设备'), deviceResults(unmounted, false));
-      lines.push(item);
+      item.append(element('h3', 'room-overview-search-group-head', '未上架设备'), deviceResults(unmounted));
+      if (unmounted.some(({ exactAddress }) => exactAddress)) {
+        const firstPrefix = groups.findIndex(({ matches }) => !matches.some(({ exactAddress }) => exactAddress));
+        lines.splice(firstPrefix < 0 ? lines.length : firstPrefix, 0, item);
+      } else lines.push(item);
     }
-    const summary = lines.length ? `找到 ${groups.length} 台机柜、${deviceCount} 台设备。` : '当前机房没有匹配的机柜或设备。';
-    searchStatus.textContent = message ? `${message}${lines.length ? ` · ${summary}` : ''}` : summary;
+    resultStatus(message ?? (locatedDevice ? deviceLocationStatus() : undefined));
     searchResults.replaceChildren(...lines);
+    markDeviceResult();
     searchPanel.hidden = false;
   }
 
@@ -272,6 +335,10 @@ export function renderRoomOverview(host, {
       directRackIds: new Set(drawn.filter(({ direct }) => direct).map(({ rack }) => String(rack.id))),
       deviceIds: new Set(drawn.flatMap(({ matches }) => matches.map(({ device }) => String(device.id)))),
     } : null;
+    if (locatedDevice && !searchFilter?.deviceIds.has(String(locatedDevice.id))) {
+      locatedDevice = undefined;
+      scene?.clearLocatedDevice?.();
+    }
     scene?.setSearchFilter?.(searchFilter);
     markPlan();
     clear.hidden = !term;
@@ -305,16 +372,31 @@ export function renderRoomOverview(host, {
     }
   }
 
-  function locate(rack, face = 'front') {
+  function flyToLocation() {
+    if (!locatedRack) return false;
+    return locatedDevice
+      ? scene?.locateDevice?.(locatedRack.id, locatedDevice.id)
+      : scene?.locateRack?.(locatedRack.id, locatedFace);
+  }
+
+  function locate(rack, face = 'front', device) {
     const position = placed.get(rack.id);
     if (!position) return;
     locatedRack = rack;
     locatedFace = face;
-    displayResults(`已定位 ${rack.name} · 第 ${position.row} 排第 ${position.slot} 位`);
+    locatedDevice = device;
+    resultStatus(device ? deviceLocationStatus() : `已定位 ${rack.name} · 第 ${position.row} 排第 ${position.slot} 位`);
+    markDeviceResult();
     reset.hidden = false;
-    focusOnMount = !scene?.locateRack?.(rack.id, face);
+    focusOnMount = !flyToLocation();
     markPlan();
-    searchButton.focus({ preventScroll: true });
+    if (device) {
+      const target = mode === '3d' ? spatial : plan;
+      const bounds = target?.getBoundingClientRect();
+      if (bounds && (bounds.top > window.innerHeight - 96 || bounds.bottom < 96)) {
+        target.scrollIntoView({ block: 'nearest' });
+      }
+    }
   }
 
   function clearSearch() {
@@ -324,6 +406,7 @@ export function renderRoomOverview(host, {
 
   function clearLocation() {
     locatedRack = undefined;
+    locatedDevice = undefined;
     focusOnMount = false;
     if (scene) scene.resetView?.();
     else camera = undefined;
@@ -350,7 +433,7 @@ export function renderRoomOverview(host, {
     }
     if (groups.length !== 1 || unmounted.length) return;
     const [group] = groups;
-    if (group.matches.length <= 1) locate(group.rack, faceFor(group));
+    if (group.matches.length <= 1) locate(group.rack, faceFor(group), group.matches[0]?.device);
   });
   searchInput.addEventListener('input', (event) => {
     if (!event.isComposing) applySearch(searchInput.value);
@@ -400,7 +483,8 @@ export function renderRoomOverview(host, {
       if (disposed || ticket !== generation) return;
       const mounted = mountRoomScene(spatial, {
         layout: { ...layout, positions }, racks, devices: roomDevices, deviceKind, units, initialCamera: camera, onRack,
-        initialLocatedRackId: locatedRack?.id, initialSearchFilter: searchFilter, onDevice, onSceneInteraction,
+        initialLocatedRackId: locatedRack?.id, initialLocatedDeviceId: locatedDevice?.id,
+        initialSearchFilter: searchFilter, onDevice, onSceneInteraction,
         onFallback: () => fallback(ticket),
       });
       if (disposed || ticket !== generation) {
@@ -408,7 +492,7 @@ export function renderRoomOverview(host, {
         return;
       }
       scene = mounted;
-      if (focusOnMount && locatedRack && scene.locateRack?.(locatedRack.id, locatedFace)) focusOnMount = false;
+      if (focusOnMount && flyToLocation()) focusOnMount = false;
       show('3d');
     } catch {
       fallback(ticket);
@@ -430,7 +514,7 @@ export function renderRoomOverview(host, {
   };
   const snapshot = () => ({
     roomId: room.id, mode: plan ? mode : undefined, camera: scene?.snapshot?.() ?? camera, locatedRackId: locatedRack?.id,
-    searchQuery: appliedQuery, locatedFace, focusOnMount,
+    searchQuery: appliedQuery, locatedFace, locatedDeviceId: locatedDevice?.id, focusOnMount,
   });
   const deviceAnchor = (id) => scene?.deviceAnchor?.(id) ?? null;
   return Object.assign(dispose, { ready, snapshot, deviceAnchor });

@@ -207,6 +207,11 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
   const deviceOutline = new THREE.LineSegments(outline.geometry, new THREE.LineBasicMaterial({ color: 0xffcb72 }));
   deviceOutline.visible = false;
   scene.add(deviceOutline);
+  const locatedDeviceOutline = new THREE.LineSegments(
+    outline.geometry, new THREE.LineBasicMaterial({ color: 0xff9f42, toneMapped: false }),
+  );
+  locatedDeviceOutline.visible = false;
+  scene.add(locatedDeviceOutline);
   const outlineEdges = outline.geometry.getAttribute('position');
   const searchOutlines = SEARCH_OUTLINE_COLORS.map((color) => searchLines(color, targets.length * outlineEdges.count));
   const deviceFaceLimit = entries.reduce((count, entry) => count + entry.devices.length * 2, 0);
@@ -286,33 +291,39 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
     outline.scale.copy(target.scale).multiplyScalar(1.014);
   }
 
-  function highlightDevice(entry, device) {
-    deviceOutline.visible = Boolean(device);
+  function positionDeviceOutline(line, entry, device, padding) {
+    line.visible = Boolean(device);
     if (!device) return;
     const metrics = deviceMetrics(device, RACK_UNIT);
     const rotation = THREE.MathUtils.degToRad(entry.rotation);
     const centerZ = (metrics.minZ + metrics.maxZ) * entry.scale / 2;
-    deviceOutline.position.set(
+    line.position.set(
       entry.x + Math.sin(rotation) * centerZ,
       entry.y + (metrics.minY + metrics.maxY) * entry.scale / 2,
       entry.z + Math.cos(rotation) * centerZ,
     );
-    deviceOutline.rotation.y = rotation;
-    deviceOutline.scale.set(
+    line.rotation.y = rotation;
+    line.scale.set(
       DEVICE_HALF_WIDTH * 2,
       metrics.maxY - metrics.minY,
       metrics.maxZ - metrics.minZ,
-    ).multiplyScalar(entry.scale * 1.022);
+    ).multiplyScalar(entry.scale * padding);
+  }
+  function highlightDevice(entry, device) {
+    positionDeviceOutline(deviceOutline, entry, device, 1.022);
+  }
+  function highlightLocatedDevice(entry, device) {
+    positionDeviceOutline(locatedDeviceOutline, entry, device, 1.052);
   }
   const targetForRack = (id) => targetsById.get(String(id));
   const entryForRack = (id) => targetForRack(id)?.userData.entry;
   return { bounds, entries, entryForRack, targetForRack, highlight, highlightDevice, landmarks, lamps: overviewLayer.lamps,
-    setMode: overviewLayer.setMode, setSearchFilter, symbols, targets };
+    highlightLocatedDevice, setMode: overviewLayer.setMode, setSearchFilter, symbols, targets };
 }
 
 export function mountRoomScene(host, {
   layout, racks, initialCamera, onRack, onFallback, devices = [], deviceKind = () => 'server', units = (device) => `U${device.u_start}`,
-  initialLocatedRackId, initialSearchFilter, onDevice, onSceneInteraction,
+  initialLocatedRackId, initialLocatedDeviceId, initialSearchFilter, onDevice, onSceneInteraction,
 }) {
   const panel = node('section', 'room-3d');
   panel.setAttribute('aria-label', '机房三维总览');
@@ -447,7 +458,12 @@ export function mountRoomScene(host, {
     viewMode,
   };
   setActive(initial.activeView);
-  markLocated(model.entryForRack(initialLocatedRackId)?.rack.id);
+  const initialLocatedEntry = model.entryForRack(initialLocatedRackId);
+  markLocated(initialLocatedEntry?.rack.id);
+  if (initialLocatedDeviceId != null) {
+    const initialDevice = deviceInRack(initialLocatedEntry, initialLocatedDeviceId);
+    if (initialDevice) markLocatedDevice(initialLocatedEntry, initialDevice);
+  }
 
   const labelItems = model.symbols.map((symbol) => {
     const rack = symbol.rack;
@@ -669,6 +685,39 @@ export function mountRoomScene(host, {
   function locateRack(id, face = 'front') {
     const entry = model.entryForRack(id);
     if (!entry || disposed) return false;
+    clearLocatedDevice();
+    focusRack(entry, face);
+    return true;
+  }
+
+  function locateDevice(rackId, deviceId) {
+    if (disposed) return false;
+    const entry = model.entryForRack(rackId);
+    const device = deviceInRack(entry, deviceId);
+    if (!device) return false;
+    focusRack(entry, device.face);
+    markLocatedDevice(entry, device);
+    return true;
+  }
+
+  function clearLocatedDevice() {
+    if (disposed || !canvas.hasAttribute('data-located-device-id')) return;
+    markLocatedDevice();
+  }
+
+  function markLocatedDevice(entry, device) {
+    if (device) {
+      canvas.dataset.locatedDeviceId = device.id;
+      canvas.dataset.locatedDeviceFace = device.face;
+    } else {
+      delete canvas.dataset.locatedDeviceId;
+      delete canvas.dataset.locatedDeviceFace;
+    }
+    model.highlightLocatedDevice(entry, device);
+    invalidate();
+  }
+
+  function focusRack(entry, face) {
     onSceneInteraction?.();
     setHover(null);
     hideTooltip();
@@ -679,10 +728,10 @@ export function mountRoomScene(host, {
     const halfAngle = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     const distance = Math.max(entry.height / (halfAngle * 1.55), CABINET_WIDTH / (halfAngle * camera.aspect * 1.28), 2.4) + 0.38;
     flyTo(direction, distance / fittedDistance(direction), new THREE.Vector3(entry.x, entry.middle, entry.z));
-    return true;
   }
 
   function resetView() {
+    clearLocatedDevice();
     markLocated();
     usePreset('angled', ANGLED);
   }
@@ -885,10 +934,14 @@ export function mountRoomScene(host, {
 
   function deviceAnchor(id) {
     for (const entry of model.entries) {
-      const device = entry.devices.find((item) => String(item.id) === String(id));
+      const device = deviceInRack(entry, id);
       if (device) return makeDeviceAnchor(entry, device);
     }
     return null;
+  }
+
+  function deviceInRack(entry, id) {
+    return entry?.devices.find((device) => String(device.id) === String(id));
   }
 
   function updateDetails(width) {
@@ -1052,5 +1105,5 @@ export function mountRoomScene(host, {
     panel.remove();
   }
 
-  return Object.assign(dispose, { snapshot, locateRack, resetView, deviceAnchor, setSearchFilter });
+  return Object.assign(dispose, { snapshot, locateRack, locateDevice, clearLocatedDevice, resetView, deviceAnchor, setSearchFilter });
 }

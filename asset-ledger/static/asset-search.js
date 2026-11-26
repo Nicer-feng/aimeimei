@@ -23,9 +23,20 @@ function hostKey(value) {
   }
 }
 
-function isIpAddress(text) {
-  return text.includes(':') ||
-    (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(text) && text.split('.').every((octet) => Number(octet) <= 255));
+function isIpv4Octet(text) {
+  return /^\d{1,3}$/.test(text) && Number(text) <= 255;
+}
+
+function isIpv4Address(text) {
+  const octets = text.split('.');
+  return octets.length === 4 && octets.every(isIpv4Octet);
+}
+
+function isIpv4Prefix(text) {
+  if (!text.includes('.')) return false;
+  const octets = text.split('.');
+  if (octets.at(-1) === '') octets.pop();
+  return octets.length <= 4 && octets.every(isIpv4Octet);
 }
 
 function parseQuery(query) {
@@ -37,8 +48,10 @@ function parseQuery(query) {
     term.match(/^(\S*[.:]\S*)\s+(?:\+\s*)?(?:(?:端口|port)\s*[:=]?\s*)?(\d+)$/);
   if (combined) return { term, kind: 'endpoint', host: hostKey(combined[1]), port: parsePort(combined[2]) };
 
+  // 保留末尾的点，让用户能限定完整网段。
+  if (isIpv4Prefix(term)) return { term, kind: 'ipv4', host: term, port: null };
   const host = hostKey(term);
-  return { term, kind: 'text', host, exactHost: isIpAddress(host), port: parsePort(term) };
+  return { term, kind: 'text', host, exactHost: host.includes(':'), port: parsePort(term) };
 }
 
 function serviceEndpoints(entry) {
@@ -64,6 +77,7 @@ function serviceEndpoints(entry) {
 
 function matchHost(key, query) {
   if (!key || !query.host || query.port !== null && query.kind === 'text') return false;
+  if (query.kind === 'ipv4') return key.startsWith(query.host) && isIpv4Address(key);
   return query.exactHost || query.kind === 'endpoint' ? key === query.host : key.includes(query.host);
 }
 
@@ -72,6 +86,10 @@ function matchEndpoint(endpoint, query) {
   if (query.kind === 'port') return portMatches;
   if (query.kind === 'endpoint') return portMatches && matchHost(endpoint.key, query);
   return portMatches || matchHost(endpoint.key, query);
+}
+
+function preferExact(items, exact) {
+  return items.sort((a, b) => Number(exact(b)) - Number(exact(a)));
 }
 
 export function deviceAddressLabel(address) {
@@ -109,11 +127,15 @@ export function buildDeviceSearch(devices, systems, { includeArchived = false } 
   }
   return (input) => {
     const query = parseQuery(input);
-    const textQuery = query.kind === 'text';
-    const modelTerms = textQuery && !query.exactHost ? query.term.split(/\s+/).map(modelKey).filter(Boolean) : [];
+    const ipv4Query = query.kind === 'ipv4';
+    const textQuery = query.kind === 'text' || ipv4Query;
+    const fullIpv4 = ipv4Query && isIpv4Address(query.host);
+    const exactAddress = ({ key }) => key === query.host;
+    const modelTerms = textQuery && !query.exactHost && !fullIpv4
+      ? query.term.split(/\s+/).map(modelKey).filter(Boolean) : [];
     const results = [];
     for (const record of index.values()) {
-      const result = { device: record.device, systems: [], entries: [], addresses: [] };
+      const result = { device: record.device, systems: [], entries: [], addresses: [], exactAddress: false };
       if (!query.term) {
         results.push(result);
         continue;
@@ -123,14 +145,21 @@ export function buildDeviceSearch(devices, systems, { includeArchived = false } 
         result.matchedModel = record.device.model;
       }
       if (textQuery) {
-        result.addresses = record.addresses.filter(({ key }) => matchHost(key, query)).map(({ address }) => address);
+        const addresses = record.addresses.filter(({ key }) => matchHost(key, query));
+        if (fullIpv4) {
+          preferExact(addresses, exactAddress);
+          result.exactAddress = addresses[0]?.key === query.host;
+        }
+        result.addresses = addresses.map(({ address }) => address);
       }
       const names = new Set();
       for (const { name, system, entries } of record.deployments) {
         if (textQuery && name.includes(query.term)) names.add(system);
         for (const { entry, endpoints } of entries) {
-          const matchedEndpoint = endpoints.find((endpoint) => matchEndpoint(endpoint, query));
+          const exact = fullIpv4 && endpoints.find(exactAddress);
+          const matchedEndpoint = exact || endpoints.find((endpoint) => matchEndpoint(endpoint, query));
           if (!matchedEndpoint) continue;
+          if (exact) result.exactAddress = true;
           names.add(system);
           result.entries.push({
             ...entry, system, matchedHost: matchedEndpoint.host, matchedPort: matchedEndpoint.port,
@@ -138,9 +167,10 @@ export function buildDeviceSearch(devices, systems, { includeArchived = false } 
         }
       }
       result.systems = [...names];
+      if (fullIpv4) preferExact(result.entries, ({ matchedHost }) => hostKey(matchedHost) === query.host);
       if (deviceMatches || result.matchedModel || names.size || result.addresses.length) results.push(result);
     }
-    return results;
+    return fullIpv4 ? preferExact(results, (result) => result.exactAddress) : results;
   };
 }
 

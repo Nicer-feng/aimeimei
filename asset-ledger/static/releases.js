@@ -1,5 +1,9 @@
 export const releases = [
   {
+    version: '1.1.2',
+    changes: ['3D 总览的搜索结果可一键定位单台设备。', 'IPv4 支持按前缀搜索，精确地址优先显示。'],
+  },
+  {
     version: '1.1.1',
     changes: ['设备台账和 3D 总览支持按品牌或型号模糊搜索。'],
   },
