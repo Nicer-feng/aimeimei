@@ -81,10 +81,12 @@ function floorPlan(room, layout, racksById, onRack) {
   return plan;
 }
 
-export function renderRoomOverview(host, { room, layout, racks, devices = [], deviceKind, units, onRack, onEdit, view }) {
+export function renderRoomOverview(host, {
+  room, layout, racks, devices = [], deviceKind, units, onRack, onDevice, onSceneInteraction, onEdit, view,
+}) {
   const racksById = new Map(racks.map((rack) => [rack.id, rack]));
   const positions = layout?.positions.filter((position) => racksById.has(position.rack_id)) ?? [];
-  const placed = new Set(positions.map((position) => position.rack_id));
+  const placed = new Map(positions.map((position) => [position.rack_id, position]));
   const unplaced = racks.filter((rack) => !placed.has(rack.id));
   const overview = element('section', 'room-overview');
   const header = element('header', 'room-overview-header');
@@ -100,6 +102,19 @@ export function renderRoomOverview(host, { room, layout, racks, devices = [], de
   info.append(titleLine, element('p', 'room-overview-count', summary.join(' · ')));
 
   const actions = element('div', 'room-overview-actions');
+  const search = element('form', 'room-overview-search');
+  search.setAttribute('role', 'search');
+  const searchInput = element('input');
+  searchInput.type = 'search';
+  searchInput.autocomplete = 'off';
+  searchInput.placeholder = '机柜编号或名称';
+  searchInput.setAttribute('aria-label', '查找机柜');
+  const searchButton = element('button', 'button small', '定位');
+  searchButton.type = 'submit';
+  search.append(searchInput, searchButton);
+  const reset = action('回到全览', 'button small quiet', clearLocation);
+  reset.hidden = true;
+  if (racks.length) actions.append(search, reset);
   const controls = element('div', 'room-overview-switch');
   controls.setAttribute('role', 'group');
   controls.setAttribute('aria-label', '机房布置视图');
@@ -110,6 +125,13 @@ export function renderRoomOverview(host, { room, layout, racks, devices = [], de
   if (onEdit) actions.append(action('编辑布置', 'button', onEdit));
   header.append(info, actions);
   overview.append(header);
+  const searchPanel = element('div', 'room-overview-search-panel');
+  const searchStatus = element('p', 'room-overview-search-status');
+  searchStatus.setAttribute('role', 'status');
+  const searchResults = element('ul', 'room-overview-search-results');
+  searchPanel.append(searchStatus, searchResults);
+  searchPanel.hidden = true;
+  overview.append(searchPanel);
 
   const spatial = element('div', 'room-overview-render-host');
   const plan = positions.length ? floorPlan(room, layout, racksById, onRack) : null;
@@ -132,10 +154,104 @@ export function renderRoomOverview(host, { room, layout, racks, devices = [], de
 
   const savedView = view?.roomId === room.id ? view : undefined;
   let camera = savedView?.camera;
+  let locatedRack = placed.has(savedView?.locatedRackId) ? racksById.get(savedView.locatedRackId) : undefined;
+  let focusOnMount = false;
   let mode;
   let scene;
   let generation = 0;
   let disposed = false;
+
+  function displayResults(matches, message) {
+    searchStatus.textContent = message || '';
+    searchResults.replaceChildren(...matches.slice(0, 8).map((rack) => {
+      const item = element('li');
+      if (placed.has(rack.id)) {
+        const locateButton = action(rack.name, 'button small', () => locate(rack));
+        locateButton.setAttribute('aria-label', `定位 ${rack.name}`);
+        item.append(locateButton);
+      } else {
+        const link = cabinetLink(rack, onRack, 'room-overview-cabinet-link');
+        link.textContent = `${rack.name} · 待摆放`;
+        item.append(link);
+      }
+      return item;
+    }));
+    searchPanel.hidden = !message && !matches.length;
+  }
+
+  function markPlan() {
+    if (!plan) return;
+    for (const link of plan.querySelectorAll('.room-overview-slot-rack')) {
+      const selected = locatedRack && link.dataset.rackId === String(locatedRack.id);
+      if (selected) link.dataset.located = 'true';
+      else delete link.dataset.located;
+      if (!selected || plan.hidden) continue;
+      const scroll = link.closest('.room-overview-plan-scroll');
+      const box = link.getBoundingClientRect();
+      const area = scroll.getBoundingClientRect();
+      if (box.left < area.left || box.right > area.right) scroll.scrollLeft += (box.left + box.right - area.left - area.right) / 2;
+      if (box.top < area.top || box.bottom > area.bottom) scroll.scrollTop += (box.top + box.bottom - area.top - area.bottom) / 2;
+    }
+  }
+
+  function locate(rack) {
+    const position = placed.get(rack.id);
+    if (!position) {
+      displayResults([rack], `${rack.name} 还没有摆放位置。`);
+      return;
+    }
+    locatedRack = rack;
+    searchInput.value = rack.name;
+    displayResults([], `已定位 ${rack.name} · 第 ${position.row} 排第 ${position.slot} 位`);
+    reset.hidden = false;
+    focusOnMount = !scene?.locateRack?.(rack.id);
+    markPlan();
+    searchButton.focus({ preventScroll: true });
+  }
+
+  function clearLocation() {
+    locatedRack = undefined;
+    focusOnMount = false;
+    if (scene) scene.resetView?.();
+    else camera = undefined;
+    searchInput.value = '';
+    displayResults([]);
+    reset.hidden = true;
+    markPlan();
+    searchButton.focus({ preventScroll: true });
+  }
+
+  const searchName = (name) => name.trim().normalize('NFKC').toLocaleLowerCase();
+  function matchingRacks() {
+    const term = searchName(searchInput.value);
+    return term ? racks.filter((rack) => searchName(rack.name).includes(term)) : [];
+  }
+
+  search.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const term = searchName(searchInput.value);
+    if (!term) {
+      displayResults([], '请输入机柜编号或名称。');
+      searchInput.focus({ preventScroll: true });
+      return;
+    }
+    const matches = matchingRacks();
+    const exact = matches.filter((rack) => searchName(rack.name) === term);
+    const rack = exact.length === 1 ? exact[0] : (matches.length === 1 ? matches[0] : undefined);
+    if (rack) locate(rack);
+    else displayResults(matches, matches.length ? '请选择要定位的机柜。' : '当前机房没有匹配的机柜。');
+  });
+  searchInput.addEventListener('input', () => {
+    const matches = matchingRacks();
+    const message = matches.length > 8 ? `找到 ${matches.length} 台，显示前 8 台。可补全柜号缩小范围。` : '';
+    displayResults(matches, message);
+  });
+  searchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !searchPanel.hidden) {
+      event.preventDefault();
+      displayResults([]);
+    }
+  });
 
   function show(modeToShow, message) {
     mode = modeToShow;
@@ -150,11 +266,13 @@ export function renderRoomOverview(host, { room, layout, racks, devices = [], de
 
   function showPlan(message) {
     generation += 1;
+    onSceneInteraction?.();
     camera = scene?.snapshot?.() ?? camera;
     scene?.();
     scene = undefined;
     spatial.replaceChildren();
     show('2d', message);
+    markPlan();
   }
 
   function fallback(ticket) {
@@ -172,6 +290,7 @@ export function renderRoomOverview(host, { room, layout, racks, devices = [], de
       if (disposed || ticket !== generation) return;
       const mounted = mountRoomScene(spatial, {
         layout: { ...layout, positions }, racks, devices, deviceKind, units, initialCamera: camera, onRack,
+        initialLocatedRackId: locatedRack?.id, onDevice, onSceneInteraction,
         onFallback: () => fallback(ticket),
       });
       if (disposed || ticket !== generation) {
@@ -179,19 +298,28 @@ export function renderRoomOverview(host, { room, layout, racks, devices = [], de
         return;
       }
       scene = mounted;
+      if (focusOnMount && locatedRack && scene.locateRack?.(locatedRack.id)) focusOnMount = false;
       show('3d');
     } catch {
       fallback(ticket);
     }
   }
 
+  if (locatedRack) {
+    searchInput.value = locatedRack.name;
+    reset.hidden = false;
+  }
   const ready = plan && savedView?.mode !== '2d' ? show3d() : Promise.resolve(show('2d'));
+  markPlan();
   const dispose = () => {
     disposed = true;
     generation += 1;
     scene?.();
     scene = undefined;
   };
-  const snapshot = () => ({ roomId: room.id, mode: plan ? mode : undefined, camera: scene?.snapshot?.() ?? camera });
-  return Object.assign(dispose, { ready, snapshot });
+  const snapshot = () => ({
+    roomId: room.id, mode: plan ? mode : undefined, camera: scene?.snapshot?.() ?? camera, locatedRackId: locatedRack?.id,
+  });
+  const deviceAnchor = (id) => scene?.deviceAnchor?.(id) ?? null;
+  return Object.assign(dispose, { ready, snapshot, deviceAnchor });
 }

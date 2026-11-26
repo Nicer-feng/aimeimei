@@ -10,7 +10,12 @@ const loginSubmit = loginForm.querySelector('button[type=submit]');
 const auth = { mode: null, captchaId: '', refreshing: false, submitting: false };
 const editor = byId('editor');
 const drawer = byId('drawer');
+const deviceQuick = element('dialog', {
+  id: 'device-quick', class: 'device-quick', 'aria-labelledby': 'device-quick-title',
+});
 const preview = byId('pdf-preview');
+const deviceClickModeKey = 'sroom-device-click-mode';
+const deviceClickModes = [['quick', '就地快览'], ['detail', '直接开详情']];
 const blankFilters = () => ({ unit: '', site: '', room: '', rack: '' });
 const state = {
   user: null,
@@ -23,8 +28,13 @@ const state = {
   roomOverview: null,
   roomViews: new Map(),
   rackOverviewRoomId: null,
-  pendingRackDevice: null,
+  deviceClickMode: savedDeviceClickMode(),
 };
+let deviceSelection = null;
+let deviceOpenedByScenePointer = false;
+let devicePageScroll = null;
+const deviceSheetMedia = window.matchMedia('(max-width: 670px)');
+drawer.before(deviceQuick);
 const titles = { rooms: '机房总览', rack: '机柜视图', devices: '设备台账', systems: '业务系统', projects: '项目档案' };
 const collectionRoutes = { device: 'devices', system: 'systems', project: 'projects' };
 const mountDepthLabels = { unknown: '深度待核', half: '半深', full: '全深' };
@@ -96,26 +106,26 @@ function showError(target, message = '') {
 }
 
 function closeDialogs() {
-  for (const dialog of [preview, editor, drawer]) {
+  for (const dialog of [preview, editor]) {
     if (dialog.open) dialog.close();
   }
+  closeDevicePresentation();
 }
 
 function showLogin(message = '') {
   const wasAuthenticated = state.user !== null;
+  closeDialogs();
   state.rackView?.();
   state.rackView = null;
   disposeRoomOverview();
   state.roomViews.clear();
   state.rackOverviewRoomId = null;
-  state.pendingRackDevice = null;
   state.user = null;
   state.catalog = null;
   state.deviceFilters = blankFilters();
   state.rackFilters = blankFilters();
   state.roomFilters = blankFilters();
   state.deviceSearch = '';
-  closeDialogs();
   page.replaceChildren();
   workspace.hidden = true;
   login.hidden = false;
@@ -331,7 +341,7 @@ function renderRoomPage(requestedId, filterChanged) {
       renderPage({ roomFilterChanged: true });
     },
   }));
-  page.append(pageHeading(titles.rooms), filterPanel);
+  page.append(pageHeading(titles.rooms, null, room ? [deviceClickModeControl()] : []), filterPanel);
   if (!room) {
     page.append(empty('当前范围内没有可查看的机房。'));
     window.scrollTo(0, 0);
@@ -348,9 +358,10 @@ function renderRoomPage(requestedId, filterChanged) {
   page.append(host);
   const controller = renderRoomOverview(host, {
     room, layout, racks, devices, deviceKind, units, view: previous?.view,
-    onRack: (rack, device) => {
+    onDevice: openDevicePresentation,
+    onSceneInteraction: dismissDeviceQuick,
+    onRack: (rack) => {
       if (state.roomOverview) state.roomOverview.leavingScroll = window.scrollY;
-      state.pendingRackDevice = device ? { rackId: rack.id, device } : null;
       location.hash = `rack/${rack.id}`;
     },
     onEdit: userCanWrite() ? () => openRoomLayoutEditor(room, layout, racks) : undefined,
@@ -374,7 +385,8 @@ function renderRackPage(requestedId, view) {
   const rack = available.find((item) => String(item.id) === filters.rack) || available[0];
   filters.rack = rack ? String(rack.id) : '';
   const devices = rack ? state.catalog.devices.filter((device) => device.rack_id === rack.id) : [];
-  const actions = userCanWrite() ? [button('新增设备', () => openDeviceEditor(null, rack), 'primary')] : [];
+  const actions = rack ? [deviceClickModeControl()] : [];
+  if (userCanWrite()) actions.push(button('新增设备', () => openDeviceEditor(null, rack), 'primary'));
   const overviewRoomId = state.rackOverviewRoomId ?? rack?.room_id;
   byId('breadcrumb').replaceChildren(
     internalLink('rooms', overviewRoomId, titles.rooms),
@@ -399,17 +411,13 @@ function renderRackPage(requestedId, view) {
     element('strong', {}, `${rack.name} · ${rack.height}U`),
     element('span', {}, joinedPath(unit?.name, site?.name, room?.name)),
   ));
-  const pending = state.pendingRackDevice?.rackId === rack.id ? state.pendingRackDevice : null;
-  state.pendingRackDevice = null;
   const rackHost = element('section', { id: 'rack-viewport', 'aria-label': `${rack.name} 机柜立面` });
   page.append(rackHost);
   state.rackView = renderRack(rackHost, {
-    rack, devices, onDevice: openDeviceDrawer,
+    rack, devices, onDevice: openDevicePresentation, onSceneInteraction: dismissDeviceQuick,
     onEmpty: userCanWrite() ? (slot) => openDeviceEditor(null, rack, slot) : undefined,
     view: view?.rackId === rack.id ? view : undefined,
-    initialDeviceId: pending?.device?.id,
   });
-  if (pending?.device) openDeviceDrawer(pending.device);
 }
 
 function systemMatchIds(query) {
@@ -641,25 +649,177 @@ function deviceFacts(device) {
   ]);
 }
 
-function dialogHeader(id, title, subtitle, dialog) {
+function dialogHeader(id, title, subtitle, dialog, close = () => dialog.close()) {
   return element('header', { class: 'dialog-head' },
     element('div', {}, element('h2', { id, class: 'dialog-title' }, title),
       subtitle && element('p', { class: 'muted small-text' }, subtitle)),
-    button('关闭', () => dialog.close(), 'quiet small'));
+    button('关闭', close, 'quiet small'));
 }
 
-function openDeviceDrawer(device) {
+function savedDeviceClickMode() {
+  try {
+    if (localStorage.getItem(deviceClickModeKey) === 'detail') return 'detail';
+  } catch {
+    // 存储受限时仍可在本次会话切换查看方式。
+  }
+  return 'quick';
+}
+
+function deviceClickModeControl() {
+  const group = element('div', { class: 'device-click-mode', role: 'group', 'aria-label': '设备点击方式' });
+  const choices = deviceClickModes.map(([mode, label]) => button(label, () => {
+    if (state.deviceClickMode === mode) return;
+    state.deviceClickMode = mode;
+    try { localStorage.setItem(deviceClickModeKey, mode); } catch { /* 沿用会话内选择 */ }
+    closeDevicePresentation();
+    update();
+  }, 'quiet small'));
+  function update() {
+    choices.forEach((choice, index) =>
+      choice.setAttribute('aria-pressed', String(state.deviceClickMode === deviceClickModes[index][0])));
+  }
+  update();
+  group.append(...choices);
+  return group;
+}
+
+function selectDevice(device, anchor) {
+  if (device && anchor && anchor === deviceSelection?.anchor) return;
+  deviceSelection?.anchor?.setSelected?.(false);
+  const point = Number.isFinite(anchor?.x) && Number.isFinite(anchor?.y);
+  const anchorRect = point && anchor.element?.getBoundingClientRect();
+  deviceSelection = device ? {
+    anchor,
+    offset: anchorRect ? { x: anchor.x - anchorRect.left, y: anchor.y - anchorRect.top } : null,
+  } : null;
+  deviceSelection?.anchor?.setSelected?.(true);
+}
+
+function closeDevicePresentation({ restoreFocus = false } = {}) {
+  const anchor = deviceSelection?.anchor;
+  if (deviceQuick.open) deviceQuick.close();
+  if (drawer.open) drawer.close();
+  selectDevice(null);
+  restoreDevicePageScroll();
+  if (restoreFocus) {
+    const source = anchor?.element;
+    const visible = source?.isConnected && (anchor.visible?.() ?? source.getClientRects().length > 0);
+    (visible ? source : page).focus({ preventScroll: true });
+  }
+}
+
+function dismissDeviceQuick() {
+  if (deviceQuick.open) closeDevicePresentation();
+}
+
+function selectedDeviceRect() {
+  const { anchor, offset } = deviceSelection ?? {};
+  const rect = anchor?.element?.getBoundingClientRect();
+  if (!rect || !offset) return rect;
+  const x = rect.left + offset.x;
+  const y = rect.top + offset.y;
+  return { left: x, right: x, top: y, bottom: y };
+}
+
+function restoreDevicePageScroll() {
+  if (devicePageScroll === null) return;
+  const scroll = devicePageScroll;
+  devicePageScroll = null;
+  workspace.style.removeProperty('--device-sheet-height');
+  window.scrollTo(0, scroll);
+}
+
+function showDeviceAboveSheet(panel) {
+  if (!deviceSheetMedia.matches) {
+    restoreDevicePageScroll();
+    return;
+  }
+  const target = selectedDeviceRect();
+  if (!target) return;
+  devicePageScroll ??= window.scrollY;
+  const height = panel.offsetHeight;
+  workspace.style.setProperty('--device-sheet-height', `${height}px`);
+  const visibleHeight = window.innerHeight - height;
+  const y = (target.top + target.bottom) / 2;
+  if (y < 36 || y > visibleHeight - 32) {
+    window.scrollBy(0, y - visibleHeight * .52);
+  }
+}
+
+function positionDeviceQuick() {
+  if (deviceSheetMedia.matches) return;
+  const edge = 12;
+  const gap = 12;
+  const width = deviceQuick.offsetWidth;
+  const height = deviceQuick.offsetHeight;
+  const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = window.innerHeight;
+  const target = selectedDeviceRect();
+  const x = target ? (target.left + target.right) / 2 : viewportWidth / 2;
+  const y = target ? (target.top + target.bottom) / 2 : viewportHeight / 2;
+  let left = (target?.right ?? x) + gap;
+  let top = y - height / 2;
+  if (left + width > viewportWidth - edge) left = (target?.left ?? x) - gap - width;
+  if (left < edge) {
+    left = x - width / 2;
+    top = (target?.bottom ?? y) + gap;
+    if (top + height > viewportHeight - edge) top = (target?.top ?? y) - gap - height;
+  }
+  left = Math.max(edge, Math.min(left, viewportWidth - width - edge));
+  top = Math.max(edge, Math.min(top, viewportHeight - height - edge));
+  deviceQuick.style.setProperty('--quick-left', `${left}px`);
+  deviceQuick.style.setProperty('--quick-top', `${top}px`);
+  deviceQuick.style.setProperty('--quick-origin', `${Math.max(0, Math.min(width, x - left))}px ${Math.max(0, Math.min(height, y - top))}px`);
+}
+
+function openDevicePresentation(device, anchor) {
+  deviceOpenedByScenePointer = Number.isFinite(anchor?.x) && Number.isFinite(anchor?.y);
+  if (state.deviceClickMode === 'detail' || drawer.open) {
+    openDeviceDrawer(device, anchor);
+    return;
+  }
+  selectDevice(device, anchor);
+  const close = button('×', () => closeDevicePresentation({ restoreFocus: true }), 'quiet small device-quick-close',
+    { 'aria-label': '关闭快览' });
+  const details = button('查看详情', () => openDeviceDrawer(device, anchor), 'primary small', { autofocus: true });
+  deviceQuick.dataset.deviceId = device.id;
+  deviceQuick.replaceChildren(
+    element('div', { class: 'device-quick-head' },
+      element('div', {},
+        element('h2', { id: 'device-quick-title' }, device.name),
+        element('p', { class: 'muted small-text code' }, device.code)),
+      close),
+    element('p', { class: 'small-text' }, deviceLocation(device)),
+    device.model && element('p', { class: 'muted small-text' }, device.model),
+    element('div', { class: 'device-quick-actions' },
+      element('span', { class: 'device-quick-status', 'data-status': operatingStatus(device) }, operatingStatusLabel(device)),
+      details));
+  if (!deviceQuick.open) deviceQuick.show();
+  positionDeviceQuick();
+  showDeviceAboveSheet(deviceQuick);
+  details.focus({ preventScroll: true });
+}
+
+function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview?.controller)?.deviceAnchor?.(device?.id)) {
+  if (!device) return;
+  if (deviceQuick.open) deviceQuick.close();
+  selectDevice(device, anchor);
+  drawer.dataset.deviceId = device.id;
   const actions = [internalLink('device', device.id, '打开设备详情', { class: 'button primary' })];
   if (userCanWrite()) actions.push(button('编辑设备', () => openDeviceEditor(device)));
   byId('drawer-content').replaceChildren(
-    dialogHeader('drawer-title', device.name, `${device.code} · ${deviceLocation(device)}`, drawer),
+    dialogHeader('drawer-title', device.name, `${device.code} · ${deviceLocation(device)}`, drawer,
+      () => closeDevicePresentation({ restoreFocus: true })),
     element('div', { class: 'drawer-body' },
       element('div', { class: 'row-actions' }, actions),
       panel('业务系统与服务入口', systemAssociations(device)),
       procurementSections(device),
       panel('设备资料', deviceFacts(device))),
   );
-  if (!drawer.open) drawer.showModal();
+  if (!drawer.open) drawer.show();
+  drawer.scrollTop = 0;
+  showDeviceAboveSheet(drawer);
+  drawer.querySelector('.dialog-head button').focus({ preventScroll: true });
 }
 
 function renderDevicePage(device) {
@@ -726,6 +886,7 @@ function readRoute() {
 
 function renderPage({ preserveRackView = false, roomFilterChanged = false } = {}) {
   if (!state.catalog) return;
+  closeDevicePresentation();
   const view = preserveRackView ? state.rackView?.snapshot?.() : undefined;
   state.rackView?.();
   state.rackView = null;
@@ -797,7 +958,7 @@ function showEditor({ title, id, fields, save, success, afterSave }) {
       return;
     }
     const restoreContext = editor.open && editor.contains(form) && location.hash === origin;
-    const initialScroll = window.scrollY;
+    const initialScroll = devicePageScroll ?? window.scrollY;
     if (restoreContext) closeDialogs();
     try {
       state.catalog = await request('catalog');
@@ -1260,23 +1421,58 @@ window.addEventListener('hashchange', () => {
   }
 });
 
-function isDrawerBackdrop(event) {
-  if (event.target !== drawer || !drawer.open || editor.open || preview.open) return false;
-  const bounds = drawer.getBoundingClientRect();
-  return event.clientX < bounds.left || event.clientX >= bounds.right
-    || event.clientY < bounds.top || event.clientY >= bounds.bottom;
-}
-
-let drawerBackdropPressed = false;
-drawer.addEventListener('pointerdown', (event) => {
-  drawerBackdropPressed = event.isPrimary && event.button === 0 && isDrawerBackdrop(event);
+let outsideDevicePointer;
+document.addEventListener('pointerdown', (event) => {
+  deviceOpenedByScenePointer = false;
+  const panel = deviceQuick.open ? deviceQuick : drawer.open ? drawer : null;
+  outsideDevicePointer = panel && !editor.open && !preview.open && event.isPrimary && event.button === 0
+    && !panel.contains(event.target)
+    ? { panel, selection: deviceSelection, id: event.pointerId, touch: event.pointerType === 'touch',
+      x: event.clientX, y: event.clientY } : null;
+}, { capture: true });
+document.addEventListener('pointermove', (event) => {
+  const pointer = outsideDevicePointer;
+  if (pointer?.id === event.pointerId && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 6) {
+    outsideDevicePointer = null;
+  }
+}, { capture: true, passive: true });
+document.addEventListener('pointercancel', () => { outsideDevicePointer = null; });
+document.addEventListener('click', (event) => {
+  // 场景在 pointerup 展开浮层，阻止同一次触点的 click 被新出现的按钮接住。
+  const fromScene = deviceOpenedByScenePointer;
+  deviceOpenedByScenePointer = false;
+  if (fromScene && event.detail &&
+    ((deviceQuick.open && deviceQuick.contains(event.target)) || (drawer.open && drawer.contains(event.target)))) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}, { capture: true });
+document.addEventListener('click', (event) => {
+  const pointer = outsideDevicePointer;
+  outsideDevicePointer = null;
+  // 浏览器可能微调触屏 click 的落点，实际拖动已在 pointermove 时排除。
+  if (event.detail && pointer?.panel.open && !editor.open && !preview.open && pointer.selection === deviceSelection
+    && !pointer.panel.contains(event.target) && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) <= (pointer.touch ? 14 : 6)) {
+    closeDevicePresentation();
+  }
 });
-drawer.addEventListener('pointercancel', () => { drawerBackdropPressed = false; });
-drawer.addEventListener('click', (event) => {
-  const shouldClose = drawerBackdropPressed && isDrawerBackdrop(event);
-  drawerBackdropPressed = false;
-  if (shouldClose) drawer.close();
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !editor.open && !preview.open && (deviceQuick.open || drawer.open)) {
+    event.preventDefault();
+    closeDevicePresentation({ restoreFocus: true });
+  }
 });
+window.addEventListener('resize', () => {
+  if (deviceQuick.open) {
+    showDeviceAboveSheet(deviceQuick);
+    positionDeviceQuick();
+  } else if (drawer.open) {
+    showDeviceAboveSheet(drawer);
+  }
+});
+window.addEventListener('scroll', (event) => {
+  if (deviceQuick.open && !(event.target instanceof Node && deviceQuick.contains(event.target))) positionDeviceQuick();
+}, { capture: true, passive: true });
 
 preview.addEventListener('close', () => {
   if (!preview.open) {

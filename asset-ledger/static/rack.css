@@ -93,6 +93,8 @@
 .rack-kind-storage .rack-svg-device-body { fill: #554d7e; }
 .rack-kind-storage .rack-svg-device-mark { fill: #ccbbea; }
 .rack-svg-device:hover .rack-svg-device-body { filter: brightness(1.18); }
+.rack-svg-device[aria-pressed='true'] .rack-svg-device-body { stroke: #67caaf; stroke-width: 2.25; }
+.rack-svg-device[aria-pressed='true'] .rack-svg-device-mark { fill: #9be3cc; }
 .rack-svg-device:focus-visible { outline: none; }
 .rack-svg-device:focus-visible .rack-svg-device-body { stroke: #ffda71; stroke-width: 2; }
 
@@ -253,6 +255,12 @@
   border-color: #b4cdc7;
   background: #e3eeeb;
   color: #234d43;
+}
+
+.rack-spatial-devices button[aria-pressed='true'] {
+  border-color: #86b4a8;
+  background: var(--accent-soft, #e2f1ee);
+  color: var(--accent-dark, #104f43);
 }
 
 .rack-camera-controls button:focus-visible, .rack-spatial-devices button:focus-visible {

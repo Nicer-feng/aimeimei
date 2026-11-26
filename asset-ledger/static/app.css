@@ -134,7 +134,54 @@ hr { border: 0; border-top: 1px solid var(--line); }
 
 dialog { border: 1px solid var(--line); border-radius: .9rem; padding: 0; color: var(--ink); background: var(--surface); box-shadow: 0 12px 55px #142b2844; }
 dialog::backdrop { background: #172d2769; }
-.drawer { width: min(95vw, 32rem); max-height: 100dvh; height: 100dvh; margin: 0 0 0 auto; border-width: 0 0 0 1px; border-radius: 0; }
+.device-click-mode { display: inline-flex; gap: .16rem; padding: .18rem; border: 1px solid var(--line); border-radius: .66rem; background: var(--surface); }
+.device-click-mode .button { color: var(--muted); }
+.device-click-mode .button[aria-pressed=true] { color: var(--accent-dark); background: var(--accent-soft); }
+.device-quick {
+  position: fixed;
+  inset: var(--quick-top, 1rem) auto auto var(--quick-left, 1rem);
+  z-index: 7;
+  margin: 0;
+  width: min(19rem, calc(100vw - 24px));
+  max-width: none;
+  max-height: calc(100dvh - 24px);
+  padding: .78rem .86rem .84rem;
+  border-color: #cadbd3;
+  border-radius: .84rem;
+  box-shadow: 0 12px 35px #15372e24, 0 2px 6px #15372e0d;
+  transform-origin: var(--quick-origin, center);
+}
+.device-quick[open] { display: grid; gap: .42rem; animation: device-quick-enter 180ms cubic-bezier(.22,.7,.28,1) both; }
+.device-quick-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; }
+.device-quick-head h2, .device-quick p { overflow-wrap: anywhere; }
+.device-quick-head h2 { font-size: 1.04rem; }
+.device-quick-close.button { font-size: 1.27rem; min-width: 2.15rem; padding: 0; line-height: 1; }
+.device-quick-actions { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-top: .33rem; }
+.device-quick-status { display: inline-flex; gap: .38rem; align-items: center; padding: .14rem .45rem; border-radius: .36rem; background: #eef2ef; color: var(--muted); font-size: .79rem; }
+.device-quick-status::before { content: ""; width: .38rem; height: .38rem; border-radius: 50%; background: currentColor; }
+.device-quick-status[data-status=running] { color: #237348; background: #e6f5eb; }
+@keyframes device-quick-enter {
+  from { opacity: 0; scale: .95; }
+  to { opacity: 1; scale: 1; }
+}
+.drawer {
+  position: fixed;
+  inset: .85rem .85rem .85rem auto;
+  z-index: 8;
+  width: min(42vw, 32rem);
+  min-width: min(23.5rem, calc(100vw - 1.7rem));
+  max-width: none;
+  max-height: calc(100dvh - 1.7rem);
+  margin: 0;
+  border-color: #c8dad2;
+  box-shadow: 0 16px 52px #15372e29, 0 2px 8px #15372e10;
+  overscroll-behavior: contain;
+}
+.drawer[open] { animation: device-drawer-enter 230ms cubic-bezier(.22,.7,.28,1) both; }
+@keyframes device-drawer-enter {
+  from { opacity: 0; transform: translateX(.9rem); }
+  to { opacity: 1; transform: none; }
+}
 .drawer-content, .editor-content, .pdf-content { min-width: 0; }
 .drawer-body { padding: 1rem 1.12rem 1.45rem; display: grid; gap: 1rem; }
 .drawer-body .panel { padding: .75rem; }
@@ -172,11 +219,33 @@ dialog::backdrop { background: #172d2769; }
   .nav a { justify-content: center; gap: .25rem; font-size: .79rem; padding: .45rem .1rem; }
   .nav-icon { font-size: .9rem; width: .74rem; }
   .sidebar-footer { display: none; }
-  .page { padding: .9rem .75rem 1.8rem; gap: .7rem; }
+  .page { padding: .9rem .75rem calc(1.8rem + var(--device-sheet-height, 0px)); gap: .7rem; }
   .topbar { min-height: 2.7rem; padding: .32rem .78rem; }
   .scope { font-size: .74rem; }
   .panel { padding: .7rem .75rem; }
   .page-head { flex-wrap: wrap; }
   .head-actions { align-self: flex-start; }
   .field-grid { grid-template-columns: minmax(0, 1fr); }
+  .device-quick {
+    inset: auto .75rem max(.75rem, env(safe-area-inset-bottom)) .75rem;
+    width: auto;
+    transform-origin: center bottom;
+  }
+  .device-quick-close.button, .device-quick-actions .button { min-height: 2.75rem; }
+  .drawer {
+    inset: auto 0 0;
+    width: 100%;
+    min-width: 0;
+    max-height: 68dvh;
+    border-radius: .95rem .95rem 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .drawer[open] { animation-name: device-sheet-enter; }
+}
+@keyframes device-sheet-enter {
+  from { opacity: 0; transform: translateY(1rem); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .device-quick[open], .drawer[open] { animation: none; }
 }

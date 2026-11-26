@@ -57,7 +57,7 @@ function addContactShadow(scene, bounds) {
 }
 
 export function mountRackScene(host, {
-  rack, devices, onDevice, deviceKind, units, depthLabel, onContextLost, initialCamera, initialDeviceId,
+  rack, devices, onDevice, deviceKind, units, depthLabel, onContextLost, onSceneInteraction, initialCamera, initialDeviceId,
 }) {
   const initialView = initialCamera ?? { direction: CAMERA_VIEWS[0].direction, zoom: 1, activeView: 0, viewMode: 'appearance' };
   let viewMode = RACK_MODES.some((m) => m.id === initialView.viewMode) ? initialView.viewMode : 'appearance';
@@ -71,6 +71,7 @@ export function mountRackScene(host, {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.16;
   const canvas = renderer.domElement;
+  canvas.tabIndex = -1;
   canvas.setAttribute('aria-label', `${rack.name} 三维机柜`);
   canvas.setAttribute('role', 'img');
   const tooltip = document.createElement('div');
@@ -100,8 +101,10 @@ export function mountRackScene(host, {
     button.textContent = label;
     button.setAttribute('aria-pressed', String(index === initialView.activeView));
     button.addEventListener('click', () => {
+      const moved = index !== activeView;
       setActiveView(index);
       frameView(new THREE.Vector3(...direction).normalize(), 1, center);
+      if (moved) onSceneInteraction?.();
     });
     rotation.append(button);
     return button;
@@ -143,7 +146,7 @@ export function mountRackScene(host, {
     button.type = 'button';
     button.dataset.deviceId = device.id;
     button.textContent = `${device.face === 'front' ? '正面' : '背面'} ${units(device)} · ${device.name} · ${depthLabel(device)} · ${operatingStatusLabel(device)}`;
-    button.addEventListener('click', () => onDevice(device));
+    button.addEventListener('click', () => onDevice(device, makeAnchor(device.id, button)));
     shortcuts.append(button);
   }
   if (devices.length) panel.append(shortcuts);
@@ -171,6 +174,7 @@ export function mountRackScene(host, {
   const pointer = new THREE.Vector2();
   let down;
   let hovered;
+  let selectedDeviceId = null;
   let activeView = initialView.activeView;
   let applyingView = false;
   let sized = false;
@@ -185,13 +189,14 @@ export function mountRackScene(host, {
     setActiveView(-1);
     clearHover();
     draw();
+    onSceneInteraction?.();
   });
 
   const observer = new ResizeObserver(resize);
   observer.observe(viewport);
   const lampAnimation = animateOperatingLamps(viewport, model.lamps, draw);
   applyViewMode(viewMode);
-  if (initialDeviceId != null) model.highlight(initialDeviceId);
+  setSelectedDevice(initialDeviceId ?? null);
   resize();
 
   canvas.addEventListener('pointerdown', (event) => {
@@ -218,7 +223,7 @@ export function mountRackScene(host, {
     if (!isClick) return;
     const device = pick(event);
     if (clearHover()) draw();
-    if (device) onDevice(device);
+    if (device) onDevice(device, makeAnchor(device.id, canvas, { x: event.clientX, y: event.clientY }));
   });
   const contextLost = (event) => {
     event.preventDefault();
@@ -226,7 +231,33 @@ export function mountRackScene(host, {
   };
   canvas.addEventListener('webglcontextlost', contextLost);
 
-  return Object.assign(dispose, { snapshot });
+  return Object.assign(dispose, { snapshot, deviceAnchor, setSelectedDevice });
+
+  function makeAnchor(deviceId, anchorElement, point) {
+    return {
+      element: anchorElement,
+      ...(anchorElement === canvas ? { viewport, ...point } : {}),
+      visible: () => anchorElement.isConnected && anchorElement.getClientRects().length > 0,
+      setSelected(selected) {
+        if (selected || selectedDeviceId === deviceId) setSelectedDevice(selected ? deviceId : null);
+      },
+    };
+  }
+
+  function deviceAnchor(deviceId) {
+    return devices.some((device) => device.id === deviceId) ? makeAnchor(deviceId, canvas) : null;
+  }
+
+  function setSelectedDevice(deviceId) {
+    selectedDeviceId = deviceId;
+    if (deviceId == null) delete canvas.dataset.selectedDeviceId;
+    else canvas.dataset.selectedDeviceId = deviceId;
+    for (const button of shortcuts.children) {
+      button.setAttribute('aria-pressed', String(button.dataset.deviceId === String(deviceId)));
+    }
+    model.highlight(selectedDeviceId ?? hovered?.id ?? null);
+    if (sized) draw();
+  }
 
   function clampTarget() {
     controls.target.x = THREE.MathUtils.clamp(controls.target.x, -1.0, 1.0);
@@ -372,7 +403,7 @@ export function mountRackScene(host, {
     tooltip.hidden = true;
     hover.textContent = hint;
     canvas.classList.remove('rack-spatial-hit');
-    model.highlight(initialDeviceId ?? null);
+    model.highlight(selectedDeviceId);
     return true;
   }
 
@@ -385,7 +416,7 @@ export function mountRackScene(host, {
       hover.textContent = `${device.name} · ${tooltipPosition.textContent}`;
       tooltip.hidden = false;
       canvas.classList.add('rack-spatial-hit');
-      model.highlight(device.id);
+      model.highlight(selectedDeviceId ?? device.id);
       draw();
     }
     const bounds = canvas.getBoundingClientRect();

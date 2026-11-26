@@ -69,7 +69,7 @@ function elevationDevice(device, { face, start, count, y, onDevice, crossing = f
   const label = `${device.name}，${FACE_NAMES[face]} ${range}，${count}U，${state}`;
   const node = svg('g', {
     class: `rack-svg-device ${crossing ? 'rack-svg-cross-face' : `rack-kind-${deviceKind(device)}`}`,
-    role: 'button', tabindex: 0, 'aria-label': label, 'data-device-id': device.id,
+    role: 'button', tabindex: 0, 'aria-label': label, 'aria-pressed': 'false', 'data-device-id': device.id,
     'data-u-height': count, 'data-u-start': start, 'data-mount-depth': mountDepth(device),
   });
   if (crossing) node.setAttribute('data-cross-face', 'true');
@@ -81,11 +81,11 @@ function elevationDevice(device, { face, start, count, y, onDevice, crossing = f
   const name = visibleName.length > nameLimit ? `${visibleName.slice(0, nameLimit).join('')}…` : visibleName.join('');
   node.append(svg('text', { class: 'rack-svg-device-name', x: 50, y: top + height / 2 + 4 }, name));
   node.append(svg('text', { class: 'rack-svg-device-u', x: 285, y: top + height / 2 + 4 }, `${count}U`));
-  node.addEventListener('click', () => onDevice(device));
+  node.addEventListener('click', () => onDevice(device, node));
   node.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      onDevice(device);
+      onDevice(device, node);
     }
   });
   return node;
@@ -155,7 +155,7 @@ function elevation(rack, devices, face, onDevice, onEmpty) {
   return side;
 }
 
-export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initialDeviceId }) {
+export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initialDeviceId, onSceneInteraction }) {
   const viewBar = element('div', 'rack-view-bar');
   const modes = element('div', 'rack-mode-switch');
   modes.setAttribute('role', 'group');
@@ -170,8 +170,9 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
   viewBar.append(modes, status);
   const chart = element('div', 'rack-2d');
   for (const face of Object.keys(FACE_NAMES)) {
-    chart.append(elevation(rack, devices, face, onDevice, onEmpty));
+    chart.append(elevation(rack, devices, face, (device, node) => onDevice(device, svgAnchor(device.id, node)), onEmpty));
   }
+  const deviceNodes = [...chart.querySelectorAll('g[data-device-id]')];
   const spatial = element('div', 'rack-3d');
   spatial.hidden = true;
   host.replaceChildren(viewBar, chart, spatial);
@@ -179,6 +180,49 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
   let generation = 0;
   let scene;
   let removed = false;
+  const wantedDeviceId = initialDeviceId ?? (view?.rackId === rack.id ? view.selectedDeviceId : null);
+  let selectedDeviceId = devices.some((device) => device.id === wantedDeviceId) ? wantedDeviceId : null;
+
+  function updateElevationSelection() {
+    for (const node of deviceNodes) {
+      node.setAttribute('aria-pressed', String(node.dataset.deviceId === String(selectedDeviceId)));
+    }
+  }
+
+  function bindSelection(deviceId, anchor) {
+    return {
+      ...anchor,
+      setSelected(selected) {
+        if (removed || (!selected && selectedDeviceId !== deviceId)) return;
+        const next = selected ? deviceId : null;
+        if (next === selectedDeviceId) return;
+        selectedDeviceId = next;
+        updateElevationSelection();
+        scene?.setSelectedDevice?.(next);
+      },
+    };
+  }
+
+  function svgAnchor(deviceId, node) {
+    return bindSelection(deviceId, {
+      element: node,
+      visible: () => node.isConnected && !chart.hidden && node.getClientRects().length > 0,
+    });
+  }
+
+  function deviceAnchor(deviceId) {
+    if (removed) return null;
+    if (!spatial.hidden) {
+      const anchor = scene?.deviceAnchor?.(deviceId);
+      return anchor ? bindSelection(deviceId, anchor) : null;
+    }
+    const matches = deviceNodes.filter((node) => node.dataset.deviceId === String(deviceId));
+    const node = matches.find((item) => !item.hasAttribute('data-cross-face')) ?? matches[0];
+    return node ? svgAnchor(deviceId, node) : null;
+  }
+
+  updateElevationSelection();
+
   function activate(mode) {
     chart.hidden = mode !== '2d';
     spatial.hidden = mode !== '3d';
@@ -208,7 +252,9 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
       const { mountRackScene } = await import('./rack-3d.js');
       if (removed || request !== generation) return;
       scene = mountRackScene(spatial, {
-        rack, devices, onDevice, deviceKind, units, depthLabel, initialCamera, initialDeviceId,
+        rack, devices, deviceKind, units, depthLabel, initialCamera,
+        initialDeviceId: selectedDeviceId, onSceneInteraction,
+        onDevice: (device, anchor) => onDevice(device, anchor ? bindSelection(device.id, anchor) : undefined),
         onContextLost: () => showElevation('3D 已断开，已返回立面。'),
       });
       status.textContent = '';
@@ -227,7 +273,7 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
     clearScene();
   };
   const snapshot = () => ({
-    rackId: rack.id, mode: spatial.hidden ? '2d' : '3d', camera: scene?.snapshot?.(),
+    rackId: rack.id, mode: spatial.hidden ? '2d' : '3d', camera: scene?.snapshot?.(), selectedDeviceId,
   });
-  return Object.assign(dispose, { ready, snapshot });
+  return Object.assign(dispose, { ready, snapshot, deviceAnchor });
 }

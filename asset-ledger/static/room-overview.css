@@ -33,6 +33,21 @@
 }
 
 .room-overview-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
+.room-overview-search { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+.room-overview-search input { width: clamp(8.5rem, 15vw, 12rem); min-height: 2.1rem; font-size: 0.85rem; }
+.room-overview-search-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.42rem 0.7rem;
+  padding: 0.52rem clamp(0.8rem, 2.8vw, 1.35rem);
+  background: #f2f7f3;
+  border-bottom: 1px solid var(--line);
+}
+.room-overview-search-status { color: var(--muted); font-size: 0.86rem; }
+.room-overview-search-status:empty, .room-overview-search-results:empty { display: none; }
+.room-overview-search-results { display: flex; flex-wrap: wrap; gap: 0.32rem; padding: 0; margin: 0; list-style: none; }
+
 .room-overview-switch, .room-3d-presets {
   display: inline-flex;
   flex-wrap: wrap;
@@ -84,7 +99,21 @@
 .room-3d-canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 .room-3d-canvas:active { cursor: grabbing; }
 .room-3d-canvas[data-pickable=true]:not(:active) { cursor: pointer; }
-.room-3d-labels { position: absolute; inset: 0; pointer-events: none; }
+.room-3d-labels, .room-3d-landmarks { position: absolute; inset: 0; pointer-events: none; }
+.room-3d-landmark {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border: 1px solid #b8ccc3;
+  border-radius: 0.3rem;
+  padding: 0.08rem 0.35rem;
+  color: #36584d;
+  background: #edf6f0ed;
+  font-size: 0.7rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.room-3d-landmark[data-landmark='entrance'] { border-color: #487165; color: #f2faf5; background: #39675b; }
+.room-3d-landmark[data-landmark='rear-aisle'] { border-color: #b9c6cc; color: #394d57; background: #edf3f5ed; }
 
 .room-3d-label {
   position: absolute;
@@ -106,7 +135,7 @@
 }
 
 button.room-3d-label { pointer-events: auto; }
-.room-3d-label[data-highlighted=true], button.room-3d-label:hover, .room-3d-label:focus-visible {
+.room-3d-label[data-highlighted=true], .room-3d-label[data-located=true], button.room-3d-label:hover, .room-3d-label:focus-visible {
   z-index: 2;
   border-color: var(--accent);
   background: var(--accent);
@@ -212,6 +241,7 @@ button.room-3d-label { pointer-events: auto; }
 }
 
 .room-overview-slot-rack:hover { border-color: #55907b; background: #dcefe5; color: var(--accent-dark); }
+.room-overview-slot-rack[data-located=true] { border-color: #277b64; background: #d5ebdf; box-shadow: inset 0 0 0 1px #277b64; }
 .room-overview-slot-rack strong {
   display: block;
   max-width: 100%;
@@ -270,6 +300,8 @@ button.room-3d-label { pointer-events: auto; }
 .room-overview-empty { color: var(--muted); font-size: 0.88rem; }
 
 @media (max-width: 650px) {
+  .room-overview-search { order: -1; flex: 1 0 100%; }
+  .room-overview-search input { flex: 1 1 auto; width: auto; }
   .room-overview-render-host {
     height: clamp(18rem, 46vh, 29rem);
     height: clamp(18rem, 46svh, 29rem);

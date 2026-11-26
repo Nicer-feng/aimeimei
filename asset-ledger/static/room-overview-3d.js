@@ -75,7 +75,11 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
   }
   const placements = new Map(room.positions.map((entry) => [`${entry.row}/${entry.slot}`, entry]));
   const width = room.columns * COLUMN_GAP + 0.68;
-  const depth = (room.rows - 1) * ROW_GAP + 2.26;
+  const rowExtent = (room.rows - 1) * ROW_GAP / 2;
+  const rearEdge = -rowExtent - 1.00;
+  const frontEdge = rowExtent + 1.58;
+  const depth = frontEdge - rearEdge;
+  const floorCenter = (frontEdge + rearEdge) / 2;
   const finishes = new Map();
   const boxes = new Map();
   const symbols = [];
@@ -83,7 +87,7 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
   const entries = [];
   const targetsById = new Map();
   const bounds = new THREE.Box3(
-    new THREE.Vector3(-width / 2, -0.16, -depth / 2), new THREE.Vector3(width / 2, 0, depth / 2),
+    new THREE.Vector3(-width / 2, -0.16, rearEdge), new THREE.Vector3(width / 2, 0, frontEdge),
   );
   const block = new THREE.BoxGeometry(1, 1, 1);
   const pickMaterial = new THREE.MeshBasicMaterial();
@@ -99,23 +103,45 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
     return finishes.get(color);
   }
 
-  function flat(color, x, y, z, size) {
+  function flat(color, x, y, z, size, angle = 0) {
     const material = finish(color);
     if (!boxes.has(material)) boxes.set(material, []);
+    level.set(0, Math.sin(angle / 2), 0, Math.cos(angle / 2));
     transform.compose(location.set(x, y, z), level, scale.fromArray(size));
     boxes.get(material).push(transform.clone());
   }
 
-  flat(0xafc0c0, 0, -0.116, 0, [width, 0.088, depth]);
-  flat(0xdbe5e4, 0, -0.056, 0, [width + 0.032, 0.110, depth + 0.032]);
+  flat(0xafc0c0, 0, -0.116, floorCenter, [width, 0.088, depth]);
+  flat(0xdbe5e4, 0, -0.056, floorCenter, [width + 0.032, 0.110, depth + 0.032]);
+  const frontAisle = rowExtent + 1.08;
+  const rearAisle = -rowExtent - 0.82;
+  flat(0xb7d0c2, 0, 0.003, frontAisle, [width - 0.22, 0.008, 0.76]);
+  flat(0xbdcbd0, 0, 0.003, rearAisle, [width - 0.22, 0.008, 0.24]);
   for (let row = 1; row < room.rows; row += 1) {
     const z = (room.rows / 2 - row) * ROW_GAP;
     flat(0xc9d9d6, 0, 0.002, z, [width - 0.65, 0.007, 0.72]);
   }
   for (const side of [-1, 1]) {
-    flat(0xc9d9d6, side * (width / 2 - 0.24), 0.002, 0, [0.026, 0.008, depth - 0.32]);
-    flat(0xc9d9d6, 0, 0.002, side * (depth / 2 - 0.18), [width - 0.46, 0.008, 0.026]);
+    flat(0xc9d9d6, side * (width / 2 - 0.14), 0.002, floorCenter, [0.026, 0.008, depth - 0.24]);
   }
+
+  const entranceX = -width / 2 + 0.61;
+  const entranceZ = frontEdge - 0.11;
+  for (const side of [-1, 1]) {
+    flat(0x487165, entranceX + side * 0.41, 0.47, entranceZ, [0.062, 0.94, 0.10]);
+  }
+  flat(0x487165, entranceX, 0.94, entranceZ, [0.88, 0.065, 0.10]);
+  flat(0x487165, entranceX, 0.014, entranceZ, [0.88, 0.025, 0.15]);
+  flat(0x487165, entranceX, 0.013, frontAisle, [0.045, 0.006, 0.28]);
+  for (const side of [-1, 1]) {
+    flat(0x487165, entranceX + side * 0.058, 0.013, frontAisle - 0.12, [0.033, 0.006, 0.17], side * 0.73);
+  }
+  const landmarks = [
+    { id: 'entrance', text: '入口（示意）', point: new THREE.Vector3(entranceX, 1.07, entranceZ) },
+    { id: 'front-aisle', text: '前走道', point: new THREE.Vector3(width * 0.24, 0.035, frontAisle) },
+    { id: 'rear-aisle', text: '后走道', point: new THREE.Vector3(-width * 0.20, 0.035, rearAisle) },
+  ];
+  bounds.max.y = 1.12;
 
   const baseY = 0.100;
   for (let row = 1; row <= room.rows; row += 1) {
@@ -145,7 +171,7 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
       const rackDevices = devicesByRack.get(id) ?? [];
       const rackEntry = {
         rack, devices: rackDevices, stats: rackOccupancy(rack, rackDevices),
-        x, y: baseY, z, rotation: entry.rotation, scale: RACK_SCALE, middle: (top + bottom) / 2,
+        x, y: baseY, z, rotation: entry.rotation, scale: RACK_SCALE, middle: (top + bottom) / 2, height: top - bottom,
       };
       entries.push(rackEntry);
 
@@ -174,6 +200,10 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
   const outline = new THREE.LineSegments(new THREE.EdgesGeometry(block), new THREE.LineBasicMaterial({ color: 0x538f80 }));
   outline.visible = false;
   scene.add(outline);
+  const deviceOutline = new THREE.LineSegments(outline.geometry, new THREE.LineBasicMaterial({ color: 0xffcb72 }));
+  deviceOutline.visible = false;
+  scene.add(deviceOutline);
+
   function highlight(id) {
     const target = targetsById.get(id);
     outline.visible = Boolean(target);
@@ -182,17 +212,41 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
     outline.rotation.copy(target.rotation);
     outline.scale.copy(target.scale).multiplyScalar(1.014);
   }
-  return { bounds, entries, highlight, lamps: overviewLayer.lamps, setMode: overviewLayer.setMode, symbols, targets };
+
+  function highlightDevice(entry, device) {
+    deviceOutline.visible = Boolean(device);
+    if (!device) return;
+    const metrics = deviceMetrics(device, RACK_UNIT);
+    const rotation = THREE.MathUtils.degToRad(entry.rotation);
+    const centerZ = (metrics.minZ + metrics.maxZ) * entry.scale / 2;
+    deviceOutline.position.set(
+      entry.x + Math.sin(rotation) * centerZ,
+      entry.y + (metrics.minY + metrics.maxY) * entry.scale / 2,
+      entry.z + Math.cos(rotation) * centerZ,
+    );
+    deviceOutline.rotation.y = rotation;
+    deviceOutline.scale.set(
+      DEVICE_HALF_WIDTH * 2,
+      metrics.maxY - metrics.minY,
+      metrics.maxZ - metrics.minZ,
+    ).multiplyScalar(entry.scale * 1.022);
+  }
+  const entryForRack = (id) => targetsById.get(String(id))?.userData.entry;
+  return { bounds, entries, entryForRack, highlight, highlightDevice, landmarks, lamps: overviewLayer.lamps,
+    setMode: overviewLayer.setMode, symbols, targets };
 }
 
 export function mountRoomScene(host, {
   layout, racks, initialCamera, onRack, onFallback, devices = [], deviceKind = () => 'server', units = (device) => `U${device.u_start}`,
+  initialLocatedRackId, onDevice, onSceneInteraction,
 }) {
   const panel = node('section', 'room-3d');
   panel.setAttribute('aria-label', '机房三维总览');
   const viewport = node('div', 'room-3d-viewport');
   const labels = node('div', 'room-3d-labels');
   labels.setAttribute('aria-label', '机柜及预留位');
+  const landmarkLayer = node('div', 'room-3d-landmarks');
+  landmarkLayer.setAttribute('aria-label', '示意方位');
   const tooltip = node('div', 'rack-spatial-tooltip room-3d-device-tooltip');
   tooltip.hidden = true;
   tooltip.setAttribute('aria-hidden', 'true');
@@ -240,9 +294,10 @@ export function mountRoomScene(host, {
   canvas.className = 'room-3d-canvas';
   canvas.setAttribute('role', 'img');
   canvas.setAttribute('aria-label', '三维机柜布局');
+  canvas.tabIndex = -1;
   canvas.dataset.detailCount = '0';
   canvas.dataset.detailRacks = '';
-  viewport.append(canvas, labels, legend, tooltip);
+  viewport.append(canvas, landmarkLayer, labels, legend, tooltip);
   panel.append(viewport, toolbar);
   host.replaceChildren(panel);
 
@@ -259,6 +314,12 @@ export function mountRoomScene(host, {
 
   const palette = createRackPalette();
   const model = makeRoom(scene, { room: layout, racks, devices, deviceKind, palette });
+  const landmarkItems = model.landmarks.map(({ id, text, point }) => {
+    const item = node('span', 'room-3d-landmark', text);
+    item.dataset.landmark = id;
+    landmarkLayer.append(item);
+    return { item, point };
+  });
   const center = model.bounds.getCenter(new THREE.Vector3());
   const corners = [];
   for (const x of [model.bounds.min.x, model.bounds.max.x]) {
@@ -292,6 +353,8 @@ export function mountRoomScene(host, {
   let sized = false;
   let pressed;
   let hovered;
+  let locatedRackId;
+  let selectedDeviceId;
   let activeView;
   let viewMode = VIEW_MODES.some((m) => m.id === initialCamera?.viewMode) ? initialCamera.viewMode : 'appearance';
 
@@ -309,6 +372,7 @@ export function mountRoomScene(host, {
     viewMode,
   };
   setActive(initial.activeView);
+  markLocated(model.entryForRack(initialLocatedRackId)?.rack.id);
 
   const labelItems = model.symbols.map((symbol) => {
     const rack = symbol.rack;
@@ -347,6 +411,7 @@ export function mountRoomScene(host, {
 
   controls.addEventListener('change', () => {
     if (applyingPreset) return;
+    onSceneInteraction?.();
     cancelFly();
     clampTarget();
     setActive(null);
@@ -384,8 +449,12 @@ export function mountRoomScene(host, {
     pressed = undefined;
     if (clicked) {
       const hit = labelRack ? null : pick(event);
-      const rack = labelRack ?? hit?.object.userData.entry.rack;
-      if (rack) onRack(rack, hit ? pickDevice(hit) : undefined);
+      const entry = hit?.object.userData.entry;
+      const rack = labelRack ?? entry?.rack;
+      if (!rack) return;
+      const device = pickDevice(hit);
+      if (device && onDevice) onDevice(device, makeDeviceAnchor(entry, device, event));
+      else onRack(rack, device);
     }
   });
   viewport.addEventListener('pointercancel', () => { pressed = undefined; });
@@ -506,10 +575,40 @@ export function mountRoomScene(host, {
   }
 
   function usePreset(view, direction) {
+    onSceneInteraction?.();
     setActive(view);
     setHover(null);
     hideTooltip();
     flyTo(new THREE.Vector3(...direction).normalize(), 1, center);
+  }
+
+  function markLocated(id) {
+    locatedRackId = id == null ? undefined : String(id);
+    if (locatedRackId) canvas.dataset.locatedRackId = locatedRackId;
+    else delete canvas.dataset.locatedRackId;
+    model.highlight(locatedRackId ?? hovered);
+    invalidate();
+  }
+
+  function locateRack(id) {
+    const entry = model.entryForRack(id);
+    if (!entry || disposed) return false;
+    onSceneInteraction?.();
+    setHover(null);
+    hideTooltip();
+    setActive(null);
+    markLocated(entry.rack.id);
+    const angle = THREE.MathUtils.degToRad(entry.rotation);
+    const direction = new THREE.Vector3(0.45, 1.05, 1).applyAxisAngle(yAxis, angle).normalize();
+    const halfAngle = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const distance = Math.max(entry.height / (halfAngle * 1.55), CABINET_WIDTH / (halfAngle * camera.aspect * 1.28), 2.4) + 0.38;
+    flyTo(direction, distance / fittedDistance(direction), new THREE.Vector3(entry.x, entry.middle, entry.z));
+    return true;
+  }
+
+  function resetView() {
+    markLocated();
+    usePreset('angled', ANGLED);
   }
 
   function snapshot() {
@@ -551,7 +650,9 @@ export function mountRoomScene(host, {
 
     for (const entry of labelItems) {
       const { item, point, rack } = entry;
-      const isHovered = Boolean(rack && String(rack.id) === hovered);
+      const rackId = rack && String(rack.id);
+      const isHovered = Boolean(rackId && rackId === hovered);
+      const isLocated = Boolean(rackId && rackId === locatedRackId);
       if (!rack && !showEmpty && !isHovered) {
         item.hidden = true;
         continue;
@@ -564,23 +665,25 @@ export function mountRoomScene(host, {
       const left = (projected.x + 1) * width / 2;
       const top = (1 - projected.y) * height / 2;
       const dist = camera.position.distanceToSquared(point);
-      candidates.push({ entry, left, top, dist, isHovered, isRack: Boolean(rack) });
+      candidates.push({ entry, left, top, dist, isHovered, isLocated, isRack: Boolean(rack) });
     }
 
     candidates.sort((a, b) => {
       if (a.isHovered !== b.isHovered) return a.isHovered ? -1 : 1;
+      if (a.isLocated !== b.isLocated) return a.isLocated ? -1 : 1;
       if (a.isRack !== b.isRack) return a.isRack ? -1 : 1;
       return a.dist - b.dist;
     });
 
     let visibleCount = 0;
-    for (const { entry, left, top, isHovered } of candidates) {
+    for (const { entry, left, top, isHovered, isLocated } of candidates) {
       const { item, rack } = entry;
       const estW = Math.min(120, Math.max(46, (rack ? rack.name.length : 2) * 9 + 18));
       const estH = 22;
       const box = { l: left - estW / 2 - 4, r: left + estW / 2 + 4, t: top - estH - 4, b: top + 2 };
-      const collides = !isHovered && placedBoxes.some((p) => box.l < p.r && box.r > p.l && box.t < p.b && box.b > p.t);
-      if (collides || (!isHovered && visibleCount >= maxLabels)) {
+      const important = isHovered || isLocated;
+      const collides = !important && placedBoxes.some((p) => box.l < p.r && box.r > p.l && box.t < p.b && box.b > p.t);
+      if (collides || (!important && visibleCount >= maxLabels)) {
         item.hidden = true;
       } else {
         item.hidden = false;
@@ -590,6 +693,21 @@ export function mountRoomScene(host, {
         visibleCount += 1;
       }
       item.dataset.highlighted = String(isHovered);
+      item.dataset.located = String(isLocated);
+    }
+
+    for (const { item, point } of landmarkItems) {
+      projected.copy(point).project(camera);
+      const left = (projected.x + 1) * width / 2;
+      const top = (1 - projected.y) * height / 2;
+      const halfWidth = item.dataset.landmark === 'entrance' ? 42 : 24;
+      const collides = placedBoxes.some((box) => left - halfWidth < box.r && left + halfWidth > box.l &&
+        top - 10 < box.b && top + 10 > box.t);
+      item.hidden = collides || Math.abs(projected.x) > 0.86 || Math.abs(projected.y) > 0.92 || projected.z < -1 || projected.z > 1;
+      if (!item.hidden) {
+        item.style.left = `${left}px`;
+        item.style.top = `${top}px`;
+      }
     }
   }
 
@@ -615,12 +733,33 @@ export function mountRoomScene(host, {
   function setHover(rack) {
     const id = rack ? String(rack.id) : undefined;
     if (hovered === id) return;
-    model.highlight(id);
+    model.highlight(locatedRackId ?? id);
     hovered = id;
     canvas.dataset.pickable = String(Boolean(id));
     if (id) canvas.dataset.hoveredRackId = id;
     else delete canvas.dataset.hoveredRackId;
     invalidate();
+  }
+
+  function makeDeviceAnchor(entry, device, event) {
+    const id = String(device.id);
+    return {
+      element: canvas, x: event?.clientX, y: event?.clientY, viewport,
+      setSelected(selected) {
+        if (disposed || (!selected && selectedDeviceId !== id)) return;
+        selectedDeviceId = selected ? id : undefined;
+        model.highlightDevice(entry, selected ? device : undefined);
+        invalidate();
+      },
+    };
+  }
+
+  function deviceAnchor(id) {
+    for (const entry of model.entries) {
+      const device = entry.devices.find((item) => String(item.id) === String(id));
+      if (device) return makeDeviceAnchor(entry, device);
+    }
+    return null;
   }
 
   function updateDetails(width) {
@@ -783,5 +922,5 @@ export function mountRoomScene(host, {
     panel.remove();
   }
 
-  return Object.assign(dispose, { snapshot });
+  return Object.assign(dispose, { snapshot, locateRack, resetView, deviceAnchor });
 }
