@@ -179,6 +179,7 @@ dialog::backdrop { background: #172d2769; }
   margin: 0;
   border-color: #c8dad2;
   box-shadow: 0 16px 52px #15372e29, 0 2px 8px #15372e10;
+  overflow: hidden auto;
   overscroll-behavior: contain;
 }
 .drawer[open] { animation: device-drawer-enter 230ms cubic-bezier(.22,.7,.28,1) both; }
