@@ -1,5 +1,9 @@
 import { deviceKind, operatingStatus, operatingStatusLabel, OPERATING_STATUS_LABELS, renderRack, units } from './rack.js?v=operating-status';
 import { renderRoomOverview } from './room-overview.js';
+import { buildDeviceSearch, deviceAddressLabel, downloadDeviceCsv, endpointLabel } from './asset-search.js';
+import { openAvailabilityPicker, openRackEditor, openRoomEditor, openRoomLayoutEditor, renderRoomStatistics } from './room-tools.js';
+import { createSlotPicker } from './slot-picker.js';
+import { releases } from './releases.js';
 
 const byId = (id) => document.getElementById(id);
 const page = byId('page');
@@ -24,6 +28,8 @@ deviceQuickTarget.setAttribute('class', 'device-quick-guide-target');
 deviceQuickTarget.setAttribute('r', '4');
 deviceQuickGuide.append(deviceQuickPath, deviceQuickTarget);
 const preview = byId('pdf-preview');
+const versionDialog = element('dialog', { class: 'editor release-dialog', 'aria-labelledby': 'release-title' });
+document.body.append(versionDialog);
 const deviceClickModeKey = 'sroom-device-click-mode';
 const deviceClickModes = [['quick', '就地快览'], ['detail', '直接开详情']];
 const blankFilters = () => ({ unit: '', site: '', room: '', rack: '' });
@@ -34,6 +40,7 @@ const state = {
   rackFilters: blankFilters(),
   roomFilters: blankFilters(),
   deviceSearch: '',
+  deviceArchiveFilter: 'active',
   rackView: null,
   roomOverview: null,
   roomViews: new Map(),
@@ -43,8 +50,15 @@ const state = {
 let deviceSelection = null;
 let deviceOpenedByScenePointer = false;
 let devicePageScroll = null;
+let availabilityCleanup;
 const deviceSheetMedia = window.matchMedia('(max-width: 670px)');
 drawer.before(deviceQuickGuide, deviceQuick);
+byId('logout').before(button(`v${releases[0].version}`, openReleaseNotes, 'version-button small',
+  { id: 'sroom-version', 'aria-label': `版本 v${releases[0].version}，查看更新日志` }));
+const roomUI = {
+  element, button, showEditor, request, selectInput, lookup, userCanWrite, internalLink,
+  afterRoomSave: (record) => { location.hash = `rooms/${record.id}`; },
+};
 const titles = { rooms: '机房总览', rack: '机柜视图', devices: '设备台账', systems: '业务系统', projects: '项目档案' };
 const collectionRoutes = { device: 'devices', system: 'systems', project: 'projects' };
 const mountDepthLabels = { unknown: '深度待核', half: '半深', full: '全深' };
@@ -116,7 +130,9 @@ function showError(target, message = '') {
 }
 
 function closeDialogs() {
-  for (const dialog of [preview, editor]) {
+  availabilityCleanup?.();
+  availabilityCleanup = undefined;
+  for (const dialog of [versionDialog, preview, editor]) {
     if (dialog.open) dialog.close();
   }
   closeDevicePresentation();
@@ -136,6 +152,7 @@ function showLogin(message = '') {
   state.rackFilters = blankFilters();
   state.roomFilters = blankFilters();
   state.deviceSearch = '';
+  state.deviceArchiveFilter = 'active';
   page.replaceChildren();
   workspace.hidden = true;
   login.hidden = false;
@@ -229,6 +246,13 @@ function deviceLocation(device, linkRack = false) {
   const { room, site } = roomContext(device.room_id);
   const rack = lookup('racks', device.rack_id);
   const where = joinedPath(site?.name, room?.name);
+  if (device.archived_at) {
+    const previous = device.archived_location ?? {};
+    const historic = previous.rack_name && previous.u_start
+      ? `${previous.rack_name} · ${faceLabel(previous.face)} · ${rackSpan(previous)}`
+      : previous.workstation;
+    return `已归档 · ${joinedPath(site?.name, previous.room_name || room?.name, historic)}`;
+  }
   if (!rack) return joinedPath(where, device.workstation || '非上架');
   const slot = `${rack.name} · ${faceLabel(device.face)} · ${rackSpan(device)}`;
   if (!linkRack) return joinedPath(where, slot);
@@ -274,7 +298,7 @@ function filterControls(filters, options = {}) {
   if (options.search) {
     const input = element('input', {
       id: 'device-search', type: 'search', value: state.deviceSearch,
-      placeholder: '设备编号、名称或系统名',
+      placeholder: '设备、系统、IP、域名或端口',
       oninput: (event) => {
         state.deviceSearch = event.currentTarget.value;
         options.search();
@@ -351,7 +375,18 @@ function renderRoomPage(requestedId, filterChanged) {
       renderPage({ roomFilterChanged: true });
     },
   }));
-  page.append(pageHeading(titles.rooms, null, room ? [deviceClickModeControl()] : []), filterPanel);
+  const actions = room ? [
+    button('空间核查', () => showAvailability(room), 'primary'),
+    deviceClickModeControl(),
+  ] : [];
+  if (userCanWrite()) {
+    actions.push(button('新增机房', () => openRoomEditor(state.catalog, null, roomUI)));
+    if (room) {
+      actions.push(button('编辑机房', () => openRoomEditor(state.catalog, room, roomUI)));
+      actions.push(button('新增机柜', () => openRackEditor(state.catalog, room, null, roomUI)));
+    }
+  }
+  page.append(pageHeading(titles.rooms, null, actions), filterPanel);
   if (!room) {
     page.append(empty('当前范围内没有可查看的机房。'));
     window.scrollTo(0, 0);
@@ -364,7 +399,7 @@ function renderRoomPage(requestedId, filterChanged) {
   const layout = (state.catalog.room_layouts ?? []).find((item) => item.room_id === room.id);
   const previous = state.roomViews.get(room.id);
   const host = element('section', { id: 'room-overview', 'aria-label': `${room.name}机柜总览` });
-  page.append(host);
+  page.append(renderRoomStatistics(state.catalog, room, roomUI), host);
   const controller = renderRoomOverview(host, {
     room, layout, racks, devices, systems: state.catalog.systems, deviceKind, units, view: previous?.view,
     onDevice: openDevicePresentation,
@@ -373,7 +408,7 @@ function renderRoomPage(requestedId, filterChanged) {
       if (state.roomOverview) state.roomOverview.leavingScroll = window.scrollY;
       location.hash = `rack/${rack.id}`;
     },
-    onEdit: userCanWrite() ? () => openRoomLayoutEditor(room, layout, racks) : undefined,
+    onEdit: userCanWrite() ? () => openRoomLayoutEditor(room, layout, racks, roomUI) : undefined,
   });
   const overview = { roomId: room.id, filters: { ...filters }, controller };
   state.roomOverview = overview;
@@ -394,8 +429,11 @@ function renderRackPage(requestedId, view) {
   const rack = available.find((item) => String(item.id) === filters.rack) || available[0];
   filters.rack = rack ? String(rack.id) : '';
   const devices = rack ? state.catalog.devices.filter((device) => device.rack_id === rack.id) : [];
-  const actions = rack ? [deviceClickModeControl()] : [];
+  const actions = rack ? [deviceClickModeControl(), button('空间核查', () => showAvailability(lookup('rooms', rack.room_id)))] : [];
   if (userCanWrite()) actions.push(button('新增设备', () => openDeviceEditor(null, rack), 'primary'));
+  if (rack && userCanWrite()) {
+    actions.push(button('编辑机柜', () => openRackEditor(state.catalog, lookup('rooms', rack.room_id), rack, roomUI)));
+  }
   const overviewRoomId = state.rackOverviewRoomId ?? rack?.room_id;
   byId('breadcrumb').replaceChildren(
     internalLink('rooms', overviewRoomId, titles.rooms),
@@ -429,36 +467,55 @@ function renderRackPage(requestedId, view) {
   });
 }
 
-function systemMatchIds(query) {
-  if (!query) return new Set();
-  const systems = state.catalog.systems.filter((system) => system.name.toLocaleLowerCase().includes(query));
-  return new Set(systems.flatMap((system) => system.deployments.map((deployment) => deployment.device_id)));
+function showAvailability(room) {
+  availabilityCleanup?.();
+  availabilityCleanup = openAvailabilityPicker(state.catalog, room, roomUI, userCanWrite() ? (slot) => {
+    const rack = lookup('racks', slot.rack_id);
+    if (rack) openDeviceEditor(null, rack, slot);
+  } : undefined);
+}
+
+function exportDevices(devices, project = null) {
+  downloadDeviceCsv(devices, {
+    location: deviceLocation,
+    project: (device) => project?.name ?? (device.project_ids ?? []).map((id) => lookup('projects', id)?.name).filter(Boolean),
+    filename: project ? `${project.code.replace(/[\\/:*?"<>|]/g, '_')}-采购设备.csv` : '设备台账-当前筛选.csv',
+  });
 }
 
 function renderDevicesPage() {
   page.append(pageHeading(titles.devices, null,
     userCanWrite() ? [button('新增设备', () => openDeviceEditor(), 'primary')] : []));
   const filters = state.deviceFilters;
+  const archiveChoice = selectInput('archive-status', [
+    ['active', '在册设备'], ['archived', '已归档'], ['all', '全部记录'],
+  ], state.deviceArchiveFilter, null, { onchange: (event) => {
+    state.deviceArchiveFilter = event.currentTarget.value;
+    refreshResults();
+  } });
+  const searchDevices = buildDeviceSearch(state.catalog.devices, state.catalog.systems, { includeArchived: true });
   const results = element('section', { class: 'panel', id: 'device-results', 'aria-labelledby': 'device-results-title' });
   function refreshResults() {
-    const query = state.deviceSearch.trim().toLocaleLowerCase();
     const locations = filteredLocations(filters);
-    const matchedSystems = systemMatchIds(query);
     const allowedRooms = new Set(locations.rooms.map((room) => String(room.id)));
-    const matches = state.catalog.devices.filter((device) =>
+    const matches = searchDevices(state.deviceSearch).filter(({ device }) =>
       allowedRooms.has(String(device.room_id))
       && (!filters.room || String(device.room_id) === filters.room)
       && (!filters.rack || String(device.rack_id) === filters.rack)
-      && (!query || device.code.toLocaleLowerCase().includes(query)
-        || device.name.toLocaleLowerCase().includes(query) || matchedSystems.has(device.id)));
+      && (state.deviceArchiveFilter === 'all' || Boolean(device.archived_at) === (state.deviceArchiveFilter === 'archived')));
     results.replaceChildren(
       element('div', { class: 'results-head' },
         element('h2', { id: 'device-results-title' }, '设备列表'),
-        element('span', { class: 'muted small-text', 'aria-live': 'polite' }, `${matches.length} 台设备`)),
+        element('div', { class: 'row-actions' },
+          element('span', { class: 'muted small-text', 'aria-live': 'polite' }, `${matches.length} 台设备`),
+          button('导出当前筛选', () => exportDevices(matches.map(({ device }) => device)), 'small', { disabled: !matches.length }))),
       table(['设备', '类型', '位置', '运行状态', '维护人', '最近核实'],
-        matches.map((device) => [
+        matches.map(({ device, systems, entries, addresses }) => [
           element('div', {}, internalLink('device', device.id, device.name),
-            element('div', { class: 'muted small-text code' }, device.code)),
+            element('div', { class: 'muted small-text code' }, device.code),
+            (systems.length || entries.length || addresses.length) && element('div', { class: 'muted small-text search-evidence' },
+              [...new Set([...systems, ...entries.map((entry) => `${entry.system} · ${endpointLabel(entry)}`),
+                ...addresses.map(deviceAddressLabel)])].join('；'))),
           element('span', { class: 'tag' }, device.type),
           deviceLocation(device, true),
           operatingStatusLabel(device),
@@ -468,8 +525,9 @@ function renderDevicesPage() {
         '没有找到符合条件的设备。'),
     );
   }
-  page.append(element('section', { class: 'panel' },
-    filterControls(filters, { search: refreshResults, change: renderPage })), results);
+  const controls = filterControls(filters, { search: refreshResults, change: renderPage });
+  controls.append(labelInput('记录状态', archiveChoice));
+  page.append(element('section', { class: 'panel' }, controls), results);
   refreshResults();
 }
 
@@ -524,8 +582,30 @@ function serviceEntries(entries) {
       element('div', {}, element('span', { class: 'tag' }, entry.protocol), entry.purpose || null),
       element('div', { class: 'code muted' }, address),
       link && element('a', { href: link, target: '_blank', rel: 'noopener noreferrer', class: 'small-text' }, entry.url),
+      evidenceLink(entry),
     );
   }));
+}
+
+function evidenceLink(record) {
+  const source = lookup('documents', record.source_document_id);
+  if (!source) return null;
+  const kind = documentType(source.filename);
+  const page = record.source_page;
+  const label = `来源 · ${source.title}${page ? ` · 第 ${page} 页` : ''}`;
+  return kind === 'PDF' || kind === '图片'
+    ? button(label, () => openDocumentPreview({ ...source, page: page ?? source.page }, kind), 'quiet small evidence-link')
+    : element('a', { href: fileAddress(source, true), class: 'small-text evidence-link' }, label);
+}
+
+function deviceAddresses(device) {
+  const entries = device.addresses ?? [];
+  if (!entries.length) return empty('暂无设备地址。');
+  return element('div', { class: 'service-list' }, entries.map((address) =>
+    element('div', { class: 'service-item' },
+      element('strong', { class: 'code' }, deviceAddressLabel(address)),
+      address.note && element('p', { class: 'muted small-text' }, address.note),
+      evidenceLink(address))));
 }
 
 function fileAddress(record, download = false) {
@@ -604,7 +684,17 @@ function documentList(documents, message = '暂无档案。') {
         element('div', { class: 'muted small-text' }, meta)),
       element('div', { class: 'row-actions' },
         canPreview && button('预览', () => openDocumentPreview(record, kind), 'small', { 'aria-label': `预览 ${record.title}` }),
-        element('a', { href: fileAddress(record, true), class: 'button small', 'aria-label': `下载 ${record.title}` }, '下载')),
+        element('a', { href: fileAddress(record, true), class: 'button small', 'aria-label': `下载 ${record.title}` }, '下载'),
+        userCanWrite() && button('移除', () => confirmRecordAction({
+          title: '移除档案', text: record.project_id
+            ? `移除「${record.title}」后，关联到这个项目的设备也将不再显示这份档案。`
+            : `移除设备档案「${record.title}」。`,
+          endpoint: `documents/${record.id}`, method: 'DELETE', success: '档案已移除。',
+          afterSave: drawer.open && drawer.dataset.deviceId ? (() => {
+            const deviceId = drawer.dataset.deviceId;
+            return () => openDeviceDrawer(lookup('devices', deviceId));
+          })() : undefined,
+        }), 'quiet small danger', { 'aria-label': `移除 ${record.title}` })),
     );
   }));
 }
@@ -622,6 +712,36 @@ function systemAssociations(device) {
     ));
   }
   return blocks.length ? blocks : empty('暂无部署记录。');
+}
+
+function deviceSystemActions(device) {
+  return userCanWrite() && !device.archived_at
+    ? [button('关联业务系统', () => openSystemLinkEditor(device), 'small')] : [];
+}
+
+function deviceMaintenanceActions(device) {
+  const actions = [];
+  if (!device.archived_at) actions.push(button('编辑设备', () => openDeviceEditor(device), 'primary'));
+  actions.push(button('以此为模板复制新建', () => {
+    const fields = ['room_id', 'type', 'model', 'ownership', 'project_ids', 'maintainer', 'reporter', 'purchased_on'];
+    const template = Object.fromEntries(fields.map((key) => [key, device[key]]));
+    openDeviceEditor(null, null, null, template);
+  }));
+  const archive = !device.archived_at;
+  actions.push(button(archive ? '下架归档' : '恢复设备', () => confirmRecordAction({
+    title: archive ? '下架归档' : '恢复设备',
+    text: archive
+      ? `归档「${device.name}」会释放柜位，原位置、项目、部署与档案保留在历史记录中。`
+      : `恢复「${device.name}」到在册设备。如需上架，请重新选择柜位。`,
+    endpoint: `devices/${device.id}/${archive ? 'archive' : 'restore'}`, method: 'POST',
+    success: archive ? '设备已归档。' : '设备已恢复。',
+  }), archive ? 'danger' : 'primary'));
+  actions.push(button('删除误录设备', () => confirmRecordAction({
+    title: '删除误录设备', text: `删除「${device.name}」的台账记录。有关联项目、部署或档案时会保留记录。`,
+    endpoint: `devices/${device.id}`, method: 'DELETE', success: '误录设备已删除。',
+    afterSave: () => { location.hash = 'devices'; },
+  }), 'danger'));
+  return actions;
 }
 
 function procurementSections(device) {
@@ -663,6 +783,16 @@ function dialogHeader(id, title, subtitle, dialog, close = () => dialog.close())
     element('div', {}, element('h2', { id, class: 'dialog-title' }, title),
       subtitle && element('p', { class: 'muted small-text' }, subtitle)),
     button('关闭', close, 'quiet small'));
+}
+
+function openReleaseNotes() {
+  if (versionDialog.open) return;
+  versionDialog.replaceChildren(
+    dialogHeader('release-title', '更新日志', `当前版本 v${releases[0].version}`, versionDialog),
+    element('div', { class: 'editor-body release-list' }, releases.map((release) =>
+      element('section', { class: 'panel' }, element('h3', {}, `v${release.version}`),
+        element('ul', {}, release.changes.map((change) => element('li', {}, change)))))));
+  versionDialog.showModal();
 }
 
 function savedDeviceClickMode() {
@@ -882,13 +1012,14 @@ function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview
   selectDevice(device, anchor);
   drawer.dataset.deviceId = device.id;
   const actions = [internalLink('device', device.id, '打开设备详情', { class: 'button primary' })];
-  if (userCanWrite()) actions.push(button('编辑设备', () => openDeviceEditor(device)));
+  if (userCanWrite() && !device.archived_at) actions.push(button('编辑设备', () => openDeviceEditor(device)));
   byId('drawer-content').replaceChildren(
     dialogHeader('drawer-title', device.name, `${device.code} · ${deviceLocation(device)}`, drawer,
       () => closeDevicePresentation({ restoreFocus: true })),
     element('div', { class: 'drawer-body' },
       element('div', { class: 'row-actions' }, actions),
-      panel('业务系统与服务入口', systemAssociations(device)),
+      panel('业务系统与服务入口', systemAssociations(device), deviceSystemActions(device)),
+      ...(device.addresses?.length ? [panel('设备地址', deviceAddresses(device))] : []),
       procurementSections(device),
       panel('设备资料', deviceFacts(device))),
   );
@@ -899,34 +1030,44 @@ function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview
 }
 
 function renderDevicePage(device) {
+  const actions = userCanWrite() ? deviceMaintenanceActions(device) : [];
   page.append(
     internalLink('devices', null, '返回设备台账', { class: 'back-link' }),
-    pageHeading(device.name, `${device.code} · ${device.type}`,
-      userCanWrite() ? [button('编辑设备', () => openDeviceEditor(device), 'primary')] : []),
+    pageHeading(device.name, `${device.code} · ${device.type}${device.archived_at ? ' · 已归档' : ''}`, actions),
     element('div', { class: 'detail-columns' },
-      element('div', { class: 'stack' }, panel('设备资料', deviceFacts(device)), panel('业务系统与服务入口', systemAssociations(device))),
+      element('div', { class: 'stack' }, panel('设备资料', deviceFacts(device)), panel('设备地址', deviceAddresses(device)),
+        panel('业务系统与服务入口', systemAssociations(device), deviceSystemActions(device))),
       element('div', { class: 'stack' }, procurementSections(device)),
     ),
   );
 }
 
 function renderSystemPage(system) {
-  const deployments = system.deployments.map((deployment) => {
+  const deployments = [];
+  const history = [];
+  for (const deployment of system.deployments) {
     const device = lookup('devices', deployment.device_id);
-    if (!device) return null;
-    return element('section', { class: 'subsection' },
+    if (!device) continue;
+    const section = element('section', { class: 'subsection' },
       element('h3', {}, internalLink('device', device.id, device.name)),
       element('div', { class: 'stack' },
         element('p', { class: 'muted small-text' }, deviceLocation(device, true),
           deployment.note && ` · ${deployment.note}`),
         serviceEntries(deployment.entries)),
     );
-  }).filter(Boolean);
+    (device.archived_at ? history : deployments).push(section);
+  }
   page.append(
     internalLink('systems', null, '返回业务系统', { class: 'back-link' }),
     pageHeading(system.name, system.description,
-      userCanWrite() ? [button('编辑系统与部署', () => openSystemEditor(system), 'primary')] : []),
+      userCanWrite() ? [button('编辑系统与部署', () => openSystemEditor(system), 'primary'),
+        button('删除系统', () => confirmRecordAction({
+          title: '删除系统', text: `删除系统「${system.name}」。系统仍有部署关联时会保留记录。`,
+          endpoint: `systems/${system.id}`, method: 'DELETE', success: '系统已删除。',
+          afterSave: () => { location.hash = 'systems'; },
+        }), 'danger')] : []),
     panel('部署设备及服务入口', deployments.length ? deployments : empty('暂无部署。')),
+    history.length ? panel('已归档的部署记录', history) : null,
   );
 }
 
@@ -936,7 +1077,12 @@ function renderProjectPage(project) {
   page.append(
     internalLink('projects', null, '返回项目档案', { class: 'back-link' }),
     pageHeading(project.name, joinedPath(project.code, lookup('sites', project.site_id)?.name),
-      userCanWrite() ? [button('编辑项目', () => openProjectEditor(project), 'primary')] : []),
+      userCanWrite() ? [button('编辑项目', () => openProjectEditor(project), 'primary'),
+        button('删除项目', () => confirmRecordAction({
+          title: '删除项目', text: `删除项目「${project.name}」。仍关联设备或档案时会保留记录。`,
+          endpoint: `projects/${project.id}`, method: 'DELETE', success: '项目已删除。',
+          afterSave: () => { location.hash = 'projects'; },
+        }), 'danger')] : []),
   );
   if (project.description) page.append(panel('项目说明', element('p', {}, project.description)));
   page.append(
@@ -947,7 +1093,7 @@ function renderProjectPage(project) {
         element('div', {}, internalLink('device', device.id, device.name),
           element('div', { class: 'muted small-text code' }, device.code)),
         deviceLocation(device, true),
-      ]), '暂无关联设备。')),
+      ]), '暂无关联设备。'), [button('导出采购设备', () => exportDevices(devices, project), 'small', { disabled: !devices.length })]),
     ),
   );
 }
@@ -1015,9 +1161,9 @@ function numberOrNull(value) {
   return value === '' || value == null ? null : Number(value);
 }
 
-function showEditor({ title, id, fields, save, success, afterSave }) {
+function showEditor({ title, id, fields, save, success, afterSave, onSaveError, submitLabel = '保存', submitStyle = 'primary' }) {
   const errorBox = element('div', { class: 'form-error', role: 'alert', tabindex: -1, hidden: true });
-  const submit = element('button', { class: 'button primary', type: 'submit' }, '保存');
+  const submit = element('button', { class: `button ${submitStyle}`, type: 'submit' }, submitLabel);
   const form = element('form', { id, onsubmit: async (event) => {
     event.preventDefault();
     const origin = location.hash;
@@ -1029,7 +1175,10 @@ function showEditor({ title, id, fields, save, success, afterSave }) {
       record = await save(form);
     } catch (error) {
       showError(errorBox, error.message);
-      if (editor.open && editor.contains(form)) errorBox.focus();
+      if (editor.open && editor.contains(form)) {
+        onSaveError?.(error);
+        errorBox.focus();
+      }
       submit.disabled = false;
       return;
     }
@@ -1062,13 +1211,21 @@ function showEditor({ title, id, fields, save, success, afterSave }) {
   if (!editor.open) editor.showModal();
 }
 
+function confirmRecordAction({ title, text, endpoint, method, success, afterSave }) {
+  showEditor({
+    title, id: 'confirm-record-action', fields: [element('p', {}, text)],
+    submitLabel: `确认${title}`, submitStyle: 'danger',
+    save: () => request(endpoint, { method }), success, afterSave,
+  });
+}
+
 function roomOptions() {
   return state.catalog.rooms.map((room) =>
     [room.id, joinedPath(lookup('sites', room.site_id)?.name, room.name)]);
 }
 
-function openDeviceEditor(device = null, rack = null, slot = null) {
-  const original = device || {};
+function openDeviceEditor(device = null, rack = null, slot = null, template = null) {
+  const original = device || template || {};
   const drawerScroll = device && drawer.open ? drawer.scrollTop : null;
   const roomChoice = selectInput('room_id', roomOptions(), original.room_id || rack?.room_id,
     '选择机房或房间', { required: true });
@@ -1077,13 +1234,24 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
     original.face || slot?.face || 'front');
   const startInput = element('input', { name: 'u_start', type: 'number', min: 1, step: 1,
     value: original.u_start ?? slot?.u_start ?? 1 });
-  const heightInput = element('input', { name: 'u_height', type: 'number', min: 1, step: 1, value: original.u_height ?? 1 });
-  const depthChoice = selectInput('mount_depth', Object.entries(mountDepthLabels), mountDepth(original), null,
+  const heightInput = element('input', { name: 'u_height', type: 'number', min: 1, step: 1, value: original.u_height ?? slot?.u_height ?? 1 });
+  const initialDepth = slot?.mount_depth ?? (slot?.requiresHalf ? 'half' : mountDepth(original));
+  const depthChoice = selectInput('mount_depth', Object.entries(mountDepthLabels), initialDepth, null,
     { 'aria-describedby': 'mount-depth-hint' });
+  const id = device?.id;
+  const slotPicker = createSlotPicker({
+    element, button, request, startInput,
+    getPlacement: () => ({
+      rackId: rackChoice.value, face: faceChoice.value, height: Number(heightInput.value),
+      depth: depthChoice.value, exclude: id,
+    }),
+  });
   const rackSlots = element('div', { class: 'field-grid wide' },
     labelInput('安装面', faceChoice), labelInput('起始 U 位', startInput),
     labelInput('占用高度（U）', heightInput), labelInput('安装深度', depthChoice),
-    element('p', { class: 'muted small-text wide', id: 'mount-depth-hint' }, '前后共用 U 位时，两台设备均需为半深。'));
+    element('p', { class: 'muted small-text wide', id: 'mount-depth-hint' },
+      slot?.requiresHalf ? '该 U 位的对面已有半深设备，仅可上架半深设备。' : '前后共用 U 位时，两台设备均需为半深。'),
+    slotPicker.host);
   const workstation = inputField('工位', 'workstation', original.workstation, { maxlength: 180 }, 'wide');
 
   function syncMountFields() {
@@ -1099,6 +1267,7 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
       if (choice) input.max = choice.height;
       else input.removeAttribute('max');
     }
+    if (slotPicker.host.isConnected) void slotPicker.refresh();
   }
 
   function syncRackChoices(selected) {
@@ -1111,10 +1280,20 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
 
   roomChoice.addEventListener('change', () => syncRackChoices(rackChoice.value));
   rackChoice.addEventListener('change', syncMountFields);
+  faceChoice.addEventListener('change', () => void slotPicker.refresh());
+  depthChoice.addEventListener('change', () => void slotPicker.refresh());
+  for (const input of [startInput, heightInput]) input.addEventListener('input', () => void slotPicker.refresh());
   syncRackChoices(original.rack_id || rack?.id);
-  const id = original.id;
+  const projects = checkboxGroup('关联项目', state.catalog.projects.map((project) => [project.id, `${project.name} · ${project.code}`]),
+    original.project_ids || [], 'project_ids', '暂无项目。');
+  const addresses = element('div', { class: 'stack' });
+  const getAddressSources = () => relatedDocuments(id, Array.from(projects.querySelectorAll(':checked'), (input) => Number(input.value)));
+  for (const address of original.addresses ?? []) addresses.append(buildDeviceAddress(address, getAddressSources));
+  projects.addEventListener('change', () => {
+    for (const address of addresses.children) address.source.sync();
+  });
   showEditor({
-    title: id ? '编辑设备' : '新增设备', id: 'device-form',
+    title: id ? '编辑设备' : template ? '以此为模板复制新建' : '新增设备', id: 'device-form',
     fields: [
       element('div', { class: 'field-grid' },
         inputField('设备编号', 'code', original.code, { required: true, maxlength: 80 }),
@@ -1135,11 +1314,17 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
         inputField('购置时间', 'purchased_on', original.purchased_on, { type: 'date' }),
         inputField('购置价格（元）', 'price', original.price, { type: 'number', min: '0', step: '0.01', placeholder: '未单列' }),
       ),
-      checkboxGroup('关联项目', state.catalog.projects.map((project) => [project.id, `${project.name} · ${project.code}`]),
-        original.project_ids || [], 'project_ids', '暂无项目。'),
+      projects,
+      element('fieldset', { class: 'fieldset stack' }, element('legend', {}, '设备地址'), addresses,
+        button('添加设备地址', () => {
+          const row = buildDeviceAddress({}, getAddressSources);
+          addresses.append(row);
+          row.querySelector('input').focus();
+        }, 'small')),
     ],
     save: (form) => {
       const values = new FormData(form);
+      for (const name of ['address_host', 'address_note', 'source_document_id', 'source_page']) values.delete(name);
       return request(id ? `devices/${id}` : 'devices', {
         method: id ? 'PATCH' : 'POST',
         data: {
@@ -1154,10 +1339,16 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
           purchased_on: values.get('purchased_on') || null,
           price: numberOrNull(values.get('price')),
           project_ids: values.getAll('project_ids').map(Number),
+          addresses: Array.from(addresses.children, (row) => ({
+            host: row.querySelector('[name="address_host"]').value,
+            note: row.querySelector('[name="address_note"]').value,
+            ...row.source.record(),
+          })),
         },
       });
     },
     success: id ? '设备更新成功。' : '设备已添加。',
+    onSaveError: (error) => { if (error.status === 409) void slotPicker.refresh({ reload: true }); },
     afterSave: drawerScroll == null ? undefined : (record) => {
       const updated = lookup('devices', record.id);
       if (!updated) return;
@@ -1165,60 +1356,7 @@ function openDeviceEditor(device = null, rack = null, slot = null) {
       drawer.scrollTop = drawerScroll;
     },
   });
-}
-
-function openRoomLayoutEditor(room, layout, racks) {
-  const positions = new Map((layout?.positions ?? []).map((position) => [position.rack_id, position]));
-  const rotations = [
-    [0, '0° 朝近侧'],
-    [90, '90° 朝右'],
-    [180, '180° 朝远侧'],
-    [270, '270° 朝左'],
-  ];
-  const rackRows = racks.map((rack) => {
-    const position = positions.get(rack.id);
-    return [
-      rack.name,
-      element('input', {
-        type: 'number', name: `row-${rack.id}`, value: position?.row ?? '',
-        min: 1, max: 12, step: 1, 'aria-label': `${rack.name} 排`,
-      }),
-      element('input', {
-        type: 'number', name: `slot-${rack.id}`, value: position?.slot ?? '',
-        min: 1, max: 20, step: 1, 'aria-label': `${rack.name} 柜位`,
-      }),
-      selectInput(`rotation-${rack.id}`, rotations, position?.rotation ?? 0, null, {
-        'aria-label': `${rack.name} 朝向`,
-      }),
-    ];
-  });
-  showEditor({
-    title: '编辑机柜布局', id: 'room-layout-form',
-    fields: [
-      element('div', { class: 'field-grid' },
-        inputField('排数', 'rows', layout?.rows ?? 2, { type: 'number', min: 1, max: 12, step: 1, required: true }),
-        inputField('每排柜位数', 'columns', layout?.columns ?? 5, { type: 'number', min: 1, max: 20, step: 1, required: true })),
-      element('p', { class: 'muted small-text' },
-        '以正俯视为准，第一排在下方，柜位从左向右编号。排和柜位均留空时，机柜显示在「待摆放」。'),
-      table(['机柜', '排', '柜位', '朝向'], rackRows, '本机房暂未登记机柜。'),
-    ],
-    save: (form) => {
-      const values = new FormData(form);
-      const updated = [];
-      for (const rack of racks) {
-        const row = numberOrNull(values.get(`row-${rack.id}`));
-        const slot = numberOrNull(values.get(`slot-${rack.id}`));
-        if (row == null && slot == null) continue;
-        if (row == null || slot == null) throw new Error(`请同时填写 ${rack.name} 的排和柜位。`);
-        updated.push({ rack_id: rack.id, row, slot, rotation: Number(values.get(`rotation-${rack.id}`)) });
-      }
-      return request(`rooms/${room.id}/layout`, {
-        method: 'PATCH',
-        data: { rows: Number(values.get('rows')), columns: Number(values.get('columns')), positions: updated },
-      });
-    },
-    success: '机房布局已保存。',
-  });
+  void slotPicker.refresh();
 }
 
 function removeAction(label, block) {
@@ -1230,8 +1368,55 @@ function removeAction(label, block) {
   }, 'quiet small danger');
 }
 
-function buildServiceEntry(entry = {}) {
+function relatedDocuments(deviceId, projectIds = lookup('devices', deviceId)?.project_ids ?? []) {
+  const projects = new Set(projectIds);
+  return state.catalog.documents.filter((doc) => (deviceId && doc.device_id === deviceId) || projects.has(doc.project_id));
+}
+
+function evidenceFields(original, getDocuments) {
+  const choice = selectInput('source_document_id', [], '', '无来源档案');
+  const pageInput = element('input', { name: 'source_page', type: 'number', min: 1, max: 9999, step: 1, value: original.source_page });
+  const pageField = labelInput('来源页码', pageInput);
+  function syncPage() {
+    const selected = lookup('documents', choice.value);
+    const pdf = selected && documentType(selected.filename) === 'PDF';
+    pageField.hidden = !pdf;
+    pageInput.disabled = !pdf;
+    if (!pdf) pageInput.value = '';
+  }
+  choice.addEventListener('change', () => {
+    pageInput.value = '';
+    syncPage();
+  });
+  function sync(selected = choice.value) {
+    choice.replaceChildren(element('option', { value: '' }, '无来源档案'),
+      ...getDocuments().map((doc) => element('option', { value: doc.id }, doc.title)));
+    choice.value = selected == null ? '' : String(selected);
+    syncPage();
+  }
+  sync(original.source_document_id);
+  return {
+    fields: [labelInput('来源档案', choice), pageField],
+    sync,
+    record: () => ({ source_document_id: numberOrNull(choice.value), source_page: numberOrNull(pageInput.value) }),
+  };
+}
+
+function buildDeviceAddress(address, getDocuments) {
+  const row = element('div', { class: 'fieldset stack' });
+  const source = evidenceFields(address, getDocuments);
+  row.source = source;
+  row.append(element('div', { class: 'panel-heading' }, element('h3', {}, '管理或资产地址'), removeAction('移除此地址', row)),
+    element('div', { class: 'field-grid' },
+      inputField('IP／域名', 'address_host', deviceAddressLabel(address), { required: true, maxlength: 253 }),
+      inputField('地址备注', 'address_note', address.note, { maxlength: 300 }), source.fields));
+  return row;
+}
+
+function buildServiceEntry(entry = {}, getDocuments) {
   const wrapper = element('div', { class: 'fieldset stack', 'data-entry': true });
+  const source = evidenceFields(entry, getDocuments);
+  wrapper.source = source;
   wrapper.append(element('div', { class: 'panel-heading' },
     element('h3', {}, '服务入口'), removeAction('移除此入口', wrapper)),
     element('div', { class: 'field-grid' },
@@ -1239,24 +1424,34 @@ function buildServiceEntry(entry = {}) {
       inputField('协议', 'protocol', entry.protocol, { required: true, maxlength: 32, placeholder: 'HTTPS' }),
       inputField('端口', 'port', entry.port, { type: 'number', min: 1, max: 65535, step: 1 }),
       inputField('用途', 'purpose', entry.purpose, { maxlength: 300 }),
-      inputField('网页访问地址', 'url', entry.url, { type: 'url', maxlength: 1000, placeholder: 'https://example.test/' }, 'wide')));
+      inputField('网页访问地址', 'url', entry.url, { type: 'url', maxlength: 1000, placeholder: 'https://example.test/' }, 'wide'),
+      source.fields));
   return wrapper;
 }
 
 function buildDeployment(deployment = {}) {
   const deploymentBlock = element('fieldset', { class: 'fieldset stack', 'data-deployment': true });
-  const entries = element('div', { class: 'stack' }, (deployment.entries || []).map(buildServiceEntry));
+  const eligible = state.catalog.devices.filter((device) => !device.archived_at || device.id === deployment.device_id);
+  const deviceSelect = selectInput('device_id', eligible.map((device) =>
+    [device.id, `${device.name} · ${device.code}${device.archived_at ? ' · 已归档' : ''}`]),
+  deployment.device_id, '选择设备', { required: true });
+  if (lookup('devices', deployment.device_id)?.archived_at) {
+    deviceSelect.querySelectorAll('option').forEach((option) => { option.disabled = option.value !== deviceSelect.value; });
+  }
+  const getDocuments = () => relatedDocuments(numberOrNull(deviceSelect.value));
+  const entries = element('div', { class: 'stack' }, (deployment.entries || []).map((entry) => buildServiceEntry(entry, getDocuments)));
+  deviceSelect.addEventListener('change', () => {
+    for (const entry of entries.children) entry.source.sync();
+  });
   deploymentBlock.append(
     element('legend', {}, '部署记录'),
     element('div', { class: 'field-grid' },
-      labeledSelect('部署设备', 'device_id',
-        state.catalog.devices.map((device) => [device.id, `${device.name} · ${device.code}`]),
-        deployment.device_id, '选择设备', { required: true }),
+      labelInput('部署设备', deviceSelect),
       inputField('部署备注', 'note', deployment.note, { maxlength: 500 })),
     entries,
     element('div', { class: 'row-actions' },
       button('添加服务入口', () => {
-        const row = buildServiceEntry();
+        const row = buildServiceEntry({}, getDocuments);
         entries.append(row);
         row.querySelector('input').focus();
       }, 'small'), removeAction('移除此部署', deploymentBlock)),
@@ -1264,9 +1459,24 @@ function buildDeployment(deployment = {}) {
   return deploymentBlock;
 }
 
-function openSystemEditor(system = null) {
+function openSystemLinkEditor(device) {
+  const choice = selectInput('system_id', state.catalog.systems.map((system) => [system.id, system.name]), '', '新建业务系统');
+  const form = element('form', { onsubmit: (event) => {
+    event.preventDefault();
+    openSystemEditor(lookup('systems', choice.value), device);
+  } },
+  element('div', { class: 'editor-body' }, labelInput('业务系统', choice)),
+  element('footer', { class: 'editor-actions' }, button('取消', () => editor.close()),
+    element('button', { class: 'button primary', type: 'submit' }, '继续')));
+  byId('editor-content').replaceChildren(dialogHeader('editor-title', '关联业务系统', device.name, editor), form);
+  if (!editor.open) editor.showModal();
+}
+
+function openSystemEditor(system = null, focusDevice = null) {
   const original = system || {};
-  const deployments = element('div', { class: 'stack' }, (original.deployments || []).map(buildDeployment));
+  const records = [...(original.deployments || [])];
+  if (focusDevice && !records.some((item) => item.device_id === focusDevice.id)) records.push({ device_id: focusDevice.id });
+  const deployments = element('div', { class: 'stack' }, records.map(buildDeployment));
   const id = original.id;
   showEditor({
     title: id ? '编辑系统与部署' : '新增系统', id: 'system-form',
@@ -1295,6 +1505,7 @@ function openSystemEditor(system = null) {
             port: numberOrNull(entry.querySelector('[name="port"]').value),
             purpose: entry.querySelector('[name="purpose"]').value,
             url: entry.querySelector('[name="url"]').value,
+            ...entry.source.record(),
           })),
         })),
       },
@@ -1315,7 +1526,8 @@ function openProjectEditor(project = null) {
         labeledSelect('归属站点', 'site_id', state.catalog.sites.map((site) => [site.id, site.name]),
           original.site_id, '选择站点', { required: true }),
         textAreaField('项目说明', 'description', original.description, { maxlength: 1000 })),
-      checkboxGroup('关联设备', state.catalog.devices.map((device) => [device.id, `${device.name} · ${device.code}`]),
+      checkboxGroup('关联设备', state.catalog.devices.filter((device) => !device.archived_at || original.device_ids?.includes(device.id))
+        .map((device) => [device.id, `${device.name} · ${device.code}${device.archived_at ? ' · 已归档' : ''}`]),
         original.device_ids || [], 'device_ids', '暂无设备。'),
     ],
     save: (form) => {

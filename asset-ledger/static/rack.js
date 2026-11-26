@@ -61,51 +61,82 @@ function occupiedSlots(devices) {
   return slots;
 }
 
+export function rackFaceSlots(rack, devices, excludeDeviceId) {
+  const included = excludeDeviceId == null ? devices : devices.filter((device) => device.id !== excludeDeviceId);
+  const front = occupiedSlots(included.filter((device) => device.face === 'front'));
+  const rear = occupiedSlots(included.filter((device) => device.face === 'rear'));
+  const oppositeKinds = { full: 'cross-face', half: 'half-only', unknown: 'unknown' };
+  function build(face, own, opposite) {
+    const slots = new Map();
+    for (let u_start = 1; u_start <= rack.height; u_start += 1) {
+      const mounted = own.get(u_start);
+      const behind = opposite.get(u_start);
+      const kind = mounted ? 'occupied' : behind ? oppositeKinds[mountDepth(behind)] : 'free';
+      slots.set(u_start, { face, u_start, kind, device: mounted ?? behind });
+    }
+    return slots;
+  }
+  return { front: build('front', front, rear), rear: build('rear', rear, front) };
+}
+
+export function isSelectableRackSlot(slot) {
+  return slot?.kind === 'free' || slot?.kind === 'half-only';
+}
+
+export function rackSlotSelection({ face, u_start, kind }) {
+  return { face, u_start, ...(kind === 'half-only' ? { requiresHalf: true } : {}) };
+}
+
+function svgButton(node, activate) {
+  node.addEventListener('click', activate);
+  node.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      activate();
+    }
+  });
+}
+
 function elevationDevice(device, { face, start, count, y, onDevice, crossing = false }) {
   const top = y(start + count - 1);
   const height = count * UNIT;
   const range = units({ u_start: start, u_height: count });
   const state = crossing ? '跨面占用' : depthLabel(device);
-  const label = `${device.name}，${FACE_NAMES[face]} ${range}，${count}U，${state}`;
+  const status = operatingStatus(device);
+  const label = `${device.name}，${FACE_NAMES[face]} ${range}，${count}U，${state}，${OPERATING_STATUS_LABELS[status]}`;
   const node = svg('g', {
     class: `rack-svg-device ${crossing ? 'rack-svg-cross-face' : `rack-kind-${deviceKind(device)}`}`,
     role: 'button', tabindex: 0, 'aria-label': label, 'aria-pressed': 'false', 'data-device-id': device.id,
     'data-u-height': count, 'data-u-start': start, 'data-mount-depth': mountDepth(device),
+    'data-operating-status': status,
   });
   if (crossing) node.setAttribute('data-cross-face', 'true');
   node.append(svg('title', {}, label));
   node.append(svg('rect', { class: 'rack-svg-device-body', x: 41, y: top, width: 253, height }));
   node.append(svg('rect', { class: 'rack-svg-device-mark', x: 41, y: top + 1, width: 4, height: height - 2 }));
   const visibleName = Array.from(crossing ? `跨面占用 · ${device.name}` : device.name);
-  const nameLimit = crossing ? 19 : 17;
+  const nameLimit = crossing ? 19 : 13;
   const name = visibleName.length > nameLimit ? `${visibleName.slice(0, nameLimit).join('')}…` : visibleName.join('');
-  node.append(svg('text', { class: 'rack-svg-device-name', x: 50, y: top + height / 2 + 4 }, name));
-  node.append(svg('text', { class: 'rack-svg-device-u', x: 285, y: top + height / 2 + 4 }, `${count}U`));
-  node.addEventListener('click', () => onDevice(device, node));
-  node.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      onDevice(device, node);
-    }
-  });
+  const mid = top + height / 2;
+  node.append(svg('text', { class: 'rack-svg-device-name', x: 50, y: mid + 4 }, name));
+  if (!crossing) {
+    node.append(svg('rect', { class: 'rack-svg-status-badge', x: 215, y: mid - 7, width: 41, height: 14, rx: 3 }));
+    node.append(svg('text', { class: 'rack-svg-status-text', x: 235.5, y: mid + 3.1 }, OPERATING_STATUS_LABELS[status]));
+  }
+  node.append(svg('text', { class: 'rack-svg-device-u', x: 285, y: mid + 4 }, `${count}U`));
+  svgButton(node, () => onDevice(device, node));
   return node;
 }
 
-function elevation(rack, devices, face, onDevice, onEmpty) {
-  const mounted = devices.filter((device) => device.face === face);
-  const placements = occupiedSlots(mounted);
-  const reservations = occupiedSlots(devices.filter((device) => device.face !== face && mountDepth(device) !== 'half'));
-  // 已有同位设备以本面实际安装为准，跨面标识只覆盖空出的格。
-  for (const unit of placements.keys()) reservations.delete(unit);
-  const crossingSlots = [...reservations.values()].filter((device) => mountDepth(device) === 'full').length;
-  const pending = reservations.size - crossingSlots;
-  const occupied = placements.size + crossingSlots;
-  const free = rack.height - occupied - pending;
+function elevation(rack, devices, slots, face, onDevice, onEmpty) {
+  const totals = { occupied: 0, 'cross-face': 0, free: 0, 'half-only': 0, unknown: 0 };
+  for (const slot of slots.values()) totals[slot.kind] += 1;
   const side = element('section', 'rack-elevation');
   const caption = element('header', 'rack-elevation-caption');
   caption.append(element('h3', '', FACE_NAMES[face]));
-  const counts = [`占用 ${occupied}U`, `空闲 ${free}U`];
-  if (pending) counts.push(`深度待核 ${pending}U`);
+  const counts = [`占用 ${totals.occupied + totals['cross-face']}U`, `空闲 ${totals.free}U`];
+  if (totals['half-only']) counts.push(`限半深 ${totals['half-only']}U`);
+  if (totals.unknown) counts.push(`深度待核 ${totals.unknown}U`);
   caption.append(element('span', 'rack-face-stat', counts.join(' · ')));
   side.append(caption);
 
@@ -117,24 +148,28 @@ function elevation(rack, devices, face, onDevice, onEmpty) {
   const y = (unit) => FRAME_TOP + (rack.height - unit) * UNIT;
   diagram.append(svg('rect', { class: 'rack-svg-frame', x: 32, y: FRAME_TOP - 4, width: 271, height: height + 8, rx: 3 }));
   for (let unit = rack.height; unit > 0; unit -= 1) {
-    const row = svg('g', { 'data-u': unit });
+    const slot = slots.get(unit);
+    const row = svg('g', { 'data-u': unit, 'data-slot-state': slot.kind });
     row.append(svg('text', { class: 'rack-svg-scale', x: 26, y: y(unit) + 15 }, `U${unit}`));
-    const device = reservations.get(unit);
-    const blocked = device && mountDepth(device);
-    const cell = svg('rect', { class: 'rack-svg-slot', x: 41, y: y(unit), width: 253, height: UNIT });
-    row.append(cell);
-    if (blocked) {
-      row.setAttribute('data-blocked', blocked);
-      if (blocked === 'unknown') {
-        row.append(svg('title', {}, `${FACE_NAMES[face]} U${unit} 对面深度待核 · ${device.name}`));
-        row.append(svg('text', { class: 'rack-svg-pending-label', x: 50, y: y(unit) + 15 }, '对面深度待核'));
-      }
-    } else if (!placements.has(unit)) {
+    row.append(svg('rect', { class: 'rack-svg-slot', x: 41, y: y(unit), width: 253, height: UNIT }));
+    if (slot.kind === 'cross-face') row.setAttribute('data-blocked', 'full');
+    if (slot.kind === 'unknown') {
+      row.setAttribute('data-blocked', 'unknown');
+      row.append(svg('title', {}, `${FACE_NAMES[face]} U${unit} 对面深度待核 · ${slot.device.name}`));
+      row.append(svg('text', { class: 'rack-svg-pending-label', x: 50, y: y(unit) + 15 }, '对面深度待核'));
+    }
+    if (isSelectableRackSlot(slot)) {
       row.setAttribute('data-empty', 'true');
-      row.append(svg('title', {}, `${FACE_NAMES[face]} U${unit} 空位`));
+      const half = slot.kind === 'half-only';
+      const label = `${FACE_NAMES[face]} U${unit} ${half ? '限半深' : '空位'}`;
+      row.append(svg('title', {}, label));
+      if (half) row.append(svg('text', { class: 'rack-svg-half-label', x: 50, y: y(unit) + 15 }, '限半深'));
       if (onEmpty) {
         row.classList.add('rack-slot-selectable');
-        cell.addEventListener('click', () => onEmpty({ face, u_start: unit }));
+        row.setAttribute('role', 'button');
+        row.setAttribute('tabindex', '0');
+        row.setAttribute('aria-label', `${label}，在此新增`);
+        svgButton(row, () => onEmpty(rackSlotSelection(slot)));
       }
     }
     row.append(svg('circle', { class: 'rack-svg-screw', cx: 36.5, cy: y(unit) + UNIT / 2, r: 1.1 }));
@@ -142,17 +177,28 @@ function elevation(rack, devices, face, onDevice, onEmpty) {
     diagram.append(row);
   }
   for (let unit = rack.height; unit > 0; unit -= 1) {
-    const device = reservations.get(unit);
-    if (!device || mountDepth(device) !== 'full') continue;
+    const slot = slots.get(unit);
+    if (slot.kind !== 'cross-face') continue;
     const end = unit;
-    while (reservations.get(unit - 1) === device) unit -= 1;
-    diagram.append(elevationDevice(device, { face, start: unit, count: end - unit + 1, y, onDevice, crossing: true }));
+    while (slots.get(unit - 1)?.kind === 'cross-face' && slots.get(unit - 1).device === slot.device) unit -= 1;
+    diagram.append(elevationDevice(slot.device, { face, start: unit, count: end - unit + 1, y, onDevice, crossing: true }));
   }
-  for (const device of mounted) {
+  for (const device of devices.filter((item) => item.face === face)) {
     diagram.append(elevationDevice(device, { face, start: device.u_start, count: device.u_height, y, onDevice }));
   }
   side.append(diagram);
   return side;
+}
+
+function statusLegend() {
+  const legend = element('ul', 'rack-status-legend');
+  legend.setAttribute('aria-label', '运行状态图例');
+  for (const status of ['running', 'unpowered', 'disabled', 'unknown']) {
+    const item = element('li', 'rack-status-legend-item', OPERATING_STATUS_LABELS[status]);
+    item.dataset.operatingStatus = status;
+    legend.append(item);
+  }
+  return legend;
 }
 
 export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initialDeviceId, onSceneInteraction }) {
@@ -169,8 +215,10 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
   status.setAttribute('role', 'status');
   viewBar.append(modes, status);
   const chart = element('div', 'rack-2d');
+  const faceSlots = rackFaceSlots(rack, devices);
+  chart.append(statusLegend());
   for (const face of Object.keys(FACE_NAMES)) {
-    chart.append(elevation(rack, devices, face, (device, node) => onDevice(device, svgAnchor(device.id, node)), onEmpty));
+    chart.append(elevation(rack, devices, faceSlots[face], face, (device, node) => onDevice(device, svgAnchor(device.id, node)), onEmpty));
   }
   const deviceNodes = [...chart.querySelectorAll('g[data-device-id]')];
   const spatial = element('div', 'rack-3d');
@@ -256,7 +304,7 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
       const { mountRackScene } = await import('./rack-3d.js');
       if (removed || request !== generation) return;
       scene = mountRackScene(spatial, {
-        rack, devices, deviceKind, units, depthLabel, initialCamera,
+        rack, devices, deviceKind, units, depthLabel, initialCamera, faceSlots, onEmpty,
         initialDeviceId: selectedDeviceId, onSceneInteraction,
         onDevice: (device, anchor) => onDevice(device, anchor ? bindSelection(device.id, anchor) : undefined),
         onContextLost: () => showElevation('3D 已断开，已返回立面。'),

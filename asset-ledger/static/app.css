@@ -90,7 +90,26 @@ hr { border: 0; border-top: 1px solid var(--line); }
 .page { width: min(100%, 94rem); margin: 0 auto; padding: 1.65rem clamp(1rem, 3vw, 2.3rem) 3rem; display: grid; gap: 1.1rem; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .9rem; }
 .title-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .65rem; margin-top: .35rem; color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
-.head-actions, .row-actions { display: flex; flex: none; flex-wrap: wrap; gap: .45rem; align-items: center; }
+.head-actions, .row-actions { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
+.version-button.button { color: var(--accent-dark); background: var(--accent-soft); border-color: transparent; font-variant-numeric: tabular-nums; }
+.release-dialog { overflow-y: auto; }
+.release-list ul { margin: .45rem 0 0; padding-inline-start: 1.3rem; }
+.evidence-link.button { width: fit-content; max-width: 100%; white-space: normal; text-align: start; }
+.search-evidence { overflow-wrap: anywhere; }
+.slot-picker { display: grid; gap: .55rem; padding: .7rem; border: 1px solid var(--line); border-radius: .6rem; background: #f7faf7; }
+.slot-picker-faces { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
+.slot-picker-face { min-width: 0; display: grid; gap: .3rem; }
+.slot-picker-face h4 { margin: 0; font-size: .83rem; }
+.slot-picker-units { display: grid; grid-template-columns: repeat(auto-fill, minmax(2.6rem, 1fr)); gap: .2rem; max-height: 9.2rem; overflow-y: auto; padding: .18rem; }
+.slot-picker-unit.button { width: 100%; min-height: 1.8rem; padding: .18rem .05rem; font-size: .76rem; }
+.slot-picker-unit.button:disabled { opacity: 1; cursor: default; color: #5d6b68; }
+.slot-picker-unit[data-state=occupied] { background: #dce8e6; }
+.slot-picker-unit[data-state=full] { background: repeating-linear-gradient(-45deg, #f0ded5 0 4px, #f7eae4 4px 8px); }
+.slot-picker-unit[data-state=unknown] { background: #fff0d1; }
+.slot-picker-unit[data-state=half] { background: #e8e9f5; }
+.slot-picker-unit.slot-available { color: #15473e; border-color: #83ae9a; }
+.slot-picker-unit.button[aria-pressed=true] { outline: 2px solid #247459; outline-offset: -2px; }
+.slot-conflict { color: var(--danger); }
 .panel { padding: 1rem 1.1rem; background: var(--surface); border: 1px solid var(--line); border-radius: .75rem; min-width: 0; }
 .panel > h2 { margin-bottom: .8rem; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .55rem; margin-bottom: .75rem; }

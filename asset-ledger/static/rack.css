@@ -45,6 +45,30 @@
 
 .rack-2d[hidden], .rack-3d[hidden] { display: none; }
 
+.rack-status-legend {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rack-2d [data-operating-status='running'] { --status-bg: #ddf2e3; --status-ink: #195738; }
+.rack-2d [data-operating-status='unpowered'] { --status-bg: #fbe4e0; --status-ink: #853229; }
+.rack-2d [data-operating-status='disabled'] { --status-bg: #e5ebee; --status-ink: #3d525d; }
+.rack-2d [data-operating-status='unknown'] { --status-bg: #fff0ce; --status-ink: #765014; }
+
+.rack-status-legend-item {
+  padding: 0.12rem 0.42rem;
+  border-radius: 0.27rem;
+  background: var(--status-bg);
+  color: var(--status-ink);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
 .rack-elevation {
   background: var(--surface, #fff);
   border: 1px solid var(--line, #d8e1e2);
@@ -82,8 +106,11 @@
 }
 
 .rack-svg-device { cursor: pointer; }
-.rack-slot-selectable .rack-svg-slot { cursor: pointer; }
-.rack-slot-selectable .rack-svg-slot:hover { fill: #d5ebe6; }
+.rack-slot-selectable { cursor: pointer; }
+.rack-slot-selectable:focus-visible { outline: none; }
+.rack-elevation-svg .rack-slot-selectable:hover .rack-svg-slot,
+.rack-elevation-svg .rack-slot-selectable:focus-visible .rack-svg-slot { fill: #d5ebe6; }
+.rack-slot-selectable:focus-visible .rack-svg-slot { stroke: #1b6359; stroke-width: 2; }
 .rack-svg-device-body { fill: #2d536b; stroke: #263c47; stroke-width: 0.85; }
 .rack-svg-device-mark { fill: #9cc7e2; }
 .rack-kind-network .rack-svg-device-body { fill: #23675e; }
@@ -110,11 +137,22 @@
   font-size: 10px;
 }
 
+.rack-svg-status-badge { fill: var(--status-bg); pointer-events: none; }
+.rack-svg-status-text {
+  fill: var(--status-ink);
+  font-size: 8.7px;
+  font-weight: 700;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
 .rack-svg-cross-face .rack-svg-device-body { fill: #dceaf0; stroke: #4a7184; stroke-dasharray: 3 2; }
 .rack-svg-cross-face .rack-svg-device-mark { fill: #5b879d; }
 .rack-svg-cross-face .rack-svg-device-name, .rack-svg-cross-face .rack-svg-device-u { fill: #24495c; }
 .rack-elevation-svg [data-blocked='unknown'] .rack-svg-slot { fill: #fff2d9; stroke: #d9be8d; }
 .rack-svg-pending-label { fill: #785314; font-size: 10px; pointer-events: none; }
+.rack-elevation-svg [data-slot-state='half-only'] .rack-svg-slot { fill: #e0f0ed; stroke: #a4c8bf; }
+.rack-svg-half-label { fill: #245b51; font-size: 10px; pointer-events: none; }
 
 .rack-spatial-panel {
   border: 1px solid var(--line, #d8e1e2);
@@ -196,6 +234,8 @@
   pointer-events: none;
 }
 
+.rack-spatial-legend[hidden] { display: none; }
+
 .rack-spatial-legend-item {
   display: inline-flex;
   align-items: center;
@@ -226,6 +266,30 @@
 }
 
 .rack-spatial-devices { border-top: 1px solid var(--line, #d8e1e2); padding: 0.65rem 0.8rem; }
+
+.rack-spatial-slot-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  padding: 0.6rem 0.8rem;
+  border-top: 1px solid var(--line, #d8e1e2);
+  font-size: 0.875rem;
+}
+
+.rack-spatial-slot-controls select, .rack-spatial-slot-controls button {
+  border-radius: 0.38rem;
+  border: 1px solid #b4cdc7;
+  padding: 0.35rem 0.55rem;
+  min-height: 2.2rem;
+  font: inherit;
+  color: #234d43;
+  background: white;
+}
+
+.rack-spatial-slot-controls button { background: #e3eeeb; font-weight: 650; cursor: pointer; }
+.rack-spatial-slot-controls button:disabled { opacity: 0.57; cursor: default; }
+.rack-spatial-slot-controls :focus-visible { outline: 2px solid #3c776b; outline-offset: 2px; }
 
 .rack-camera-controls button, .rack-spatial-devices button {
   font: inherit;

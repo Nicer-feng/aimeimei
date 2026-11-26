@@ -1,4 +1,8 @@
-const FRONT_MARKERS = {
+import {
+  buildDeviceSearch, deviceAddressLabel, endpointLabel, isDeviceArchived, normalizeSearchText as normalize,
+} from './asset-search.js';
+
+export const FRONT_MARKERS = {
   0: ['↓', '下'],
   90: ['→', '右'],
   180: ['↑', '上'],
@@ -88,23 +92,9 @@ export function renderRoomOverview(host, {
   const positions = layout?.positions.filter((position) => racksById.has(position.rack_id)) ?? [];
   const placed = new Map(positions.map((position) => [position.rack_id, position]));
   const unplaced = racks.filter((rack) => !placed.has(rack.id));
-  const roomDevices = devices.filter((device) => String(device.room_id) === String(room.id));
-  const scopeIds = new Set(roomDevices.map((device) => String(device.id)));
-  const systemNames = new Map();
-  const normalize = (value) => String(value ?? '').trim().normalize('NFKC').toLocaleLowerCase();
-  for (const system of systems) {
-    const name = { text: system.name, key: normalize(system.name) };
-    for (const deployment of system.deployments ?? []) {
-      const id = String(deployment.device_id);
-      if (!scopeIds.has(id)) continue;
-      if (!systemNames.has(id)) systemNames.set(id, []);
-      systemNames.get(id).push(name);
-    }
-  }
+  const roomDevices = devices.filter((device) => String(device.room_id) === String(room.id) && !isDeviceArchived(device));
   const rackNames = racks.map((rack) => ({ rack, key: normalize(rack.name) }));
-  const deviceNames = roomDevices.map((device) => ({
-    device, name: normalize(device.name), code: normalize(device.code), systems: systemNames.get(String(device.id)) ?? [],
-  }));
+  const searchDevices = buildDeviceSearch(roomDevices, systems);
   const overview = element('section', 'room-overview');
   const header = element('header', 'room-overview-header');
   const info = element('div', 'room-overview-summary');
@@ -125,8 +115,8 @@ export function renderRoomOverview(host, {
   searchInput.type = 'search';
   searchInput.autocomplete = 'off';
   searchInput.maxLength = 160;
-  searchInput.placeholder = '柜号、设备或业务系统';
-  searchInput.setAttribute('aria-label', '查找机柜、设备或业务系统');
+  searchInput.placeholder = '柜号、设备、系统、IP 或端口';
+  searchInput.setAttribute('aria-label', '查找机柜、设备、业务系统、IP、域名或端口');
   const searchButton = element('button', 'button small', '搜索');
   searchButton.type = 'submit';
   search.append(searchInput, searchButton);
@@ -197,13 +187,9 @@ export function renderRoomOverview(host, {
     for (const { rack, key } of rackNames) {
       if (key.includes(term)) groupsByRack.set(rack.id, { rack, direct: true, matches: [] });
     }
-    let deviceCount = 0;
-    for (const item of deviceNames) {
-      const names = item.systems.filter((system) => system.key.includes(term)).map((system) => system.text);
-      if (!item.name.includes(term) && !item.code.includes(term) && !names.length) continue;
-      deviceCount += 1;
-      const match = { device: item.device, systems: [...new Set(names)] };
-      const rack = racksById.get(item.device.rack_id);
+    const matches = searchDevices(term);
+    for (const match of matches) {
+      const rack = racksById.get(match.device.rack_id);
       if (!rack) {
         unmounted.push(match);
         continue;
@@ -212,12 +198,12 @@ export function renderRoomOverview(host, {
       groupsByRack.get(rack.id).matches.push(match);
     }
     const groups = racks.map((rack) => groupsByRack.get(rack.id)).filter(Boolean);
-    return { groups, unmounted, deviceCount };
+    return { groups, unmounted, deviceCount: matches.length };
   }
 
   function deviceResults(matches, mounted) {
     const list = element('ul', 'room-overview-search-devices');
-    for (const { device, systems: names } of matches) {
+    for (const { device, systems: names, entries, addresses } of matches) {
       const item = element('li', 'room-overview-search-device');
       item.dataset.deviceId = device.id;
       const deviceLink = element('a', 'room-overview-search-device-name', device.name);
@@ -230,6 +216,10 @@ export function renderRoomOverview(host, {
       const context = [location, names.length ? `业务系统 ${names.join('、')}` : ''].filter(Boolean).join(' · ');
       item.append(title);
       if (context) item.append(element('span', 'room-overview-search-device-meta', context));
+      const endpoints = [...new Set(entries.map(endpointLabel).filter(Boolean))];
+      const addressLabels = [...new Set(addresses.map(deviceAddressLabel).filter(Boolean))];
+      if (endpoints.length) item.append(element('span', 'room-overview-search-device-meta', `入口 ${endpoints.join('、')}`));
+      if (addressLabels.length) item.append(element('span', 'room-overview-search-device-meta', `设备地址 ${addressLabels.join('、')}`));
       list.append(item);
     }
     return list;
@@ -346,7 +336,7 @@ export function renderRoomOverview(host, {
     event.preventDefault();
     const term = normalize(searchInput.value);
     if (!term) {
-      displayResults('请输入柜号、设备编号、设备名称或业务系统名称。');
+      displayResults('请输入柜号、设备编号、设备名称、业务系统、IP、域名或端口。');
       searchInput.focus({ preventScroll: true });
       return;
     }

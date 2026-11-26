@@ -1,8 +1,8 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
-import { DETAIL_Z, RACK_UNIT, deviceMetrics } from './rack-geometry.js';
+import { DETAIL_Z, DEVICE_HALF_WIDTH, MOUNT_FULL_Z, RACK_UNIT, deviceMetrics } from './rack-geometry.js';
 import { animateOperatingLamps, buildRackModel, projectCabinetRect, projectScenePoint } from './rack-3d-model.js';
-import { operatingStatusLabel } from './rack.js?v=operating-status';
+import { isSelectableRackSlot, operatingStatusLabel, rackFaceSlots, rackSlotSelection } from './rack.js?v=operating-status';
 
 const CAMERA_VIEWS = [
   { label: '斜视', direction: [0.65, 0.29, 1] },
@@ -16,6 +16,13 @@ const RACK_MODES = [
   { id: 'depth', label: '深度核查' },
 ];
 
+const FACE_LABELS = { front: '正面', rear: '背面' };
+const SLOT_MARKS = {
+  'cross-face': { color: '#497bb5', label: '跨面占用' },
+  'half-only': { color: '#258976', label: '空位限半深' },
+  unknown: { color: '#d28324', label: '对面深度待核' },
+};
+
 const RACK_LEGENDS = {
   status: [
     ['#3fa86b', '运行中'],
@@ -26,9 +33,86 @@ const RACK_LEGENDS = {
   depth: [
     ['#3b6998', '全深（占正背面）'],
     ['#4b93a8', '半深（可共享 U 位）'],
-    ['#e5a131', '深度待核'],
+    ['#e5a131', '本面设备深度待核'],
+    ...Object.values(SLOT_MARKS).map(({ color, label }) => [color, label]),
   ],
 };
+
+export function rackFaceSlotAt(ray, slots) {
+  const sign = Math.sign(ray.origin.z);
+  if (Math.abs(ray.origin.z) <= MOUNT_FULL_Z || ray.direction.z * sign >= -1e-6) return undefined;
+  const distance = (sign * MOUNT_FULL_Z - ray.origin.z) / ray.direction.z;
+  const x = ray.origin.x + distance * ray.direction.x;
+  const y = ray.origin.y + distance * ray.direction.y;
+  if (Math.abs(x) > DEVICE_HALF_WIDTH || y < 0) return undefined;
+  const face = sign > 0 ? 'front' : 'rear';
+  return slots[face].get(Math.floor(y / RACK_UNIT) + 1);
+}
+
+function addSlotMarkers(scene, faceSlots) {
+  const group = new THREE.Group();
+  const geometry = new THREE.PlaneGeometry(0.052, RACK_UNIT * 0.74);
+  const matrix = new THREE.Matrix4();
+  for (const [kind, { color }] of Object.entries(SLOT_MARKS)) {
+    const slots = [...faceSlots.front.values(), ...faceSlots.rear.values()].filter((slot) => slot.kind === kind);
+    if (!slots.length) continue;
+    const marks = new THREE.InstancedMesh(geometry, new THREE.MeshBasicMaterial({ color, toneMapped: false }), slots.length * 2);
+    for (const [index, { face, u_start }] of slots.entries()) {
+      const sign = face === 'front' ? 1 : -1;
+      for (const [rail, x] of [-0.822, 0.822].entries()) {
+        matrix.makeRotationY(sign > 0 ? 0 : Math.PI);
+        matrix.setPosition(x, (u_start - 0.5) * RACK_UNIT, sign * (DETAIL_Z + 0.015));
+        marks.setMatrixAt(index * 2 + rail, matrix);
+      }
+    }
+    group.add(marks);
+  }
+  if (!group.children.length) geometry.dispose();
+  scene.add(group);
+  return group;
+}
+
+function slotControls(faceSlots, onEmpty, initialFace) {
+  const group = document.createElement('div');
+  group.className = 'rack-spatial-slot-controls';
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', '按面和 U 位新增设备');
+  const face = document.createElement('select');
+  face.className = 'rack-spatial-slot-face';
+  face.setAttribute('aria-label', '安装面');
+  for (const [value, label] of Object.entries(FACE_LABELS)) face.append(new Option(label, value));
+  const unit = document.createElement('select');
+  unit.className = 'rack-spatial-slot-u';
+  unit.setAttribute('aria-label', '可用起始 U 位');
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'rack-spatial-slot-add';
+  add.textContent = '在此新增';
+  add.addEventListener('click', () => {
+    const slot = faceSlots[face.value].get(Number(unit.value));
+    if (isSelectableRackSlot(slot)) onEmpty(rackSlotSelection(slot));
+  });
+  face.addEventListener('change', refresh);
+  group.append(face, unit, add);
+  setFace(initialFace);
+  return { group, setFace };
+
+  function setFace(next) {
+    face.value = next;
+    refresh();
+  }
+
+  function refresh() {
+    const previousUnit = unit.value;
+    const slots = [...faceSlots[face.value].values()].filter(isSelectableRackSlot).reverse();
+    unit.replaceChildren(...slots.map((slot) => new Option(
+      `U${slot.u_start}${slot.kind === 'half-only' ? '（限半深）' : ''}`, slot.u_start,
+    )));
+    if (slots.some((slot) => String(slot.u_start) === previousUnit)) unit.value = previousUnit;
+    if (!slots.length) unit.append(new Option('本面无可用 U 位'));
+    unit.disabled = add.disabled = !slots.length;
+  }
+}
 
 function addContactShadow(scene, bounds) {
   const stamp = document.createElement('canvas');
@@ -57,7 +141,8 @@ function addContactShadow(scene, bounds) {
 }
 
 export function mountRackScene(host, {
-  rack, devices, onDevice, deviceKind, units, depthLabel, onContextLost, onSceneInteraction, initialCamera, initialDeviceId,
+  rack, devices, onDevice, onEmpty, deviceKind, units, depthLabel, onContextLost, onSceneInteraction, initialCamera,
+  initialDeviceId, faceSlots = rackFaceSlots(rack, devices),
 }) {
   const initialView = initialCamera ?? { direction: CAMERA_VIEWS[0].direction, zoom: 1, activeView: 0, viewMode: 'appearance' };
   let viewMode = RACK_MODES.some((m) => m.id === initialView.viewMode) ? initialView.viewMode : 'appearance';
@@ -104,6 +189,7 @@ export function mountRackScene(host, {
       const moved = index !== activeView;
       setActiveView(index);
       frameView(new THREE.Vector3(...direction).normalize(), 1, center);
+      slotPicker?.setFace(index === 2 ? 'rear' : 'front');
       if (moved) onSceneInteraction?.();
     });
     rotation.append(button);
@@ -137,6 +223,8 @@ export function mountRackScene(host, {
   hover.textContent = hint;
   toolbar.append(toolbarGroups, hover);
   panel.append(toolbar);
+  const slotPicker = onEmpty && slotControls(faceSlots, onEmpty, initialView.direction[2] < 0 ? 'rear' : 'front');
+  if (slotPicker) panel.append(slotPicker.group);
 
   const shortcuts = document.createElement('div');
   shortcuts.className = 'rack-spatial-devices';
@@ -167,6 +255,13 @@ export function mountRackScene(host, {
     }
   }
   addContactShadow(scene, bounds);
+  const slotMarkers = addSlotMarkers(scene, faceSlots);
+  const slotHover = new THREE.Mesh(
+    new THREE.PlaneGeometry(DEVICE_HALF_WIDTH * 1.93, RACK_UNIT * 0.86),
+    new THREE.MeshBasicMaterial({ color: '#66c8aa', opacity: 0.38, transparent: true, depthWrite: false, toneMapped: false }),
+  );
+  slotHover.visible = false;
+  scene.add(slotHover);
 
   const camera = new THREE.PerspectiveCamera(36, 1, 0.04, 120);
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -200,6 +295,7 @@ export function mountRackScene(host, {
   resize();
 
   canvas.addEventListener('pointerdown', (event) => {
+    if (!event.isPrimary && event.pointerType === 'touch') down = undefined;
     if (event.button === 0 && event.isPrimary) {
       down = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
     }
@@ -211,8 +307,8 @@ export function mountRackScene(host, {
       return;
     }
     if (event.pointerType === 'touch') return;
-    const device = pick(event);
-    if (device) showHover(device, event);
+    const hit = pick(event);
+    if (hit) showHover(hit, event);
     else if (clearHover()) draw();
   });
   canvas.addEventListener('pointerleave', () => { if (clearHover()) draw(); });
@@ -221,9 +317,11 @@ export function mountRackScene(host, {
       Math.hypot(event.clientX - down.x, event.clientY - down.y) <= 5;
     down = undefined;
     if (!isClick) return;
-    const device = pick(event);
+    const hit = pick(event);
     if (clearHover()) draw();
-    if (device) onDevice(device, makeAnchor(device, canvas, { x: event.clientX, y: event.clientY }));
+    if (hit?.device) onDevice(hit.device, makeAnchor(hit.device, canvas, { x: event.clientX, y: event.clientY }));
+    else if (onEmpty && isSelectableRackSlot(hit?.slot)) onEmpty(rackSlotSelection(hit.slot));
+    else if (hit?.slot?.kind === 'unknown' && event.pointerType === 'touch') showHover(hit, event);
   });
   const contextLost = (event) => {
     event.preventDefault();
@@ -262,7 +360,7 @@ export function mountRackScene(host, {
     for (const button of shortcuts.children) {
       button.setAttribute('aria-pressed', String(button.dataset.deviceId === String(deviceId)));
     }
-    model.highlight(selectedDeviceId ?? hovered?.id ?? null);
+    model.highlight(selectedDeviceId ?? hovered?.device?.id ?? null);
     if (sized) draw();
   }
 
@@ -278,6 +376,7 @@ export function mountRackScene(host, {
       button.setAttribute('aria-pressed', String(id === mode));
     }
     model.setMode(mode);
+    slotMarkers.visible = mode === 'depth';
     const entries = RACK_LEGENDS[mode];
     if (!entries) {
       legend.hidden = true;
@@ -400,8 +499,14 @@ export function mountRackScene(host, {
       -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
     );
     raycaster.setFromCamera(pointer, camera);
+    const slot = rackFaceSlotAt(raycaster.ray, faceSlots);
+    if (slot) {
+      const activeDevice = slot.kind === 'occupied' || slot.kind === 'cross-face' ? slot.device : undefined;
+      return { slot, device: activeDevice };
+    }
     const hit = raycaster.intersectObjects(model.parts, false)[0];
-    return hit?.object.userData.device;
+    const device = hit?.object.userData.device;
+    return device ? { device } : undefined;
   }
 
   function clearHover() {
@@ -410,20 +515,43 @@ export function mountRackScene(host, {
     tooltip.hidden = true;
     hover.textContent = hint;
     canvas.classList.remove('rack-spatial-hit');
+    delete canvas.dataset.slotFace;
+    delete canvas.dataset.slotU;
+    delete canvas.dataset.slotState;
+    slotHover.visible = false;
     model.highlight(selectedDeviceId);
     return true;
   }
 
-  function showHover(device, event) {
-    if (hovered !== device) {
-      hovered = device;
-      const face = device.face === 'front' ? '正面' : '背面';
-      tooltipName.textContent = device.name;
-      tooltipPosition.textContent = `${face} ${units(device)} · ${device.u_height}U · ${depthLabel(device)} · ${operatingStatusLabel(device)}`;
-      hover.textContent = `${device.name} · ${tooltipPosition.textContent}`;
+  function showHover(hit, event) {
+    const { device, slot } = hit;
+    if (hovered?.device !== device || hovered?.slot !== slot) {
+      clearHover();
+      hovered = hit;
+      if (slot) {
+        canvas.dataset.slotFace = slot.face;
+        canvas.dataset.slotU = slot.u_start;
+        canvas.dataset.slotState = slot.kind;
+      }
+      const canAdd = Boolean(onEmpty && isSelectableRackSlot(slot));
+      if (device) {
+        tooltipName.textContent = device.name;
+        const cross = slot?.kind === 'cross-face' ? `${FACE_LABELS[slot.face]} U${slot.u_start} 跨面占用 · ` : '';
+        tooltipPosition.textContent = `${cross}${FACE_LABELS[device.face]} ${units(device)} · ${device.u_height}U · ${depthLabel(device)} · ${operatingStatusLabel(device)}`;
+      } else {
+        tooltipName.textContent = `${FACE_LABELS[slot.face]} U${slot.u_start} · ${SLOT_MARKS[slot.kind]?.label ?? '空位'}`;
+        tooltipPosition.textContent = slot.kind === 'unknown' ? `待核实对面设备「${slot.device.name}」的深度` : canAdd ? '选择此 U 位新增设备' : '';
+      }
+      hover.textContent = [tooltipName.textContent, tooltipPosition.textContent].filter(Boolean).join(' · ');
       tooltip.hidden = false;
-      canvas.classList.add('rack-spatial-hit');
-      model.highlight(selectedDeviceId ?? device.id);
+      canvas.classList.toggle('rack-spatial-hit', Boolean(device || canAdd));
+      model.highlight(selectedDeviceId ?? device?.id ?? null);
+      if (canAdd) {
+        const sign = slot.face === 'front' ? 1 : -1;
+        slotHover.position.set(0, (slot.u_start - 0.5) * RACK_UNIT, sign * (DETAIL_Z + 0.008));
+        slotHover.rotation.y = sign > 0 ? 0 : Math.PI;
+        slotHover.visible = true;
+      }
       draw();
     }
     const bounds = canvas.getBoundingClientRect();
