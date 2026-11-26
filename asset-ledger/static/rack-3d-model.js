@@ -9,6 +9,87 @@ import { createDeviceLabelTexture, createRackScaleTexture } from './rack-texture
 const LAMP_PERIOD_MS = 3200;
 const LAMP_FRAME_MS = 80;
 
+function canvasRect(canvas) {
+  const rect = canvas.getBoundingClientRect();
+  if (![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite) ||
+      rect.width <= 0 || rect.height <= 0) return null;
+  return rect;
+}
+
+function projectX(rect, x) {
+  return rect.left + (x + 1) * rect.width / 2;
+}
+
+function projectY(rect, y) {
+  return rect.top + (1 - y) * rect.height / 2;
+}
+
+export function projectScenePoint(camera, canvas, point) {
+  const rect = canvasRect(canvas);
+  if (!rect) return null;
+  camera.updateWorldMatrix(true, false);
+  const view = point.clone().applyMatrix4(camera.matrixWorldInverse);
+  if (view.z > -camera.near || view.z < -camera.far) return null;
+  view.applyMatrix4(camera.projectionMatrix);
+  if (![view.x, view.y].every(Number.isFinite) || Math.abs(view.x) > 1 || Math.abs(view.y) > 1) return null;
+  return { x: projectX(rect, view.x), y: projectY(rect, view.y) };
+}
+
+export function projectCabinetRect(camera, canvas, bounds, matrixWorld) {
+  const rect = canvasRect(canvas);
+  if (!rect || bounds.isEmpty()) return null;
+  camera.updateWorldMatrix(true, false);
+  const transform = camera.matrixWorldInverse.clone();
+  if (matrixWorld) transform.multiply(matrixWorld);
+  const corners = Array.from({ length: 8 }, (_, index) => new THREE.Vector3(
+    index & 1 ? bounds.max.x : bounds.min.x,
+    index & 2 ? bounds.max.y : bounds.min.y,
+    index & 4 ? bounds.max.z : bounds.min.z,
+  ).applyMatrix4(transform));
+  if (corners.some((point) => ![point.x, point.y, point.z].every(Number.isFinite))) return null;
+
+  const near = -camera.near;
+  const far = -camera.far;
+  const visible = corners.filter((point) => point.z <= near && point.z >= far);
+  // 剪裁包围盒棱线，避免靠近机柜时，镜头后方的顶点把投影范围翻转。
+  for (const plane of [near, far]) {
+    if (!Number.isFinite(plane)) continue;
+    for (let index = 0; index < corners.length; index += 1) {
+      for (const axis of [1, 2, 4]) {
+        if (index & axis) continue;
+        const start = corners[index];
+        const end = corners[index | axis];
+        if ((start.z - plane) * (end.z - plane) < 0) {
+          visible.push(start.clone().lerp(end, (plane - start.z) / (end.z - start.z)));
+        }
+      }
+    }
+  }
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of visible) {
+    const projected = point.clone().applyMatrix4(camera.projectionMatrix);
+    if (![projected.x, projected.y].every(Number.isFinite)) continue;
+    minX = Math.min(minX, projected.x);
+    minY = Math.min(minY, projected.y);
+    maxX = Math.max(maxX, projected.x);
+    maxY = Math.max(maxY, projected.y);
+  }
+  minX = Math.max(-1, minX);
+  minY = Math.max(-1, minY);
+  maxX = Math.min(1, maxX);
+  maxY = Math.min(1, maxY);
+  if (minX >= maxX || minY >= maxY) return null;
+  const left = projectX(rect, minX);
+  const right = projectX(rect, maxX);
+  const top = projectY(rect, maxY);
+  const bottom = projectY(rect, minY);
+  return { left, top, right, bottom, width: right - left, height: bottom - top };
+}
+
 function material(color, roughness, metalness) {
   return new THREE.MeshStandardMaterial({ color, roughness, metalness });
 }

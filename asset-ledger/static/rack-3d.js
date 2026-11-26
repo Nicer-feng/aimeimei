@@ -1,7 +1,7 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
-import { RACK_UNIT } from './rack-geometry.js';
-import { animateOperatingLamps, buildRackModel } from './rack-3d-model.js';
+import { DETAIL_Z, RACK_UNIT, deviceMetrics } from './rack-geometry.js';
+import { animateOperatingLamps, buildRackModel, projectCabinetRect, projectScenePoint } from './rack-3d-model.js';
 import { operatingStatusLabel } from './rack.js?v=operating-status';
 
 const CAMERA_VIEWS = [
@@ -146,7 +146,7 @@ export function mountRackScene(host, {
     button.type = 'button';
     button.dataset.deviceId = device.id;
     button.textContent = `${device.face === 'front' ? '正面' : '背面'} ${units(device)} · ${device.name} · ${depthLabel(device)} · ${operatingStatusLabel(device)}`;
-    button.addEventListener('click', () => onDevice(device, makeAnchor(device.id, button)));
+    button.addEventListener('click', () => onDevice(device, makeAnchor(device, button)));
     shortcuts.append(button);
   }
   if (devices.length) panel.append(shortcuts);
@@ -223,7 +223,7 @@ export function mountRackScene(host, {
     if (!isClick) return;
     const device = pick(event);
     if (clearHover()) draw();
-    if (device) onDevice(device, makeAnchor(device.id, canvas, { x: event.clientX, y: event.clientY }));
+    if (device) onDevice(device, makeAnchor(device, canvas, { x: event.clientX, y: event.clientY }));
   });
   const contextLost = (event) => {
     event.preventDefault();
@@ -233,19 +233,26 @@ export function mountRackScene(host, {
 
   return Object.assign(dispose, { snapshot, deviceAnchor, setSelectedDevice });
 
-  function makeAnchor(deviceId, anchorElement, point) {
+  function makeAnchor(device, anchorElement, point) {
     return {
       element: anchorElement,
       ...(anchorElement === canvas ? { viewport, ...point } : {}),
       visible: () => anchorElement.isConnected && anchorElement.getClientRects().length > 0,
+      cabinetRect: () => projectCabinetRect(camera, canvas, bounds),
+      devicePoint() {
+        const { centerY, full, sign } = deviceMetrics(device, RACK_UNIT);
+        const visibleFace = full ? (camera.position.z >= 0 ? 1 : -1) : sign;
+        return projectScenePoint(camera, canvas, new THREE.Vector3(0, centerY, visibleFace * DETAIL_Z));
+      },
       setSelected(selected) {
-        if (selected || selectedDeviceId === deviceId) setSelectedDevice(selected ? deviceId : null);
+        if (selected || selectedDeviceId === device.id) setSelectedDevice(selected ? device.id : null);
       },
     };
   }
 
   function deviceAnchor(deviceId) {
-    return devices.some((device) => device.id === deviceId) ? makeAnchor(deviceId, canvas) : null;
+    const device = devices.find((item) => item.id === deviceId);
+    return device ? makeAnchor(device, canvas) : null;
   }
 
   function setSelectedDevice(deviceId) {

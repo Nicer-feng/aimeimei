@@ -6,6 +6,7 @@ import {
 } from './rack-geometry.js';
 import {
   animateOperatingLamps, buildRackFineDetails, buildRackOverviewLayer, createRackPalette,
+  projectCabinetRect, projectScenePoint,
 } from './rack-3d-model.js';
 import { operatingStatusLabel } from './rack.js?v=operating-status';
 
@@ -231,8 +232,9 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
       metrics.maxZ - metrics.minZ,
     ).multiplyScalar(entry.scale * 1.022);
   }
-  const entryForRack = (id) => targetsById.get(String(id))?.userData.entry;
-  return { bounds, entries, entryForRack, highlight, highlightDevice, landmarks, lamps: overviewLayer.lamps,
+  const targetForRack = (id) => targetsById.get(String(id));
+  const entryForRack = (id) => targetForRack(id)?.userData.entry;
+  return { bounds, entries, entryForRack, targetForRack, highlight, highlightDevice, landmarks, lamps: overviewLayer.lamps,
     setMode: overviewLayer.setMode, symbols, targets };
 }
 
@@ -745,6 +747,28 @@ export function mountRoomScene(host, {
     const id = String(device.id);
     return {
       element: canvas, x: event?.clientX, y: event?.clientY, viewport,
+      cabinetRect() {
+        if (disposed || !sized) return null;
+        const target = model.targetForRack(entry.rack.id);
+        if (!target) return null;
+        if (!target.geometry.boundingBox) target.geometry.computeBoundingBox();
+        target.updateWorldMatrix(true, false);
+        return projectCabinetRect(camera, canvas, target.geometry.boundingBox, target.matrixWorld);
+      },
+      devicePoint() {
+        if (disposed || !sized) return null;
+        const metrics = deviceMetrics(device, RACK_UNIT);
+        const rotation = THREE.MathUtils.degToRad(entry.rotation);
+        const sin = Math.sin(rotation);
+        const cos = Math.cos(rotation);
+        const cameraZ = (camera.position.x - entry.x) * sin + (camera.position.z - entry.z) * cos;
+        const front = metrics.full ? cameraZ >= 0 : metrics.front;
+        const panelZ = (front ? metrics.maxZ : metrics.minZ) * entry.scale;
+        const point = new THREE.Vector3(
+          entry.x + sin * panelZ, entry.y + metrics.centerY * entry.scale, entry.z + cos * panelZ,
+        );
+        return projectScenePoint(camera, canvas, point);
+      },
       setSelected(selected) {
         if (disposed || (!selected && selectedDeviceId !== id)) return;
         selectedDeviceId = selected ? id : undefined;

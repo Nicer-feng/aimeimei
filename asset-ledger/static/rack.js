@@ -204,8 +204,12 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
   }
 
   function svgAnchor(deviceId, node) {
+    const frame = node.ownerSVGElement?.querySelector('.rack-svg-frame');
+    const neighbor = [...chart.querySelectorAll('.rack-svg-frame')].find((item) => item !== frame);
     return bindSelection(deviceId, {
       element: node,
+      cabinetRect: () => frame?.getBoundingClientRect(),
+      neighborCabinetRect: () => neighbor?.getBoundingClientRect(),
       visible: () => node.isConnected && !chart.hidden && node.getClientRects().length > 0,
     });
   }
@@ -263,8 +267,16 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
     }
   }
 
-  buttons[0].addEventListener('click', () => showElevation());
-  buttons[1].addEventListener('click', () => { void showScene(); });
+  buttons[0].addEventListener('click', () => {
+    if (spatial.hidden) return;
+    onSceneInteraction?.();
+    showElevation();
+  });
+  buttons[1].addEventListener('click', () => {
+    if (!spatial.hidden) return;
+    onSceneInteraction?.();
+    void showScene();
+  });
   const restoreScene = view?.rackId === rack.id && view.mode === '3d';
   const ready = restoreScene ? showScene(view.camera) : undefined;
   if (!restoreScene) activate('2d');

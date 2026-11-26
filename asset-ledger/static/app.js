@@ -13,6 +13,16 @@ const drawer = byId('drawer');
 const deviceQuick = element('dialog', {
   id: 'device-quick', class: 'device-quick', 'aria-labelledby': 'device-quick-title',
 });
+const deviceQuickGuide = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+const deviceQuickPath = document.createElementNS(deviceQuickGuide.namespaceURI, 'path');
+const deviceQuickTarget = document.createElementNS(deviceQuickGuide.namespaceURI, 'circle');
+deviceQuickGuide.setAttribute('class', 'device-quick-guide');
+deviceQuickGuide.setAttribute('aria-hidden', 'true');
+deviceQuickGuide.setAttribute('hidden', '');
+deviceQuickPath.setAttribute('class', 'device-quick-guide-path');
+deviceQuickTarget.setAttribute('class', 'device-quick-guide-target');
+deviceQuickTarget.setAttribute('r', '4');
+deviceQuickGuide.append(deviceQuickPath, deviceQuickTarget);
 const preview = byId('pdf-preview');
 const deviceClickModeKey = 'sroom-device-click-mode';
 const deviceClickModes = [['quick', '就地快览'], ['detail', '直接开详情']];
@@ -34,7 +44,7 @@ let deviceSelection = null;
 let deviceOpenedByScenePointer = false;
 let devicePageScroll = null;
 const deviceSheetMedia = window.matchMedia('(max-width: 670px)');
-drawer.before(deviceQuick);
+drawer.before(deviceQuickGuide, deviceQuick);
 const titles = { rooms: '机房总览', rack: '机柜视图', devices: '设备台账', systems: '业务系统', projects: '项目档案' };
 const collectionRoutes = { device: 'devices', system: 'systems', project: 'projects' };
 const mountDepthLabels = { unknown: '深度待核', half: '半深', full: '全深' };
@@ -690,14 +700,19 @@ function selectDevice(device, anchor) {
   const anchorRect = point && anchor.element?.getBoundingClientRect();
   deviceSelection = device ? {
     anchor,
-    offset: anchorRect ? { x: anchor.x - anchorRect.left, y: anchor.y - anchorRect.top } : null,
+    offset: anchorRect ? {
+      x: anchor.x - anchorRect.left,
+      y: anchor.y - anchorRect.top,
+      width: anchorRect.width,
+      height: anchorRect.height,
+    } : null,
   } : null;
   deviceSelection?.anchor?.setSelected?.(true);
 }
 
 function closeDevicePresentation({ restoreFocus = false } = {}) {
   const anchor = deviceSelection?.anchor;
-  if (deviceQuick.open) deviceQuick.close();
+  closeQuickPanel();
   if (drawer.open) drawer.close();
   selectDevice(null);
   restoreDevicePageScroll();
@@ -708,17 +723,28 @@ function closeDevicePresentation({ restoreFocus = false } = {}) {
   }
 }
 
+function closeQuickPanel() {
+  deviceQuickGuide.setAttribute('hidden', '');
+  if (deviceQuick.open) deviceQuick.close();
+}
+
 function dismissDeviceQuick() {
   if (deviceQuick.open) closeDevicePresentation();
 }
 
 function selectedDeviceRect() {
   const { anchor, offset } = deviceSelection ?? {};
-  const rect = anchor?.element?.getBoundingClientRect();
-  if (!rect || !offset) return rect;
-  const x = rect.left + offset.x;
-  const y = rect.top + offset.y;
-  return { left: x, right: x, top: y, bottom: y };
+  const source = anchor?.element;
+  if (!source?.isConnected || !source.getClientRects().length) return null;
+  const rect = source.getBoundingClientRect();
+  if (offset && (!anchor.devicePoint || (rect.width === offset.width && rect.height === offset.height))) {
+    const x = rect.left + offset.x;
+    const y = rect.top + offset.y;
+    return { left: x, right: x, top: y, bottom: y };
+  }
+  if (!anchor?.devicePoint) return rect;
+  const point = anchor.devicePoint();
+  return point && { left: point.x, right: point.x, top: point.y, bottom: point.y };
 }
 
 function restoreDevicePageScroll() {
@@ -747,29 +773,80 @@ function showDeviceAboveSheet(panel) {
 }
 
 function positionDeviceQuick() {
-  if (deviceSheetMedia.matches) return;
   const edge = 12;
-  const gap = 12;
-  const width = deviceQuick.offsetWidth;
-  const height = deviceQuick.offsetHeight;
   const viewportWidth = document.documentElement.clientWidth;
   const viewportHeight = window.innerHeight;
   const target = selectedDeviceRect();
   const x = target ? (target.left + target.right) / 2 : viewportWidth / 2;
   const y = target ? (target.top + target.bottom) / 2 : viewportHeight / 2;
-  let left = (target?.right ?? x) + gap;
-  let top = y - height / 2;
-  if (left + width > viewportWidth - edge) left = (target?.left ?? x) - gap - width;
-  if (left < edge) {
-    left = x - width / 2;
-    top = (target?.bottom ?? y) + gap;
-    if (top + height > viewportHeight - edge) top = (target?.top ?? y) - gap - height;
+
+  if (!deviceSheetMedia.matches) {
+    const anchor = deviceSelection?.anchor;
+    const cabinet = anchor?.cabinetRect?.() ?? target;
+    const neighbor = anchor?.neighborCabinetRect?.();
+    const cabinetLeft = cabinet?.left ?? x;
+    const cabinetRight = cabinet?.right ?? x;
+    const leftLimit = neighbor?.right <= cabinetLeft ? Math.max(edge, neighbor.right + edge) : edge;
+    const rightLimit = neighbor?.left >= cabinetRight
+      ? Math.min(viewportWidth - edge, neighbor.left - edge) : viewportWidth - edge;
+    const availableLeft = cabinetLeft - leftLimit;
+    const availableRight = rightLimit - cabinetRight;
+    deviceQuick.style.removeProperty('--quick-width');
+    const compactWidth = Math.floor(Math.max(availableLeft, availableRight) - 20);
+    if (neighbor && compactWidth >= 216 && compactWidth < deviceQuick.offsetWidth) {
+      deviceQuick.style.setProperty('--quick-width', `${compactWidth}px`);
+    }
+    const width = deviceQuick.offsetWidth;
+    const height = deviceQuick.offsetHeight;
+    const rightSpace = availableRight - width;
+    const leftSpace = availableLeft - width;
+    let left;
+    let top = y - height / 2;
+    if (rightSpace >= 40 || (rightSpace >= 20 && leftSpace < 40)) {
+      left = cabinetRight + Math.min(40, rightSpace);
+    } else if (leftSpace >= 20) {
+      left = cabinetLeft - width - Math.min(40, leftSpace);
+    } else {
+      left = x - width / 2;
+      const lower = (cabinet?.bottom ?? y) + 24;
+      const upper = (cabinet?.top ?? y) - height - 24;
+      if (lower + height <= viewportHeight - edge) top = lower;
+      else if (upper >= edge) top = upper;
+      else top = y + height + 20 <= viewportHeight - edge ? y + 20 : y - height - 20;
+    }
+    left = Math.max(edge, Math.min(left, viewportWidth - width - edge));
+    top = Math.max(edge, Math.min(top, viewportHeight - height - edge));
+    deviceQuick.style.setProperty('--quick-left', `${left}px`);
+    deviceQuick.style.setProperty('--quick-top', `${top}px`);
+    deviceQuick.style.setProperty('--quick-origin', `${Math.max(0, Math.min(width, x - left))}px ${Math.max(0, Math.min(height, y - top))}px`);
   }
-  left = Math.max(edge, Math.min(left, viewportWidth - width - edge));
-  top = Math.max(edge, Math.min(top, viewportHeight - height - edge));
-  deviceQuick.style.setProperty('--quick-left', `${left}px`);
-  deviceQuick.style.setProperty('--quick-top', `${top}px`);
-  deviceQuick.style.setProperty('--quick-origin', `${Math.max(0, Math.min(width, x - left))}px ${Math.max(0, Math.min(height, y - top))}px`);
+
+  const visible = Boolean(target && x >= 0 && x < viewportWidth && y >= 0 && y < viewportHeight);
+  drawDeviceQuickGuide(visible ? { x, y } : null);
+}
+
+function drawDeviceQuickGuide(point) {
+  const card = deviceQuick.getBoundingClientRect();
+  const dx = point ? Math.max(card.left - point.x, point.x - card.right, 0) : 0;
+  const dy = point ? Math.max(card.top - point.y, point.y - card.bottom, 0) : 0;
+  deviceQuickGuide.toggleAttribute('hidden', dx < 6 && dy < 6);
+  if (dx < 6 && dy < 6) return;
+
+  const { x, y } = point;
+  let path;
+  if (dx >= dy) {
+    const startX = x < card.left ? card.left : card.right;
+    const startY = Math.max(card.top + 14, Math.min(y, card.bottom - 14));
+    path = `M ${startX} ${startY} H ${(startX + x) / 2} L ${x} ${y}`;
+  } else {
+    const startX = Math.max(card.left + 14, Math.min(x, card.right - 14));
+    const startY = y < card.top ? card.top : card.bottom;
+    path = `M ${startX} ${startY} V ${(startY + y) / 2} L ${x} ${y}`;
+  }
+  deviceQuickPath.setAttribute('d', path);
+  deviceQuickTarget.setAttribute('cx', x);
+  deviceQuickTarget.setAttribute('cy', y);
+  deviceQuickGuide.classList.toggle('device-quick-guide-elevation', deviceSelection?.anchor?.element instanceof SVGElement);
 }
 
 function openDevicePresentation(device, anchor) {
@@ -795,14 +872,14 @@ function openDevicePresentation(device, anchor) {
       element('span', { class: 'device-quick-status', 'data-status': operatingStatus(device) }, operatingStatusLabel(device)),
       details));
   if (!deviceQuick.open) deviceQuick.show();
-  positionDeviceQuick();
   showDeviceAboveSheet(deviceQuick);
+  positionDeviceQuick();
   details.focus({ preventScroll: true });
 }
 
 function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview?.controller)?.deviceAnchor?.(device?.id)) {
   if (!device) return;
-  if (deviceQuick.open) deviceQuick.close();
+  closeQuickPanel();
   selectDevice(device, anchor);
   drawer.dataset.deviceId = device.id;
   const actions = [internalLink('device', device.id, '打开设备详情', { class: 'button primary' })];
@@ -1469,6 +1546,9 @@ window.addEventListener('resize', () => {
   } else if (drawer.open) {
     showDeviceAboveSheet(drawer);
   }
+});
+deviceQuick.addEventListener('animationend', () => {
+  if (deviceQuick.open) positionDeviceQuick();
 });
 window.addEventListener('scroll', (event) => {
   if (deviceQuick.open && !(event.target instanceof Node && deviceQuick.contains(event.target))) positionDeviceQuick();
