@@ -162,6 +162,37 @@ class SroomIdentityTests(unittest.TestCase):
                                       headers={"Origin": "https://untrusted.example"})[0], 403)
         self.assertEqual(self.identity.requests, [])
 
+    def test_management_routes_use_authorized_write_branch(self):
+        origin = {"Origin": "https://feng.asia"}
+        for path, method in (("/api/rooms", "POST"), ("/api/racks/1", "PATCH"),
+                             ("/api/devices/1/archive", "POST"), ("/api/documents/5", "DELETE")):
+            with self.subTest(path=path):
+                self.assertEqual(self.request(path, READER, method=method, headers=origin)[0], 403)
+                self.assertEqual(self.request(path, method=method, headers=origin)[0], 401)
+        self.assertEqual(self.request("/api/documents/5", ADMIN, method="DELETE",
+                                      headers={"Origin": "https://untrusted.example"})[0], 403)
+        status, _, body = self.request("/api/rooms", ADMIN, method="POST", headers=origin,
+                                       data={"site_id": 1, "name": "HTTP 验收机房"})
+        self.assertEqual(status, 201)
+        room_id = json.loads(body)["id"]
+        status, _, body = self.request("/api/racks", ADMIN, method="POST", headers=origin,
+                                       data={"room_id": room_id, "name": "HTTP-01", "height": 42})
+        self.assertEqual(status, 201)
+        rack_id = json.loads(body)["id"]
+        status, _, body = self.request(f"/api/rack-availability?height=2&depth=full&rack_id={rack_id}", READER)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["racks"][0]["faces"]["front"]["starts"], list(range(1, 42)))
+        data = {"code": "HTTP-DEVICE", "name": "HTTP 验收设备", "type": "测试", "room_id": room_id,
+                "rack_id": rack_id, "face": "front", "u_start": 1, "u_height": 2, "mount_depth": "full"}
+        status, _, body = self.request("/api/devices", ADMIN, method="POST", headers=origin, data=data)
+        self.assertEqual(status, 201)
+        device_id = json.loads(body)["id"]
+        path = f"/api/devices/{device_id}"
+        self.assertEqual(self.request(path + "/archive", ADMIN, method="POST", headers=origin)[0], 200)
+        self.assertEqual(self.request(path + "/restore", ADMIN, method="POST", headers=origin)[0], 200)
+        status, _, body = self.request(path, ADMIN, method="DELETE", headers=origin)
+        self.assertEqual((status, json.loads(body)), (200, {}))
+
     def test_local_password_mode_remains_available_for_development(self):
         status, _, config = self.request("/api/auth-config", local=True)
         self.assertEqual((status, json.loads(config)), (200, {"mode": "local"}))

@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS devices (
     operating_status TEXT NOT NULL DEFAULT 'unknown' CHECK (
         operating_status IN ('unknown', 'running', 'disabled', 'unpowered')
     ),
+    archived_at TEXT, archived_location TEXT,
     CHECK ((rack_id IS NULL AND face IS NULL AND u_start IS NULL AND u_height IS NULL) OR
            (rack_id IS NOT NULL AND face IS NOT NULL AND face IN ('front', 'rear') AND
             u_start IS NOT NULL AND u_start > 0 AND u_height IS NOT NULL AND u_height > 0))
@@ -47,7 +48,9 @@ CREATE TABLE IF NOT EXISTS deployments (
 CREATE TABLE IF NOT EXISTS service_entries (
     id INTEGER PRIMARY KEY, deployment_id INTEGER NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
     host TEXT NOT NULL, protocol TEXT NOT NULL, port INTEGER CHECK (port BETWEEN 1 AND 65535),
-    purpose TEXT NOT NULL, url TEXT NOT NULL
+    purpose TEXT NOT NULL, url TEXT NOT NULL,
+    source_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    source_page INTEGER CHECK (source_page > 0)
 );
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, code TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -67,6 +70,12 @@ CREATE TABLE IF NOT EXISTS documents (
     file_digest TEXT NOT NULL REFERENCES files(digest),
     CHECK ((project_id IS NULL) <> (device_id IS NULL))
 );
+CREATE TABLE IF NOT EXISTS device_addresses (
+    id INTEGER PRIMARY KEY, device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    host TEXT NOT NULL, note TEXT NOT NULL, source_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    source_page INTEGER CHECK (source_page > 0)
+);
+CREATE INDEX IF NOT EXISTS device_addresses_device ON device_addresses(device_id);
 CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY, role TEXT NOT NULL CHECK(role IN ('admin', 'reader')),
     unit_id INTEGER REFERENCES units(id), password_hash TEXT,

@@ -11,9 +11,9 @@ from urllib.parse import quote, urlsplit
 
 from .attachment_formats import FORMATS, extension
 from .data import (
-    ApiError, PROJECT_ROOT, SESSION_SECONDS, catalog, database, document_file,
-    invalid, log_in, log_out, profile, save_device, save_document, save_project,
-    save_room_layout, save_system, session_user, string,
+    ApiError, PROJECT_ROOT, SESSION_SECONDS, catalog, database, delete_record, document_file,
+    invalid, log_in, log_out, profile, rack_availability, save_device, save_document, save_project,
+    save_rack, save_room, save_room_layout, save_system, session_user, set_device_archive, string,
 )
 from .edge import LoginThrottle
 from .identity import AI_COOKIE, IdentityError, sroom_user
@@ -24,12 +24,16 @@ COOKIE = "asset_ledger_session"
 LOCAL_HOST = re.compile(r"(?:127\.0\.0\.1|localhost|\[::1\])(?::[0-9]{1,5})?", re.I)
 TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 FILE_ROUTE = re.compile(r"/api/documents/([1-9][0-9]{0,9})/file")
-EDIT_ROUTE = re.compile(r"/api/(devices|systems|projects)/([1-9][0-9]{0,9})")
+EDIT_ROUTE = re.compile(r"/api/(devices|systems|projects|rooms|racks)/([1-9][0-9]{0,9})")
+DELETE_ROUTE = re.compile(r"/api/(documents|devices|systems|projects)/([1-9][0-9]{0,9})")
+DEVICE_ARCHIVE_ROUTE = re.compile(r"/api/devices/([1-9][0-9]{0,9})/(archive|restore)")
 ROOM_LAYOUT_ROUTE = re.compile(r"/api/rooms/([1-9][0-9]{0,9})/layout")
 ASSET_ROUTE = re.compile(r"/static/([a-zA-Z0-9_-][a-zA-Z0-9._-]*(?:/[a-zA-Z0-9_-][a-zA-Z0-9._-]*)*)")
 ENCODING_QUALITY = re.compile(r"\s*q\s*=\s*(0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)\s*", re.I)
 BYTE_RANGE = re.compile(r"bytes=([0-9]{0,10})-([0-9]{0,10})")
-RESOURCE_WRITERS = {"devices": save_device, "systems": save_system, "projects": save_project}
+RESOURCE_WRITERS = {
+    "devices": save_device, "systems": save_system, "projects": save_project, "rooms": save_room, "racks": save_rack,
+}
 WRITE_LIMIT = 1024 * 1024
 UPLOAD_LIMIT = 12 * 1024 * 1024
 PDFJS_CACHE_QUERY = "v=6.5.438"
@@ -91,6 +95,9 @@ class LedgerHandler(BaseHTTPRequestHandler):
         self.handle_request()
 
     def do_PATCH(self):
+        self.handle_request()
+
+    def do_DELETE(self):
         self.handle_request()
 
     def handle_request(self):
@@ -189,7 +196,7 @@ class LedgerHandler(BaseHTTPRequestHandler):
         return value
 
     def api(self, conn, path, query):
-        writing = self.command in ("POST", "PATCH")
+        writing = self.command in ("POST", "PATCH", "DELETE")
         if writing:
             self.check_origin()
         managed = self.server.ai_sso
@@ -228,6 +235,8 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 self.json_response(200, profile(conn, user))
             elif path == "/api/catalog":
                 self.json_response(200, catalog(conn, user))
+            elif path == "/api/rack-availability":
+                self.json_response(200, rack_availability(conn, user, query))
             else:
                 match = FILE_ROUTE.fullmatch(path)
                 if not match:
@@ -247,6 +256,10 @@ class LedgerHandler(BaseHTTPRequestHandler):
             if path == "/api/documents":
                 self.json_response(201, save_document(conn, self.payload(UPLOAD_LIMIT)))
                 return
+            archive = DEVICE_ARCHIVE_ROUTE.fullmatch(path)
+            if archive:
+                self.json_response(200, set_device_archive(conn, user, int(archive[1]), archive[2] == "archive"))
+                return
             writer = RESOURCE_WRITERS.get(path.removeprefix("/api/"))
             if writer:
                 self.json_response(201, writer(conn, user, self.payload()))
@@ -259,6 +272,12 @@ class LedgerHandler(BaseHTTPRequestHandler):
             match = EDIT_ROUTE.fullmatch(path)
             if match:
                 self.json_response(200, RESOURCE_WRITERS[match[1]](conn, user, self.payload(), int(match[2])))
+                return
+        if self.command == "DELETE":
+            match = DELETE_ROUTE.fullmatch(path)
+            if match:
+                delete_record(conn, match[1], int(match[2]))
+                self.json_response(200, {})
                 return
         raise ApiError(404, "页面或记录不存在。")
 

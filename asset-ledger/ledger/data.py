@@ -2,8 +2,9 @@
 
 import base64
 import binascii
+from collections import defaultdict, deque
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import hmac
@@ -12,7 +13,7 @@ from pathlib import Path
 import secrets
 import sqlite3
 import time
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from .attachment_formats import FORMATS, extension, valid_attachment
 from .samples import seed
@@ -27,6 +28,9 @@ OPERATING_STATUSES = ("unknown", "running", "disabled", "unpowered")
 LAYOUT_MAX_ROWS = 12
 LAYOUT_MAX_COLUMNS = 20
 LAYOUT_ROTATIONS = (0, 90, 180, 270)
+MAX_RACK_HEIGHT = 255
+RACK_FACES = ("front", "rear")
+DELETABLE_RECORDS = ("devices", "projects", "systems", "documents")
 
 
 class ApiError(Exception):
@@ -72,6 +76,7 @@ def migrate_schema(conn):
     conn.executescript((Path(__file__).parent / "schema.sql").read_text(encoding="utf-8"))
     migrate_mount_depth(conn)
     migrate_operating_status(conn)
+    migrate_device_catalog(conn)
 
 
 def migrate_mount_depth(conn):
@@ -92,6 +97,22 @@ def migrate_operating_status(conn):
         conn.execute("""ALTER TABLE devices ADD COLUMN operating_status TEXT NOT NULL DEFAULT 'unknown' CHECK (
             operating_status IN ('unknown', 'running', 'disabled', 'unpowered')
         )""")
+
+
+def migrate_device_catalog(conn):
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for table, columns in (
+            ("devices", {"archived_at": "TEXT", "archived_location": "TEXT"}),
+            ("service_entries", {
+                "source_document_id": "INTEGER REFERENCES documents(id) ON DELETE SET NULL",
+                "source_page": "INTEGER CHECK (source_page > 0)",
+            }),
+        ):
+            existing = {column["name"] for column in conn.execute(f"PRAGMA table_info({table})")}
+            for name, definition in columns.items():
+                if name not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
 def password_hash(password, salt):
@@ -227,6 +248,12 @@ def room_layouts(conn, rooms, sites, units, racks):
     return [layouts[room_id] for room_id in sorted(layouts)]
 
 
+def entry_source(row, documents):
+    document = documents.get(row["source_document_id"])
+    return {"source_document_id": document["id"] if document else None,
+            "source_page": row["source_page"] if document else None}
+
+
 def catalog(conn, user):
     is_admin = user["role"] == "admin"
     site_ids = visible_sites(conn, user)
@@ -246,13 +273,22 @@ def catalog(conn, user):
     rooms = {row["id"]: dict(row) for row in conn.execute("SELECT * FROM rooms ORDER BY id") if row["site_id"] in site_ids}
     racks = [dict(row) for row in conn.execute("SELECT * FROM racks ORDER BY id") if row["room_id"] in rooms]
     devices = {
-        row["id"]: dict(row, project_ids=[]) for row in conn.execute("SELECT * FROM devices ORDER BY id")
-        if row["room_id"] in rooms
+        row["id"]: dict(row, project_ids=[], addresses=[], archived_location=json.loads(row["archived_location"] or "null"))
+        for row in conn.execute("SELECT * FROM devices ORDER BY id") if row["room_id"] in rooms
     }
     projects = project_lists(conn, site_ids, is_admin)
     for project in projects.values():
         for device_id in project["device_ids"]:
             devices[device_id]["project_ids"].append(project["id"])
+    documents = {
+        row["id"]: dict(row) for row in conn.execute(
+            "SELECT id, title, category, project_id, device_id, page, note, filename FROM documents ORDER BY id"
+        ) if row["project_id"] in projects or row["device_id"] in devices
+    }
+    for row in conn.execute("SELECT * FROM device_addresses ORDER BY id"):
+        device = devices.get(row["device_id"])
+        if device:
+            device["addresses"].append({"host": row["host"], "note": row["note"], **entry_source(row, documents)})
     systems = {row["id"]: dict(row, deployments=[]) for row in conn.execute("SELECT * FROM systems ORDER BY id")}
     deployments = {}
     for row in conn.execute("SELECT * FROM deployments ORDER BY id"):
@@ -263,14 +299,13 @@ def catalog(conn, user):
     for row in conn.execute("SELECT * FROM service_entries ORDER BY id"):
         deployment = deployments.get(row["deployment_id"])
         if deployment:
-            deployment["entries"].append({key: row[key] for key in ("id", "host", "protocol", "port", "purpose", "url")})
-    documents = [dict(row) for row in conn.execute(
-        "SELECT id, title, category, project_id, device_id, page, note, filename FROM documents ORDER BY id"
-    ) if row["project_id"] in projects or row["device_id"] in devices]
+            fields = {key: row[key] for key in ("id", "host", "protocol", "port", "purpose", "url")}
+            fields.update(entry_source(row, documents))
+            deployment["entries"].append(fields)
     return {
         "units": list(units.values()), "sites": sites, "rooms": list(rooms.values()), "racks": racks,
         "devices": list(devices.values()), "systems": [system for system in systems.values() if is_admin or system["deployments"]],
-        "projects": list(projects.values()), "documents": documents,
+        "projects": list(projects.values()), "documents": list(documents.values()),
         "room_layouts": room_layouts(conn, rooms, sites, units, racks),
     }
 
@@ -402,6 +437,12 @@ def save_room_layout(conn, payload, room_id):
 
 def write_record(conn, table, ident, values):
     # 表名、字段名来自本模块的固定字面量，录入值统一使用 SQL 参数。
+    if ident is None and table in DELETABLE_RECORDS:
+        # 旧的书签或确认窗口不能在删除记录后指向另一条新记录。
+        floor = conn.execute("SELECT value FROM metadata WHERE key = ?", (f"deleted-id:{table}",)).fetchone()
+        if floor:
+            largest = conn.execute(f"SELECT COALESCE(MAX(id), 0) FROM {table}").fetchone()[0]
+            values = {"id": max(largest, int(floor["value"])) + 1, **values}
     keys = list(values)
     args = tuple(values.values())
     if ident is None:
@@ -410,6 +451,61 @@ def write_record(conn, table, ident, values):
     columns = ", ".join(f"{key} = ?" for key in keys)
     conn.execute(f"UPDATE {table} SET {columns} WHERE id = ?", (*args, ident))
     return ident
+
+
+def save_room(conn, user, payload, ident=None):
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        previous = conn.execute("SELECT * FROM rooms WHERE id = ?", (ident,)).fetchone() if ident is not None else None
+        if ident is not None and previous is None:
+            raise ApiError(404, "机房不存在。")
+        site_id = previous["site_id"] if previous and "site_id" not in payload else integer(
+            payload, "site_id", "站点", required=True,
+        )
+        if previous and site_id != previous["site_id"]:
+            raise invalid("已登记机房不可更换所属站点。")
+        ensure_record(conn, "sites", site_id, "站点")
+        name = previous["name"] if previous and "name" not in payload else string(
+            payload, "name", "机房名称", 160, required=True,
+        )
+        if conn.execute("SELECT 1 FROM rooms WHERE site_id = ? AND name = ? COLLATE NOCASE AND id != ?",
+                        (site_id, name, ident or 0)).fetchone():
+            raise ApiError(409, "该站点已有同名机房。")
+        saved_id = write_record(conn, "rooms", ident, {"site_id": site_id, "name": name})
+    return {"id": saved_id, "site_id": site_id, "name": name}
+
+
+def save_rack(conn, user, payload, ident=None):
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        previous = conn.execute("SELECT * FROM racks WHERE id = ?", (ident,)).fetchone() if ident is not None else None
+        if ident is not None and previous is None:
+            raise ApiError(404, "机柜不存在。")
+        room_id = previous["room_id"] if previous and "room_id" not in payload else integer(
+            payload, "room_id", "机房", required=True,
+        )
+        if previous and room_id != previous["room_id"]:
+            raise invalid("已登记机柜不可更换所属机房。")
+        ensure_record(conn, "rooms", room_id, "机房")
+        name = previous["name"] if previous and "name" not in payload else string(
+            payload, "name", "柜号", 80, required=True,
+        )
+        height = previous["height"] if previous and "height" not in payload else integer(
+            payload, "height", "柜高", required=True, maximum=MAX_RACK_HEIGHT,
+        )
+        if conn.execute("SELECT 1 FROM racks WHERE room_id = ? AND name = ? COLLATE NOCASE AND id != ?",
+                        (room_id, name, ident or 0)).fetchone():
+            raise ApiError(409, "该机房已有相同柜号。")
+        if previous and height < previous["height"]:
+            blocker = conn.execute(
+                """SELECT code, u_start + u_height - 1 AS end_u FROM devices WHERE rack_id = ?
+                   AND u_start + u_height - 1 > ? ORDER BY end_u DESC LIMIT 1""",
+                (ident, height),
+            ).fetchone()
+            if blocker:
+                raise ApiError(409, f"设备 {blocker['code']} 占用至 U{blocker['end_u']}，不能降低柜高。")
+        saved_id = write_record(conn, "racks", ident, {"room_id": room_id, "name": name, "height": height})
+    return {"id": saved_id, "room_id": room_id, "name": name, "height": height}
 
 
 def save_device(conn, user, payload, ident=None):
@@ -445,11 +541,14 @@ def save_device(conn, user, payload, ident=None):
         values["u_start"] = integer(payload, "u_start", "起始 U 位", required=True)
         values["u_height"] = integer(payload, "u_height", "占用 U 数", required=True)
     project_ids = id_list(payload, "project_ids", "项目") if "project_ids" in payload else None
+    addresses = device_addresses(payload) if "addresses" in payload else None
     with conn:
         conn.execute("BEGIN IMMEDIATE")
         previous = conn.execute("SELECT * FROM devices WHERE id = ?", (ident,)).fetchone() if ident is not None else None
         if ident is not None and previous is None:
             raise ApiError(404, "设备不存在。")
+        if previous is not None and previous["archived_at"]:
+            raise ApiError(409, "设备已下架归档，恢复后再编辑。")
         if previous is not None and "operating_status" not in payload:
             values["operating_status"] = previous["operating_status"]
         ensure_record(conn, "rooms", values["room_id"], "机房")
@@ -466,7 +565,103 @@ def save_device(conn, user, payload, ident=None):
         if project_ids is not None:
             conn.execute("DELETE FROM project_devices WHERE device_id = ?", (saved_id,))
             conn.executemany("INSERT INTO project_devices VALUES (?, ?)", [(pid, saved_id) for pid in project_ids])
+        if addresses is not None:
+            previous_sources = {(row["host"], row["source_document_id"]) for row in conn.execute(
+                "SELECT host, source_document_id FROM device_addresses WHERE device_id = ?", (saved_id,),
+            )}
+            for host, _, document_id, _ in addresses:
+                if (host, document_id) not in previous_sources:
+                    ensure_device_source(conn, saved_id, document_id)
+            conn.execute("DELETE FROM device_addresses WHERE device_id = ?", (saved_id,))
+            conn.executemany(
+                """INSERT INTO device_addresses(device_id, host, note, source_document_id, source_page)
+                   VALUES (?, ?, ?, ?, ?)""", [(saved_id, *address) for address in addresses],
+            )
         return next(device for device in catalog(conn, user)["devices"] if device["id"] == saved_id)
+
+
+def set_device_archive(conn, user, ident, archived):
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        device = conn.execute(
+            """SELECT d.*, room.name AS room_name, rack.name AS rack_name FROM devices d
+               JOIN rooms room ON room.id = d.room_id LEFT JOIN racks rack ON rack.id = d.rack_id
+               WHERE d.id = ?""", (ident,),
+        ).fetchone()
+        if device is None:
+            raise ApiError(404, "设备不存在。")
+        if archived and not device["archived_at"]:
+            location = {key: device[key] for key in (
+                "room_id", "room_name", "rack_id", "rack_name", "face", "u_start", "u_height", "mount_depth", "workstation",
+            )}
+            conn.execute(
+                """UPDATE devices SET archived_at = ?, archived_location = ?, rack_id = NULL,
+                   face = NULL, u_start = NULL, u_height = NULL, mount_depth = 'unknown', workstation = '' WHERE id = ?""",
+                (datetime.now(timezone.utc).isoformat(timespec="seconds"), json.dumps(location, ensure_ascii=False), ident),
+            )
+        if not archived and device["archived_at"]:
+            location = json.loads(device["archived_location"] or "{}")
+            conn.execute(
+                "UPDATE devices SET archived_at = NULL, archived_location = NULL, workstation = ? WHERE id = ?",
+                (location.get("workstation", ""), ident),
+            )
+        return next(item for item in catalog(conn, user)["devices"] if item["id"] == ident)
+
+
+def delete_record(conn, resource, ident):
+    references = {
+        "devices": ("设备", (("project_devices", "device_id", "项目关联"),
+                               ("deployments", "device_id", "业务部署"), ("documents", "device_id", "档案"))),
+        "projects": ("项目", (("project_devices", "project_id", "设备关联"), ("documents", "project_id", "档案"))),
+        "systems": ("业务系统", (("deployments", "system_id", "业务部署"),)),
+    }
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if resource == "documents":
+            document = conn.execute("SELECT file_digest FROM documents WHERE id = ?", (ident,)).fetchone()
+            if document is None:
+                raise ApiError(404, "档案不存在。")
+            for table in ("device_addresses", "service_entries"):
+                conn.execute(f"UPDATE {table} SET source_document_id = NULL, source_page = NULL WHERE source_document_id = ?",
+                             (ident,))
+            conn.execute("DELETE FROM documents WHERE id = ?", (ident,))
+            conn.execute(
+                "DELETE FROM files WHERE digest = ? AND NOT EXISTS (SELECT 1 FROM documents WHERE file_digest = ?)",
+                (document["file_digest"], document["file_digest"]),
+            )
+        else:
+            label, dependencies = references[resource]
+            ensure_record(conn, resource, ident, label, 404)
+            associated = [kind for table, column, kind in dependencies if conn.execute(
+                f"SELECT 1 FROM {table} WHERE {column} = ? LIMIT 1", (ident,),
+            ).fetchone()]
+            if associated:
+                raise ApiError(409, f"{label}仍有关联记录（{'、'.join(associated)}），请先解除关联。")
+            conn.execute(f"DELETE FROM {resource} WHERE id = ?", (ident,))
+        conn.execute(
+            """INSERT INTO metadata(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE
+               SET value = MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER))""",
+            (f"deleted-id:{resource}", ident),
+        )
+
+
+def preserves_rack_position(values, previous):
+    return (
+        previous is not None
+        and all(previous[key] == values[key] for key in ("rack_id", "face", "u_start", "u_height"))
+        and (previous["mount_depth"] == values["mount_depth"]
+             or (previous["mount_depth"] == "unknown" and values["mount_depth"] == "half"))
+    )
+
+
+def placement_conflict(face, depth, preserve, blocker):
+    if blocker["face"] == face:
+        return f"同一安装面的 U 位与设备 {blocker['code']} 重叠。"
+    if depth == "full" or blocker["mount_depth"] == "full":
+        return f"全深设备同时占用正背面 U 位，与对面设备 {blocker['code']} 冲突。"
+    if not preserve and (depth == "unknown" or blocker["mount_depth"] == "unknown"):
+        return f"与对面设备 {blocker['code']} 共用 U 位前，需核实两台设备均为半深。"
+    return None
 
 
 def validate_rack_position(conn, values, ident, previous=None):
@@ -477,12 +672,8 @@ def validate_rack_position(conn, values, ident, previous=None):
     end = start + values["u_height"] - 1
     if end > rack["height"]:
         raise invalid(f"设备超出机柜的 {rack['height']}U 范围。")
-    depth = values.get("mount_depth", "unknown")
     # 旧记录可能在前后面共享 U 位。可就地保留或补核半深，改位置时按新规则核对。
-    legacy_position = (
-        previous is not None and all(previous[key] == values[key] for key in ("rack_id", "face", "u_start", "u_height"))
-        and (previous["mount_depth"] == depth or (previous["mount_depth"] == "unknown" and depth == "half"))
-    )
+    legacy_position = preserves_rack_position(values, previous)
     blockers = conn.execute(
         """SELECT code, face, mount_depth FROM devices WHERE rack_id = ? AND id != ?
            AND u_start <= ? AND u_start + u_height - 1 >= ?
@@ -490,12 +681,89 @@ def validate_rack_position(conn, values, ident, previous=None):
         (values["rack_id"], ident or 0, end, start, values["face"]),
     )
     for blocker in blockers:
-        if blocker["face"] == values["face"]:
-            raise ApiError(409, f"同一安装面的 U 位与设备 {blocker['code']} 重叠。")
-        if depth == "full" or blocker["mount_depth"] == "full":
-            raise ApiError(409, f"全深设备同时占用正背面 U 位，与对面设备 {blocker['code']} 冲突。")
-        if not legacy_position and (depth == "unknown" or blocker["mount_depth"] == "unknown"):
-            raise ApiError(409, f"与对面设备 {blocker['code']} 共用 U 位前，需核实两台设备均为半深。")
+        conflict = placement_conflict(values["face"], values["mount_depth"], legacy_position, blocker)
+        if conflict:
+            raise ApiError(409, conflict)
+
+
+def rack_availability(conn, user, query):
+    keys = {"height", "depth", "face", "room_id", "rack_id", "exclude_device_id"}
+    try:
+        values = parse_qsl(query, keep_blank_values=True, strict_parsing=True, max_num_fields=len(keys))
+    except ValueError:
+        raise invalid("柜位查询参数格式不正确。") from None
+    params = dict(values)
+    if len(params) != len(values) or params.keys() - keys:
+        raise invalid("柜位查询含未知或重复参数。")
+
+    for key in ("height", "room_id", "rack_id", "exclude_device_id"):
+        if key in params:
+            value = params[key]
+            if not value.isascii() or not value.isdecimal() or len(value) > 10:
+                raise invalid("柜位筛选的高度和编号应为正整数。")
+            params[key] = int(value)
+    height = integer(params, "height", "占用 U 数", required=True, maximum=MAX_RACK_HEIGHT)
+    room_id = integer(params, "room_id", "机房")
+    rack_id = integer(params, "rack_id", "机柜")
+    excluded_id = integer(params, "exclude_device_id", "排除设备")
+    depth = params.get("depth", "unknown")
+    face = params.get("face", "any")
+    if depth not in MOUNT_DEPTHS or face not in (*RACK_FACES, "any"):
+        raise invalid("请选择有效的机柜面与设备深度。")
+
+    site_ids = visible_sites(conn, user)
+    rooms = {row["id"] for row in conn.execute("SELECT id, site_id FROM rooms") if row["site_id"] in site_ids}
+    if room_id is not None and room_id not in rooms:
+        raise ApiError(404, "机房不存在。")
+    if excluded_id is not None:
+        previous = conn.execute("SELECT * FROM devices WHERE id = ?", (excluded_id,)).fetchone()
+        if previous is None or previous["room_id"] not in rooms:
+            raise ApiError(404, "设备不存在。")
+    else:
+        previous = None
+    racks = {
+        row["id"]: dict(row, faces={})
+        for row in conn.execute("SELECT * FROM racks ORDER BY room_id, name, id")
+        if row["room_id"] in rooms and (room_id is None or row["room_id"] == room_id)
+        and (rack_id is None or row["id"] == rack_id)
+    }
+    if rack_id is not None and rack_id not in racks:
+        raise ApiError(404, "机柜不存在。")
+    placements = {ident: [] for ident in racks}
+    for device in conn.execute(
+        "SELECT id, rack_id, face, u_start, u_height, mount_depth, code FROM devices WHERE rack_id IS NOT NULL ORDER BY id"
+    ):
+        if device["id"] != excluded_id and device["rack_id"] in placements:
+            placements[device["rack_id"]].append(device)
+
+    for rack in racks.values():
+        occupied = placements[rack["id"]]
+        for side in RACK_FACES:
+            result = {"starts": []}
+            rack["faces"][side] = result
+            position = {"rack_id": rack["id"], "face": side, "u_height": height, "mount_depth": depth}
+            if face in ("any", side):
+                for start in range(1, rack["height"] - height + 2):
+                    position["u_start"] = start
+                    preserve = preserves_rack_position(position, previous)
+                    if not any(
+                        device["u_start"] < start + height and start < device["u_start"] + device["u_height"]
+                        and placement_conflict(side, depth, preserve, device)
+                        for device in occupied
+                    ):
+                        result["starts"].append(start)
+            if rack_id is not None:
+                slots = [{"u": number, "state": "free"} for number in range(1, rack["height"] + 1)]
+                priority = {"free": 0, "half": 1, "unknown": 2, "full": 3, "occupied": 4}
+                for device in occupied:
+                    state = "occupied" if side == device["face"] else device["mount_depth"]
+                    end = min(rack["height"], device["u_start"] + device["u_height"] - 1)
+                    for number in range(device["u_start"], end + 1):
+                        slot = slots[number - 1]
+                        if priority[state] > priority[slot["state"]]:
+                            slot.update(state=state, code=device["code"], device_id=device["id"])
+                result["slots"] = slots
+    return {"racks": list(racks.values())}
 
 
 def save_project(conn, user, payload, ident=None):
@@ -511,8 +779,11 @@ def save_project(conn, user, payload, ident=None):
         if ident is not None:
             ensure_record(conn, "projects", ident, "项目", 404)
         ensure_record(conn, "sites", values["site_id"], "站点")
+        linked = {row["device_id"] for row in conn.execute(
+            "SELECT device_id FROM project_devices WHERE project_id = ?", (ident,),
+        )} if ident is not None and device_ids is not None else set()
         for device_id in device_ids or []:
-            ensure_record(conn, "devices", device_id, "设备")
+            ensure_linkable_device(conn, device_id, "设备", linked)
         if conn.execute(
             "SELECT 1 FROM projects WHERE code = ? AND id != ?", (values["code"], ident or 0)
         ).fetchone():
@@ -522,6 +793,47 @@ def save_project(conn, user, payload, ident=None):
             conn.execute("DELETE FROM project_devices WHERE project_id = ?", (saved_id,))
             conn.executemany("INSERT INTO project_devices VALUES (?, ?)", [(saved_id, did) for did in device_ids])
         return next(project for project in catalog(conn, user)["projects"] if project["id"] == saved_id)
+
+
+def ensure_linkable_device(conn, device_id, label, previous):
+    device = conn.execute("SELECT archived_at FROM devices WHERE id = ?", (device_id,)).fetchone()
+    if device is None:
+        raise invalid(f"{label}不存在。")
+    if device["archived_at"] and device_id not in previous:
+        raise ApiError(409, "已归档设备不能新增关联。")
+
+
+def source_fields(payload):
+    document_id = integer(payload, "source_document_id", "依据档案")
+    page = integer(payload, "source_page", "依据页码", maximum=9999)
+    if page is not None and document_id is None:
+        raise invalid("填写依据页码时须选择档案。")
+    return document_id, page
+
+
+def ensure_device_source(conn, device_id, document_id):
+    if document_id is not None and conn.execute(
+        """SELECT 1 FROM documents d WHERE d.id = ? AND (d.device_id = ? OR EXISTS (
+           SELECT 1 FROM project_devices pd WHERE pd.device_id = ? AND pd.project_id = d.project_id))""",
+        (document_id, device_id, device_id),
+    ).fetchone() is None:
+        raise invalid("依据档案须与设备或设备所属项目关联。")
+
+
+def check_host(host):
+    if not host or any(char.isspace() or ord(char) < 32 or char in "/\\@?#" for char in host):
+        raise invalid("请填写有效的 IP 或域名，端口请单独填写。")
+
+
+def device_addresses(payload):
+    addresses = []
+    for address in items(payload, "addresses", "管理地址", maximum=100):
+        if not isinstance(address, dict):
+            raise invalid("管理地址应为对象。")
+        host = string(address, "host", "管理地址", 253, required=True)
+        check_host(host)
+        addresses.append((host, string(address, "note", "地址备注", 300), *source_fields(address)))
+    return addresses
 
 
 def service_entry(payload):
@@ -541,13 +853,14 @@ def service_entry(payload):
         except ValueError:
             raise invalid("网页访问地址须为 HTTP 或 HTTPS 且不能含登录凭据。") from None
         host = host or parsed.hostname
-    if not host or any(char.isspace() or ord(char) < 32 or char in "/\\@?#" for char in host):
-        raise invalid("请填写有效的 IP 或域名，端口请单独填写。")
-    return (
+    check_host(host)
+    fields = (
         host, string(payload, "protocol", "协议", 60, required=True),
         integer(payload, "port", "端口", maximum=65535),
         string(payload, "purpose", "入口用途", 300), url,
     )
+    source = source_fields(payload) if {"source_document_id", "source_page"} & payload.keys() else None
+    return fields, source
 
 
 def save_system(conn, user, payload, ident=None):
@@ -570,20 +883,38 @@ def save_system(conn, user, payload, ident=None):
         conn.execute("BEGIN IMMEDIATE")
         if ident is not None:
             ensure_record(conn, "systems", ident, "业务系统", 404)
+        linked = {row["device_id"] for row in conn.execute(
+            "SELECT device_id FROM deployments WHERE system_id = ?", (ident,),
+        )} if ident is not None and "deployments" in payload else set()
         for device_id in deployments:
-            ensure_record(conn, "devices", device_id, "部署设备")
+            ensure_linkable_device(conn, device_id, "部署设备", linked)
         saved_id = write_record(conn, "systems", ident, values)
         if "deployments" in payload:
+            sources = defaultdict(deque)
+            for row in conn.execute(
+                """SELECT d.device_id, e.* FROM service_entries e JOIN deployments d ON e.deployment_id = d.id
+                   WHERE d.system_id = ? ORDER BY e.id""", (saved_id,),
+            ):
+                key = tuple(row[field] for field in ("device_id", "host", "protocol", "port", "purpose", "url"))
+                sources[key].append((row["source_document_id"], row["source_page"]))
             conn.execute("DELETE FROM deployments WHERE system_id = ?", (saved_id,))
             for device_id, (note, entries) in deployments.items():
                 deployed_id = conn.execute(
                     "INSERT INTO deployments(system_id, device_id, note) VALUES (?, ?, ?)",
                     (saved_id, device_id, note),
                 ).lastrowid
+                values = []
+                for fields, source in entries:
+                    matches = sources.get((device_id, *fields))
+                    previous = matches.popleft() if matches else (None, None)
+                    if source is None:
+                        source = previous
+                    if source[0] != previous[0]:
+                        ensure_device_source(conn, device_id, source[0])
+                    values.append((deployed_id, *fields, *source))
                 conn.executemany(
-                    """INSERT INTO service_entries(deployment_id, host, protocol, port, purpose, url)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    [(deployed_id, *entry) for entry in entries],
+                    """INSERT INTO service_entries(deployment_id, host, protocol, port, purpose, url, source_document_id, source_page)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", values,
                 )
         return next(system for system in catalog(conn, user)["systems"] if system["id"] == saved_id)
 

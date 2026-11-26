@@ -75,7 +75,7 @@ def seed(conn, directory):
         [(1, 1, 1, "青岚站实例"), (2, 1, 5, "松泉站实例"), (3, 2, 1, "资料归档实例")],
     )
     conn.executemany(
-        "INSERT INTO service_entries VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO service_entries(id, deployment_id, host, protocol, port, purpose, url) VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
             (1, 1, "portal.ql.example", "HTTPS", 443, "业务门户", "https://portal.ql.example/"),
             (2, 1, "192.0.2.31", "PostgreSQL", 5432, "业务数据库", ""),
