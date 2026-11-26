@@ -298,7 +298,7 @@ function filterControls(filters, options = {}) {
   if (options.search) {
     const input = element('input', {
       id: 'device-search', type: 'search', value: state.deviceSearch,
-      placeholder: '设备、系统、IP、域名或端口',
+      placeholder: '设备、品牌型号、系统、IP 或端口',
       oninput: (event) => {
         state.deviceSearch = event.currentTarget.value;
         options.search();
@@ -510,9 +510,10 @@ function renderDevicesPage() {
           element('span', { class: 'muted small-text', 'aria-live': 'polite' }, `${matches.length} 台设备`),
           button('导出当前筛选', () => exportDevices(matches.map(({ device }) => device)), 'small', { disabled: !matches.length }))),
       table(['设备', '类型', '位置', '运行状态', '维护人', '最近核实'],
-        matches.map(({ device, systems, entries, addresses }) => [
+        matches.map(({ device, matchedModel, systems, entries, addresses }) => [
           element('div', {}, internalLink('device', device.id, device.name),
             element('div', { class: 'muted small-text code' }, device.code),
+            matchedModel && element('div', { class: 'muted small-text' }, matchedModel),
             (systems.length || entries.length || addresses.length) && element('div', { class: 'muted small-text search-evidence' },
               [...new Set([...systems, ...entries.map((entry) => `${entry.system} · ${endpointLabel(entry)}`),
                 ...addresses.map(deviceAddressLabel)])].join('；'))),

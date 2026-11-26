@@ -115,8 +115,8 @@ export function renderRoomOverview(host, {
   searchInput.type = 'search';
   searchInput.autocomplete = 'off';
   searchInput.maxLength = 160;
-  searchInput.placeholder = '柜号、设备、系统、IP 或端口';
-  searchInput.setAttribute('aria-label', '查找机柜、设备、业务系统、IP、域名或端口');
+  searchInput.placeholder = '柜号、设备、品牌型号、系统、IP 或端口';
+  searchInput.setAttribute('aria-label', '查找机柜、设备、品牌型号、业务系统、IP、域名或端口');
   const searchButton = element('button', 'button small', '搜索');
   searchButton.type = 'submit';
   search.append(searchInput, searchButton);
@@ -203,7 +203,7 @@ export function renderRoomOverview(host, {
 
   function deviceResults(matches, mounted) {
     const list = element('ul', 'room-overview-search-devices');
-    for (const { device, systems: names, entries, addresses } of matches) {
+    for (const { device, matchedModel, systems: names, entries, addresses } of matches) {
       const item = element('li', 'room-overview-search-device');
       item.dataset.deviceId = device.id;
       const deviceLink = element('a', 'room-overview-search-device-name', device.name);
@@ -213,7 +213,7 @@ export function renderRoomOverview(host, {
       if (device.code) title.append(element('span', 'code muted', device.code));
       const location = mounted ? `${device.face === 'rear' ? '背面' : '正面'} ${units?.(device) ?? `U${device.u_start}`}`
         : (device.workstation ? `工位 ${device.workstation}` : '');
-      const context = [location, names.length ? `业务系统 ${names.join('、')}` : ''].filter(Boolean).join(' · ');
+      const context = [location, matchedModel, names.length ? `业务系统 ${names.join('、')}` : ''].filter(Boolean).join(' · ');
       item.append(title);
       if (context) item.append(element('span', 'room-overview-search-device-meta', context));
       const endpoints = [...new Set(entries.map(endpointLabel).filter(Boolean))];
@@ -336,7 +336,7 @@ export function renderRoomOverview(host, {
     event.preventDefault();
     const term = normalize(searchInput.value);
     if (!term) {
-      displayResults('请输入柜号、设备编号、设备名称、业务系统、IP、域名或端口。');
+      displayResults('请输入柜号、设备编号、名称、品牌型号、业务系统、IP、域名或端口。');
       searchInput.focus({ preventScroll: true });
       return;
     }

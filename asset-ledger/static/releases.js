@@ -1,5 +1,9 @@
 export const releases = [
   {
+    version: '1.1.1',
+    changes: ['设备台账和 3D 总览支持按品牌或型号模糊搜索。'],
+  },
+  {
     version: '1.1.0',
     changes: [
       '支持跨机房核查连续 U 位，新增和移位时可以预览冲突；2D、3D 均可从空 U 位录入。',

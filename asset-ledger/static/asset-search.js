@@ -2,6 +2,10 @@ export function normalizeSearchText(value) {
   return String(value ?? '').trim().normalize('NFKC').toLowerCase();
 }
 
+function modelKey(text) {
+  return text.replace(/[\s\p{Pd}]+/gu, '');
+}
+
 function parsePort(value) {
   const text = String(value ?? '');
   if (!/^\d{1,5}$/.test(text)) return null;
@@ -86,6 +90,7 @@ export function buildDeviceSearch(devices, systems, { includeArchived = false } 
       device,
       name: normalizeSearchText(device.name),
       code: normalizeSearchText(device.code),
+      model: modelKey(normalizeSearchText(device.model)),
       addresses: (device.addresses ?? []).map((address) => ({ address, key: hostKey(deviceAddressLabel(address)) })),
       deployments: [],
     });
@@ -104,6 +109,8 @@ export function buildDeviceSearch(devices, systems, { includeArchived = false } 
   }
   return (input) => {
     const query = parseQuery(input);
+    const textQuery = query.kind === 'text';
+    const modelTerms = textQuery && !query.exactHost ? query.term.split(/\s+/).map(modelKey).filter(Boolean) : [];
     const results = [];
     for (const record of index.values()) {
       const result = { device: record.device, systems: [], entries: [], addresses: [] };
@@ -111,8 +118,10 @@ export function buildDeviceSearch(devices, systems, { includeArchived = false } 
         results.push(result);
         continue;
       }
-      const textQuery = query.kind === 'text';
       const deviceMatches = textQuery && (record.name.includes(query.term) || record.code.includes(query.term));
+      if (modelTerms.length && modelTerms.every((term) => record.model.includes(term))) {
+        result.matchedModel = record.device.model;
+      }
       if (textQuery) {
         result.addresses = record.addresses.filter(({ key }) => matchHost(key, query)).map(({ address }) => address);
       }
@@ -129,7 +138,7 @@ export function buildDeviceSearch(devices, systems, { includeArchived = false } 
         }
       }
       result.systems = [...names];
-      if (deviceMatches || names.size || result.addresses.length) results.push(result);
+      if (deviceMatches || result.matchedModel || names.size || result.addresses.length) results.push(result);
     }
     return results;
   };
