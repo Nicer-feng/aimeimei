@@ -1,5 +1,9 @@
 export const releases = [
   {
+    version: '1.2.1',
+    changes: ['机房 3D 总览支持沿屏幕上下左右平移，并放宽单排机柜的平移范围。'],
+  },
+  {
     version: '1.2.0',
     changes: [
       '3D 增加按需惯性、单柜平滑切换和总览双击聚焦。',

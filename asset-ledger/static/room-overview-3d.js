@@ -439,6 +439,8 @@ export function mountRoomScene(host, {
   const shadowTexture = createContactShadowTexture();
   const model = makeRoom(scene, { room: layout, racks, devices, deviceKind, palette, floorTexture, shadowTexture });
   const roomSize = model.bounds.getSize(new THREE.Vector3());
+  // 屏幕平移会同时改变目标的高度和纵深，给单排机房的地板边缘留出余量。
+  const panBounds = model.bounds.clone().expandByScalar(Math.max(roomSize.y, Math.hypot(roomSize.x, roomSize.z) / 4));
   scene.fog = new THREE.FogExp2(scene.background, Math.min(0.023, 0.18 / Math.hypot(roomSize.x, roomSize.z)));
   const landmarkItems = model.landmarks.map(({ id, text, point }) => {
     const item = node('span', 'room-3d-landmark', text);
@@ -458,7 +460,7 @@ export function mountRoomScene(host, {
   const controls = new OrbitControls(camera, viewport);
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
   controls.enablePan = true;
-  controls.screenSpacePanning = false;
+  controls.screenSpacePanning = true;
   controls.enableDamping = !motion.matches;
   controls.dampingFactor = 0.08;
   controls.minPolarAngle = 0.001;
@@ -632,9 +634,7 @@ export function mountRoomScene(host, {
 
   function clampTarget(keepOrbit = false) {
     offset.copy(controls.target);
-    controls.target.x = THREE.MathUtils.clamp(controls.target.x, model.bounds.min.x, model.bounds.max.x);
-    controls.target.z = THREE.MathUtils.clamp(controls.target.z, model.bounds.min.z, model.bounds.max.z);
-    controls.target.y = THREE.MathUtils.clamp(controls.target.y, 0, Math.max(0.4, model.bounds.max.y * 0.7));
+    controls.target.clamp(panBounds.min, panBounds.max);
     if (keepOrbit) camera.position.add(offset.subVectors(controls.target, offset));
   }
 
