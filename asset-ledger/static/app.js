@@ -360,14 +360,13 @@ function renderRoomPage(requestedId, filterChanged) {
   const { site, unit } = roomContext(room.id);
   filterPanel.append(element('div', { class: 'rack-context' }, joinedPath(unit?.name, site?.name, room.name)));
   const racks = state.catalog.racks.filter((rack) => rack.room_id === room.id);
-  const rackIds = new Set(racks.map((rack) => rack.id));
-  const devices = state.catalog.devices.filter((device) => device.room_id === room.id && rackIds.has(device.rack_id));
+  const devices = state.catalog.devices.filter((device) => device.room_id === room.id);
   const layout = (state.catalog.room_layouts ?? []).find((item) => item.room_id === room.id);
   const previous = state.roomViews.get(room.id);
   const host = element('section', { id: 'room-overview', 'aria-label': `${room.name}机柜总览` });
   page.append(host);
   const controller = renderRoomOverview(host, {
-    room, layout, racks, devices, deviceKind, units, view: previous?.view,
+    room, layout, racks, devices, systems: state.catalog.systems, deviceKind, units, view: previous?.view,
     onDevice: openDevicePresentation,
     onSceneInteraction: dismissDeviceQuick,
     onRack: (rack) => {

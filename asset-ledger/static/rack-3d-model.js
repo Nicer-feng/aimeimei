@@ -8,6 +8,7 @@ import { createDeviceLabelTexture, createRackScaleTexture } from './rack-texture
 
 const LAMP_PERIOD_MS = 3200;
 const LAMP_FRAME_MS = 80;
+const SEARCH_DIM = 0.27;
 
 function canvasRect(canvas) {
   const rect = canvas.getBoundingClientRect();
@@ -159,28 +160,77 @@ export function createRackPalette() {
   return Object.assign(materialFor, { scaleMaterial, dispose });
 }
 
-function instancedBoxes(parent, materialFor) {
+function matchesRoomSearch(filter, { rackId, deviceId }) {
+  return !filter || filter.directRackIds.has(rackId) ||
+    (filter.rackIds.has(rackId) && (!deviceId || filter.deviceIds.has(deviceId)));
+}
+
+function roomSearchOwners(rack) {
+  const rackId = String(rack.id);
+  const cabinet = { rackId };
+  const devices = new Map();
+  return (device) => {
+    if (!device) return cabinet;
+    const id = String(device.id);
+    if (!devices.has(id)) devices.set(id, { rackId, deviceId: id });
+    return devices.get(id);
+  };
+}
+
+function roomSearchTint() {
+  const normal = new THREE.Color(1, 1, 1);
+  const subdued = new THREE.Color(SEARCH_DIM, SEARCH_DIM, SEARCH_DIM);
+  const tracked = [];
+
+  function add(mesh, owners) {
+    // 实例乘色独立于共享材质；搜索清除后各实例恢复原色。
+    mesh.setColorAt(0, normal);
+    mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    tracked.push({ mesh, owners, muted: new Uint8Array(owners.length) });
+  }
+
+  function setSearchFilter(filter) {
+    for (const { mesh, owners, muted } of tracked) {
+      let changed = false;
+      owners.forEach((owner, index) => {
+        const dim = matchesRoomSearch(filter, owner) ? 0 : 1;
+        if (muted[index] === dim) return;
+        muted[index] = dim;
+        mesh.setColorAt(index, dim ? subdued : normal);
+        changed = true;
+      });
+      if (changed) mesh.instanceColor.needsUpdate = true;
+    }
+  }
+
+  return { add, setSearchFilter };
+}
+
+function instancedBoxes(parent, materialFor, tint) {
   const buckets = new Map();
   const matrix = new THREE.Matrix4();
   const position = new THREE.Vector3();
   const rotation = new THREE.Quaternion();
   const scale = new THREE.Vector3();
 
-  function add(surface, size, center, world) {
-    if (!buckets.has(surface)) buckets.set(surface, []);
+  function add(surface, size, center, world, owner) {
+    if (!buckets.has(surface)) buckets.set(surface, { matrices: [], owners: [] });
+    const bucket = buckets.get(surface);
     matrix.compose(position.fromArray(center), rotation, scale.fromArray(size));
     if (world) matrix.premultiply(world);
-    buckets.get(surface).push(matrix.clone());
+    bucket.matrices.push(matrix.clone());
+    if (tint) bucket.owners.push(owner);
   }
 
   function finish() {
     if (!buckets.size) return [];
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const meshes = [];
-    for (const [surface, matrices] of buckets) {
+    for (const [surface, { matrices, owners }] of buckets) {
       const mesh = new THREE.InstancedMesh(geometry, materialFor(surface), matrices.length);
       matrices.forEach((transform, index) => mesh.setMatrixAt(index, transform));
       mesh.instanceMatrix.needsUpdate = true;
+      tint?.add(mesh, owners);
       parent.add(mesh);
       meshes.push(mesh);
     }
@@ -191,24 +241,38 @@ function instancedBoxes(parent, materialFor) {
   return { add, finish };
 }
 
-function addScaleStrips(parent, rackHeight, unit, scaleMat) {
+function addScaleStrips(parent, rackHeight, unit, scaleMat, tint, owner) {
   if (!scaleMat) return;
   const stripHeight = rackHeight * unit;
   const geometry = new THREE.PlaneGeometry(0.088, stripHeight);
   const centerY = stripHeight / 2;
+  const batch = tint && new THREE.InstancedMesh(geometry, scaleMat, 4);
+  const pose = batch && new THREE.Object3D();
+  let index = 0;
   for (const face of [-1, 1]) {
     for (const side of [-1, 1]) {
-      const strip = new THREE.Mesh(geometry, scaleMat);
+      const strip = pose || new THREE.Mesh(geometry, scaleMat);
       strip.position.set(side * 0.905, centerY, face * (DETAIL_Z + 0.008));
-      if (face < 0) strip.rotation.y = Math.PI;
-      parent.add(strip);
+      strip.rotation.y = face < 0 ? Math.PI : 0;
+      if (batch) {
+        strip.updateMatrix();
+        batch.setMatrixAt(index++, strip.matrix);
+      } else {
+        parent.add(strip);
+      }
     }
+  }
+  if (batch) {
+    batch.instanceMatrix.needsUpdate = true;
+    tint.add(batch, Array(4).fill(owner));
+    parent.add(batch);
   }
 }
 
 function buildOperatingLamps(parent, entries, unit) {
   const indicesByRack = new Map();
   const matrices = [];
+  const owners = [];
   const world = new THREE.Matrix4();
   const local = new THREE.Matrix4();
   const position = new THREE.Vector3();
@@ -223,6 +287,7 @@ function buildOperatingLamps(parent, entries, unit) {
     const running = devices.filter((device) => device.operating_status === 'running');
     if (!running.length) continue;
     world.compose(position.set(x, y, z), rotation.setFromAxisAngle(yAxis, THREE.MathUtils.degToRad(angle)), size.setScalar(scale));
+    const ownerFor = roomSearchOwners(rack);
     const indices = [];
     for (const device of running) {
       const onFront = device.face === 'front';
@@ -230,12 +295,14 @@ function buildOperatingLamps(parent, entries, unit) {
       position.set(OPERATING_LAMP_X, height, (onFront ? 1 : -1) * OPERATING_LAMP_Z);
       indices.push(matrices.length);
       matrices.push(local.compose(position, onFront ? front : rear, normalSize).clone().premultiply(world));
+      owners.push(ownerFor(device));
     }
     indicesByRack.set(String(rack.id), indices);
   }
   if (!matrices.length) return undefined;
 
   const steadyColor = new THREE.Color(0x4b7b60);
+  const subdued = steadyColor.clone().multiplyScalar(SEARCH_DIM);
   const dimColor = new THREE.Color(0x4a875f);
   const brightColor = new THREE.Color(0x8ce9a9);
   const pulseColor = new THREE.Color();
@@ -253,10 +320,19 @@ function buildOperatingLamps(parent, entries, unit) {
   parent.add(mesh);
 
   let animated = [];
+  let nearby = [];
+  let searchFilter = null;
   function paint(color) {
     if (!animated.length) return;
     for (const index of animated) mesh.setColorAt(index, color);
     mesh.instanceColor.needsUpdate = true;
+  }
+  function updateAnimated() {
+    paint(steadyColor);
+    for (const index of animated) mesh.setMatrixAt(index, matrices[index]);
+    animated = nearby.filter((index) => matchesRoomSearch(searchFilter, owners[index]));
+    for (const index of animated) mesh.setMatrixAt(index, local.copy(matrices[index]).scale(nearScale));
+    mesh.instanceMatrix.needsUpdate = true;
   }
   return {
     mesh,
@@ -265,15 +341,18 @@ function buildOperatingLamps(parent, entries, unit) {
       mesh.visible = visible;
     },
     setNearbyRacks(rackIds) {
-      paint(steadyColor);
-      for (const index of animated) mesh.setMatrixAt(index, matrices[index]);
-      animated = [];
+      nearby = [];
       for (const id of rackIds) {
         const indices = indicesByRack.get(String(id));
-        if (indices) animated.push(...indices);
+        if (indices) nearby.push(...indices);
       }
-      for (const index of animated) mesh.setMatrixAt(index, local.copy(matrices[index]).scale(nearScale));
-      mesh.instanceMatrix.needsUpdate = true;
+      updateAnimated();
+    },
+    setSearchFilter(filter) {
+      searchFilter = filter;
+      updateAnimated();
+      owners.forEach((owner, index) => mesh.setColorAt(index, matchesRoomSearch(filter, owner) ? steadyColor : subdued));
+      mesh.instanceColor.needsUpdate = true;
     },
     steady: () => paint(steadyColor),
     pulse(time) {
@@ -377,15 +456,16 @@ function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = fals
     if (!includeFine) return;
     // 面板耳与螺栓只提供外观，拾取使用背后的整块面板。
     for (const side of [-1, 1]) {
-      detail('trim', [0.050, faceHeight * 0.86, 0.008], [side * 0.833, center, sign * DETAIL_Z]);
-      detail('screw', [0.018, 0.018, 0.003], [side * 0.834, center, sign * (DETAIL_Z + 0.005)]);
+      detail('trim', [0.050, faceHeight * 0.86, 0.008], [side * 0.833, center, sign * DETAIL_Z], false, device);
+      detail('screw', [0.018, 0.018, 0.003], [side * 0.834, center, sign * (DETAIL_Z + 0.005)], false, device);
     }
   }
 
-  function frontDetail(kind, sign, center, faceHeight, units) {
+  function frontDetail(device, kind, sign, center, faceHeight) {
+    const feature = (surface, size, center, medium) => detail(surface, size, center, medium, device);
     const frontZ = sign * DETAIL_Z;
     if (!reserveNameplate) {
-      detail(accent(kind), [0.039, Math.min(0.040, faceHeight * 0.34), 0.004], [-0.762, center, frontZ],
+      feature(accent(kind), [0.039, Math.min(0.040, faceHeight * 0.34), 0.004], [-0.762, center, frontZ],
         [0.080, Math.min(0.052, faceHeight * 0.46), 0.004]);
     }
     if (!includeFine) return;
@@ -399,13 +479,13 @@ function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = fals
           const x = areaCenter + bank * (reserveNameplate ? 0.22 : 0.316) + (port - (portsPerBank - 1) / 2) * step;
           for (const row of [-1, 1]) {
             const y = center + row * Math.min(0.022, faceHeight * 0.19);
-            detail('rail', [step * 0.82, 0.027, 0.004], [x, y, frontZ]);
-            detail('socket', [step * 0.60, 0.017, 0.004], [x, y, sign * (DETAIL_Z + 0.003)]);
+            feature('rail', [step * 0.82, 0.027, 0.004], [x, y, frontZ]);
+            feature('socket', [step * 0.60, 0.017, 0.004], [x, y, sign * (DETAIL_Z + 0.003)]);
           }
         }
       }
       for (const offset of [-0.012, 0.012]) {
-        detail('inset', [0.014, 0.006, 0.005], [0.737, center + offset, frontZ]);
+        feature('inset', [0.014, 0.006, 0.005], [0.737, center + offset, frontZ]);
       }
       return;
     }
@@ -414,50 +494,51 @@ function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = fals
       const pitch = reserveNameplate ? 0.165 : 0.172;
       for (let outlet = 0; outlet < outlets; outlet += 1) {
         const x = areaCenter + (outlet - (outlets - 1) / 2) * pitch;
-        detail('rail', [0.105, 0.066, 0.005], [x, center, frontZ]);
-        detail('socket', [0.088, 0.048, 0.005], [x, center, sign * (DETAIL_Z + 0.003)]);
+        feature('rail', [0.105, 0.066, 0.005], [x, center, frontZ]);
+        feature('socket', [0.088, 0.048, 0.005], [x, center, sign * (DETAIL_Z + 0.003)]);
         for (const offset of [-0.022, 0.022]) {
-          detail('screw', [0.011, 0.014, 0.003], [x + offset, center, sign * (DETAIL_Z + 0.005)]);
+          feature('screw', [0.011, 0.014, 0.003], [x + offset, center, sign * (DETAIL_Z + 0.005)]);
         }
       }
-      detail(accent(kind), [0.048, 0.043, 0.008], [0.705, center, frontZ]);
+      feature(accent(kind), [0.048, 0.043, 0.008], [0.705, center, frontZ]);
       return;
     }
 
     const columns = kind === 'storage' ? (reserveNameplate ? 4 : 5) : (reserveNameplate ? 5 : 7);
-    const rows = Math.min(3, Math.max(1, Math.ceil(units / 1.7)));
+    const rows = Math.min(3, Math.max(1, Math.ceil(device.u_height / 1.7)));
     const pitch = areaWidth / columns;
     const rowHeight = Math.min(0.080, faceHeight * 0.86 / rows);
     for (let row = 0; row < rows; row += 1) {
       const y = center + (row - (rows - 1) / 2) * rowHeight;
       for (let bay = 0; bay < columns; bay += 1) {
         const x = (reserveNameplate ? areaCenter : -0.07) + (bay - (columns - 1) / 2) * pitch;
-        detail('inset', [pitch - 0.013, rowHeight * 0.80, 0.006], [x, y, frontZ]);
-        detail('trim', [pitch - 0.031, 0.013, 0.005], [x, y - rowHeight * 0.13, sign * (DETAIL_Z + 0.004)]);
+        feature('inset', [pitch - 0.013, rowHeight * 0.80, 0.006], [x, y, frontZ]);
+        feature('trim', [pitch - 0.031, 0.013, 0.005], [x, y - rowHeight * 0.13, sign * (DETAIL_Z + 0.004)]);
       }
     }
     for (const offset of [-0.024, 0, 0.024]) {
-      detail('inset', [0.014, 0.006, 0.004], [0.715, center + offset, frontZ]);
+      feature('inset', [0.014, 0.006, 0.004], [0.715, center + offset, frontZ]);
     }
   }
 
-  function backDetail(kind, sign, center, faceHeight) {
+  function backDetail(device, kind, sign, center, faceHeight) {
+    const feature = (surface, size, center, medium) => detail(surface, size, center, medium, device);
     if (includeFine) {
       const shift = reserveNameplate ? 0.24 : 0;
       for (const centerX of (reserveNameplate ? [shift - 0.16, shift + 0.10] : [-0.57, -0.30])) {
         for (let slot = 0; slot < 5; slot += 1) {
           const y = center + (slot - 2) * Math.min(0.017, faceHeight * 0.16);
-          detail('inset', [0.206, 0.008, 0.004], [centerX, y, sign * DETAIL_Z]);
+          feature('inset', [0.206, 0.008, 0.004], [centerX, y, sign * DETAIL_Z]);
         }
       }
       for (const x of (reserveNameplate ? [shift + 0.28, shift + 0.39] : [-0.04, 0.08, 0.20, 0.37])) {
-        detail('rail', [0.072, 0.039, 0.005], [x, center, sign * DETAIL_Z]);
-        detail('socket', [0.054, 0.025, 0.005], [x, center, sign * (DETAIL_Z + 0.003)]);
+        feature('rail', [0.072, 0.039, 0.005], [x, center, sign * DETAIL_Z]);
+        feature('socket', [0.054, 0.025, 0.005], [x, center, sign * (DETAIL_Z + 0.003)]);
       }
-      if (!reserveNameplate) detail('inset', [0.115, 0.053, 0.006], [0.61, center, sign * DETAIL_Z]);
+      if (!reserveNameplate) feature('inset', [0.115, 0.053, 0.006], [0.61, center, sign * DETAIL_Z]);
     }
     if (!reserveNameplate) {
-      detail(accent(kind), [0.018, 0.009, 0.004], [0.710, center, sign * DETAIL_Z], [0.042, 0.017, 0.004]);
+      feature(accent(kind), [0.018, 0.009, 0.004], [0.710, center, sign * DETAIL_Z], [0.042, 0.017, 0.004]);
     }
   }
 
@@ -466,10 +547,10 @@ function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = fals
     const kind = deviceKind(device);
     solid('chassis', [1.665, metrics.faceHeight, metrics.chassisDepth], [0, metrics.centerY, metrics.chassisCenterZ], 0.007, device);
     metalFace(device, metrics.sign, metrics.centerY, metrics.faceHeight, kind);
-    frontDetail(kind, metrics.sign, metrics.centerY, metrics.faceHeight, device.u_height);
+    frontDetail(device, kind, metrics.sign, metrics.centerY, metrics.faceHeight);
     if (metrics.full) {
       metalFace(device, -metrics.sign, metrics.centerY, metrics.faceHeight, kind);
-      backDetail(kind, -metrics.sign, metrics.centerY, metrics.faceHeight);
+      backDetail(device, kind, -metrics.sign, metrics.centerY, metrics.faceHeight);
     }
   }
 }
@@ -491,18 +572,20 @@ function buildSemanticOverlay(scene, entries, unit) {
     const { rack, devices, x, y, z } = entry;
     world.compose(pos.set(x, y, z), rot.setFromAxisAngle(axis, THREE.MathUtils.degToRad(entry.rotation)), scl.setScalar(entry.scale));
     const height = rack.height * unit;
+    const ownerFor = roomSearchOwners(rack);
     local.compose(pos.set(0, height + 0.125, 0), rot.identity(), scl.set(RACK_WIDTH * 0.96, 0.036, RACK_DEPTH * 0.96));
-    rackEntries.push({ rack, devices });
+    rackEntries.push({ rack, devices, owner: ownerFor() });
     rackMatrices.push(local.clone().premultiply(world));
 
     for (const device of devices) {
       const m = deviceMetrics(device, unit);
+      const semanticDevice = { device, owner: ownerFor(device) };
       local.compose(pos.set(0, m.centerY, m.sign * (DETAIL_Z + 0.014)), rot.identity(), scl.set(1.75, m.faceHeight, 0.018));
-      deviceEntries.push(device);
+      deviceEntries.push(semanticDevice);
       deviceMatrices.push(local.clone().premultiply(world));
       if (m.full) {
         local.compose(pos.set(0, m.centerY, -m.sign * (DETAIL_Z + 0.014)), rot.identity(), scl.set(1.75, m.faceHeight, 0.018));
-        deviceEntries.push(device);
+        deviceEntries.push(semanticDevice);
         deviceMatrices.push(local.clone().premultiply(world));
       }
     }
@@ -541,34 +624,50 @@ function buildSemanticOverlay(scene, entries, unit) {
 
   scene.add(group);
 
-  function setMode(mode) {
-    if (mode === 'appearance') {
-      group.visible = false;
-      return;
-    }
+  let mode = 'appearance';
+  let searchFilter = null;
+  function semanticColor(hex, owner) {
+    color.setHex(hex);
+    if (!matchesRoomSearch(searchFilter, owner)) color.multiplyScalar(SEARCH_DIM);
+    return color;
+  }
+
+  function paint() {
+    if (!group.visible) return;
     if (rackMesh) {
-      rackEntries.forEach(({ rack, devices }, i) => {
-        rackMesh.setColorAt(i, color.setHex(rackSummaryColor(rack, devices, mode)));
+      rackEntries.forEach(({ rack, devices, owner }, i) => {
+        rackMesh.setColorAt(i, semanticColor(rackSummaryColor(rack, devices, mode), owner));
       });
       rackMesh.instanceColor.needsUpdate = true;
     }
     if (deviceMesh) {
-      deviceEntries.forEach((device, i) => {
+      deviceEntries.forEach(({ device, owner }, i) => {
         const hex = mode === 'status'
           ? STATUS_COLORS[normalizeStatus(device)]
           : DEPTH_COLORS[normalizeDepth(device)];
-        deviceMesh.setColorAt(i, color.setHex(hex));
+        deviceMesh.setColorAt(i, semanticColor(hex, owner));
       });
       deviceMesh.instanceColor.needsUpdate = true;
     }
-    group.visible = true;
   }
 
-  return { group, setMode };
+  return {
+    group,
+    setMode(next) {
+      mode = next;
+      group.visible = mode !== 'appearance';
+      paint();
+    },
+    setSearchFilter(filter) {
+      searchFilter = filter;
+      paint();
+    },
+  };
 }
 
 export function buildRackOverviewLayer(scene, { entries, unit, deviceKind, palette = createRackPalette() }) {
-  const batches = instancedBoxes(scene, palette);
+  const tint = roomSearchTint();
+  const batches = instancedBoxes(scene, palette, tint);
   const world = new THREE.Matrix4();
   const axis = new THREE.Vector3(0, 1, 0);
   const position = new THREE.Vector3();
@@ -580,12 +679,13 @@ export function buildRackOverviewLayer(scene, { entries, unit, deviceKind, palet
     rotation.setFromAxisAngle(axis, THREE.MathUtils.degToRad(entry.rotation));
     scale.setScalar(entry.scale);
     world.compose(position, rotation, scale);
+    const ownerFor = roomSearchOwners(rack);
     describeRack({ rack, devices, unit, deviceKind }, {
-      solid(surface, size, center) {
-        batches.add(surface, size, center, world);
+      solid(surface, size, center, _edge, device) {
+        batches.add(surface, size, center, world, ownerFor(device));
       },
-      detail(surface, size, center, medium) {
-        if (medium) batches.add(surface, Array.isArray(medium) ? medium : size, center, world);
+      detail(surface, size, center, medium, device) {
+        if (medium) batches.add(surface, Array.isArray(medium) ? medium : size, center, world, ownerFor(device));
       },
     }, false);
   }
@@ -599,21 +699,28 @@ export function buildRackOverviewLayer(scene, { entries, unit, deviceKind, palet
       lamps?.setVisible(mode === 'appearance');
       semantic.setMode(mode);
     },
+    setSearchFilter(filter) {
+      tint.setSearchFilter(filter);
+      semantic.setSearchFilter(filter);
+      lamps?.setSearchFilter(filter);
+    },
   };
 }
 
 export function buildRackFineDetails(group, options) {
   const palette = options.palette ?? createRackPalette();
-  const batches = instancedBoxes(group, palette);
+  const tint = roomSearchTint();
+  const batches = instancedBoxes(group, palette, tint);
+  const ownerFor = roomSearchOwners(options.rack);
   describeRack(options, {
     solid() {},
-    detail(surface, size, center, medium) {
-      if (!medium) batches.add(surface, size, center);
+    detail(surface, size, center, medium, device) {
+      if (!medium) batches.add(surface, size, center, undefined, ownerFor(device));
     },
   });
   const meshes = batches.finish();
-  addScaleStrips(group, options.rack.height, options.unit, palette.scaleMaterial(options.rack.height));
-  return { meshes };
+  addScaleStrips(group, options.rack.height, options.unit, palette.scaleMaterial(options.rack.height), tint, ownerFor());
+  return { meshes, setSearchFilter: tint.setSearchFilter };
 }
 
 export function buildRackModel(scene, options) {

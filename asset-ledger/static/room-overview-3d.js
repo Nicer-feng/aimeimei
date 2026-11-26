@@ -1,7 +1,7 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
 import {
-  DEVICE_HALF_WIDTH, RACK_UNIT,
+  DETAIL_Z, DEVICE_HALF_WIDTH, RACK_UNIT,
   deviceMetrics, normalizeDepth, rackOccupancy, rackVerticalBounds,
 } from './rack-geometry.js';
 import {
@@ -19,6 +19,9 @@ const MIN_DISTANCE = 1.05;
 const FINE_CACHE_LIMIT = 12;
 const ANGLED = [0.42, 2.30, 1.12];
 const TOP = [0, 1, 0.001];
+const SEARCH_OUTLINE_COLORS = [0x0875ba, 0x02836e];
+const SEARCH_DEVICE_COLOR = 0x79f4ff;
+const FACE_OUTLINE_EDGES = [[-1, 0], [1, 0], [1, 0], [1, 1], [1, 1], [-1, 1], [-1, 1], [-1, 0]];
 
 const VIEW_MODES = [
   { id: 'appearance', label: '外观' },
@@ -204,6 +207,75 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
   const deviceOutline = new THREE.LineSegments(outline.geometry, new THREE.LineBasicMaterial({ color: 0xffcb72 }));
   deviceOutline.visible = false;
   scene.add(deviceOutline);
+  const outlineEdges = outline.geometry.getAttribute('position');
+  const searchOutlines = SEARCH_OUTLINE_COLORS.map((color) => searchLines(color, targets.length * outlineEdges.count));
+  const deviceFaceLimit = entries.reduce((count, entry) => count + entry.devices.length * 2, 0);
+  const deviceSearchOutline = searchLines(SEARCH_DEVICE_COLOR, deviceFaceLimit * FACE_OUTLINE_EDGES.length);
+
+  function searchLines(color, vertexLimit) {
+    const geometry = new THREE.BufferGeometry();
+    const position = new THREE.BufferAttribute(new Float32Array(vertexLimit * 3), 3);
+    position.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute('position', position);
+    const lines = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color, toneMapped: false }));
+    lines.visible = false;
+    lines.frustumCulled = false;
+    scene.add(lines);
+    return { lines, position };
+  }
+
+  function showSearchLines({ lines, position }, count) {
+    lines.visible = count > 0;
+    lines.geometry.setDrawRange(0, count);
+    if (lines.visible) position.needsUpdate = true;
+  }
+
+  function highlightSearchDevices(filter) {
+    const { position } = deviceSearchOutline;
+    let count = 0;
+    if (filter?.deviceIds.size) {
+      for (const entry of entries) {
+        if (filter.directRackIds.has(String(entry.rack.id))) continue;
+        const angle = THREE.MathUtils.degToRad(entry.rotation);
+        const sin = Math.sin(angle);
+        const cos = Math.cos(angle);
+        for (const device of entry.devices) {
+          if (!filter.deviceIds.has(String(device.id))) continue;
+          const { minY, maxY, sign, full } = deviceMetrics(device, RACK_UNIT);
+          for (const face of full ? [sign, -sign] : [sign]) {
+            const z = face * (DETAIL_Z + 0.026) * entry.scale;
+            for (const [side, upper] of FACE_OUTLINE_EDGES) {
+              const x = side * (DEVICE_HALF_WIDTH - 0.015) * entry.scale;
+              const y = (upper ? maxY : minY) * entry.scale;
+              position.setXYZ(count++, entry.x + cos * x + sin * z, entry.y + y, entry.z - sin * x + cos * z);
+            }
+          }
+        }
+      }
+    }
+    showSearchLines(deviceSearchOutline, count);
+  }
+
+  function setSearchFilter(filter) {
+    overviewLayer.setSearchFilter?.(filter);
+    const counts = [0, 0];
+    if (filter) {
+      const vertex = new THREE.Vector3();
+      for (const [id, target] of targetsById) {
+        const direct = filter.directRackIds.has(id);
+        if (!direct && !filter.rackIds.has(id)) continue;
+        const index = direct ? 1 : 0;
+        const { position } = searchOutlines[index];
+        target.updateWorldMatrix(true, false);
+        for (let edge = 0; edge < outlineEdges.count; edge += 1) {
+          vertex.fromBufferAttribute(outlineEdges, edge).multiplyScalar(1.026).applyMatrix4(target.matrixWorld);
+          position.setXYZ(counts[index]++, vertex.x, vertex.y, vertex.z);
+        }
+      }
+    }
+    searchOutlines.forEach((batch, index) => showSearchLines(batch, counts[index]));
+    highlightSearchDevices(filter);
+  }
 
   function highlight(id) {
     const target = targetsById.get(id);
@@ -235,12 +307,12 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette }) {
   const targetForRack = (id) => targetsById.get(String(id));
   const entryForRack = (id) => targetForRack(id)?.userData.entry;
   return { bounds, entries, entryForRack, targetForRack, highlight, highlightDevice, landmarks, lamps: overviewLayer.lamps,
-    setMode: overviewLayer.setMode, symbols, targets };
+    setMode: overviewLayer.setMode, setSearchFilter, symbols, targets };
 }
 
 export function mountRoomScene(host, {
   layout, racks, initialCamera, onRack, onFallback, devices = [], deviceKind = () => 'server', units = (device) => `U${device.u_start}`,
-  initialLocatedRackId, onDevice, onSceneInteraction,
+  initialLocatedRackId, initialSearchFilter, onDevice, onSceneInteraction,
 }) {
   const panel = node('section', 'room-3d');
   panel.setAttribute('aria-label', '机房三维总览');
@@ -358,6 +430,7 @@ export function mountRoomScene(host, {
   let locatedRackId;
   let selectedDeviceId;
   let activeView;
+  let searchFilter;
   let viewMode = VIEW_MODES.some((m) => m.id === initialCamera?.viewMode) ? initialCamera.viewMode : 'appearance';
 
   const preset = ['angled', 'top'].includes(initialCamera?.activeView) ? initialCamera.activeView : null;
@@ -473,6 +546,7 @@ export function mountRoomScene(host, {
   observer.observe(viewport);
   const lampAnimation = animateOperatingLamps(viewport, model.lamps, () => renderer.render(scene, camera));
   applyViewMode(viewMode);
+  setSearchFilter(initialSearchFilter);
   resize();
 
   function clampTarget() {
@@ -592,7 +666,7 @@ export function mountRoomScene(host, {
     invalidate();
   }
 
-  function locateRack(id) {
+  function locateRack(id, face = 'front') {
     const entry = model.entryForRack(id);
     if (!entry || disposed) return false;
     onSceneInteraction?.();
@@ -600,7 +674,7 @@ export function mountRoomScene(host, {
     hideTooltip();
     setActive(null);
     markLocated(entry.rack.id);
-    const angle = THREE.MathUtils.degToRad(entry.rotation);
+    const angle = THREE.MathUtils.degToRad(entry.rotation) + (face === 'rear' ? Math.PI : 0);
     const direction = new THREE.Vector3(0.45, 1.05, 1).applyAxisAngle(yAxis, angle).normalize();
     const halfAngle = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     const distance = Math.max(entry.height / (halfAngle * 1.55), CABINET_WIDTH / (halfAngle * camera.aspect * 1.28), 2.4) + 0.38;
@@ -611,6 +685,36 @@ export function mountRoomScene(host, {
   function resetView() {
     markLocated();
     usePreset('angled', ANGLED);
+  }
+
+  function setSearchFilter(filter) {
+    if (disposed) return;
+    const matching = new Set();
+    if (filter) {
+      for (const { rack } of model.entries) {
+        const id = String(rack.id);
+        if (filter.directRackIds.has(id) || filter.rackIds.has(id)) matching.add(id);
+      }
+    }
+    // 非上架或待摆放机柜中的匹配结果不会让总览所有柜体褪色。
+    searchFilter = matching.size ? filter : null;
+    for (const { item, rack } of labelItems) {
+      if (!rack) continue;
+      if (!searchFilter) {
+        delete item.dataset.searchMatch;
+        delete item.dataset.searchDirect;
+        continue;
+      }
+      const id = String(rack.id);
+      item.dataset.searchMatch = String(matching.has(id));
+      item.dataset.searchDirect = String(searchFilter.directRackIds.has(id));
+    }
+    if (searchFilter) canvas.dataset.searchRacks = [...matching].join(' ');
+    else delete canvas.dataset.searchRacks;
+    model.setSearchFilter(searchFilter);
+    for (const { details } of fineLayers.values()) details.setSearchFilter?.(searchFilter);
+    lampAnimation?.sync();
+    invalidate();
   }
 
   function snapshot() {
@@ -655,6 +759,8 @@ export function mountRoomScene(host, {
       const rackId = rack && String(rack.id);
       const isHovered = Boolean(rackId && rackId === hovered);
       const isLocated = Boolean(rackId && rackId === locatedRackId);
+      const priority = isHovered ? 4 : isLocated ? 3 :
+        item.dataset.searchDirect === 'true' ? 2 : item.dataset.searchMatch === 'true' ? 1 : 0;
       if (!rack && !showEmpty && !isHovered) {
         item.hidden = true;
         continue;
@@ -667,25 +773,24 @@ export function mountRoomScene(host, {
       const left = (projected.x + 1) * width / 2;
       const top = (1 - projected.y) * height / 2;
       const dist = camera.position.distanceToSquared(point);
-      candidates.push({ entry, left, top, dist, isHovered, isLocated, isRack: Boolean(rack) });
+      candidates.push({ entry, left, top, dist, isHovered, isLocated, isRack: Boolean(rack), priority });
     }
 
     candidates.sort((a, b) => {
-      if (a.isHovered !== b.isHovered) return a.isHovered ? -1 : 1;
-      if (a.isLocated !== b.isLocated) return a.isLocated ? -1 : 1;
+      if (a.priority !== b.priority) return b.priority - a.priority;
       if (a.isRack !== b.isRack) return a.isRack ? -1 : 1;
       return a.dist - b.dist;
     });
 
     let visibleCount = 0;
-    for (const { entry, left, top, isHovered, isLocated } of candidates) {
+    for (const { entry, left, top, isHovered, isLocated, priority } of candidates) {
       const { item, rack } = entry;
       const estW = Math.min(120, Math.max(46, (rack ? rack.name.length : 2) * 9 + 18));
       const estH = 22;
       const box = { l: left - estW / 2 - 4, r: left + estW / 2 + 4, t: top - estH - 4, b: top + 2 };
       const important = isHovered || isLocated;
       const collides = !important && placedBoxes.some((p) => box.l < p.r && box.r > p.l && box.t < p.b && box.b > p.t);
-      if (collides || (!important && visibleCount >= maxLabels)) {
+      if (collides || (priority === 0 && visibleCount >= maxLabels)) {
         item.hidden = true;
       } else {
         item.hidden = false;
@@ -793,7 +898,7 @@ export function mountRoomScene(host, {
     if (viewDir.y < 0.985) {
       for (const entry of model.entries) {
         const id = String(entry.rack.id);
-        const activeGroup = fineLayers.get(id);
+        const activeGroup = fineLayers.get(id)?.group;
         const active = Boolean(activeGroup && activeGroup.visible);
         projected.set(entry.x, entry.middle, entry.z).project(camera);
         if (Math.abs(projected.x) > 0.96 || Math.abs(projected.y) > 0.96 || projected.z < -1 || projected.z > 1) continue;
@@ -811,7 +916,7 @@ export function mountRoomScene(host, {
     const selected = new Map(candidates.slice(0, narrow ? 2 : 4).map(({ id, entry }) => [id, entry]));
     let changed = false;
 
-    for (const [id, group] of fineLayers) {
+    for (const [id, { group }] of fineLayers) {
       const shouldShow = selected.has(id);
       if (group.visible !== shouldShow) {
         group.visible = shouldShow;
@@ -830,15 +935,16 @@ export function mountRoomScene(host, {
       group.position.set(entry.x, entry.y, entry.z);
       group.rotation.y = THREE.MathUtils.degToRad(entry.rotation);
       group.scale.setScalar(entry.scale);
-      buildRackFineDetails(group, { rack: entry.rack, devices: entry.devices, unit: RACK_UNIT, deviceKind, palette });
-      fineLayers.set(id, group);
+      const details = buildRackFineDetails(group, { rack: entry.rack, devices: entry.devices, unit: RACK_UNIT, deviceKind, palette });
+      details.setSearchFilter?.(searchFilter);
+      fineLayers.set(id, { group, details });
       scene.add(group);
       changed = true;
     }
 
     // 超出 LRU 上限时仅淘汰未显示的历史细节层。
     if (fineLayers.size > FINE_CACHE_LIMIT) {
-      for (const [id, group] of fineLayers) {
+      for (const [id, { group }] of fineLayers) {
         if (fineLayers.size <= FINE_CACHE_LIMIT) break;
         if (group.visible) continue;
         scene.remove(group);
@@ -946,5 +1052,5 @@ export function mountRoomScene(host, {
     panel.remove();
   }
 
-  return Object.assign(dispose, { snapshot, locateRack, resetView, deviceAnchor });
+  return Object.assign(dispose, { snapshot, locateRack, resetView, deviceAnchor, setSearchFilter });
 }
