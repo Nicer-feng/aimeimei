@@ -27,9 +27,16 @@ const ANGLED = [0.42, 2.30, 1.12];
 const IMMERSIVE_ANGLED = [0.32, 1.20, 1.48];
 const TOP = [0, 1, 0.001];
 const PORTRAIT_ASPECT = 1.05;
+const ENTRY_VIEWS = {
+  arrival: { duration: 1050, pullback: 1.28 },
+  switch: { duration: 400, pullback: 1.12 },
+};
 const SEARCH_OUTLINE_COLORS = [0x0875ba, 0x02836e];
 const SEARCH_DEVICE_COLOR = 0x79f4ff;
 const FACE_OUTLINE_EDGES = [[-1, 0], [1, 0], [1, 0], [1, 1], [1, 1], [-1, 1], [-1, 1], [-1, 0]];
+
+const easeOut = (t) => 1 - (1 - t) ** 3;
+const easeInOut = (t) => t * t * (3 - 2 * t);
 
 const VIEW_MODES = [
   { id: 'appearance', label: '外观' },
@@ -454,7 +461,7 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
 export function mountRoomScene(host, {
   layout, roomName, siteName, racks, initialCamera, onRack, onFallback, devices = [],
   deviceKind = () => 'server', units = (device) => `U${device.u_start}`,
-  initialLocatedRackId, initialLocatedDeviceId, initialSearchFilter, onDevice, onSceneInteraction,
+  initialLocatedRackId, initialLocatedDeviceId, initialSearchFilter, onDevice, onSceneInteraction, entry,
 }) {
   const panel = node('section', 'room-3d');
   panel.setAttribute('aria-label', '机房三维总览');
@@ -581,6 +588,7 @@ export function mountRoomScene(host, {
   const previousPosition = new THREE.Vector3();
   const previousTarget = new THREE.Vector3();
   const offset = new THREE.Vector3();
+  const renderSize = new THREE.Vector2();
   const fineLayers = new Map();
   let deviceHitCache;
   let frame;
@@ -853,7 +861,7 @@ export function mountRoomScene(host, {
     }
   }
 
-  function flyTo(direction, zoom, target, duration = 260) {
+  function flyTo(direction, zoom, target, duration = 260, { easing = easeOut, startAfterDraw = false } = {}) {
     clearPendingClick();
     clearDamping();
     flight = undefined;
@@ -864,7 +872,8 @@ export function mountRoomScene(host, {
     const endTarget = target.clone();
     const fit = fittedDistance(direction);
     flight = {
-      direction, zoom, fit, duration, endTarget, startTime: performance.now(),
+      direction, zoom, fit, duration, endTarget, easing,
+      startTime: startAfterDraw ? null : performance.now(),
       startTarget: controls.target.clone(), startPosition: camera.position.clone(),
       endPosition: endTarget.clone().addScaledVector(direction, fit * zoom),
     };
@@ -873,8 +882,9 @@ export function mountRoomScene(host, {
 
   function advanceCamera(now) {
     if (flight) {
-      const t = Math.min(1, (now - flight.startTime) / flight.duration);
-      const ease = 1 - (1 - t) ** 3;
+      if (flight.startTime === null) return;
+      const t = THREE.MathUtils.clamp((now - flight.startTime) / flight.duration, 0, 1);
+      const ease = flight.easing(t);
       controls.minDistance = MIN_DISTANCE;
       controls.maxDistance = flight.fit * 3;
       controls.target.lerpVectors(flight.startTarget, flight.endTarget, ease);
@@ -1065,15 +1075,20 @@ export function mountRoomScene(host, {
   }
 
   function resize() {
-    if (!viewport.clientWidth || !viewport.clientHeight) return;
-    const aspect = viewport.clientWidth / viewport.clientHeight;
+    const width = viewport.clientWidth;
+    const height = viewport.clientHeight;
+    if (!width || !height) return;
+    renderer.getSize(renderSize);
+    if (sized && renderSize.x === width && renderSize.y === height) return;
+    const firstFrame = !sized;
+    const aspect = width / height;
     const changedOrientation = (camera.aspect < PORTRAIT_ASPECT) !== (aspect < PORTRAIT_ASPECT) ||
       defaultZoom(camera.aspect) !== defaultZoom(aspect);
     const current = snapshot();
     const destination = flight;
     flight = undefined;
     clearDamping();
-    renderer.setSize(viewport.clientWidth, viewport.clientHeight, false);
+    renderer.setSize(width, height, false);
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
     const reframe = model.photoFront && !destination && current.activeView === 'angled' &&
@@ -1081,11 +1096,16 @@ export function mountRoomScene(host, {
     sized = true;
     const targetVec = current.target instanceof THREE.Vector3
       ? current.target : new THREE.Vector3(...(current.target ?? center.toArray()));
-    const direction = reframe ? defaultAngle() : current.direction;
-    placeView(new THREE.Vector3(...direction).normalize(), reframe ? defaultZoom() : current.zoom, targetVec);
+    const direction = new THREE.Vector3(...(reframe ? defaultAngle() : current.direction)).normalize();
+    const zoom = reframe ? defaultZoom() : current.zoom;
+    const entryView = firstFrame && !motion.matches ? ENTRY_VIEWS[entry] : undefined;
+    placeView(direction, entryView ? Math.min(zoom * entryView.pullback, 3) : zoom, targetVec);
+    if (entryView) flyTo(direction, zoom, targetVec, entryView.duration, { easing: easeInOut, startAfterDraw: true });
     if (destination) {
-      const remaining = Math.max(1, destination.startTime + destination.duration - performance.now());
-      flyTo(destination.direction, destination.zoom, destination.endTarget, remaining);
+      const startAfterDraw = destination.startTime === null;
+      const remaining = startAfterDraw ? destination.duration :
+        Math.max(1, destination.startTime + destination.duration - performance.now());
+      flyTo(destination.direction, destination.zoom, destination.endTarget, remaining, { easing: destination.easing, startAfterDraw });
     }
   }
 
@@ -1189,6 +1209,7 @@ export function mountRoomScene(host, {
     camera.updateMatrixWorld();
     updateDetails(width);
     renderer.render(scene, camera);
+    if (flight?.startTime === null) flight.startTime = performance.now();
     layoutLabels(width, height);
     if (flight || dampingFrames) invalidate();
   }

@@ -166,7 +166,7 @@ function floorPlan(room, layout, racksById, onRack) {
 
 export function renderRoomOverview(host, {
   room, layout, racks, devices = [], systems = [], deviceKind, units, siteName, toolbar, disclosures,
-  onRack, onDevice, onSceneInteraction, view,
+  onRack, onDevice, onSceneInteraction, view, switchingRoom = false,
 }) {
   const racksById = new Map(racks.map((rack) => [rack.id, rack]));
   const positions = layout?.positions.filter((position) => racksById.has(position.rack_id)) ?? [];
@@ -258,6 +258,7 @@ export function renderRoomOverview(host, {
   host.replaceChildren(overview);
 
   const savedView = view?.roomId === room.id ? view : undefined;
+  let entry = switchingRoom ? 'switch' : savedView ? undefined : 'arrival';
   let camera = savedView?.camera;
   let locatedRack = placed.has(savedView?.locatedRackId) ? racksById.get(savedView.locatedRackId) : undefined;
   let locatedDevice = locatedRack && roomDevices.find((device) =>
@@ -551,7 +552,7 @@ export function renderRoomOverview(host, {
       if (disposed || ticket !== generation) return;
       const mounted = mountRoomScene(spatial, {
         layout: { ...layout, positions }, racks, devices: roomDevices, deviceKind, units, initialCamera: camera, onRack,
-        roomName: room.name, siteName,
+        roomName: room.name, siteName, entry: focusOnMount ? undefined : entry,
         initialLocatedRackId: locatedRack?.id, initialLocatedDeviceId: locatedDevice?.id,
         initialSearchFilter: searchFilter, onDevice, onSceneInteraction,
         onFallback: () => fallback(ticket),
@@ -561,6 +562,7 @@ export function renderRoomOverview(host, {
         return;
       }
       scene = mounted;
+      entry = undefined;
       if (focusOnMount && flyToLocation()) focusOnMount = false;
       show('3d');
     } catch {

@@ -399,7 +399,7 @@ function disposeRoomOverview(remember = false) {
   state.roomOverview = null;
 }
 
-function renderRoomPage(requestedId, filterChanged) {
+function renderRoomPage(requestedId, filterChanged, previousRoomId) {
   const filters = state.roomFilters;
   let roomId = requestedId;
   if (!roomId && !filterChanged && !filters.unit && !filters.site && !filters.room) {
@@ -450,6 +450,7 @@ function renderRoomPage(requestedId, filterChanged) {
   const controller = renderRoomOverview(host, {
     room, layout, racks, devices, systems: state.catalog.systems, deviceKind, units,
     siteName: site?.name, toolbar, disclosures, view: previous?.view,
+    switchingRoom: previousRoomId != null && previousRoomId !== room.id,
     onDevice: openDevicePresentation,
     onSceneInteraction: dismissDeviceQuick,
     onRack: (rack) => {
@@ -465,7 +466,7 @@ function renderRoomPage(requestedId, filterChanged) {
   });
 }
 
-function renderRackPage(requestedId, view) {
+function renderRackPage(requestedId, view, fromRoom3d) {
   const filters = state.rackFilters;
   const requested = lookup('racks', requestedId);
   if (requested) {
@@ -506,7 +507,7 @@ function renderRackPage(requestedId, view) {
   state.rackView = renderRack(rackHost, {
     rack, devices, onDevice: openDevicePresentation, onSceneInteraction: dismissDeviceQuick,
     onEmpty: userCanWrite() ? (slot) => openDeviceEditor(null, rack, slot) : undefined,
-    view: view?.rackId === rack.id ? view : undefined,
+    view: view?.rackId === rack.id ? view : fromRoom3d ? { rackId: rack.id, mode: '3d' } : undefined,
   });
 }
 
@@ -1189,6 +1190,7 @@ function renderPage({ preserveRackView = false, roomFilterChanged = false } = {}
   state.rackView?.();
   state.rackView = null;
   const { kind, id, section } = readRoute();
+  const previousRoomId = state.roomOverview?.roomId;
   if (kind === 'rack' && state.roomOverview) state.rackOverviewRoomId = state.roomOverview.roomId;
   else if (kind !== 'rack') state.rackOverviewRoomId = null;
   disposeRoomOverview(true);
@@ -1199,8 +1201,11 @@ function renderPage({ preserveRackView = false, roomFilterChanged = false } = {}
     else link.removeAttribute('aria-current');
   });
   page.replaceChildren();
-  if (kind === 'rooms') return renderRoomPage(id, roomFilterChanged);
-  if (kind === 'rack') renderRackPage(id, view);
+  if (kind === 'rooms') return renderRoomPage(id, roomFilterChanged, previousRoomId);
+  if (kind === 'rack') {
+    const fromRoom3d = previousRoomId != null && state.roomViews.get(previousRoomId)?.view?.mode === '3d';
+    renderRackPage(id, view, fromRoom3d);
+  }
   if (kind === 'devices') renderDevicesPage();
   if (kind === 'systems') renderSystemsPage();
   if (kind === 'projects') renderProjectsPage();

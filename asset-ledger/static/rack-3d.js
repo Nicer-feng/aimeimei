@@ -6,6 +6,8 @@ import { isSelectableRackSlot, operatingStatus, operatingStatusLabel, rackFaceSl
 import { createContactShadowTexture, createRackEnvironment } from './rack-textures.js';
 
 const CAMERA_TRANSITION_MS = 240;
+const CAMERA_ENTRY_MS = 380;
+const CAMERA_ENTRY_DISTANCE = 1.18;
 const MAX_DAMPING_TAIL_MS = 1000;
 const CAMERA_VIEWS = [
   { label: '斜视', direction: [0.65, 0.29, 1] },
@@ -526,7 +528,7 @@ export function mountRackScene(host, {
     controls.enableDamping = true;
   }
 
-  function transitionView(direction, distance, target, onArrive) {
+  function transitionView(direction, distance, target, { onArrive, duration = CAMERA_TRANSITION_MS, afterFirstDraw = false } = {}) {
     clearHover();
     stopDamping();
     transition = undefined;
@@ -540,15 +542,16 @@ export function mountRackScene(host, {
       const angle = THREE.MathUtils.euclideanModulo(end.theta - start.theta + Math.PI, 2 * Math.PI) - Math.PI;
       controls.maxDistance = Math.max(controls.maxDistance, end.radius, fittedDistance(direction) * 2.8);
       transition = {
-        start, end, angle, fromTarget: controls.target.clone(), target, direction, distance, onArrive, started: performance.now(),
+        start, end, angle, fromTarget: controls.target.clone(), target, direction, distance, onArrive,
+        duration, started: afterFirstDraw ? undefined : performance.now(),
       };
     }
     invalidate();
   }
 
   function updateTransition(now) {
-    const { start, end, angle, fromTarget, target, direction, distance, onArrive, started } = transition;
-    const progress = Math.min(1, Math.max(0, (now - started) / CAMERA_TRANSITION_MS));
+    const { start, end, angle, fromTarget, target, direction, distance, onArrive, duration, started } = transition;
+    const progress = Math.min(1, Math.max(0, (now - started) / duration));
     if (progress === 1) {
       transition = undefined;
       placeView(direction, distance, target);
@@ -588,7 +591,7 @@ export function mountRackScene(host, {
   function render(now) {
     renderFrame = undefined;
     if (!sized || disposed) return;
-    if (transition) updateTransition(now);
+    if (transition?.started != null) updateTransition(now);
     else if (settling) {
       settling = updateControls();
       clampTarget();
@@ -596,6 +599,8 @@ export function mountRackScene(host, {
     }
     if (disposed) return;
     renderer.render(scene, camera);
+    // 机柜第一次出画可能要编译着色器，从出画后开始计算入场时间。
+    if (transition && transition.started == null) transition.started = performance.now();
     if (transition || settling) invalidate();
   }
 
@@ -634,7 +639,7 @@ export function mountRackScene(host, {
     setActiveView(-1);
     markFocusedDevice(device.id);
     slotPicker?.setFace(device.face);
-    transitionView(direction, distance, new THREE.Vector3(0, centerY, front ? maxZ : minZ), onArrive);
+    transitionView(direction, distance, new THREE.Vector3(0, centerY, front ? maxZ : minZ), { onArrive });
     return true;
   }
 
@@ -643,6 +648,7 @@ export function mountRackScene(host, {
     const viewportHeight = viewport.clientHeight;
     if (!width || !viewportHeight) return;
     if (sized && width === renderSize.x && viewportHeight === renderSize.y) return;
+    const enter = !sized && !initialCamera && pendingDeviceId == null && !reducedMotion.matches;
     const current = snapshot() ?? initialView;
     renderer.setSize(width, viewportHeight, false);
     camera.aspect = width / viewportHeight;
@@ -651,12 +657,15 @@ export function mountRackScene(host, {
     const targetVec = Array.isArray(current.target) && current.target.length === 3
       ? new THREE.Vector3(...current.target) : center;
     const direction = new THREE.Vector3(...current.direction).normalize();
-    placeView(direction, fittedDistance(direction) * current.zoom, targetVec);
+    const distance = fittedDistance(direction) * current.zoom;
+    placeView(direction, enter ? distance * CAMERA_ENTRY_DISTANCE : distance, targetVec);
     renderSize.set(width, viewportHeight);
     if (pendingDeviceId != null) {
       const id = pendingDeviceId;
       pendingDeviceId = undefined;
       focusDevice(id);
+    } else if (enter) {
+      transitionView(direction, distance, targetVec, { duration: CAMERA_ENTRY_MS, afterFirstDraw: true });
     }
     invalidate();
   }
