@@ -166,7 +166,7 @@ function floorPlan(room, layout, racksById, onRack) {
 
 export function renderRoomOverview(host, {
   room, layout, racks, devices = [], systems = [], deviceKind, units, siteName, toolbar, disclosures,
-  onRack, onDevice, onSceneInteraction, view, switchingRoom = false,
+  onRack, onDevice, onSceneInteraction, onClearDeviceSelection, view, switchingRoom = false,
 }) {
   const racksById = new Map(racks.map((rack) => [rack.id, rack]));
   const positions = layout?.positions.filter((position) => racksById.has(position.rack_id)) ?? [];
@@ -554,7 +554,7 @@ export function renderRoomOverview(host, {
         layout: { ...layout, positions }, racks, devices: roomDevices, deviceKind, units, initialCamera: camera, onRack,
         roomName: room.name, siteName, entry: focusOnMount ? undefined : entry,
         initialLocatedRackId: locatedRack?.id, initialLocatedDeviceId: locatedDevice?.id,
-        initialSearchFilter: searchFilter, onDevice, onSceneInteraction,
+        initialSearchFilter: searchFilter, onDevice, onSceneInteraction, onClearDeviceSelection,
         onFallback: () => fallback(ticket),
       });
       if (disposed || ticket !== generation) {

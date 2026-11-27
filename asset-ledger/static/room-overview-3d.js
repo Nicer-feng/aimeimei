@@ -5,8 +5,8 @@ import {
   deviceMetrics, normalizeDepth, normalizeStatus, rackOccupancy, rackVerticalBounds,
 } from './rack-geometry.js';
 import {
-  animateOperatingLamps, buildRackFineDetails, buildRackOverviewLayer, createRackPalette,
-  projectCabinetRect, projectScenePoint,
+  animateOperatingLamps, buildRackFineDetails, buildRackOverviewLayer, createDeviceSelectionLabel,
+  createDeviceSelectionOutline, createRackPalette, projectCabinetRect, projectScenePoint,
 } from './rack-3d-model.js';
 import { createContactShadowTexture, createFloorTileTexture, createRackEnvironment } from './rack-textures.js';
 import { buildRoomLighting } from './room-immersive.js';
@@ -311,9 +311,7 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
   const outline = new THREE.LineSegments(new THREE.EdgesGeometry(block), new THREE.LineBasicMaterial({ color: 0x538f80 }));
   outline.visible = false;
   scene.add(outline);
-  const deviceOutline = new THREE.LineSegments(outline.geometry, new THREE.LineBasicMaterial({ color: 0xffcb72 }));
-  deviceOutline.visible = false;
-  scene.add(deviceOutline);
+  const deviceOutline = createDeviceSelectionOutline(scene);
   const locatedDeviceOutline = new THREE.LineSegments(
     outline.geometry, new THREE.LineBasicMaterial({ color: 0xff9f42, toneMapped: false }),
   );
@@ -323,6 +321,7 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
   let immersiveLayer;
   let highlightedRackId;
   let selectedRackId;
+  let hasLocatedDevice = false;
   let activeFilter;
 
   function updateRoomLighting() {
@@ -339,7 +338,6 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
       material.color.setHex(active ? (IMMERSIVE_SURFACES.get(color) ?? color) : color);
     }
     outline.material.color.setHex(active ? 0x77eaff : 0x538f80);
-    deviceOutline.material.color.setHex(active ? 0x82edff : 0xffcb72);
     locatedDeviceOutline.material.color.setHex(active ? 0xb4f7ff : 0xff9f42);
     updateRoomLighting();
   }
@@ -445,23 +443,28 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
     ).multiplyScalar(entry.scale * padding);
   }
   function highlightDevice(entry, device) {
-    positionDeviceOutline(deviceOutline, entry, device, 1.022);
+    if (device) deviceOutline.set(device, { ...entry, unit: RACK_UNIT });
+    else deviceOutline.clear();
     selectedRackId = device ? String(entry.rack.id) : undefined;
+    locatedDeviceOutline.visible = hasLocatedDevice && !device;
     updateRoomLighting();
   }
   function highlightLocatedDevice(entry, device) {
     positionDeviceOutline(locatedDeviceOutline, entry, device, 1.052);
+    hasLocatedDevice = Boolean(device);
+    locatedDeviceOutline.visible = hasLocatedDevice && !selectedRackId;
   }
   const targetForRack = (id) => targetsById.get(String(id));
   const entryForRack = (id) => targetForRack(id)?.userData.entry;
   return { bounds, entries, entryForRack, targetForRack, highlight, highlightDevice, landmarks, lamps: overviewLayer.lamps,
-    highlightLocatedDevice, photoFront, setImmersive, setMode: overviewLayer.setMode, setSearchFilter, symbols, targets };
+    highlightLocatedDevice, photoFront, selectedDeviceCenter: deviceOutline.center, setImmersive,
+    setMode: overviewLayer.setMode, setSearchFilter, symbols, targets };
 }
 
 export function mountRoomScene(host, {
   layout, roomName, siteName, racks, initialCamera, onRack, onFallback, devices = [],
   deviceKind = () => 'server', units = (device) => `U${device.u_start}`,
-  initialLocatedRackId, initialLocatedDeviceId, initialSearchFilter, onDevice, onSceneInteraction, entry,
+  initialLocatedRackId, initialLocatedDeviceId, initialSearchFilter, onDevice, onSceneInteraction, onClearDeviceSelection, entry,
 }) {
   const panel = node('section', 'room-3d');
   panel.setAttribute('aria-label', '机房三维总览');
@@ -526,6 +529,7 @@ export function mountRoomScene(host, {
   canvas.dataset.detailCount = '0';
   canvas.dataset.detailRacks = '';
   viewport.append(canvas, landmarkLayer, labels, toolbar, legend, tooltip);
+  const selectionLabel = createDeviceSelectionLabel(viewport);
   panel.append(viewport);
   host.replaceChildren(panel);
 
@@ -678,7 +682,7 @@ export function mountRoomScene(host, {
       const angleChanged = (viewMode === 'immersive') !== (id === 'immersive');
       applyViewMode(id);
       if (angleChanged && activeView === 'angled') usePreset('angled', defaultAngle());
-      else if (angleChanged) onSceneInteraction?.();
+      else onSceneInteraction?.();
       invalidate();
     });
   }
@@ -733,6 +737,10 @@ export function mountRoomScene(host, {
       const entry = hit?.object.userData.entry;
       const rack = labelRack ?? entry?.rack;
       if (rack) selectRack(rack, entry, pickDevice(hit), event);
+      else if (event.target === canvas) {
+        clearPendingClick();
+        if (selectedDeviceId) onClearDeviceSelection?.();
+      }
     }
   });
   viewport.addEventListener('pointercancel', () => {
@@ -1211,6 +1219,7 @@ export function mountRoomScene(host, {
     renderer.render(scene, camera);
     if (flight?.startTime === null) flight.startTime = performance.now();
     layoutLabels(width, height);
+    selectionLabel.update(camera, canvas, model.selectedDeviceCenter);
     if (flight || dampingFrames) invalidate();
   }
 
@@ -1236,7 +1245,7 @@ export function mountRoomScene(host, {
   function makeDeviceAnchor(entry, device, event) {
     const id = String(device.id);
     return {
-      element: canvas, x: event?.clientX, y: event?.clientY, viewport,
+      element: canvas, x: event?.clientX, y: event?.clientY, viewport, persistSelection: true,
       cabinetRect() {
         if (disposed || !sized) return null;
         const target = model.targetForRack(entry.rack.id);
@@ -1262,7 +1271,10 @@ export function mountRoomScene(host, {
       setSelected(selected) {
         if (disposed || (!selected && selectedDeviceId !== id)) return;
         selectedDeviceId = selected ? id : undefined;
+        if (selected) canvas.dataset.selectedDeviceId = id;
+        else delete canvas.dataset.selectedDeviceId;
         model.highlightDevice(entry, selected ? device : undefined);
+        selectionLabel.set(selected ? `${entry.rack.name} · ${units(device)}` : undefined);
         invalidate();
       },
     };
@@ -1383,7 +1395,7 @@ export function mountRoomScene(host, {
   }
 
   function showTooltip(device, entry, event) {
-    if (!entry) {
+    if (!entry || (device && String(device.id) === selectedDeviceId)) {
       hideTooltip();
       return;
     }

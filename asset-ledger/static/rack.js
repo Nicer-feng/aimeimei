@@ -207,7 +207,7 @@ function statusLegend() {
   return legend;
 }
 
-export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initialDeviceId, onSceneInteraction }) {
+export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initialDeviceId, onSceneInteraction, onClearDeviceSelection }) {
   const viewBar = element('div', 'rack-view-bar');
   const modes = element('div', 'rack-mode-switch');
   modes.setAttribute('role', 'group');
@@ -244,6 +244,15 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
     for (const node of deviceNodes) {
       node.setAttribute('aria-pressed', String(node.dataset.deviceId === String(selectedDeviceId)));
     }
+  }
+
+  function clearDeviceSelection() {
+    const wasSelected = selectedDeviceId != null || pendingDeviceId != null;
+    selectedDeviceId = null;
+    pendingDeviceId = undefined;
+    if (wasSelected) updateElevationSelection();
+    const sceneCleared = scene?.clearDeviceSelection?.();
+    return wasSelected || Boolean(sceneCleared);
   }
 
   function bindSelection(deviceId, anchor) {
@@ -315,6 +324,10 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
       scene = mountRackScene(spatial, {
         rack, devices, deviceKind, units, depthLabel, initialCamera: lastCamera, faceSlots, onEmpty,
         initialDeviceId: selectedDeviceId, onSceneInteraction,
+        onClearDeviceSelection: () => {
+          clearDeviceSelection();
+          onClearDeviceSelection?.();
+        },
         onDevice: (device, anchor) => onDevice(device, anchor ? bindSelection(device.id, anchor) : undefined),
         onContextLost: () => showElevation('3D 已断开，已返回立面。'),
       });
@@ -349,5 +362,5 @@ export function renderRack(host, { rack, devices, onDevice, onEmpty, view, initi
   const snapshot = () => ({
     rackId: rack.id, mode: spatial.hidden ? '2d' : '3d', camera: scene?.snapshot?.() ?? lastCamera, selectedDeviceId,
   });
-  return Object.assign(dispose, { ready, snapshot, deviceAnchor });
+  return Object.assign(dispose, { ready, snapshot, deviceAnchor, clearDeviceSelection });
 }

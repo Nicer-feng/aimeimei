@@ -453,6 +453,7 @@ function renderRoomPage(requestedId, filterChanged, previousRoomId) {
     switchingRoom: previousRoomId != null && previousRoomId !== room.id,
     onDevice: openDevicePresentation,
     onSceneInteraction: dismissDeviceQuick,
+    onClearDeviceSelection: closeDevicePresentation,
     onRack: (rack) => {
       if (state.roomOverview) state.roomOverview.leavingScroll = window.scrollY;
       location.hash = `rack/${rack.id}`;
@@ -506,6 +507,7 @@ function renderRackPage(requestedId, view, fromRoom3d) {
   page.append(rackHost);
   state.rackView = renderRack(rackHost, {
     rack, devices, onDevice: openDevicePresentation, onSceneInteraction: dismissDeviceQuick,
+    onClearDeviceSelection: closeDevicePresentation,
     onEmpty: userCanWrite() ? (slot) => openDeviceEditor(null, rack, slot) : undefined,
     view: view?.rackId === rack.id ? view : fromRoom3d ? { rackId: rack.id, mode: '3d' } : undefined,
   });
@@ -916,6 +918,7 @@ function closeDevicePresentation({ restoreFocus = false, animate = false } = {})
   if (drawer.open) drawer.close();
   cancelDrawerClose();
   selectDevice(null);
+  if (anchor?.persistSelection) state.rackView?.clearDeviceSelection?.();
   restoreDevicePageScroll();
   if (restoreFocus) {
     const source = anchor?.element;
@@ -930,7 +933,13 @@ function closeQuickPanel() {
 }
 
 function dismissDeviceQuick() {
-  if (deviceQuick.open) closeDevicePresentation();
+  if (!deviceQuick.open) return;
+  if (deviceSelection?.anchor?.persistSelection) {
+    closeQuickPanel();
+    restoreDevicePageScroll();
+  } else {
+    closeDevicePresentation();
+  }
 }
 
 function selectedDeviceRect() {
@@ -1074,10 +1083,10 @@ function openDevicePresentation(device, anchor) {
         element('p', { class: 'muted small-text code' }, device.code)),
       close),
     element('p', { class: 'small-text' }, deviceLocation(device)),
-    device.model && element('p', { class: 'muted small-text' }, device.model),
-    systems.length > 0 && element('p', { class: 'device-quick-systems small-text' },
+    device.model ? element('p', { class: 'muted small-text' }, device.model) : '',
+    systems.length ? element('p', { class: 'device-quick-systems small-text' },
       systems.slice(0, 3).map((system) => internalLink('system', system.id, system.name)),
-      systems.length > 3 ? '…' : ''),
+      systems.length > 3 ? '…' : '') : '',
     element('div', { class: 'device-quick-actions' }, deviceStatusPill(device, { quick: true }), details));
   if (!deviceQuick.open) deviceQuick.show();
   showDeviceAboveSheet(deviceQuick);
@@ -1836,9 +1845,12 @@ document.addEventListener('click', (event) => {
   }
 });
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !editor.open && !preview.open && (deviceQuick.open || drawer.open)) {
+  if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('dialog:modal')) return;
+  if (deviceQuick.open || drawer.open || deviceSelection?.anchor?.persistSelection) {
     event.preventDefault();
     closeDevicePresentation({ restoreFocus: true, animate: true });
+  } else if (state.rackView?.clearDeviceSelection?.()) {
+    event.preventDefault();
   }
 });
 window.addEventListener('resize', () => {

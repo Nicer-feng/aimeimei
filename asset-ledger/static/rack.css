@@ -206,6 +206,28 @@
 .rack-spatial-viewport canvas:active { cursor: grabbing; }
 .rack-spatial-viewport canvas.rack-spatial-hit:not(:active) { cursor: pointer; }
 
+.device-3d-selection-label {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: calc(100% - 1rem);
+  overflow: hidden;
+  padding: .14rem .42rem;
+  border: 1px solid #ffcb72;
+  border-radius: .35rem;
+  background: #271c10f0;
+  box-shadow: 0 1px 5px #0003;
+  color: #ffe4ad;
+  font-size: .72rem;
+  font-weight: 680;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
 .rack-spatial-tooltip {
   position: absolute;
   z-index: 5;

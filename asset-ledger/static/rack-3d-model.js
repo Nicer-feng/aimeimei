@@ -1,7 +1,7 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import {
   DEPTH_COLORS, DETAIL_Z, DEVICE_HALF_WIDTH, OPERATING_LAMP_X, OPERATING_LAMP_Z, PANEL_COLORS, PANEL_Z,
-  RACK_DEPTH, RACK_WIDTH, STATUS_COLORS, SURFACES, TYPE_ACCENTS,
+  RACK_DEPTH, RACK_UNIT, RACK_WIDTH, STATUS_COLORS, SURFACES, TYPE_ACCENTS,
   deviceMetrics, normalizeDepth, normalizeStatus, rackSummaryColor,
 } from './rack-geometry.js';
 import { createDeviceLabelTexture, createOperatingLampTexture, createRackScaleTexture } from './rack-textures.js';
@@ -34,6 +34,32 @@ export function projectScenePoint(camera, canvas, point) {
   view.applyMatrix4(camera.projectionMatrix);
   if (![view.x, view.y].every(Number.isFinite) || Math.abs(view.x) > 1 || Math.abs(view.y) > 1) return null;
   return { x: projectX(rect, view.x), y: projectY(rect, view.y) };
+}
+
+export function createDeviceSelectionLabel(viewport) {
+  const label = document.createElement('span');
+  label.className = 'device-3d-selection-label';
+  label.setAttribute('aria-hidden', 'true');
+  label.hidden = true;
+  viewport.append(label);
+
+  return {
+    set(text) {
+      label.textContent = text ?? '';
+      if (!text) label.hidden = true;
+    },
+    update(camera, canvas, center) {
+      if (!label.textContent) return;
+      const point = projectScenePoint(camera, canvas, center);
+      label.hidden = !point;
+      if (!point) return;
+      const rect = viewport.getBoundingClientRect();
+      const margin = label.offsetWidth / 2 + 7;
+      const left = THREE.MathUtils.clamp(point.x - rect.left + 12, margin, Math.max(margin, rect.width - margin));
+      const top = THREE.MathUtils.clamp(point.y - rect.top + 12, 5, Math.max(5, rect.height - label.offsetHeight - 5));
+      label.style.transform = `translate(${left}px, ${top}px) translateX(-50%)`;
+    },
+  };
 }
 
 export function projectCabinetRect(camera, canvas, bounds, matrixWorld) {
@@ -89,6 +115,154 @@ export function projectCabinetRect(camera, canvas, bounds, matrixWorld) {
   const top = projectY(rect, maxY);
   const bottom = projectY(rect, minY);
   return { left, top, right, bottom, width: right - left, height: bottom - top };
+}
+
+function selectionEdgeGeometry() {
+  const corners = Array.from({ length: 8 }, (_, index) => [
+    index & 1 ? 0.5 : -0.5, index & 2 ? 0.5 : -0.5, index & 4 ? 0.5 : -0.5,
+  ]);
+  const starts = [];
+  const ends = [];
+  const offsets = [];
+  const indices = [];
+  for (let index = 0; index < corners.length; index += 1) {
+    for (const axis of [1, 2, 4]) {
+      if (index & axis) continue;
+      const start = corners[index];
+      const end = corners[index | axis];
+      const first = starts.length / 3;
+      for (let vertex = 0; vertex < 4; vertex += 1) {
+        starts.push(...start);
+        ends.push(...end);
+        offsets.push(vertex & 1, vertex & 2 ? 1 : -1);
+      }
+      indices.push(first, first + 1, first + 2, first + 2, first + 1, first + 3);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(starts, 3));
+  geometry.setAttribute('edgeEnd', new THREE.Float32BufferAttribute(ends, 3));
+  geometry.setAttribute('edgeCorner', new THREE.Float32BufferAttribute(offsets, 2));
+  geometry.setIndex(indices);
+  return geometry;
+}
+
+const selectionEdgeVertex = `
+  attribute vec3 edgeEnd;
+  attribute vec2 edgeCorner;
+  uniform vec2 viewportSize;
+  uniform float edgeWidth;
+  varying vec2 edgeCoord;
+  varying float edgeW;
+
+  void main() {
+    vec4 start = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 end = projectionMatrix * modelViewMatrix * vec4(edgeEnd, 1.0);
+    // 跨过近平面的棱线先裁剪，再转换到屏幕坐标，避免贴近设备时出现长条。
+    float startDepth = start.z + start.w;
+    float endDepth = end.z + end.w;
+    if (startDepth < 0.0 && endDepth < 0.0) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      edgeCoord = vec2(0.0);
+      edgeW = 1.0;
+      return;
+    }
+    if (startDepth < 0.0) start = mix(start, end, startDepth / (startDepth - endDepth));
+    if (endDepth < 0.0) end = mix(end, start, endDepth / (endDepth - startDepth));
+
+    vec2 segment = (end.xy / end.w - start.xy / start.w) * viewportSize * 0.5;
+    float lengthPx = length(segment);
+    vec2 normal = vec2(-segment.y, segment.x) / max(lengthPx, 0.0001);
+    vec4 clip = mix(start, end, edgeCorner.x);
+    clip.xy += normal * edgeCorner.y * edgeWidth / viewportSize * clip.w;
+    gl_Position = clip;
+    // 在片元中抵消透视插值，让虚线节距维持屏幕像素长度。
+    edgeCoord = vec2(edgeCorner.x * lengthPx, edgeCorner.y) * clip.w;
+    edgeW = clip.w;
+  }
+`;
+
+const selectionEdgeFragment = `
+  uniform vec3 edgeColor;
+  uniform float edgeOpacity;
+  uniform bool dashed;
+  varying vec2 edgeCoord;
+  varying float edgeW;
+
+  void main() {
+    vec2 point = edgeCoord / edgeW;
+    float alpha = edgeOpacity * (1.0 - smoothstep(0.69, 1.0, abs(point.y)));
+    if (dashed) {
+      float phase = mod(point.x, 10.0);
+      alpha *= smoothstep(0.0, 0.75, phase) * (1.0 - smoothstep(5.75, 6.5, phase));
+    }
+    gl_FragColor = vec4(edgeColor, alpha);
+    #include <colorspace_fragment>
+  }
+`;
+
+export function createDeviceSelectionOutline(scene) {
+  const group = new THREE.Group();
+  const geometry = selectionEdgeGeometry();
+  const tint = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({
+    color: 0xffc65a, opacity: 0.075, transparent: true, depthWrite: false, toneMapped: false,
+  }));
+  tint.renderOrder = 6;
+  group.add(tint);
+
+  const viewportSize = new THREE.Vector2(1, 1);
+  const edgeColor = new THREE.Color(0xffc65a);
+  function edge(dashed) {
+    const mesh = new THREE.Mesh(geometry, new THREE.ShaderMaterial({
+      uniforms: {
+        viewportSize: { value: viewportSize },
+        edgeColor: { value: edgeColor },
+        edgeWidth: { value: dashed ? 2.4 : 3.2 },
+        edgeOpacity: { value: dashed ? 0.37 : 1 },
+        dashed: { value: dashed },
+      },
+      vertexShader: selectionEdgeVertex,
+      fragmentShader: selectionEdgeFragment,
+      transparent: true,
+      depthWrite: false,
+      depthFunc: dashed ? THREE.GreaterDepth : THREE.LessEqualDepth,
+      toneMapped: false,
+    }));
+    mesh.frustumCulled = false;
+    mesh.renderOrder = dashed ? 7 : 8;
+    mesh.onBeforeRender = (renderer) => renderer.getSize(viewportSize);
+    group.add(mesh);
+    return mesh;
+  }
+
+  const hidden = edge(true);
+  const visible = edge(false);
+  group.visible = false;
+  scene.add(group);
+
+  function set(device, { unit = RACK_UNIT, x = 0, y = 0, z = 0, rotation = 0, scale = 1 } = {}) {
+    group.visible = device != null;
+    if (!device) return;
+    const { minY, maxY, minZ, maxZ } = deviceMetrics(device, unit);
+    const angle = THREE.MathUtils.degToRad(rotation);
+    const centerZ = (minZ + maxZ) * scale / 2;
+    group.position.set(x + Math.sin(angle) * centerZ, y + (minY + maxY) * scale / 2, z + Math.cos(angle) * centerZ);
+    group.rotation.y = angle;
+    group.scale.set(DEVICE_HALF_WIDTH * 2 + 0.016, maxY - minY + 0.003, maxZ - minZ + 0.024).multiplyScalar(scale);
+  }
+
+  function clear() { group.visible = false; }
+
+  function dispose() {
+    group.removeFromParent();
+    geometry.dispose();
+    tint.geometry.dispose();
+    tint.material.dispose();
+    hidden.material.dispose();
+    visible.material.dispose();
+  }
+
+  return { set, clear, center: group.position, dispose };
 }
 
 function material(color, roughness, metalness) {

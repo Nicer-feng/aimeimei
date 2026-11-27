@@ -1,7 +1,10 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
 import { DETAIL_Z, DEVICE_HALF_WIDTH, MOUNT_FULL_Z, RACK_DEPTH, RACK_UNIT, deviceMetrics } from './rack-geometry.js';
-import { animateOperatingLamps, buildRackModel, projectCabinetRect, projectScenePoint } from './rack-3d-model.js';
+import {
+  animateOperatingLamps, buildRackModel, createDeviceSelectionLabel, createDeviceSelectionOutline,
+  projectCabinetRect, projectScenePoint,
+} from './rack-3d-model.js';
 import { isSelectableRackSlot, operatingStatus, operatingStatusLabel, rackFaceSlots, rackSlotSelection } from './rack.js?v=operating-status';
 import { createContactShadowTexture, createRackEnvironment } from './rack-textures.js';
 
@@ -135,7 +138,7 @@ function addContactShadow(scene, bounds) {
 
 export function mountRackScene(host, {
   rack, devices, onDevice, onEmpty, deviceKind, units, depthLabel, onContextLost, onSceneInteraction, initialCamera,
-  initialDeviceId, faceSlots = rackFaceSlots(rack, devices),
+  initialDeviceId, onClearDeviceSelection, faceSlots = rackFaceSlots(rack, devices),
 }) {
   const initialView = initialCamera ?? { direction: CAMERA_VIEWS[0].direction, zoom: 1, activeView: 0, viewMode: 'appearance' };
   let viewMode = RACK_MODES.some((m) => m.id === initialView.viewMode) ? initialView.viewMode : 'appearance';
@@ -254,6 +257,8 @@ export function mountRackScene(host, {
   addLight(0xecf5ff, 2.6, [1, 5, -7]);
   const model = buildRackModel(scene, { rack, devices, deviceKind, unit: RACK_UNIT });
   const bounds = new THREE.Box3().setFromObject(scene);
+  const deviceOutline = createDeviceSelectionOutline(scene);
+  const deviceLabel = createDeviceSelectionLabel(viewport);
   const center = bounds.getCenter(new THREE.Vector3());
   const corners = [];
   for (const x of [bounds.min.x, bounds.max.x]) {
@@ -350,7 +355,11 @@ export function mountRackScene(host, {
     if (clearHover()) invalidate();
     if (hit?.device) onDevice(hit.device, makeAnchor(hit.device, canvas, { x: event.clientX, y: event.clientY }));
     else if (onEmpty && isSelectableRackSlot(hit?.slot)) onEmpty(rackSlotSelection(hit.slot));
-    else if (hit?.slot?.kind === 'unknown' && event.pointerType === 'touch') showHover(hit, event);
+    else {
+      clearDeviceSelection();
+      onClearDeviceSelection?.();
+      if (hit?.slot?.kind === 'unknown' && event.pointerType === 'touch') showHover(hit, event);
+    }
   });
   const contextLost = (event) => {
     event.preventDefault();
@@ -358,11 +367,12 @@ export function mountRackScene(host, {
   };
   canvas.addEventListener('webglcontextlost', contextLost);
 
-  return Object.assign(dispose, { snapshot, deviceAnchor, setSelectedDevice, focusDevice });
+  return Object.assign(dispose, { snapshot, deviceAnchor, setSelectedDevice, clearDeviceSelection, focusDevice });
 
   function makeAnchor(device, anchorElement, point) {
     return {
       element: anchorElement,
+      persistSelection: true,
       ...(anchorElement === canvas ? { viewport, ...point } : {}),
       visible: () => anchorElement.isConnected && anchorElement.getClientRects().length > 0,
       cabinetRect: () => projectCabinetRect(camera, canvas, bounds),
@@ -388,6 +398,15 @@ export function mountRackScene(host, {
     if (deviceId == null) delete canvas.dataset.selectedDeviceId;
     else canvas.dataset.selectedDeviceId = deviceId;
     updateDeviceSelection();
+  }
+
+  function clearDeviceSelection() {
+    if (disposed || (selectedDeviceId == null && focusedDeviceId == null && pendingDeviceId == null)) return false;
+    pendingDeviceId = undefined;
+    if (transition && focusedDeviceId != null) transition.onArrive = undefined;
+    markFocusedDevice();
+    setSelectedDevice(null);
+    return true;
   }
 
   function clampTarget() {
@@ -434,6 +453,7 @@ export function mountRackScene(host, {
     reducedMotion.removeEventListener('change', updateMotionPreference);
     canvas.removeEventListener('webglcontextlost', contextLost);
     controls.dispose();
+    deviceOutline.dispose();
     model.disposeExtra?.();
     const geometries = new Set();
     const materials = new Set();
@@ -599,6 +619,7 @@ export function mountRackScene(host, {
     }
     if (disposed) return;
     renderer.render(scene, camera);
+    deviceLabel.update(camera, canvas, deviceOutline.center);
     // 机柜第一次出画可能要编译着色器，从出画后开始计算入场时间。
     if (transition && transition.started == null) transition.started = performance.now();
     if (transition || settling) invalidate();
@@ -616,6 +637,9 @@ export function mountRackScene(host, {
     for (const button of shortcuts.children) {
       button.setAttribute('aria-pressed', String(button.dataset.deviceId === String(activeDeviceId)));
     }
+    const selected = devices.find(({ id }) => id === selectedDeviceId);
+    deviceOutline.set(selected);
+    deviceLabel.set(selected ? `${rack.name} · ${units(selected)}` : null);
     model.highlight(activeDeviceId ?? hovered?.device?.id ?? null);
     invalidate();
   }
