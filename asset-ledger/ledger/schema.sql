@@ -37,6 +37,30 @@ CREATE TABLE IF NOT EXISTS devices (
             u_start IS NOT NULL AND u_start > 0 AND u_height IS NOT NULL AND u_height > 0))
 );
 CREATE INDEX IF NOT EXISTS devices_rack_face ON devices(rack_id, face, u_start);
+CREATE TABLE IF NOT EXISTS physical_ports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    name TEXT NOT NULL COLLATE NOCASE,
+    kind TEXT NOT NULL CHECK (kind IN ('copper', 'fiber', 'other')),
+    port_group TEXT NOT NULL DEFAULT '',
+    position INTEGER CHECK (position BETWEEN 1 AND 4096),
+    base_state TEXT NOT NULL DEFAULT 'unknown' CHECK (base_state IN ('unknown', 'free')),
+    is_demo INTEGER NOT NULL DEFAULT 0 CHECK (is_demo IN (0, 1)),
+    UNIQUE (device_id, name)
+);
+CREATE TABLE IF NOT EXISTS physical_cables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pending_peer_label TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    verified_on TEXT
+);
+CREATE TABLE IF NOT EXISTS physical_cable_ends (
+    port_id INTEGER PRIMARY KEY REFERENCES physical_ports(id) ON DELETE RESTRICT,
+    cable_id INTEGER NOT NULL REFERENCES physical_cables(id) ON DELETE CASCADE,
+    side INTEGER NOT NULL CHECK (side IN (0, 1)),
+    label TEXT NOT NULL DEFAULT '',
+    UNIQUE (cable_id, side)
+);
 CREATE TABLE IF NOT EXISTS systems (
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL
 );

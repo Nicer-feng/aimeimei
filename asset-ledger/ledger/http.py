@@ -17,6 +17,7 @@ from .data import (
 )
 from .edge import LoginThrottle
 from .identity import AI_COOKIE, IdentityError, sroom_user
+from .ports import create_ports, delete_port, device_ports, edit_port, link_port, unlink_port
 
 
 STATIC_DIR = PROJECT_ROOT / "static"
@@ -27,6 +28,9 @@ FILE_ROUTE = re.compile(r"/api/documents/([1-9][0-9]{0,9})/file")
 EDIT_ROUTE = re.compile(r"/api/(devices|systems|projects|rooms|racks)/([1-9][0-9]{0,9})")
 DELETE_ROUTE = re.compile(r"/api/(documents|devices|systems|projects)/([1-9][0-9]{0,9})")
 DEVICE_ARCHIVE_ROUTE = re.compile(r"/api/devices/([1-9][0-9]{0,9})/(archive|restore)")
+DEVICE_PORTS_ROUTE = re.compile(r"/api/devices/([1-9][0-9]{0,9})/ports")
+PORT_ROUTE = re.compile(r"/api/ports/([1-9][0-9]{0,9})")
+PORT_CABLE_ROUTE = re.compile(r"/api/ports/([1-9][0-9]{0,9})/cable")
 ROOM_LAYOUT_ROUTE = re.compile(r"/api/rooms/([1-9][0-9]{0,9})/layout")
 ASSET_ROUTE = re.compile(r"/static/([a-zA-Z0-9_-][a-zA-Z0-9._-]*(?:/[a-zA-Z0-9_-][a-zA-Z0-9._-]*)*)")
 ENCODING_QUALITY = re.compile(r"\s*q\s*=\s*(0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)\s*", re.I)
@@ -95,6 +99,9 @@ class LedgerHandler(BaseHTTPRequestHandler):
         self.handle_request()
 
     def do_PATCH(self):
+        self.handle_request()
+
+    def do_PUT(self):
         self.handle_request()
 
     def do_DELETE(self):
@@ -196,7 +203,7 @@ class LedgerHandler(BaseHTTPRequestHandler):
         return value
 
     def api(self, conn, path, query):
-        writing = self.command in ("POST", "PATCH", "DELETE")
+        writing = self.command in ("POST", "PATCH", "PUT", "DELETE")
         if writing:
             self.check_origin()
         managed = self.server.ai_sso
@@ -237,6 +244,8 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 self.json_response(200, catalog(conn, user))
             elif path == "/api/rack-availability":
                 self.json_response(200, rack_availability(conn, user, query))
+            elif (device := DEVICE_PORTS_ROUTE.fullmatch(path)):
+                self.json_response(200, device_ports(conn, user, int(device[1])))
             else:
                 match = FILE_ROUTE.fullmatch(path)
                 if not match:
@@ -253,6 +262,9 @@ class LedgerHandler(BaseHTTPRequestHandler):
         if user["role"] != "admin":
             raise ApiError(403, "当前账号只有辖区内的查阅权限。")
         if self.command == "POST":
+            if (device := DEVICE_PORTS_ROUTE.fullmatch(path)):
+                self.json_response(201, create_ports(conn, user, int(device[1]), self.payload()))
+                return
             if path == "/api/documents":
                 self.json_response(201, save_document(conn, self.payload(UPLOAD_LIMIT)))
                 return
@@ -265,6 +277,9 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 self.json_response(201, writer(conn, user, self.payload()))
                 return
         if self.command == "PATCH":
+            if (port := PORT_ROUTE.fullmatch(path)):
+                self.json_response(200, edit_port(conn, user, int(port[1]), self.payload()))
+                return
             layout = ROOM_LAYOUT_ROUTE.fullmatch(path)
             if layout:
                 self.json_response(200, save_room_layout(conn, self.payload(), int(layout[1])))
@@ -273,7 +288,16 @@ class LedgerHandler(BaseHTTPRequestHandler):
             if match:
                 self.json_response(200, RESOURCE_WRITERS[match[1]](conn, user, self.payload(), int(match[2])))
                 return
+        if self.command == "PUT" and (port := PORT_CABLE_ROUTE.fullmatch(path)):
+            self.json_response(200, link_port(conn, user, int(port[1]), self.payload()))
+            return
         if self.command == "DELETE":
+            if (port := PORT_CABLE_ROUTE.fullmatch(path)):
+                self.json_response(200, unlink_port(conn, user, int(port[1])))
+                return
+            if (port := PORT_ROUTE.fullmatch(path)):
+                self.json_response(200, delete_port(conn, user, int(port[1])))
+                return
             match = DELETE_ROUTE.fullmatch(path)
             if match:
                 delete_record(conn, match[1], int(match[2]))

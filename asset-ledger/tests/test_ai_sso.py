@@ -162,6 +162,29 @@ class SroomIdentityTests(unittest.TestCase):
                                       headers={"Origin": "https://untrusted.example"})[0], 403)
         self.assertEqual(self.identity.requests, [])
 
+    def test_physical_ports_follow_scope_and_put_origin(self):
+        status, _, body = self.request("/api/devices/2/ports", READER)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(json.loads(body)["ports"]), 24)
+        self.assertEqual(self.request("/api/devices/5/ports", READER)[0], 404)
+        origin = {"Origin": "https://feng.asia"}
+        status, _, body = self.request("/api/devices/5/ports", ADMIN, method="POST", headers=origin,
+                                       data={"name": "HTTP-PORT"})
+        self.assertEqual(status, 201)
+        ident = json.loads(body)["ports"][0]["id"]
+        path = f"/api/ports/{ident}/cable"
+        pending = {"peer_label": "待核"}
+        upstream_calls = len(self.identity.requests)
+        self.assertEqual(self.request(path, ADMIN, method="PUT", data=pending,
+                                      headers={"Origin": "https://untrusted.example"})[0], 403)
+        self.assertEqual(len(self.identity.requests), upstream_calls)
+        self.assertEqual(self.request(path, READER, method="PUT", data=pending, headers=origin)[0], 403)
+        status, _, body = self.request(path, ADMIN, method="PUT", data=pending, headers=origin)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["ports"][0]["state"], "pending")
+        self.assertEqual(self.request(path, ADMIN, method="DELETE", headers=origin)[0], 200)
+        self.assertEqual(self.request(f"/api/ports/{ident}", ADMIN, method="DELETE", headers=origin)[0], 200)
+
     def test_management_routes_use_authorized_write_branch(self):
         origin = {"Origin": "https://feng.asia"}
         for path, method in (("/api/rooms", "POST"), ("/api/racks/1", "PATCH"),

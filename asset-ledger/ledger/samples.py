@@ -3,6 +3,63 @@
 import hashlib
 
 
+def seed_physical_port_demo(conn):
+    if conn.execute("SELECT 1 FROM metadata WHERE key = 'samples' AND value = '1'").fetchone() is None:
+        return
+    key = "qinglan-physical-ports-v1"
+    if conn.execute("SELECT 1 FROM metadata WHERE key = ?", (key,)).fetchone():
+        return
+    records = {
+        row["code"]: row["id"] for row in conn.execute(
+            """SELECT d.id, d.code FROM devices d
+               JOIN rooms r ON r.id = d.room_id JOIN sites s ON s.id = r.site_id JOIN units u ON u.id = s.unit_id
+               JOIN racks rack ON rack.id = d.rack_id AND rack.room_id = r.id
+               WHERE u.name = '演示东区' AND s.name = '青岚站' AND r.name = '综合机房' AND d.archived_at IS NULL
+                 AND ((d.code = 'QL-SW-001' AND d.serial = 'DEMO-QL-002' AND rack.name = 'A01')
+                   OR (d.code = 'QL-NET-001' AND d.serial = 'DEMO-QL-005' AND rack.name = 'A02'))"""
+        )
+    }
+    if len(records) != 2:
+        return
+    source, peer = records["QL-SW-001"], records["QL-NET-001"]
+    conn.execute("INSERT INTO metadata(key, value) VALUES (?, '1')", (key,))
+    if conn.execute("SELECT 1 FROM physical_ports WHERE device_id IN (?, ?) LIMIT 1", (source, peer)).fetchone():
+        # 已手工录入端口的样例也保留原样。
+        return
+
+    def demo_port(device, name, kind, group, position, state="unknown"):
+        return conn.execute(
+            """INSERT INTO physical_ports(device_id, name, kind, port_group, position, base_state, is_demo)
+               VALUES (?, ?, ?, ?, ?, ?, 1)""", (device, name, kind, group, position, state),
+        ).lastrowid
+
+    for position in range(1, 25):
+        fiber = position >= 23
+        kind = "fiber" if fiber else "copper"
+        name = f"{'SFP' if fiber else 'GE'}1/0/{position:02d}"
+        state = "free" if 17 <= position <= 21 or position == 24 else "unknown"
+        port = demo_port(source, name, kind, "成员 1", position, state)
+        linked = position <= 10 or position == 23
+        if not linked and not 11 <= position <= 16:
+            continue
+        prefix = "F" if fiber else "C"
+        label = f"演示-QL-{prefix}{position:02d}"
+        pending = "" if linked else f"演示-A03-旧标签-{position:02d}"
+        cable = conn.execute(
+            """INSERT INTO physical_cables(pending_peer_label, note, verified_on) VALUES (?, ?, ?)""",
+            (pending, "演示数据 · 跨柜跳线" if linked else "演示数据 · 按现场标签记录，待核对端",
+             "2026-11-18" if linked else None),
+        ).lastrowid
+        ends = [(port, cable, 0, f"{label}-A")]
+        if linked:
+            peer_position = 11 if fiber else position
+            peer_name = f"{'SFP' if fiber else 'GE'}0/{peer_position}"
+            far = demo_port(peer, peer_name, kind, "成员 1", peer_position)
+            ends.append((far, cable, 1, f"{label}-B"))
+        conn.executemany("INSERT INTO physical_cable_ends(port_id, cable_id, side, label) VALUES (?, ?, ?, ?)", ends)
+    demo_port(peer, "SFP0/12", "fiber", "成员 1", 12, "free")
+
+
 def seed(conn, directory):
     conn.executemany(
         "INSERT INTO units VALUES (?, ?, ?)",

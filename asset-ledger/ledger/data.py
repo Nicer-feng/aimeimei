@@ -16,7 +16,7 @@ import time
 from urllib.parse import parse_qsl, urlsplit
 
 from .attachment_formats import FORMATS, extension, valid_attachment
-from .samples import seed
+from .samples import seed, seed_physical_port_demo
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -70,6 +70,7 @@ def initialize(data_dir):
             if conn.execute("SELECT 1 FROM metadata WHERE key = 'samples'").fetchone() is None:
                 seed(conn, PROJECT_ROOT / "samples")
                 conn.execute("INSERT INTO metadata VALUES ('samples', '1')")
+            seed_physical_port_demo(conn)
 
 
 def migrate_schema(conn):
@@ -77,6 +78,9 @@ def migrate_schema(conn):
     migrate_mount_depth(conn)
     migrate_operating_status(conn)
     migrate_device_catalog(conn)
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        seed_physical_port_demo(conn)
 
 
 def migrate_mount_depth(conn):
@@ -635,6 +639,11 @@ def delete_record(conn, resource, ident):
             associated = [kind for table, column, kind in dependencies if conn.execute(
                 f"SELECT 1 FROM {table} WHERE {column} = ? LIMIT 1", (ident,),
             ).fetchone()]
+            if resource == "devices" and conn.execute(
+                """SELECT 1 FROM physical_ports p JOIN physical_cable_ends e ON e.port_id = p.id
+                   WHERE p.device_id = ? LIMIT 1""", (ident,),
+            ).fetchone():
+                associated.append("物理线缆")
             if associated:
                 raise ApiError(409, f"{label}仍有关联记录（{'、'.join(associated)}），请先解除关联。")
             conn.execute(f"DELETE FROM {resource} WHERE id = ?", (ident,))

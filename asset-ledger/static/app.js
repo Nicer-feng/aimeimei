@@ -4,6 +4,7 @@ import { buildDeviceSearch, deviceAddressLabel, downloadDeviceCsv, endpointLabel
 import { openAvailabilityPicker, openRackEditor, openRoomEditor, openRoomLayoutEditor } from './room-tools.js';
 import { createSlotPicker } from './slot-picker.js';
 import { openDeviceLocator, locationHash } from './device-locator.js';
+import { renderDevicePorts, renderDevicePortsSummary } from './device-ports.js';
 import { releases } from './releases.js';
 
 const byId = (id) => document.getElementById(id);
@@ -278,11 +279,11 @@ function deviceLocation(device, linkRack = false) {
   return element('span', {}, where && `${where} / `, element('a', { href: locationHash(device.id) }, slot));
 }
 
-async function copyDeviceLocation(device) {
-  const url = new URL(locationHash(device.id), location.href).href;
+async function copyDeviceLocation(device, portId) {
+  const url = new URL(locationHash(device.id, portId), location.href).href;
   try {
     await navigator.clipboard.writeText(url);
-    notify('已复制设备定位链接');
+    notify(portId == null ? '已复制设备定位链接' : '已复制端口定位链接');
   } catch {
     const input = element('input', { type: 'text', readonly: true, value: url, 'aria-label': '设备定位链接' });
     locator.replaceChildren(dialogHeader('locator-title', '设备定位链接', null, locator),
@@ -1080,6 +1081,17 @@ function drawDeviceQuickGuide(point) {
   deviceQuickGuide.classList.toggle('device-quick-guide-elevation', deviceSelection?.anchor?.element instanceof SVGElement);
 }
 
+function makeDevicePorts(device, initialPortId) {
+  const rendered = renderDevicePorts({
+    device, request, devices: state.catalog.devices, initialPortId,
+    canWrite: userCanWrite() && !device.archived_at,
+    onLocate: ({ deviceId, portId }) => { location.hash = locationHash(deviceId, portId); },
+    onCopy: (portId) => copyDeviceLocation(device, portId),
+  });
+  rendered.dataset.devicePortsSection = String(device.id);
+  return rendered;
+}
+
 function openDevicePresentation(device, anchor) {
   deviceOpenedByScenePointer = Number.isFinite(anchor?.x) && Number.isFinite(anchor?.y);
   if (state.deviceClickMode === 'detail' || drawer.open) {
@@ -1107,6 +1119,10 @@ function openDevicePresentation(device, anchor) {
     systems.length ? element('p', { class: 'device-quick-systems small-text' },
       systems.slice(0, 3).map((system) => internalLink('system', system.id, system.name)),
       systems.length > 3 ? '…' : '') : '',
+    renderDevicePortsSummary({
+      device, request,
+      onOpen: () => openDeviceDrawer(device, anchor, { showPorts: true }),
+    }),
     element('div', { class: 'device-quick-actions' }, deviceStatusPill(device, { quick: true }), details));
   if (!deviceQuick.open) deviceQuick.show();
   showDeviceAboveSheet(deviceQuick);
@@ -1114,12 +1130,14 @@ function openDevicePresentation(device, anchor) {
   details.focus({ preventScroll: true });
 }
 
-function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview?.controller)?.deviceAnchor?.(device?.id)) {
+function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview?.controller)?.deviceAnchor?.(device?.id),
+  { showPorts = false, initialPortId } = {}) {
   if (!device) return;
   cancelDrawerClose();
   closeQuickPanel();
   selectDevice(device, anchor);
   drawer.dataset.deviceId = device.id;
+  const ports = makeDevicePorts(device, initialPortId);
   const actions = [internalLink('device', device.id, '打开设备详情', { class: 'button primary' })];
   if (!device.archived_at) actions.push(button('复制定位链接', () => copyDeviceLocation(device)));
   if (userCanWrite() && !device.archived_at) actions.push(button('编辑设备', () => openDeviceEditor(device)));
@@ -1128,6 +1146,7 @@ function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview
       () => closeDevicePresentation({ restoreFocus: true, animate: true })),
     element('div', { class: 'drawer-body' },
       element('div', { class: 'row-actions' }, actions),
+      ports,
       panel('业务系统与服务入口', systemAssociations(device), deviceSystemActions(device)),
       ...(device.addresses?.length ? [panel('设备地址', deviceAddresses(device))] : []),
       procurementSections(device),
@@ -1137,15 +1156,16 @@ function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview
   drawer.scrollTop = 0;
   showDeviceAboveSheet(drawer);
   drawer.querySelector('.dialog-head button').focus({ preventScroll: true });
+  if (showPorts) ports.scrollIntoView({ block: 'nearest', container: 'nearest' });
 }
 
-function renderDevicePage(device) {
+function renderDevicePage(device, initialPortId) {
   const actions = userCanWrite() ? deviceMaintenanceActions(device) : [];
   if (!device.archived_at) actions.push(button('复制定位链接', () => copyDeviceLocation(device)));
   page.append(
     pageHeading(device.name, `${device.code} · ${device.type}${device.archived_at ? ' · 已归档' : ''}`, actions),
     element('div', { class: 'detail-columns' },
-      element('div', { class: 'stack' }, panel('设备资料', deviceFacts(device)), panel('设备地址', deviceAddresses(device)),
+      element('div', { class: 'stack' }, panel('设备资料', deviceFacts(device)), makeDevicePorts(device, initialPortId), panel('设备地址', deviceAddresses(device)),
         panel('业务系统与服务入口', systemAssociations(device), deviceSystemActions(device))),
       element('div', { class: 'stack' }, procurementSections(device)),
     ),
@@ -1222,7 +1242,7 @@ function renderPage({ preserveRackView = false, roomFilterChanged = false } = {}
   const view = preserveRackView ? state.rackView?.snapshot?.() : undefined;
   state.rackView?.();
   state.rackView = null;
-  const { kind, id, section } = readRoute();
+  const { kind, id, section, port } = readRoute();
   const previousRoomId = state.roomOverview?.roomId;
   if (kind === 'rack' && state.roomOverview) state.rackOverviewRoomId = state.roomOverview.roomId;
   else if (kind !== 'rack') state.rackOverviewRoomId = null;
@@ -1246,9 +1266,15 @@ function renderPage({ preserveRackView = false, roomFilterChanged = false } = {}
       page.append(pageHeading('设备定位'), empty('当前范围内没有可定位的设备。'));
     } else if (!device.rack_id || !lookup('racks', device.rack_id)) {
       detailBreadcrumb('devices', null, device.name);
-      renderDevicePage(device);
+      renderDevicePage(device, port);
     } else {
       renderRackPage(device.rack_id, view, true, device);
+      if (port) {
+        const targetView = state.rackView;
+        return Promise.resolve(targetView?.ready).then(() => {
+          if (state.rackView === targetView) openDeviceDrawer(device, undefined, { showPorts: true, initialPortId: port });
+        });
+      }
     }
   }
   if (kind === 'devices') renderDevicesPage();
