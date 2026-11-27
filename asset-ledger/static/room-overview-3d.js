@@ -707,7 +707,7 @@ export function mountRoomScene(host, {
     if (event.button === 0 && event.isPrimary) {
       const label = event.target.closest('button.room-3d-label');
       const rack = label ? racks.find((item) => String(item.id) === label.dataset.rackId) : undefined;
-      pressed = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, rack };
+      pressed = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, rack, fromCanvas: event.target === canvas };
     } else if (pressed && event.pointerType === 'touch') pressed.moved = true;
   });
   viewport.addEventListener('pointermove', (event) => {
@@ -731,13 +731,14 @@ export function mountRoomScene(host, {
     const clicked = pressed?.id === event.pointerId && !pressed.moved &&
       Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) <= 5;
     const labelRack = pressed?.rack;
+    const fromCanvas = pressed?.fromCanvas;
     pressed = undefined;
     if (clicked) {
       const hit = labelRack ? null : pick(event);
       const entry = hit?.object.userData.entry;
       const rack = labelRack ?? entry?.rack;
       if (rack) selectRack(rack, entry, pickDevice(hit), event);
-      else if (event.target === canvas) {
+      else if (fromCanvas) {
         clearPendingClick();
         if (selectedDeviceId) onClearDeviceSelection?.();
       }
