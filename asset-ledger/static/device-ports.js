@@ -274,7 +274,7 @@ function parsePortRows(value, kind, group, ports) {
   return rows;
 }
 
-function bulkEditor(ports, onSave, onCancel) {
+function bulkEditor(ports, onSave, onCancel, portTemplates) {
   const raw = element('textarea', {
     name: 'rows', rows: 5, required: true,
     placeholder: 'GE1/0/01\t本端线标\tA02 对端线标\nGE1/0/02',
@@ -283,25 +283,40 @@ function bulkEditor(ports, onSave, onCancel) {
   const group = input('group', '', { maxlength: 80, placeholder: '例如 RJ45' });
   const preview = element('div', { class: 'port-batch-preview', 'aria-live': 'polite' });
   let rows;
+  let selectedTemplate = false;
   function resetPreview() {
     rows = undefined;
     preview.replaceChildren();
   }
-  for (const control of [raw, kind, group]) control.addEventListener('input', resetPreview);
+  function returnToManualEntry() {
+    selectedTemplate = false;
+    resetPreview();
+  }
+  for (const control of [raw, kind, group]) control.addEventListener('input', returnToManualEntry);
   const fill = (size) => {
     raw.value = Array.from({ length: size }, (_, index) => `GE1/0/${String(index + 1).padStart(2, '0')}`).join('\n');
-    resetPreview();
+    returnToManualEntry();
     raw.focus({ preventScroll: true });
   };
   function prepare() {
     resetPreview();
     try {
-      rows = parsePortRows(raw.value, kind.value, group.value.trim(), ports);
+      if (selectedTemplate) {
+        const existing = new Set(ports.map((port) => normalize(port.name)));
+        rows = portTemplates.filter((port) => !existing.has(normalize(port.name)));
+        raw.value = rows.map((port) => port.name).join('\n');
+        if (!rows.length) {
+          rows = undefined;
+          throw new Error('已登记此型号模板中的全部端口。');
+        }
+      } else {
+        rows = parsePortRows(raw.value, kind.value, group.value.trim(), ports);
+      }
       preview.append(element('p', { class: 'small-text' },
         `待新增 ${rows.length} 个端口，其中 ${rows.filter((row) => row.peer_label).length} 个对端待核。`),
       element('ul', { class: 'port-batch-rows' }, rows.map((row) => element('li', {},
         element('strong', { class: 'port-mono' }, row.name),
-        [row.label, row.peer_label].filter(Boolean).join(' · ')))));
+        [selectedTemplate && kinds[row.kind], selectedTemplate && row.group, row.label, row.peer_label].filter(Boolean).join(' · ')))));
     } catch (failure) {
       preview.append(element('p', { class: 'form-error' }, errorMessage(failure)));
     }
@@ -313,14 +328,18 @@ function bulkEditor(ports, onSave, onCancel) {
   }, onCancel, [
     element('p', { class: 'muted small-text' }, '每行填一个端口名称。可从表格直接粘贴端口名、本端标签、对端标签三列。'),
     element('div', { class: 'port-actions' },
-      button('填入 24 口模板', () => fill(24), 'quiet'), button('填入 48 口模板', () => fill(48), 'quiet')),
+      button('填入 24 口模板', () => fill(24), 'quiet'), button('填入 48 口模板', () => fill(48), 'quiet'),
+      portTemplates?.length ? button('预览型号端口', () => {
+        selectedTemplate = true;
+        prepare();
+      }, 'quiet') : null),
     element('div', { class: 'port-fields' }, field('类型', kind), field('分组', group)),
     field('待登记端口', raw), button('预览', prepare), preview,
   ]);
 }
 
 export function renderDevicePorts({
-  device, request, canWrite, devices = [], initialPortId, onLocate, onCopy,
+  device, request, canWrite, devices = [], initialPortId, onLocate, onCopy, portTemplates,
 }) {
   let ports = [];
   let selectedId = initialPortId;
@@ -342,7 +361,7 @@ export function renderDevicePorts({
   const tools = element('div', { class: 'port-toolbar' }, query, filter,
     element('div', { class: 'port-views', role: 'group', 'aria-label': '端口视图' }, gridView, listView));
   const add = button('新增端口', () => showForm(metadataEditor(null, create, hideForm)));
-  const batch = button('批量登记', () => showForm(bulkEditor(ports, create, hideForm)), 'quiet');
+  const batch = button('批量登记', () => showForm(bulkEditor(ports, create, hideForm, portTemplates)), 'quiet');
   const management = canWrite ? element('div', { class: 'port-actions' }, add, batch) : null;
 
   function announce(message) {

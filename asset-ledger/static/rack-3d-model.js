@@ -4,6 +4,7 @@ import {
   RACK_DEPTH, RACK_UNIT, RACK_WIDTH, STATUS_COLORS, SURFACES, TYPE_ACCENTS,
   deviceMetrics, normalizeDepth, normalizeStatus, rackSummaryColor,
 } from './rack-geometry.js';
+import { matchDeviceModelTemplate } from './device-model-templates.js';
 import { createDeviceLabelTexture, createOperatingLampTexture, createRackScaleTexture } from './rack-textures.js';
 
 const LAMP_PERIOD_MS = 3200;
@@ -731,7 +732,7 @@ function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = fals
     }
   }
 
-  function frontDetail(device, kind, sign, center, faceHeight) {
+  function frontDetail(device, kind, sign, center, faceHeight, template) {
     const feature = (surface, size, center, medium) => detail(surface, size, center, medium, device);
     const frontZ = sign * DETAIL_Z;
     if (!reserveNameplate) {
@@ -744,8 +745,42 @@ function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = fals
     const base = (surface, width = areaWidth, x = areaCenter) => {
       feature(surface, [width, areaHeight, 0.004], [x, center, frontZ], true);
     };
+    if (template?.style === 'dell' || template?.style === 'hpe') {
+      base('inset');
+      if (includeFine) {
+        const columns = template.style === 'hpe' ? 9 : 7;
+        for (let bar = 0; bar < columns; bar += 1) {
+          const x = areaCenter + (bar - (columns - 1) / 2) * areaWidth / columns;
+          feature('trim', [areaWidth / columns * 0.62, areaHeight * 0.79, 0.004],
+            [x, center, frontZ * 1.007]);
+        }
+      }
+      return;
+    }
     if (kind === 'generic') {
       feature('inset', [areaWidth * 0.66, Math.min(0.026, faceHeight * 0.17), 0.004], [areaCenter, center, frontZ], true);
+      return;
+    }
+    if (template?.accessPorts) {
+      const columns = template.accessPorts / 2;
+      const socketsWidth = areaWidth * 0.74;
+      const pitch = socketsWidth / columns;
+      const socketsX = areaCenter - areaWidth * 0.13;
+      const uplinkX = areaCenter + areaWidth * 0.37;
+      base('inset', socketsWidth, socketsX);
+      base('inset', areaWidth * 0.20, uplinkX);
+      if (!includeFine) return;
+      for (let index = 0; index < columns; index += 1) {
+        for (const row of [-1, 1]) {
+          const x = socketsX + (index - (columns - 1) / 2) * pitch;
+          feature('socket', [pitch * 0.76, areaHeight * 0.31, 0.005],
+            [x, center + row * areaHeight * 0.24, frontZ * 1.008]);
+        }
+      }
+      for (const offset of [-1.5, -0.5, 0.5, 1.5]) {
+        feature('rail', [areaWidth * 0.037, areaHeight * 0.49, 0.005],
+          [uplinkX + offset * areaWidth * 0.046, center, frontZ * 1.006]);
+      }
       return;
     }
     if (kind === 'network') {
@@ -832,10 +867,11 @@ function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = fals
 
   for (const device of devices) {
     const metrics = deviceMetrics(device, unit);
-    const kind = deviceKind(device);
+    const template = matchDeviceModelTemplate(device.model);
+    const kind = template?.accessPorts ? 'network' : template ? 'server' : deviceKind(device);
     solid('chassis', [1.665, metrics.faceHeight, metrics.chassisDepth], [0, metrics.centerY, metrics.chassisCenterZ], 0.007, device);
     metalFace(device, metrics.sign, metrics.centerY, metrics.faceHeight, kind);
-    frontDetail(device, kind, metrics.sign, metrics.centerY, metrics.faceHeight);
+    frontDetail(device, kind, metrics.sign, metrics.centerY, metrics.faceHeight, template);
     if (metrics.full) {
       metalFace(device, -metrics.sign, metrics.centerY, metrics.faceHeight, kind);
       backDetail(device, kind, -metrics.sign, metrics.centerY, metrics.faceHeight);

@@ -75,12 +75,14 @@ def initialize(data_dir):
 
 def migrate_schema(conn):
     from .patrol import initialize_patrol
+    from .room_profiles import migrate_room_profiles
 
     conn.executescript((Path(__file__).parent / "schema.sql").read_text(encoding="utf-8"))
     migrate_mount_depth(conn)
     migrate_operating_status(conn)
     migrate_device_catalog(conn)
     initialize_patrol(conn)
+    migrate_room_profiles(conn)
     with conn:
         conn.execute("BEGIN IMMEDIATE")
         seed_physical_port_demo(conn)

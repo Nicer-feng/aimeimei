@@ -18,6 +18,7 @@ from .data import (
 from .edge import LoginThrottle
 from .identity import AI_COOKIE, IdentityError, sroom_user
 from .patrol import record_patrol, room_patrol
+from .room_profiles import read_room_profile, read_room_profile_image, save_room_profile
 from .ports import create_ports, delete_port, device_ports, edit_port, link_port, unlink_port
 
 
@@ -33,6 +34,7 @@ DEVICE_PORTS_ROUTE = re.compile(r"/api/devices/([1-9][0-9]{0,9})/ports")
 PORT_ROUTE = re.compile(r"/api/ports/([1-9][0-9]{0,9})")
 PORT_CABLE_ROUTE = re.compile(r"/api/ports/([1-9][0-9]{0,9})/cable")
 ROOM_LAYOUT_ROUTE = re.compile(r"/api/rooms/([1-9][0-9]{0,9})/layout")
+ROOM_PROFILE_ROUTE = re.compile(r"/api/rooms/([1-9][0-9]{0,9})/floor-profile(/image)?")
 ASSET_ROUTE = re.compile(r"/static/([a-zA-Z0-9_-][a-zA-Z0-9._-]*(?:/[a-zA-Z0-9_-][a-zA-Z0-9._-]*)*)")
 ENCODING_QUALITY = re.compile(r"\s*q\s*=\s*(0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)\s*", re.I)
 BYTE_RANGE = re.compile(r"bytes=([0-9]{0,10})-([0-9]{0,10})")
@@ -252,6 +254,12 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 self.json_response(200, room_patrol(conn, user, int(room_ids[0])))
             elif (device := DEVICE_PORTS_ROUTE.fullmatch(path)):
                 self.json_response(200, device_ports(conn, user, int(device[1])))
+            elif (match := ROOM_PROFILE_ROUTE.fullmatch(path)):
+                if match[2]:
+                    mime, image = read_room_profile_image(conn, user, int(match[1]))
+                    self.respond(200, image, mime)
+                else:
+                    self.json_response(200, read_room_profile(conn, user, int(match[1])))
             else:
                 match = FILE_ROUTE.fullmatch(path)
                 if not match:
@@ -286,6 +294,10 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 self.json_response(201, writer(conn, user, self.payload()))
                 return
         if self.command == "PATCH":
+            floor_route = ROOM_PROFILE_ROUTE.fullmatch(path)
+            if floor_route and not floor_route[2]:
+                self.json_response(200, save_room_profile(conn, user, int(floor_route[1]), self.payload(UPLOAD_LIMIT)))
+                return
             if (port := PORT_ROUTE.fullmatch(path)):
                 self.json_response(200, edit_port(conn, user, int(port[1]), self.payload()))
                 return

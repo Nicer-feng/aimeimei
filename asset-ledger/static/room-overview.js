@@ -1,5 +1,6 @@
 import { OPERATING_STATUS_LABELS, operatingStatus } from './rack.js?v=operating-status';
 import { rackOccupancy } from './rack-geometry.js';
+import { renderRoomProfilePlan } from './room-profiles.js';
 import {
   buildDeviceSearch, deviceAddressLabel, endpointLabel, isDeviceArchived, normalizeSearchText as normalize,
 } from './asset-search.js';
@@ -165,7 +166,7 @@ function floorPlan(room, layout, racksById, onRack) {
 }
 
 export function renderRoomOverview(host, {
-  room, layout, racks, devices = [], systems = [], deviceKind, units, siteName, toolbar, disclosures,
+  room, layout, floorProfile, racks, devices = [], systems = [], deviceKind, units, siteName, toolbar, disclosures,
   onRack, onDevice, onSceneInteraction, onClearDeviceSelection, onGlobalSearch, view, switchingRoom = false,
 }) {
   const racksById = new Map(racks.map((rack) => [rack.id, rack]));
@@ -220,10 +221,10 @@ export function renderRoomOverview(host, {
   const threeButton = action('3D 总览', '', () => { void show3d(); });
   const planButton = action('平面布局', '', () => showPlan());
   controls.append(threeButton, planButton);
-  if (positions.length) actions.append(controls);
+  if (positions.length || floorProfile) actions.append(controls);
   const summary = element('div', 'room-overview-viewbar');
   summary.append(roomStatistics(racks, roomDevices, positions.length ? layout.rows * layout.columns : 0));
-  if (positions.length) summary.append(actions);
+  if (positions.length || floorProfile) summary.append(actions);
   const querybar = element('div', 'room-overview-querybar');
   if (lookup.children.length) querybar.append(lookup);
   querybar.append(summary);
@@ -240,7 +241,9 @@ export function renderRoomOverview(host, {
   overview.append(searchPanel);
 
   const spatial = element('div', 'room-overview-render-host');
-  const plan = positions.length ? floorPlan(room, layout, racksById, onRack) : null;
+  const sceneLayout = layout ? { ...layout, positions } : { rows: 1, columns: 1, positions };
+  const plan = floorProfile ? renderRoomProfilePlan(room, floorProfile, sceneLayout, racksById, onRack)
+    : positions.length ? floorPlan(room, layout, racksById, onRack) : null;
   const notice = element('p', 'room-overview-status');
   notice.setAttribute('role', 'status');
   notice.hidden = true;
@@ -552,7 +555,7 @@ export function renderRoomOverview(host, {
       const { mountRoomScene } = await import('./room-overview-3d.js');
       if (disposed || ticket !== generation) return;
       const mounted = mountRoomScene(spatial, {
-        layout: { ...layout, positions }, racks, devices: roomDevices, deviceKind, units, initialCamera: camera, onRack,
+        layout: sceneLayout, floorProfile, racks, devices: roomDevices, deviceKind, units, initialCamera: camera, onRack,
         roomName: room.name, siteName, entry: focusOnMount ? undefined : entry,
         initialLocatedRackId: locatedRack?.id, initialLocatedDeviceId: locatedDevice?.id,
         initialSearchFilter: searchFilter, onDevice, onSceneInteraction, onClearDeviceSelection,

@@ -10,6 +10,7 @@ import {
 } from './rack-3d-model.js';
 import { createContactShadowTexture, createFloorTileTexture, createRackEnvironment } from './rack-textures.js';
 import { buildRoomLighting } from './room-immersive.js';
+import { profiledRackCenters, roomProfileColor, roomProfileFeatureName } from './room-profiles.js';
 import { operatingStatusLabel } from './rack.js?v=operating-status';
 
 const COLUMN_GAP = 1.21;
@@ -107,7 +108,7 @@ function nanchangFront(layout, racksById, roomName, siteName) {
   return names.size === 9 && slots.size === 9 ? (rotation === 0 ? 1 : -1) : 0;
 }
 
-function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind, palette, floorTexture, shadowTexture }) {
+function makeRoom(scene, { room, roomName, siteName, floorProfile, racks, devices, deviceKind, palette, floorTexture, shadowTexture }) {
   const racksById = new Map(racks.map((rack) => [String(rack.id), rack]));
   const photoFront = nanchangFront(room, racksById, roomName, siteName);
   const turned = room.positions.some(({ rotation }) => rotation === 90 || rotation === 270);
@@ -121,10 +122,13 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
     devicesByRack.get(id).push(device);
   }
   const placements = new Map(room.positions.map((entry) => [`${entry.row}/${entry.slot}`, entry]));
-  const width = room.columns * columnGap + 0.68;
+  const unitsPerMeter = FLOOR_TILE_SIZE / 0.6;
+  const width = floorProfile ? floorProfile.width_m * unitsPerMeter : room.columns * columnGap + 0.68;
+  const profileDepth = floorProfile ? floorProfile.depth_m * unitsPerMeter : 0;
+  const profiledCenters = floorProfile ? profiledRackCenters(floorProfile, room) : new Map();
   const rowExtent = (room.rows - 1) * ROW_GAP / 2;
-  const rearEdge = -rowExtent - (frontSign > 0 ? 1.00 : 1.58);
-  const frontEdge = rowExtent + (frontSign > 0 ? 1.58 : 1.00);
+  const rearEdge = floorProfile ? -profileDepth / 2 : -rowExtent - (frontSign > 0 ? 1.00 : 1.58);
+  const frontEdge = floorProfile ? profileDepth / 2 : rowExtent + (frontSign > 0 ? 1.58 : 1.00);
   const depth = frontEdge - rearEdge;
   const floorCenter = (frontEdge + rearEdge) / 2;
   const finishes = new Map();
@@ -171,45 +175,79 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
     floor.position.set(0, 0.0005, floorCenter);
     scene.add(floor);
   }
-  const frontAisle = frontSign * (rowExtent + 1.08);
-  const rearAisle = -frontSign * (rowExtent + 0.82);
-  flat(0xb7d0c2, 0, 0.003, frontAisle, [width - 0.22, 0.008, photoFront ? 0.032 : 0.76]);
-  flat(0xbdcbd0, 0, 0.003, rearAisle, [width - 0.22, 0.008, photoFront ? 0.032 : 0.24]);
-  for (let row = 1; row < room.rows; row += 1) {
-    const z = (room.rows / 2 - row) * ROW_GAP;
-    flat(0xc9d9d6, 0, 0.002, z, [width - 0.65, 0.007, 0.72]);
-  }
-  for (const side of [-1, 1]) {
-    flat(0xc9d9d6, side * (width / 2 - 0.14), 0.002, floorCenter, [0.026, 0.008, depth - 0.24]);
-  }
+  const landmarks = [];
+  if (floorProfile) {
+    for (const [index, feature] of floorProfile.features.entries()) {
+      const [x1, z1] = [(feature.from[0] - 0.5) * width, rearEdge + feature.from[1] * depth];
+      const [x2, z2] = [(feature.to[0] - 0.5) * width, rearEdge + feature.to[1] * depth];
+      const [x, z] = [(x1 + x2) / 2, (z1 + z2) / 2];
+      const [dx, dz] = [x2 - x1, z2 - z1];
+      const length = Math.hypot(dx, dz);
+      const angle = -Math.atan2(dz, dx);
+      const color = roomProfileColor(feature.kind);
+      let height;
+      if (feature.kind === 'wall') {
+        height = 0.18;
+        flat(color, x, height / 2, z, [length, height, 0.055], angle);
+      } else if (feature.kind === 'entrance') {
+        height = 0.89;
+        for (const [edgeX, edgeZ] of [[x1, z1], [x2, z2]]) {
+          flat(color, edgeX, height / 2, edgeZ, [0.046, height, 0.058], angle);
+        }
+        flat(color, x, height, z, [length + 0.046, 0.045, 0.055], angle);
+        flat(color, x, 0.012, z, [length, 0.018, 0.09], angle);
+      } else {
+        height = feature.kind === 'equipment' ? 0.115 : 0.009;
+        flat(color, x, height / 2 + 0.002, z, [Math.abs(dx), height, Math.abs(dz)]);
+      }
+      if (feature.label || feature.kind !== 'wall') {
+        landmarks.push({ id: feature.kind + '-' + index, text: roomProfileFeatureName(feature),
+          point: new THREE.Vector3(x, height + 0.07, z) });
+      }
+    }
+  } else {
+    const frontAisle = frontSign * (rowExtent + 1.08);
+    const rearAisle = -frontSign * (rowExtent + 0.82);
+    flat(0xb7d0c2, 0, 0.003, frontAisle, [width - 0.22, 0.008, photoFront ? 0.032 : 0.76]);
+    flat(0xbdcbd0, 0, 0.003, rearAisle, [width - 0.22, 0.008, photoFront ? 0.032 : 0.24]);
+    for (let row = 1; row < room.rows; row += 1) {
+      const z = (room.rows / 2 - row) * ROW_GAP;
+      flat(0xc9d9d6, 0, 0.002, z, [width - 0.65, 0.007, 0.72]);
+    }
+    for (const side of [-1, 1]) {
+      flat(0xc9d9d6, side * (width / 2 - 0.14), 0.002, floorCenter, [0.026, 0.008, depth - 0.24]);
+    }
 
-  const entranceX = -width / 2 + 0.61;
-  const entranceZ = frontSign * (rowExtent + 1.47);
-  for (const side of [-1, 1]) {
-    flat(0x487165, entranceX + side * 0.41, 0.47, entranceZ, [0.062, 0.94, 0.10]);
+    const entranceX = -width / 2 + 0.61;
+    const entranceZ = frontSign * (rowExtent + 1.47);
+    for (const side of [-1, 1]) {
+      flat(0x487165, entranceX + side * 0.41, 0.47, entranceZ, [0.062, 0.94, 0.10]);
+    }
+    flat(0x487165, entranceX, 0.94, entranceZ, [0.88, 0.065, 0.10]);
+    flat(0x487165, entranceX, 0.014, entranceZ, [0.88, 0.025, 0.15]);
+    flat(0x487165, entranceX, 0.013, frontAisle, [0.045, 0.006, 0.28]);
+    for (const side of [-1, 1]) {
+      flat(0x487165, entranceX + side * 0.058, 0.013, frontAisle - frontSign * 0.12,
+        [0.033, 0.006, 0.17], frontSign * side * 0.73);
+    }
+    landmarks.push(
+      { id: 'entrance', text: '入口（示意）', point: new THREE.Vector3(entranceX, 1.07, entranceZ) },
+      { id: 'front-aisle', text: '前走道', point: new THREE.Vector3(width * 0.24, 0.035, frontAisle) },
+      { id: 'rear-aisle', text: '后走道', point: new THREE.Vector3(-width * 0.20, 0.035, rearAisle) },
+    );
   }
-  flat(0x487165, entranceX, 0.94, entranceZ, [0.88, 0.065, 0.10]);
-  flat(0x487165, entranceX, 0.014, entranceZ, [0.88, 0.025, 0.15]);
-  flat(0x487165, entranceX, 0.013, frontAisle, [0.045, 0.006, 0.28]);
-  for (const side of [-1, 1]) {
-    flat(0x487165, entranceX + side * 0.058, 0.013, frontAisle - frontSign * 0.12,
-      [0.033, 0.006, 0.17], frontSign * side * 0.73);
-  }
-  const landmarks = [
-    { id: 'entrance', text: '入口（示意）', point: new THREE.Vector3(entranceX, 1.07, entranceZ) },
-    { id: 'front-aisle', text: '前走道', point: new THREE.Vector3(width * 0.24, 0.035, frontAisle) },
-    { id: 'rear-aisle', text: '后走道', point: new THREE.Vector3(-width * 0.20, 0.035, rearAisle) },
-  ];
   bounds.max.y = 1.12;
 
   const baseY = 0.100;
   for (let row = 1; row <= room.rows; row += 1) {
     for (let slot = 1; slot <= room.columns; slot += 1) {
-      const x = (slot - (room.columns + 1) / 2) * columnGap;
-      const z = ((room.rows + 1) / 2 - row) * ROW_GAP;
       const entry = placements.get(`${row}/${slot}`);
       const rack = entry && racksById.get(String(entry.rack_id));
+      const profiled = profiledCenters.get(String(entry?.rack_id));
+      const x = profiled ? (profiled[0] - 0.5) * width : (slot - (room.columns + 1) / 2) * columnGap;
+      const z = profiled ? rearEdge + profiled[1] * depth : ((room.rows + 1) / 2 - row) * ROW_GAP;
       if (!rack) {
+        if (floorProfile) continue;
         for (const sx of [-1, 1]) {
           for (const sz of [-1, 1]) {
             flat(0x8fa9a5, x + sx * (CABINET_WIDTH / 2 - 0.04), 0.016,
@@ -227,6 +265,11 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
       const top = baseY + vb.top * RACK_SCALE;
       const bottom = baseY + vb.bottom * RACK_SCALE;
       bounds.max.y = Math.max(bounds.max.y, top + 0.12);
+      if (floorProfile) {
+        const margin = Math.hypot(CABINET_WIDTH, CABINET_DEPTH) / 2;
+        bounds.expandByPoint(new THREE.Vector3(x - margin, 0, z - margin));
+        bounds.expandByPoint(new THREE.Vector3(x + margin, top + 0.12, z + margin));
+      }
       const rackDevices = devicesByRack.get(id) ?? [];
       const rackEntry = {
         rack, devices: rackDevices, stats: rackOccupancy(rack, rackDevices),
@@ -249,7 +292,7 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
     }
   }
 
-  if (photoFront) {
+  if (photoFront && !floorProfile) {
     // 桥架沿照片中的柜列连续布置，离开柜顶的空隙由托架支撑。
     const z = -photoFront * 0.31;
     const railY = Math.max(...entries.map((entry) => entry.middle + entry.height / 2)) + 0.24;
@@ -462,7 +505,7 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
 }
 
 export function mountRoomScene(host, {
-  layout, roomName, siteName, racks, initialCamera, onRack, onFallback, devices = [],
+  layout, roomName, siteName, floorProfile, racks, initialCamera, onRack, onFallback, devices = [],
   deviceKind = () => 'server', units = (device) => `U${device.u_start}`,
   initialLocatedRackId, initialLocatedDeviceId, initialSearchFilter, onDevice, onSceneInteraction, onClearDeviceSelection, entry,
 }) {
@@ -472,7 +515,7 @@ export function mountRoomScene(host, {
   const labels = node('div', 'room-3d-labels');
   labels.setAttribute('aria-label', '机柜及预留位');
   const landmarkLayer = node('div', 'room-3d-landmarks');
-  landmarkLayer.setAttribute('aria-label', '示意方位');
+  landmarkLayer.setAttribute('aria-label', floorProfile ? '机房平面标记' : '示意方位');
   const tooltip = node('div', 'rack-spatial-tooltip room-3d-device-tooltip');
   tooltip.hidden = true;
   tooltip.setAttribute('role', 'tooltip');
@@ -550,8 +593,9 @@ export function mountRoomScene(host, {
   const palette = createRackPalette();
   const floorTexture = createFloorTileTexture();
   const shadowTexture = createContactShadowTexture();
-  const model = makeRoom(scene, { room: layout, roomName, siteName, racks, devices, deviceKind, palette, floorTexture, shadowTexture });
-  if (model.photoFront) viewport.dataset.roomProfile = 'nanchang-east';
+  const model = makeRoom(scene, { room: layout, roomName, siteName, floorProfile, racks, devices, deviceKind, palette, floorTexture, shadowTexture });
+  if (floorProfile) viewport.dataset.roomProfile = floorProfile.illustrative ? 'demo-floor' : 'recorded-floor';
+  else if (model.photoFront) viewport.dataset.roomProfile = 'nanchang-east';
   const roomSize = model.bounds.getSize(new THREE.Vector3());
   // 屏幕平移会同时改变目标的高度和纵深，给单排机房的地板边缘留出余量。
   const panBounds = model.bounds.clone().expandByScalar(Math.max(roomSize.y, Math.hypot(roomSize.x, roomSize.z) / 4));

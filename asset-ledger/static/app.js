@@ -7,6 +7,8 @@ import { openDeviceLocator, locationHash } from './device-locator.js';
 import { renderDevicePorts, renderDevicePortsSummary } from './device-ports.js';
 import { openRackPlanner } from './rack-planner.js';
 import { openRoomPatrol } from './room-patrol.js';
+import { openRoomProfileEditor } from './room-profiles.js';
+import { deviceModelPanel, deviceModelTemplatePicker, matchDeviceModelTemplate } from './device-model-templates.js';
 import { releases } from './releases.js';
 
 const byId = (id) => document.getElementById(id);
@@ -422,7 +424,7 @@ function disposeRoomOverview(remember = false) {
   state.roomOverview = null;
 }
 
-function renderRoomPage(requestedId, filterChanged, previousRoomId) {
+async function renderRoomPage(requestedId, filterChanged, previousRoomId) {
   const filters = state.roomFilters;
   let roomId = requestedId;
   if (!roomId && !filterChanged && !filters.unit && !filters.site && !filters.room) {
@@ -456,6 +458,9 @@ function renderRoomPage(requestedId, filterChanged, previousRoomId) {
   const actions = room ? [deviceClickModeControl()] : [];
   const racks = room ? state.catalog.racks.filter((rack) => rack.room_id === room.id) : [];
   const layout = room && (state.catalog.room_layouts ?? []).find((item) => item.room_id === room.id);
+  const profileEndpoint = room && `rooms/${room.id}/floor-profile`;
+  let floorProfile;
+  let profileLoaded = false;
   if (userCanWrite()) {
     actions.push(button('新增机房', () => openRoomEditor(state.catalog, null, roomUI)));
     if (room) {
@@ -463,6 +468,13 @@ function renderRoomPage(requestedId, filterChanged, previousRoomId) {
         button('编辑机房', () => openRoomEditor(state.catalog, room, roomUI)),
         button('新增机柜', () => openRackEditor(state.catalog, room, null, roomUI)),
         button('编辑布置', () => openRoomLayoutEditor(room, layout, racks, roomUI)),
+        button('编辑机房底图', () => {
+          if (!profileLoaded) {
+            notify('底图当前无法读取，请刷新后重试。');
+            return;
+          }
+          openRoomProfileEditor(room, floorProfile, layout, racks, roomUI);
+        }),
       );
     }
   }
@@ -479,9 +491,19 @@ function renderRoomPage(requestedId, filterChanged, previousRoomId) {
   const devices = state.catalog.devices.filter((device) => device.room_id === room.id);
   const previous = state.roomViews.get(room.id);
   const host = element('section', { id: 'room-overview', 'aria-label': `${room.name}机柜总览` });
+  host.append(element('p', { class: 'muted', role: 'status' }, '正在加载机房总览…'));
   page.append(host);
+  try {
+    floorProfile = await request(profileEndpoint);
+    if (floorProfile?.reference) floorProfile.reference.url = apiUrl(`${profileEndpoint}/image`);
+    profileLoaded = true;
+  } catch {
+    // 底图读取失败时仍可查看当前机房和机柜。
+  }
+  if (!host.isConnected || !state.user) return;
   const controller = renderRoomOverview(host, {
     room, layout, racks, devices, systems: state.catalog.systems, deviceKind, units,
+    floorProfile,
     siteName: site?.name, toolbar, disclosures, view: previous?.view,
     switchingRoom: previousRoomId != null && previousRoomId !== room.id,
     onDevice: openDevicePresentation,
@@ -1114,6 +1136,7 @@ function drawDeviceQuickGuide(point) {
 function makeDevicePorts(device, initialPortId) {
   const rendered = renderDevicePorts({
     device, request, devices: state.catalog.devices, initialPortId,
+    portTemplates: matchDeviceModelTemplate(device.model)?.ports,
     canWrite: userCanWrite() && !device.archived_at,
     onLocate: ({ deviceId, portId }) => { location.hash = locationHash(deviceId, portId); },
     onCopy: (portId) => copyDeviceLocation(device, portId),
@@ -1193,12 +1216,14 @@ function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview
 }
 
 function renderDevicePage(device, initialPortId) {
+  const modelPanel = deviceModelPanel(device,
+    state.catalog.documents.filter((document) => document.device_id === device.id), fileAddress);
   const actions = userCanWrite() ? deviceMaintenanceActions(device) : [];
   if (!device.archived_at) actions.push(button('复制定位链接', () => copyDeviceLocation(device)));
   page.append(
     pageHeading(device.name, `${device.code} · ${device.type}${device.archived_at ? ' · 已归档' : ''}`, actions),
     element('div', { class: 'detail-columns' },
-      element('div', { class: 'stack' }, panel('设备资料', deviceFacts(device)), makeDevicePorts(device, initialPortId), panel('设备地址', deviceAddresses(device)),
+      element('div', { class: 'stack' }, panel('设备资料', deviceFacts(device)), modelPanel, makeDevicePorts(device, initialPortId), panel('设备地址', deviceAddresses(device)),
         panel('业务系统与服务入口', systemAssociations(device), deviceSystemActions(device))),
       element('div', { class: 'stack' }, procurementSections(device)),
     ),
@@ -1473,6 +1498,15 @@ function openDeviceEditor(device = null, rack = null, slot = null, template = nu
   depthChoice.addEventListener('change', () => void slotPicker.refresh());
   for (const input of [startInput, heightInput]) input.addEventListener('input', () => void slotPicker.refresh());
   syncRackChoices(targetRack?.id);
+  const modelField = inputField('品牌型号', 'model', original.model, { maxlength: 160 });
+  const modelTemplate = deviceModelTemplatePicker(modelField.querySelector('input'), {
+    applyPlacement: !device?.rack_id ? ({ u_height, mount_depth }) => {
+      heightInput.value = u_height;
+      if (mount_depth && depthChoice.value === 'unknown') depthChoice.value = mount_depth;
+      void slotPicker.refresh();
+    } : undefined,
+  });
+  modelTemplate.classList.add('wide');
   const projects = checkboxGroup('关联项目', state.catalog.projects.map((project) => [project.id, `${project.name} · ${project.code}`]),
     original.project_ids || [], 'project_ids', '暂无项目。');
   const addresses = element('div', { class: 'stack' });
@@ -1488,7 +1522,7 @@ function openDeviceEditor(device = null, rack = null, slot = null, template = nu
         inputField('设备编号', 'code', original.code, { required: true, maxlength: 80 }),
         inputField('设备名称', 'name', original.name, { required: true, maxlength: 160 }),
         inputField('设备类型', 'type', original.type, { required: true, maxlength: 80, placeholder: '例如服务器、交换机、打印机' }),
-        inputField('品牌型号', 'model', original.model, { maxlength: 160 }),
+        modelField, modelTemplate,
         labelInput('运行状态（人工登记）', selectInput(
           'operating_status', Object.entries(OPERATING_STATUS_LABELS), operatingStatus(original), null,
         )),
@@ -1745,7 +1779,9 @@ function readFileBase64(file) {
 
 function openDocumentEditor(type, record) {
   const wasInDrawer = drawer.open;
-  const categories = ['工程量清单', '施工设计图', '合同', '验收报告', '设备资料', '其他'];
+  const photoCategories = ['设备正面照片', '设备背面照片'];
+  const categories = ['工程量清单', '施工设计图', '合同', '验收报告', '设备资料',
+    ...(type === 'device' ? photoCategories : []), '其他'];
   const acceptedExtensions = Array.from(documentTypes.keys(), (extension) => `.${extension}`).join(',');
   const fileInput = element('input', { name: 'file', type: 'file', accept: acceptedExtensions, required: true,
     'aria-describedby': 'document-file-hint' });
@@ -1777,6 +1813,9 @@ function openDocumentEditor(type, record) {
       const file = values.get('file');
       if (!file?.size) throw new Error('请选择档案文件。');
       const kind = documentType(file.name);
+      if (photoCategories.includes(values.get('category')) && !/\.(png|jpe?g|webp)$/i.test(file.name)) {
+        throw new Error('设备面板照片支持 PNG、JPEG 和 WebP。');
+      }
       if (!kind) throw new Error('请选择受支持的档案格式。');
       if (file.size > 8 * 1024 * 1024) throw new Error('档案原件大小不能超过 8 MiB。');
       return request('documents', {
