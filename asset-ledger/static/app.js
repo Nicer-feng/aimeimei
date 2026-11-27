@@ -5,6 +5,7 @@ import { openAvailabilityPicker, openRackEditor, openRoomEditor, openRoomLayoutE
 import { createSlotPicker } from './slot-picker.js';
 import { openDeviceLocator, locationHash } from './device-locator.js';
 import { renderDevicePorts, renderDevicePortsSummary } from './device-ports.js';
+import { openRackPlanner } from './rack-planner.js';
 import { releases } from './releases.js';
 
 const byId = (id) => document.getElementById(id);
@@ -135,6 +136,7 @@ function showError(target, message = '') {
 }
 
 function closeDialogs() {
+  document.querySelector('dialog.rack-planner[open]')?.close();
   availabilityCleanup?.();
   availabilityCleanup = undefined;
   for (const dialog of [versionDialog, locator, preview, editor]) {
@@ -453,7 +455,10 @@ function renderRoomPage(requestedId, filterChanged, previousRoomId) {
       );
     }
   }
-  const { toolbar, disclosures } = roomControls(filterPanel, availability, actions);
+  const planning = room && racks.length
+    ? button('上架预演', () => showRackPlanner(racks[0]), 'small')
+    : null;
+  const { toolbar, disclosures } = roomControls(filterPanel, [availability, planning], actions);
   if (!room) {
     page.append(pageHeading(titles.rooms), toolbar, disclosures, empty('当前范围内没有可查看的机房。'));
     window.scrollTo(0, 0);
@@ -498,7 +503,11 @@ function renderRackPage(requestedId, view, fromRoom3d, targetDevice) {
   const rack = available.find((item) => String(item.id) === filters.rack) || available[0];
   filters.rack = rack ? String(rack.id) : '';
   const devices = rack ? state.catalog.devices.filter((device) => device.rack_id === rack.id) : [];
-  const actions = rack ? [deviceClickModeControl(), button('空间核查', () => showAvailability(lookup('rooms', rack.room_id)))] : [];
+  const actions = rack ? [
+    deviceClickModeControl(),
+    button('空间核查', () => showAvailability(lookup('rooms', rack.room_id))),
+    button('上架预演', () => showRackPlanner(rack)),
+  ] : [];
   if (userCanWrite()) actions.push(button('新增设备', () => openDeviceEditor(null, rack), 'primary'));
   if (rack && userCanWrite()) {
     actions.push(button('编辑机柜', () => openRackEditor(state.catalog, lookup('rooms', rack.room_id), rack, roomUI)));
@@ -531,6 +540,13 @@ function renderRackPage(requestedId, view, fromRoom3d, targetDevice) {
     onEmpty: userCanWrite() ? (slot) => openDeviceEditor(null, rack, slot) : undefined,
     initialDeviceId: targetDevice?.id,
     view: view?.rackId === rack.id ? view : fromRoom3d ? { rackId: rack.id, mode: '3d' } : undefined,
+  });
+}
+
+function showRackPlanner(rack, device) {
+  openRackPlanner({
+    catalog: state.catalog, rack, device, request,
+    onApply: userCanWrite() ? ({ rack: target, slot }) => openDeviceEditor(device ?? null, target, slot) : undefined,
   });
 }
 
@@ -797,7 +813,10 @@ function deviceSystemActions(device) {
 
 function deviceMaintenanceActions(device) {
   const actions = [];
-  if (!device.archived_at) actions.push(button('编辑设备', () => openDeviceEditor(device), 'primary'));
+  if (!device.archived_at) actions.push(
+    button('编辑设备', () => openDeviceEditor(device), 'primary'),
+    button(device.rack_id ? '移位预演' : '上架预演', () => showRackPlanner(lookup('racks', device.rack_id), device)),
+  );
   actions.push(button('以此为模板复制新建', () => {
     const fields = ['room_id', 'type', 'model', 'ownership', 'project_ids', 'maintainer', 'reporter', 'purchased_on'];
     const template = Object.fromEntries(fields.map((key) => [key, device[key]]));
@@ -1140,7 +1159,10 @@ function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview
   const ports = makeDevicePorts(device, initialPortId);
   const actions = [internalLink('device', device.id, '打开设备详情', { class: 'button primary' })];
   if (!device.archived_at) actions.push(button('复制定位链接', () => copyDeviceLocation(device)));
-  if (userCanWrite() && !device.archived_at) actions.push(button('编辑设备', () => openDeviceEditor(device)));
+  if (userCanWrite() && !device.archived_at) actions.push(
+    button('编辑设备', () => openDeviceEditor(device)),
+    button(device.rack_id ? '移位预演' : '上架预演', () => showRackPlanner(lookup('racks', device.rack_id), device)),
+  );
   byId('drawer-content').replaceChildren(
     dialogHeader('drawer-title', device.name, `${device.code} · ${deviceLocation(device)}`, drawer,
       () => closeDevicePresentation({ restoreFocus: true, animate: true })),
@@ -1381,14 +1403,16 @@ function roomOptions() {
 function openDeviceEditor(device = null, rack = null, slot = null, template = null) {
   const original = device || template || {};
   const drawerScroll = device && drawer.open ? drawer.scrollTop : null;
-  const roomChoice = selectInput('room_id', roomOptions(), original.room_id || rack?.room_id,
+  const targetRack = slot ? rack : lookup('racks', original.rack_id) ?? rack;
+  const targetRoomId = slot ? rack?.room_id ?? original.room_id : original.room_id ?? rack?.room_id;
+  const roomChoice = selectInput('room_id', roomOptions(), targetRoomId,
     '选择机房或房间', { required: true });
   const rackChoice = selectInput('rack_id', [], '', '非上架设备');
   const faceChoice = selectInput('face', [['front', '正面'], ['rear', '背面']],
-    original.face || slot?.face || 'front');
+    slot?.face ?? original.face ?? 'front');
   const startInput = element('input', { name: 'u_start', type: 'number', min: 1, step: 1,
-    value: original.u_start ?? slot?.u_start ?? 1 });
-  const heightInput = element('input', { name: 'u_height', type: 'number', min: 1, step: 1, value: original.u_height ?? slot?.u_height ?? 1 });
+    value: slot?.u_start ?? original.u_start ?? 1 });
+  const heightInput = element('input', { name: 'u_height', type: 'number', min: 1, step: 1, value: slot?.u_height ?? original.u_height ?? 1 });
   const initialDepth = slot?.mount_depth ?? (slot?.requiresHalf ? 'half' : mountDepth(original));
   const depthChoice = selectInput('mount_depth', Object.entries(mountDepthLabels), initialDepth, null,
     { 'aria-describedby': 'mount-depth-hint' });
@@ -1437,7 +1461,7 @@ function openDeviceEditor(device = null, rack = null, slot = null, template = nu
   faceChoice.addEventListener('change', () => void slotPicker.refresh());
   depthChoice.addEventListener('change', () => void slotPicker.refresh());
   for (const input of [startInput, heightInput]) input.addEventListener('input', () => void slotPicker.refresh());
-  syncRackChoices(original.rack_id || rack?.id);
+  syncRackChoices(targetRack?.id);
   const projects = checkboxGroup('关联项目', state.catalog.projects.map((project) => [project.id, `${project.name} · ${project.code}`]),
     original.project_ids || [], 'project_ids', '暂无项目。');
   const addresses = element('div', { class: 'stack' });

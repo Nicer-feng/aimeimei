@@ -1,0 +1,240 @@
+.rack-planner {
+  width: min(96vw, 64rem);
+  max-height: 92dvh;
+  overscroll-behavior: contain;
+}
+
+.rack-planner-body {
+  display: grid;
+  gap: .8rem;
+  padding: .85rem 1.1rem 1rem;
+}
+
+.rack-planner-controls {
+  display: grid;
+  grid-template-columns: minmax(12rem, 2.5fr) repeat(4, minmax(5.15rem, 1fr));
+  gap: .45rem .7rem;
+}
+
+.rack-planner-controls label { min-width: 0; }
+.rack-planner-controls select,
+.rack-planner-controls input { min-height: 2.3rem; }
+
+.rack-planner-status-box,
+.rack-planner-confirm {
+  border: 1px solid var(--line);
+  background: var(--canvas);
+  border-radius: .65rem;
+  padding: .65rem .8rem;
+}
+
+.rack-planner-selection,
+.rack-planner-alternatives,
+.rack-planner-confirm-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.rack-planner-selection { justify-content: space-between; }
+.rack-planner-status { color: var(--muted); font-size: .9rem; font-weight: 650; overflow-wrap: anywhere; }
+.rack-planner-status[data-state="available"] { color: var(--accent-dark); }
+.rack-planner-status[data-state="conflict"] { color: #8c3f27; }
+.rack-planner-alternatives:not(:empty), .rack-planner-legend { margin-top: .45rem; }
+.rack-planner-alternative { min-height: 1.85rem; }
+.rack-planner-drag { cursor: grab; min-height: 2rem; font-size: .8rem; }
+.rack-planner-drag:active { cursor: grabbing; }
+
+.rack-planner-view:not(:empty) {
+  border: 1px solid var(--line);
+  border-radius: .65rem;
+  max-height: 47dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  isolation: isolate;
+  scroll-padding-block-start: 2.3rem;
+}
+
+.rack-planner-diagram {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: .85rem;
+  padding: 0 .55rem .5rem;
+}
+
+.rack-planner-face h3 {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  color: var(--muted);
+  background: var(--surface);
+  padding: .43rem 0;
+  font-size: .84rem;
+  font-weight: 700;
+}
+
+.rack-planner-rail {
+  --planner-track: 2.9rem;
+  display: grid;
+  grid-template-columns: var(--planner-track) minmax(0, 1fr);
+  grid-auto-rows: 1.7rem;
+  gap: 1px 0;
+  padding: 2px;
+  border: 1px solid #435261;
+  border-radius: .4rem;
+  background: #435261;
+}
+
+.rack-planner-slot {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  border: 0;
+  border-radius: 0;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  background: #f5f8fa;
+  color: #4e5f70;
+  font: inherit;
+  font-size: .68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.rack-planner-slot span { flex: 0 0 var(--planner-track); text-align: center; border-right: 1px solid #c3cfda; }
+.rack-planner-slot:nth-child(even) { background: #e9eef3; }
+.rack-planner-slot[data-available] span { color: #165c57; font-weight: 720; }
+.rack-planner-slot[data-available] span::before { content: '•'; margin-right: .15rem; color: #238578; }
+.rack-planner-slot:is(:hover, :focus-visible, [data-drop-target]) { z-index: 1; box-shadow: inset 0 0 0 2px #2d817a; }
+.rack-planner-slot:focus-visible { outline-offset: -2px; }
+.rack-planner-slot[data-drop-target] { background: #cceae3; }
+
+.rack-planner-device,
+.rack-planner-ghost {
+  grid-column: 2;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-self: stretch;
+  min-width: 0;
+  overflow: hidden;
+  margin: 1px 2px;
+  padding: 0 .44rem;
+  border: 1px solid #314758;
+  border-radius: 3px;
+  color: #f1f6fb;
+  background: #475c6e;
+  line-height: 1.08;
+  font-size: .75rem;
+  pointer-events: none;
+}
+
+.rack-planner-device-name,
+.rack-planner-device-code,
+.rack-planner-ghost span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rack-planner-device-code { color: #dbe3ed; font-size: .65rem; }
+.rack-planner-device[data-state="full"],
+.rack-planner-device[data-state="unknown"] {
+  color: #373f49;
+  border-color: #a5b0bd;
+  background: repeating-linear-gradient(135deg, #c9d1da, #c9d1da 4px, #dce3e8 4px, #dce3e8 8px);
+}
+
+.rack-planner-device[data-state="unknown"] {
+  border-color: #b39971;
+  background: repeating-linear-gradient(135deg, #e6d8c2, #e6d8c2 4px, #f5e9d6 4px, #f5e9d6 8px);
+}
+
+.rack-planner-device[data-state="half"] {
+  border-color: #9db6b1;
+  color: #315952;
+  background: #daeae6;
+}
+
+.rack-planner-device:not([data-state="occupied"]) .rack-planner-device-code { color: inherit; opacity: .92; }
+
+.rack-planner-ghost {
+  z-index: 3;
+  color: #123f38;
+  border: 2px dashed #187469;
+  background: #b3eddfde;
+  font-weight: 730;
+}
+
+.rack-planner-ghost[data-valid="false"] {
+  color: #542710;
+  border-color: #b45e3b;
+  background: #ffdbd3d6;
+}
+
+.rack-planner-legend {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: .85rem;
+  row-gap: .15rem;
+  list-style: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: .75rem;
+}
+
+.rack-planner-legend li::before {
+  content: '';
+  display: inline-block;
+  width: .64rem;
+  height: .53rem;
+  border: 1px solid #91a0b1;
+  border-radius: 2px;
+  margin-inline-end: .3rem;
+  background: #daeae6;
+}
+
+.rack-planner-legend [data-kind="available"]::before { border-radius: 50%; background: #238578; }
+.rack-planner-legend [data-kind="occupied"]::before { background: #475c6e; }
+.rack-planner-legend [data-kind="full"]::before { background: #c9d1da; }
+.rack-planner-legend [data-kind="unknown"]::before { background: #e6d8c2; }
+.rack-planner-confirm { flex: 1 1 100%; }
+.rack-planner-confirm p { margin-bottom: .5rem; font-size: .9rem; }
+.rack-planner-confirm-actions { justify-content: end; }
+.rack-planner-actions { flex-wrap: wrap; }
+.rack-planner-print { display: none; }
+
+@media (max-width: 620px) {
+  .rack-planner-body { gap: .55rem; padding: .65rem; }
+  .rack-planner-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem .55rem; }
+  .rack-planner-controls label:first-child { grid-column: 1 / -1; }
+  .rack-planner-drag { display: none; }
+  .rack-planner-view:not(:empty) { max-height: 42dvh; }
+  .rack-planner-diagram { gap: .4rem; padding-inline: .27rem; }
+  .rack-planner-rail { --planner-track: 2.2rem; grid-auto-rows: 2rem; }
+  .rack-planner-device, .rack-planner-ghost { font-size: .68rem; padding-inline: .2rem; }
+  .rack-planner-device-code { display: none; }
+  .rack-planner-actions { justify-content: start; gap: .35rem; padding: .55rem .65rem; }
+  .rack-planner-actions .button { padding-inline: .45rem; font-size: .78rem; }
+}
+
+@media print {
+  html.rack-planner-printing body > :not(.rack-planner-print) { display: none !important; }
+  html.rack-planner-printing body { background: white; color: #111c24; }
+  .rack-planner-print { display: block; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .rack-planner-print > header { padding-block-end: 4mm; }
+  .rack-planner-print h1 { margin: 0 0 2mm; font-size: 17pt; }
+  .rack-planner-print h2 { margin: 0 0 2mm; font-size: 13pt; }
+  .rack-planner-print p { margin: 1mm 0; font-size: 9pt; }
+  .rack-planner-print-page + .rack-planner-print-page { break-before: page; }
+  .rack-planner-print .rack-planner-diagram { padding: 0; gap: 4mm; }
+  .rack-planner-print .rack-planner-face h3 { position: static; font-size: 9pt; padding: 0 0 1mm; }
+  .rack-planner-print .rack-planner-rail { --planner-track: 10mm; grid-auto-rows: 4.25mm; }
+  .rack-planner-print .rack-planner-device,
+  .rack-planner-print .rack-planner-ghost { font-size: 7.5pt; }
+  .rack-planner-print .rack-planner-device-code { display: inline; font-size: 6.25pt; }
+}

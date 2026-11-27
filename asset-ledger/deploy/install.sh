@@ -13,6 +13,7 @@ service_user=asset-ledger
 
 /usr/bin/python3 -c 'import sqlite3, sys; sys.exit("需要 Python 3.9 或更新版本。") if sys.version_info < (3, 9) else None'
 for path in ledger/__main__.py ledger/schema.sql ledger/_vendor/olefile.py ledger/_vendor/olefile.LICENSE \
+    static/rack-planner.js static/rack-planner.css \
     static/index.html static/room-overview.js static/room-overview-3d.js static/room-overview.css \
     static/rack-geometry.js static/rack-textures.js static/rack-3d-model.js static/rack-3d.js \
     ledger/ports.py static/device-locator.js static/device-ports.js static/device-ports.css static/pdf-preview.js static/pdf-preview.css deploy/asset-ledger.service \
