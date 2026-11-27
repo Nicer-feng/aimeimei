@@ -1,6 +1,8 @@
 import * as THREE from './vendor/three/three.module.min.js';
 
-export function buildRoomLighting(scene, bounds, entries, cabinetWidth, cabinetDepth) {
+export function buildRoomLighting(scene, bounds, entries, cabinetWidth, cabinetDepth, {
+  hasCableTray = false, frontSign = 1,
+} = {}) {
   const group = new THREE.Group();
   scene.add(group);
   const box = new THREE.BoxGeometry(1, 1, 1);
@@ -21,29 +23,33 @@ export function buildRoomLighting(scene, bounds, entries, cabinetWidth, cabinetD
   const { min, max } = bounds;
   const width = max.x - min.x;
   const height = max.y;
+  const frontEdge = frontSign > 0 ? max.z : min.z;
+  const rearEdge = frontSign > 0 ? min.z : max.z;
   const rows = [...new Set(entries.map(({ z }) => z))];
   const metal = new THREE.MeshStandardMaterial({ color: 0x233747, metalness: 0.36, roughness: 0.58 });
 
   // Keep the room open above the cabinets so the top view and picking remain clear.
   const rearWall = [
-    { y: height * 0.33, z: min.z, size: [width, height * 0.66, 0.045] },
-    { y: 0.042, z: max.z - 0.02, size: [width, 0.084, 0.032] },
+    { y: height * 0.33, z: rearEdge, size: [width, height * 0.66, 0.045] },
+    { y: 0.042, z: frontEdge - frontSign * 0.02, size: [width, 0.084, 0.032] },
   ];
   addBoxes(rearWall, new THREE.MeshStandardMaterial({ color: 0x182736, roughness: 0.86 }));
 
   const rails = [];
   const strips = [
-    { y: height * 0.64, z: min.z + 0.029, size: [width * 0.97, 0.014, 0.016] },
-    { y: 0.021, z: max.z - 0.040, size: [width * 0.97, 0.014, 0.018] },
+    { y: height * 0.64, z: rearEdge + frontSign * 0.029, size: [width * 0.97, 0.014, 0.016] },
+    { y: 0.021, z: frontEdge - frontSign * 0.040, size: [width * 0.97, 0.014, 0.018] },
   ];
-  for (const z of rows) {
-    for (const edge of [-1, 1]) {
-      rails.push({ y: height + 0.14, z: z + edge * 0.15, size: [width - 0.22, 0.038, 0.034] });
+  if (!hasCableTray) {
+    for (const z of rows) {
+      for (const edge of [-1, 1]) {
+        rails.push({ y: height + 0.14, z: z + edge * 0.15, size: [width - 0.22, 0.038, 0.034] });
+      }
+      for (let x = min.x + 0.32; x < max.x - 0.2; x += 0.41) {
+        rails.push({ x, y: height + 0.138, z, size: [0.025, 0.033, 0.28] });
+      }
+      strips.push({ y: height + 0.22, z: z + 0.49, size: [width * 0.92, 0.018, 0.055] });
     }
-    for (let x = min.x + 0.32; x < max.x - 0.2; x += 0.41) {
-      rails.push({ x, y: height + 0.138, z, size: [0.025, 0.033, 0.28] });
-    }
-    strips.push({ y: height + 0.22, z: z + 0.49, size: [width * 0.92, 0.018, 0.055] });
   }
   if (rails.length) addBoxes(rails, metal);
   else metal.dispose();

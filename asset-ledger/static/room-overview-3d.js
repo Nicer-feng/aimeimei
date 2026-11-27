@@ -1,7 +1,7 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
 import {
-  DETAIL_Z, DEVICE_HALF_WIDTH, RACK_UNIT,
+  DETAIL_Z, DEVICE_HALF_WIDTH, RACK_DEPTH, RACK_UNIT, RACK_WIDTH,
   deviceMetrics, normalizeDepth, normalizeStatus, rackOccupancy, rackVerticalBounds,
 } from './rack-geometry.js';
 import {
@@ -16,8 +16,8 @@ const COLUMN_GAP = 1.21;
 const ROW_GAP = 2.30;
 const RACK_SCALE = 0.535;
 const FLOOR_TILE_SIZE = RACK_UNIT * RACK_SCALE * 600 / 44.45;
-const CABINET_WIDTH = 1.98 * RACK_SCALE;
-const CABINET_DEPTH = 1.27 * RACK_SCALE;
+const CABINET_WIDTH = RACK_WIDTH * RACK_SCALE;
+const CABINET_DEPTH = RACK_DEPTH * RACK_SCALE;
 const MIN_DISTANCE = 1.05;
 const FINE_CACHE_LIMIT = 12;
 const MAX_DAMPING_FRAMES = 100;
@@ -26,6 +26,7 @@ const SINGLE_CLICK_DELAY = 320;
 const ANGLED = [0.42, 2.30, 1.12];
 const IMMERSIVE_ANGLED = [0.32, 1.20, 1.48];
 const TOP = [0, 1, 0.001];
+const PORTRAIT_ASPECT = 1.05;
 const SEARCH_OUTLINE_COLORS = [0x0875ba, 0x02836e];
 const SEARCH_DEVICE_COLOR = 0x79f4ff;
 const FACE_OUTLINE_EDGES = [[-1, 0], [1, 0], [1, 0], [1, 1], [1, 1], [-1, 1], [-1, 1], [-1, 0]];
@@ -82,8 +83,29 @@ function node(tag, className, label) {
   return element;
 }
 
-function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTexture, shadowTexture }) {
+function nanchangFront(layout, racksById, roomName, siteName) {
+  if (roomName !== '中心机房' || !siteName?.includes('南昌东') || layout.illustrative ||
+      layout.rows !== 1 || layout.columns !== 9 || layout.positions.length !== 9) return 0;
+  const rotation = layout.positions[0].rotation;
+  if (rotation !== 0 && rotation !== 180) return 0;
+  const names = new Set();
+  const slots = new Set();
+  for (const entry of layout.positions) {
+    const name = racksById.get(String(entry.rack_id))?.name;
+    if (!/^A0[1-9]$/i.test(name ?? '') || entry.rotation !== rotation || entry.row !== 1 ||
+        entry.slot < 1 || entry.slot > 9) return 0;
+    names.add(name.toUpperCase());
+    slots.add(entry.slot);
+  }
+  return names.size === 9 && slots.size === 9 ? (rotation === 0 ? 1 : -1) : 0;
+}
+
+function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind, palette, floorTexture, shadowTexture }) {
   const racksById = new Map(racks.map((rack) => [String(rack.id), rack]));
+  const photoFront = nanchangFront(room, racksById, roomName, siteName);
+  const turned = room.positions.some(({ rotation }) => rotation === 90 || rotation === 270);
+  const columnGap = photoFront ? CABINET_WIDTH + 0.045 : Math.max(COLUMN_GAP, turned ? CABINET_DEPTH + 0.10 : 0);
+  const frontSign = photoFront || 1;
   const devicesByRack = new Map();
   for (const device of devices) {
     const id = String(device.rack_id);
@@ -92,10 +114,10 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
     devicesByRack.get(id).push(device);
   }
   const placements = new Map(room.positions.map((entry) => [`${entry.row}/${entry.slot}`, entry]));
-  const width = room.columns * COLUMN_GAP + 0.68;
+  const width = room.columns * columnGap + 0.68;
   const rowExtent = (room.rows - 1) * ROW_GAP / 2;
-  const rearEdge = -rowExtent - 1.00;
-  const frontEdge = rowExtent + 1.58;
+  const rearEdge = -rowExtent - (frontSign > 0 ? 1.00 : 1.58);
+  const frontEdge = rowExtent + (frontSign > 0 ? 1.58 : 1.00);
   const depth = frontEdge - rearEdge;
   const floorCenter = (frontEdge + rearEdge) / 2;
   const finishes = new Map();
@@ -142,10 +164,10 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
     floor.position.set(0, 0.0005, floorCenter);
     scene.add(floor);
   }
-  const frontAisle = rowExtent + 1.08;
-  const rearAisle = -rowExtent - 0.82;
-  flat(0xb7d0c2, 0, 0.003, frontAisle, [width - 0.22, 0.008, 0.76]);
-  flat(0xbdcbd0, 0, 0.003, rearAisle, [width - 0.22, 0.008, 0.24]);
+  const frontAisle = frontSign * (rowExtent + 1.08);
+  const rearAisle = -frontSign * (rowExtent + 0.82);
+  flat(0xb7d0c2, 0, 0.003, frontAisle, [width - 0.22, 0.008, photoFront ? 0.032 : 0.76]);
+  flat(0xbdcbd0, 0, 0.003, rearAisle, [width - 0.22, 0.008, photoFront ? 0.032 : 0.24]);
   for (let row = 1; row < room.rows; row += 1) {
     const z = (room.rows / 2 - row) * ROW_GAP;
     flat(0xc9d9d6, 0, 0.002, z, [width - 0.65, 0.007, 0.72]);
@@ -155,7 +177,7 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
   }
 
   const entranceX = -width / 2 + 0.61;
-  const entranceZ = frontEdge - 0.11;
+  const entranceZ = frontSign * (rowExtent + 1.47);
   for (const side of [-1, 1]) {
     flat(0x487165, entranceX + side * 0.41, 0.47, entranceZ, [0.062, 0.94, 0.10]);
   }
@@ -163,7 +185,8 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
   flat(0x487165, entranceX, 0.014, entranceZ, [0.88, 0.025, 0.15]);
   flat(0x487165, entranceX, 0.013, frontAisle, [0.045, 0.006, 0.28]);
   for (const side of [-1, 1]) {
-    flat(0x487165, entranceX + side * 0.058, 0.013, frontAisle - 0.12, [0.033, 0.006, 0.17], side * 0.73);
+    flat(0x487165, entranceX + side * 0.058, 0.013, frontAisle - frontSign * 0.12,
+      [0.033, 0.006, 0.17], frontSign * side * 0.73);
   }
   const landmarks = [
     { id: 'entrance', text: '入口（示意）', point: new THREE.Vector3(entranceX, 1.07, entranceZ) },
@@ -175,15 +198,17 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
   const baseY = 0.100;
   for (let row = 1; row <= room.rows; row += 1) {
     for (let slot = 1; slot <= room.columns; slot += 1) {
-      const x = (slot - (room.columns + 1) / 2) * COLUMN_GAP;
+      const x = (slot - (room.columns + 1) / 2) * columnGap;
       const z = ((room.rows + 1) / 2 - row) * ROW_GAP;
       const entry = placements.get(`${row}/${slot}`);
       const rack = entry && racksById.get(String(entry.rack_id));
       if (!rack) {
         for (const sx of [-1, 1]) {
           for (const sz of [-1, 1]) {
-            flat(0x8fa9a5, x + sx * 0.50, 0.016, z + sz * 0.53, [0.20, 0.006, 0.024]);
-            flat(0x8fa9a5, x + sx * 0.54, 0.016, z + sz * 0.445, [0.024, 0.006, 0.18]);
+            flat(0x8fa9a5, x + sx * (CABINET_WIDTH / 2 - 0.04), 0.016,
+              z + sz * (CABINET_DEPTH / 2 + 0.05), [0.20, 0.006, 0.024]);
+            flat(0x8fa9a5, x + sx * (CABINET_WIDTH / 2 + 0.035), 0.016,
+              z + sz * (CABINET_DEPTH / 2 - 0.035), [0.024, 0.006, 0.18]);
           }
         }
         symbols.push({ row, slot, point: new THREE.Vector3(x, 0.045, z) });
@@ -199,6 +224,7 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
       const rackEntry = {
         rack, devices: rackDevices, stats: rackOccupancy(rack, rackDevices),
         x, y: baseY, z, rotation: entry.rotation, scale: RACK_SCALE, middle: (top + bottom) / 2, height: top - bottom,
+        enclosure: Boolean(photoFront),
       };
       entries.push(rackEntry);
 
@@ -211,8 +237,43 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
       scene.add(target);
       targets.push(target);
       targetsById.set(id, target);
-      symbols.push({ row, slot, rack, stats: rackEntry.stats, point: new THREE.Vector3(x, top + 0.05, z) });
+      symbols.push({ row, slot, rack, stats: rackEntry.stats,
+        point: new THREE.Vector3(x, top + 0.05, z + photoFront * CABINET_DEPTH * 0.43) });
     }
+  }
+
+  if (photoFront) {
+    // 桥架沿照片中的柜列连续布置，离开柜顶的空隙由托架支撑。
+    const z = -photoFront * 0.31;
+    const railY = Math.max(...entries.map((entry) => entry.middle + entry.height / 2)) + 0.24;
+    const length = entries.at(-1).x - entries[0].x + CABINET_WIDTH * 0.86;
+    const railColor = 0x72838a;
+    const railSpacing = 0.205;
+    for (const side of [-1, 1]) {
+      flat(railColor, 0, railY - 0.028, z + side * railSpacing, [length, 0.037, 0.022]);
+      flat(railColor, 0, railY + 0.065, z + side * railSpacing, [length, 0.018, 0.019]);
+    }
+    for (const [index, entry] of entries.entries()) {
+      if (index % 2 !== 0) continue;
+      const rackTop = entry.middle + entry.height / 2;
+      const supportHeight = railY - rackTop;
+      for (const side of [-1, 1]) {
+        flat(railColor, entry.x, rackTop + supportHeight / 2, z + side * railSpacing,
+          [0.034, supportHeight, 0.035]);
+      }
+    }
+    const sections = Math.ceil(length / 0.24);
+    for (let step = 0; step <= sections; step += 1) {
+      const x = (step / sections - 0.5) * (length - 0.022);
+      flat(railColor, x, railY - 0.04, z, [0.018, 0.018, railSpacing * 2]);
+      for (const side of [-1, 1]) {
+        flat(railColor, x, railY + 0.015, z + side * railSpacing, [0.011, 0.10, 0.014]);
+      }
+    }
+    for (const [index, offset] of [-0.133, -0.095, 0.018, 0.055, 0.097].entries()) {
+      flat(index % 2 ? 0x313c43 : 0x232c33, 0, railY - 0.009, z + offset, [length - 0.12, 0.026, 0.025]);
+    }
+    bounds.max.y = Math.max(bounds.max.y, railY + 0.09);
   }
 
   for (const [material, matrices] of boxes) {
@@ -255,7 +316,28 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
   let immersiveLayer;
   let highlightedRackId;
   let selectedRackId;
+  let locatedDeviceRackId;
   let activeFilter;
+  let nearbyRackIds = [];
+
+  function updateRackDoors() {
+    if (!photoFront) return;
+    const open = new Set(nearbyRackIds);
+    if (selectedRackId) open.add(selectedRackId);
+    if (locatedDeviceRackId) open.add(locatedDeviceRackId);
+    if (activeFilter?.deviceIds.size) {
+      for (const entry of entries) {
+        if (entry.devices.some(({ id }) => activeFilter.deviceIds.has(String(id)))) open.add(String(entry.rack.id));
+      }
+    }
+    overviewLayer.setOpenRacks?.(open);
+  }
+
+  function setNearbyRacks(ids) {
+    nearbyRackIds = ids;
+    overviewLayer.lamps?.setNearbyRacks(ids);
+    updateRackDoors();
+  }
 
   function updateRoomLighting() {
     if (immersiveLayer?.group.visible) immersiveLayer.highlight(highlightedRackId, selectedRackId, activeFilter);
@@ -263,7 +345,8 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
 
   function setImmersive(active) {
     if (active && !immersiveLayer) {
-      immersiveLayer = buildRoomLighting(scene, bounds, entries, CABINET_WIDTH, CABINET_DEPTH);
+      immersiveLayer = buildRoomLighting(scene, bounds, entries, CABINET_WIDTH, CABINET_DEPTH,
+        { hasCableTray: Boolean(photoFront), frontSign });
     }
     if (immersiveLayer) immersiveLayer.group.visible = active;
     for (const [color, material] of finishes) {
@@ -326,6 +409,7 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
   function setSearchFilter(filter) {
     overviewLayer.setSearchFilter?.(filter);
     activeFilter = filter;
+    updateRackDoors();
     updateRoomLighting();
     const counts = [0, 0];
     if (filter) {
@@ -378,19 +462,23 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
   function highlightDevice(entry, device) {
     positionDeviceOutline(deviceOutline, entry, device, 1.022);
     selectedRackId = device ? String(entry.rack.id) : undefined;
+    updateRackDoors();
     updateRoomLighting();
   }
   function highlightLocatedDevice(entry, device) {
     positionDeviceOutline(locatedDeviceOutline, entry, device, 1.052);
+    locatedDeviceRackId = device ? String(entry.rack.id) : undefined;
+    updateRackDoors();
   }
   const targetForRack = (id) => targetsById.get(String(id));
   const entryForRack = (id) => targetForRack(id)?.userData.entry;
   return { bounds, entries, entryForRack, targetForRack, highlight, highlightDevice, landmarks, lamps: overviewLayer.lamps,
-    highlightLocatedDevice, setImmersive, setMode: overviewLayer.setMode, setSearchFilter, symbols, targets };
+    highlightLocatedDevice, photoFront, setImmersive, setMode: overviewLayer.setMode, setNearbyRacks, setSearchFilter, symbols, targets };
 }
 
 export function mountRoomScene(host, {
-  layout, racks, initialCamera, onRack, onFallback, devices = [], deviceKind = () => 'server', units = (device) => `U${device.u_start}`,
+  layout, roomName, siteName, racks, initialCamera, onRack, onFallback, devices = [],
+  deviceKind = () => 'server', units = (device) => `U${device.u_start}`,
   initialLocatedRackId, initialLocatedDeviceId, initialSearchFilter, onDevice, onSceneInteraction,
 }) {
   const panel = node('section', 'room-3d');
@@ -476,7 +564,8 @@ export function mountRoomScene(host, {
   const palette = createRackPalette();
   const floorTexture = createFloorTileTexture();
   const shadowTexture = createContactShadowTexture();
-  const model = makeRoom(scene, { room: layout, racks, devices, deviceKind, palette, floorTexture, shadowTexture });
+  const model = makeRoom(scene, { room: layout, roomName, siteName, racks, devices, deviceKind, palette, floorTexture, shadowTexture });
+  if (model.photoFront) viewport.dataset.roomProfile = 'nanchang-east';
   const roomSize = model.bounds.getSize(new THREE.Vector3());
   // 屏幕平移会同时改变目标的高度和纵深，给单排机房的地板边缘留出余量。
   const panBounds = model.bounds.clone().expandByScalar(Math.max(roomSize.y, Math.hypot(roomSize.x, roomSize.z) / 4));
@@ -541,11 +630,22 @@ export function mountRoomScene(host, {
   const restoredTarget = Array.isArray(initialCamera?.target) && initialCamera.target.length === 3 &&
     initialCamera.target.every(Number.isFinite)
     ? new THREE.Vector3(...initialCamera.target) : center.clone();
-  const defaultAngle = () => viewMode === 'immersive' ? IMMERSIVE_ANGLED : ANGLED;
+  function defaultAngle(aspect = camera.aspect) {
+    const immersive = viewMode === 'immersive';
+    if (!model.photoFront) return immersive ? IMMERSIVE_ANGLED : ANGLED;
+    const portrait = aspect < PORTRAIT_ASPECT;
+    return [portrait ? -0.82 : -0.46, (portrait ? 0.45 : 0.35) - (immersive ? 0.09 : 0), model.photoFront];
+  }
+
+  function defaultZoom(aspect = camera.aspect) {
+    return model.photoFront && aspect >= 1.45 ? 0.89 : 1;
+  }
+
   const initial = {
-    direction: restored ? initialCamera.direction : defaultAngle(),
+    direction: restored ? initialCamera.direction : defaultAngle(viewport.clientWidth / viewport.clientHeight),
     activeView: restored ? preset : 'angled',
-    zoom: Number.isFinite(initialCamera?.zoom) ? THREE.MathUtils.clamp(initialCamera.zoom, 0.12, 3) : 1,
+    zoom: Number.isFinite(initialCamera?.zoom) ? THREE.MathUtils.clamp(initialCamera.zoom, 0.12, 3) :
+      defaultZoom(viewport.clientWidth / viewport.clientHeight),
     target: restoredTarget,
     viewMode,
   };
@@ -880,7 +980,7 @@ export function mountRoomScene(host, {
     setActive(view);
     setHover(null);
     hideTooltip();
-    flyTo(new THREE.Vector3(...direction).normalize(), 1, center);
+    flyTo(new THREE.Vector3(...direction).normalize(), view === 'angled' ? defaultZoom() : 1, center);
   }
 
   function markLocated(id) {
@@ -991,17 +1091,23 @@ export function mountRoomScene(host, {
 
   function resize() {
     if (!viewport.clientWidth || !viewport.clientHeight) return;
+    const aspect = viewport.clientWidth / viewport.clientHeight;
+    const changedOrientation = (camera.aspect < PORTRAIT_ASPECT) !== (aspect < PORTRAIT_ASPECT) ||
+      defaultZoom(camera.aspect) !== defaultZoom(aspect);
     const current = snapshot();
     const destination = flight;
     flight = undefined;
     clearDamping();
     renderer.setSize(viewport.clientWidth, viewport.clientHeight, false);
-    camera.aspect = viewport.clientWidth / viewport.clientHeight;
+    camera.aspect = aspect;
     camera.updateProjectionMatrix();
+    const reframe = model.photoFront && !destination && current.activeView === 'angled' &&
+      (sized ? changedOrientation : !restored);
     sized = true;
     const targetVec = current.target instanceof THREE.Vector3
       ? current.target : new THREE.Vector3(...(current.target ?? center.toArray()));
-    placeView(new THREE.Vector3(...current.direction).normalize(), current.zoom, targetVec);
+    const direction = reframe ? defaultAngle() : current.direction;
+    placeView(new THREE.Vector3(...direction).normalize(), reframe ? defaultZoom() : current.zoom, targetVec);
     if (destination) {
       const remaining = Math.max(1, destination.startTime + destination.duration - performance.now());
       flyTo(destination.direction, destination.zoom, destination.endTarget, remaining);
@@ -1052,9 +1158,11 @@ export function mountRoomScene(host, {
     for (const { entry, left, top, dist, isHovered, isLocated, priority } of candidates) {
       const { item, rack } = entry;
       const expanded = Boolean(rack && (isHovered || dist < labelDetailDistance ** 2));
-      const estW = Math.min(148, Math.max(expanded ? 104 : 46, (rack ? rack.name.length : 2) * 9 + 18));
+      const smallRackLabel = model.photoFront && narrow && rack && !expanded;
+      const estW = smallRackLabel ? 28 : Math.min(148, Math.max(expanded ? 104 : 46, (rack ? rack.name.length : 2) * 9 + 18));
       const estH = expanded ? 56 : 22;
-      const box = { l: left - estW / 2 - 4, r: left + estW / 2 + 4, t: top - estH - 4, b: top + 2 };
+      const edge = estW / 2 + (smallRackLabel ? 2 : 4);
+      const box = { l: left - edge, r: left + edge, t: top - estH - 4, b: top + 2 };
       const important = isHovered || isLocated;
       const collides = !important && placedBoxes.some((p) => box.l < p.r && box.r > p.l && box.t < p.b && box.b > p.t);
       if (collides || (priority === 0 && visibleCount >= maxLabels)) {
@@ -1071,7 +1179,17 @@ export function mountRoomScene(host, {
       item.dataset.located = String(isLocated);
     }
 
+    const lookX = camera.position.x - controls.target.x;
+    const lookY = camera.position.y - controls.target.y;
+    const lookZ = camera.position.z - controls.target.z;
+    const overhead = lookY > Math.hypot(lookX, lookZ) * 1.75;
     for (const { item, point } of landmarkItems) {
+      const rear = item.dataset.landmark === 'rear-aisle';
+      const frontVisible = camera.position.z * model.photoFront >= 0;
+      if (model.photoFront && !overhead && (rear === frontVisible)) {
+        item.hidden = true;
+        continue;
+      }
       projected.copy(point).project(camera);
       const left = (projected.x + 1) * width / 2;
       const top = (1 - projected.y) * height / 2;
@@ -1082,6 +1200,7 @@ export function mountRoomScene(host, {
       if (!item.hidden) {
         item.style.left = `${left}px`;
         item.style.top = `${top}px`;
+        placedBoxes.push({ l: left - halfWidth, r: left + halfWidth, t: top - 10, b: top + 10 });
       }
     }
   }
@@ -1229,7 +1348,7 @@ export function mountRoomScene(host, {
 
     if (changed) {
       const visibleIds = [...selected.keys()];
-      model.lamps?.setNearbyRacks(visibleIds);
+      model.setNearbyRacks(visibleIds);
       lampAnimation?.sync();
       canvas.dataset.detailRacks = visibleIds.join(' ');
       canvas.dataset.detailCount = String(visibleIds.length);

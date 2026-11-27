@@ -31,10 +31,12 @@ function svg(tag, attributes, label) {
 }
 
 export function deviceKind(device) {
-  if (/交换|路由|防火墙|网关/.test(device.type)) return 'network';
-  if (/配电|电源|UPS/i.test(device.type)) return 'power';
-  if (/存储|磁盘/.test(device.type)) return 'storage';
-  return 'server';
+  const type = device.type ?? '';
+  if (/存储|磁盘|磁带|storage|\bNAS\b|\bSAN\b/i.test(type)) return 'storage';
+  if (/服务器|\bserver\b/i.test(type)) return 'server';
+  if (/交换|路由|防火墙|网关|switch|router|firewall|gateway/i.test(type)) return 'network';
+  if (/配电|电源|\bUPS\b|\bPDU\b/i.test(type)) return 'power';
+  return 'generic';
 }
 
 export function units(device) {

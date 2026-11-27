@@ -1,10 +1,10 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import {
-  DEPTH_COLORS, DETAIL_Z, OPERATING_LAMP_X, OPERATING_LAMP_Z, PANEL_Z,
+  DEPTH_COLORS, DETAIL_Z, DEVICE_HALF_WIDTH, OPERATING_LAMP_X, OPERATING_LAMP_Z, PANEL_COLORS, PANEL_Z,
   RACK_DEPTH, RACK_WIDTH, STATUS_COLORS, SURFACES, TYPE_ACCENTS,
   deviceMetrics, normalizeDepth, normalizeStatus, rackSummaryColor,
 } from './rack-geometry.js';
-import { createDeviceLabelTexture, createOperatingLampTexture, createRackScaleTexture } from './rack-textures.js';
+import { createCabinetMeshTexture, createDeviceLabelTexture, createOperatingLampTexture, createRackScaleTexture } from './rack-textures.js';
 
 const LAMP_PERIOD_MS = 3200;
 const LAMP_FRAME_MS = 80;
@@ -95,6 +95,10 @@ function material(color, roughness, metalness) {
   return new THREE.MeshStandardMaterial({ color, roughness, metalness });
 }
 
+function panelColor(kind) {
+  return PANEL_COLORS[kind] ?? PANEL_COLORS.generic;
+}
+
 function beveledBox(width, height, depth, edge) {
   const w = width / 2 - edge;
   const h = height / 2 - edge;
@@ -119,17 +123,32 @@ export function createRackPalette() {
   const materials = new Map();
   const scaleMaterials = new Map();
   const textures = [];
+  let perforatedMaterial;
 
   function materialFor(surface) {
     if (!materials.has(surface)) {
       if (SURFACES[surface]) {
         materials.set(surface, material(...SURFACES[surface]));
+      } else if (surface.startsWith('panel/')) {
+        materials.set(surface, material(panelColor(surface.slice('panel/'.length)), SURFACES.panel[1], SURFACES.panel[2]));
       } else {
-        const color = TYPE_ACCENTS[surface.slice('accent/'.length)] ?? TYPE_ACCENTS.server;
+        const color = TYPE_ACCENTS[surface.slice('accent/'.length)] ?? TYPE_ACCENTS.generic;
         materials.set(surface, material(color, 0.72, 0.10));
       }
     }
     return materials.get(surface);
+  }
+
+  function cabinetMeshMaterial() {
+    if (!perforatedMaterial) {
+      const map = createCabinetMeshTexture();
+      if (map) textures.push(map);
+      perforatedMaterial = new THREE.MeshStandardMaterial({
+        color: 0x303a42, roughness: 0.66, metalness: 0.26, map,
+      });
+      materials.set('cabinet-mesh', perforatedMaterial);
+    }
+    return perforatedMaterial;
   }
 
   function scaleMaterial(rackHeight) {
@@ -157,7 +176,7 @@ export function createRackPalette() {
     textures.length = 0;
   }
 
-  return Object.assign(materialFor, { scaleMaterial, dispose });
+  return Object.assign(materialFor, { scaleMaterial, cabinetMeshMaterial, dispose });
 }
 
 function matchesRoomSearch(filter, { rackId, deviceId }) {
@@ -267,6 +286,58 @@ function addScaleStrips(parent, rackHeight, unit, scaleMat, tint, owner) {
     tint.add(batch, Array(4).fill(owner));
     parent.add(batch);
   }
+}
+
+function addCabinetEnclosure(parent, { rack, unit, palette, tint, owner }) {
+  const height = rack.height * unit;
+  const sides = instancedBoxes(parent, palette, tint);
+  const sections = 3;
+  const sectionHeight = height / sections;
+  const panelX = RACK_WIDTH / 2 - 0.023;
+  const doorZ = RACK_DEPTH / 2 - 0.035;
+  const doorInset = 0.09;
+  const doorOpening = RACK_WIDTH - doorInset * 3.4;
+  for (const sign of [-1, 1]) {
+    for (let index = 0; index < sections; index += 1) {
+      const y = sectionHeight * (index + 0.5);
+      sides.add('sidePanel', [0.037, sectionHeight - 0.022, RACK_DEPTH - 0.135], [sign * panelX, y, 0], undefined, owner);
+      for (const end of [-1, 1]) {
+        const z = end * (doorZ - 0.23);
+        const latchY = y + sectionHeight * 0.34;
+        sides.add('handle', [0.014, 0.102, 0.076], [sign * (panelX + 0.020), latchY, z], undefined, owner);
+        sides.add('inset', [0.010, 0.065, 0.045], [sign * (panelX + 0.027), latchY, z], undefined, owner);
+      }
+    }
+  }
+  sides.finish();
+
+  const doors = new THREE.Group();
+  const frames = instancedBoxes(doors, palette, tint);
+  const doorMesh = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(doorOpening + 0.016, height - 0.16), palette.cabinetMeshMaterial(), 2,
+  );
+  const pose = new THREE.Object3D();
+  for (const [index, sign] of [1, -1].entries()) {
+    for (const end of [-1, 1]) {
+      frames.add('doorFrame', [RACK_WIDTH - 0.10, 0.092, 0.045], [0, end < 0 ? 0.039 : height - 0.039, sign * doorZ], undefined, owner);
+      frames.add('doorFrame', [0.108, height, 0.045], [end * (doorOpening / 2 + 0.048), height / 2, sign * doorZ], undefined, owner);
+    }
+    const pullX = sign * (doorOpening / 2 + 0.021);
+    const pullY = height * 0.42;
+    const length = Math.min(height * 0.20, 0.81);
+    frames.add('inset', [0.072, length + 0.10, 0.022], [pullX, pullY, sign * (doorZ + 0.023)], undefined, owner);
+    frames.add('handle', [0.037, length, 0.029], [pullX, pullY + 0.012, sign * (doorZ + 0.041)], undefined, owner);
+    pose.position.set(0, height / 2, sign * (doorZ + 0.014));
+    pose.rotation.y = sign < 0 ? Math.PI : 0;
+    pose.updateMatrix();
+    doorMesh.setMatrixAt(index, pose.matrix);
+  }
+  doorMesh.instanceMatrix.needsUpdate = true;
+  tint?.add(doorMesh, [owner, owner]);
+  doors.add(doorMesh);
+  frames.finish();
+  parent.add(doors);
+  return doors;
 }
 
 function buildLampGlow(core, texture) {
@@ -452,22 +523,24 @@ function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = fals
   const height = rack.height * unit;
   solid('cover', [RACK_WIDTH, 0.077, RACK_DEPTH], [0, height + 0.065, 0], 0.012);
   solid('cover', [RACK_WIDTH, 0.077, RACK_DEPTH], [0, -0.070, 0], 0.012);
+  const frameZ = PANEL_Z - 0.020;
+  const footZ = RACK_DEPTH / 2 - 0.14;
   for (const side of [-1, 1]) {
-    detail('trim', [0.07, 0.038, 1.15], [side * 0.89, height + 0.012, 0], true);
-    detail('trim', [0.07, 0.038, 1.15], [side * 0.89, -0.018, 0], true);
+    detail('trim', [0.07, 0.038, RACK_DEPTH - 0.12], [side * 0.89, height + 0.012, 0], true);
+    detail('trim', [0.07, 0.038, RACK_DEPTH - 0.12], [side * 0.89, -0.018, 0], true);
     for (const face of [-1, 1]) {
-      solid('frame', [0.095, height + 0.10, 0.095], [side * 0.92, height / 2, face * 0.553], 0.009);
-      detail('rail', [0.055, height + 0.018, 0.035], [side * 0.844, height / 2, face * 0.568], true);
-      detail('trim', [0.022, height + 0.018, 0.046], [side * 0.885, height / 2, face * 0.555], true);
-      detail('foot', [0.13, 0.053, 0.14], [side * 0.89, -0.134, face * 0.50], true);
+      solid('frame', [0.095, height + 0.10, 0.095], [side * 0.92, height / 2, face * frameZ], 0.009);
+      detail('rail', [0.055, height + 0.018, 0.035], [side * 0.844, height / 2, face * (frameZ + 0.015)], true);
+      detail('trim', [0.022, height + 0.018, 0.046], [side * 0.885, height / 2, face * (frameZ + 0.002)], true);
+      detail('foot', [0.13, 0.053, 0.14], [side * 0.89, -0.134, face * footZ], true);
       if (!includeFine || reserveNameplate) continue;
       for (let u = 1; u <= rack.height; u += 1) {
         const center = (u - 0.5) * unit;
         for (const offset of [-0.26, 0, 0.26]) {
-          detail('inset', [0.020, unit * 0.115, 0.004], [side * 0.844, center + offset * unit, face * 0.588]);
+          detail('inset', [0.020, unit * 0.115, 0.004], [side * 0.844, center + offset * unit, face * (frameZ + 0.035)]);
         }
         if (u === 1 || u === rack.height || u % 5 === 0) {
-          detail('scale', [0.022, 0.006, 0.003], [side * 0.918, center, face * 0.603]);
+          detail('scale', [0.022, 0.006, 0.003], [side * 0.918, center, face * (DETAIL_Z + 0.007)]);
         }
       }
     }
@@ -479,7 +552,7 @@ function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = fals
   }
 
   function metalFace(device, sign, center, faceHeight, kind) {
-    solid('panel', [1.738, faceHeight, 0.040], [0, center, sign * PANEL_Z], 0.005, device, kind);
+    solid('panel', [DEVICE_HALF_WIDTH * 2, faceHeight, 0.040], [0, center, sign * PANEL_Z], 0.005, device, kind);
     if (!includeFine) return;
     // 面板耳与螺栓只提供外观，拾取使用背后的整块面板。
     for (const side of [-1, 1]) {
@@ -495,61 +568,79 @@ function describeRack({ rack, devices, deviceKind, unit, reserveNameplate = fals
       feature(accent(kind), [0.039, Math.min(0.040, faceHeight * 0.34), 0.004], [-0.762, center, frontZ],
         [0.080, Math.min(0.052, faceHeight * 0.46), 0.004]);
     }
-    if (!includeFine) return;
     const areaCenter = reserveNameplate ? 0.25 : 0;
-    const areaWidth = reserveNameplate ? 0.86 : 1.14;
+    const areaWidth = reserveNameplate ? 0.83 : 1.16;
+    const areaHeight = Math.min(faceHeight * 0.73, 0.28);
+    const base = (surface, width = areaWidth, x = areaCenter) => {
+      feature(surface, [width, areaHeight, 0.004], [x, center, frontZ], true);
+    };
+    if (kind === 'generic') {
+      feature('inset', [areaWidth * 0.66, Math.min(0.026, faceHeight * 0.17), 0.004], [areaCenter, center, frontZ], true);
+      return;
+    }
     if (kind === 'network') {
-      const portsPerBank = reserveNameplate ? 5 : 6;
-      const step = reserveNameplate ? 0.075 : 0.087;
+      const bankWidth = areaWidth * 0.42;
+      const slotWidth = bankWidth / 4;
       for (const bank of [-1, 1]) {
-        for (let port = 0; port < portsPerBank; port += 1) {
-          const x = areaCenter + bank * (reserveNameplate ? 0.22 : 0.316) + (port - (portsPerBank - 1) / 2) * step;
+        const bankX = areaCenter + bank * areaWidth * 0.26;
+        base('inset', bankWidth, bankX);
+        if (!includeFine) continue;
+        for (const offset of [-1.5, -0.5, 0.5, 1.5]) {
           for (const row of [-1, 1]) {
-            const y = center + row * Math.min(0.022, faceHeight * 0.19);
-            feature('rail', [step * 0.82, 0.027, 0.004], [x, y, frontZ]);
-            feature('socket', [step * 0.60, 0.017, 0.004], [x, y, sign * (DETAIL_Z + 0.003)]);
+            const x = bankX + offset * slotWidth;
+            const y = center + row * areaHeight * 0.235;
+            feature('rail', [slotWidth * 0.78, areaHeight * 0.32, 0.005], [x, y, frontZ * 1.004]);
+            feature('socket', [slotWidth * 0.56, areaHeight * 0.20, 0.005], [x, y, frontZ * 1.008]);
           }
         }
-      }
-      for (const offset of [-0.012, 0.012]) {
-        feature('inset', [0.014, 0.006, 0.005], [0.737, center + offset, frontZ]);
       }
       return;
     }
     if (kind === 'power') {
-      const outlets = reserveNameplate ? 5 : 6;
-      const pitch = reserveNameplate ? 0.165 : 0.172;
-      for (let outlet = 0; outlet < outlets; outlet += 1) {
-        const x = areaCenter + (outlet - (outlets - 1) / 2) * pitch;
-        feature('rail', [0.105, 0.066, 0.005], [x, center, frontZ]);
-        feature('socket', [0.088, 0.048, 0.005], [x, center, sign * (DETAIL_Z + 0.003)]);
-        for (const offset of [-0.022, 0.022]) {
-          feature('screw', [0.011, 0.014, 0.003], [x + offset, center, sign * (DETAIL_Z + 0.005)]);
+      base('inset', areaWidth * 0.35, areaCenter - areaWidth * 0.30);
+      base('trim', areaWidth * 0.50, areaCenter + areaWidth * 0.19);
+      if (includeFine) {
+        for (const offset of [-0.28, 0, 0.28]) {
+          feature('inset', [areaWidth * 0.44, areaHeight * 0.11, 0.004],
+            [areaCenter + areaWidth * 0.19, center + areaHeight * offset, frontZ * 1.006]);
         }
       }
-      feature(accent(kind), [0.048, 0.043, 0.008], [0.705, center, frontZ]);
       return;
     }
 
-    const columns = kind === 'storage' ? (reserveNameplate ? 4 : 5) : (reserveNameplate ? 5 : 7);
-    const rows = Math.min(3, Math.max(1, Math.ceil(device.u_height / 1.7)));
-    const pitch = areaWidth / columns;
-    const rowHeight = Math.min(0.080, faceHeight * 0.86 / rows);
+    const storage = kind === 'storage';
+    const columns = storage ? 5 : 3;
+    const rows = device.u_height >= 2 ? 2 : 1;
+    const driveWidth = areaWidth * (storage ? 1 : 0.70);
+    const driveCenter = areaCenter - (areaWidth - driveWidth) / 2;
+    base('inset', driveWidth, driveCenter);
+    if (!storage) base('trim', areaWidth * 0.23, areaCenter + areaWidth * 0.36);
+    if (!includeFine) return;
+    const pitch = driveWidth / columns;
+    const rowHeight = areaHeight / rows;
     for (let row = 0; row < rows; row += 1) {
       const y = center + (row - (rows - 1) / 2) * rowHeight;
       for (let bay = 0; bay < columns; bay += 1) {
-        const x = (reserveNameplate ? areaCenter : -0.07) + (bay - (columns - 1) / 2) * pitch;
-        feature('inset', [pitch - 0.013, rowHeight * 0.80, 0.006], [x, y, frontZ]);
-        feature('trim', [pitch - 0.031, 0.013, 0.005], [x, y - rowHeight * 0.13, sign * (DETAIL_Z + 0.004)]);
+        const x = driveCenter + (bay - (columns - 1) / 2) * pitch;
+        feature('trim', [pitch * 0.88, rowHeight * 0.78, 0.005], [x, y, frontZ * 1.004]);
+        feature('socket', [pitch * 0.49, rowHeight * 0.19, 0.004], [x, y, frontZ * 1.008]);
       }
     }
-    for (const offset of [-0.024, 0, 0.024]) {
-      feature('inset', [0.014, 0.006, 0.004], [0.715, center + offset, frontZ]);
+    if (!storage) {
+      for (const offset of [-0.30, -0.10, 0.10, 0.30]) {
+        feature('inset', [areaWidth * 0.18, areaHeight * 0.075, 0.004],
+          [areaCenter + areaWidth * 0.36, center + areaHeight * offset, frontZ * 1.006]);
+      }
     }
   }
 
   function backDetail(device, kind, sign, center, faceHeight) {
     const feature = (surface, size, center, medium) => detail(surface, size, center, medium, device);
+    if (kind === 'generic') {
+      feature('inset', [reserveNameplate ? 0.54 : 0.74, Math.min(0.026, faceHeight * 0.17), 0.004],
+        [reserveNameplate ? 0.23 : 0, center, sign * DETAIL_Z], true);
+      return;
+    }
     if (includeFine) {
       const shift = reserveNameplate ? 0.24 : 0;
       for (const centerX of (reserveNameplate ? [shift - 0.16, shift + 0.10] : [-0.57, -0.30])) {
@@ -695,6 +786,7 @@ function buildSemanticOverlay(scene, entries, unit) {
 export function buildRackOverviewLayer(scene, { entries, unit, deviceKind, palette = createRackPalette() }) {
   const tint = roomSearchTint();
   const batches = instancedBoxes(scene, palette, tint);
+  const doorsByRack = new Map();
   const world = new THREE.Matrix4();
   const axis = new THREE.Vector3(0, 1, 0);
   const position = new THREE.Vector3();
@@ -708,21 +800,41 @@ export function buildRackOverviewLayer(scene, { entries, unit, deviceKind, palet
     world.compose(position, rotation, scale);
     const ownerFor = roomSearchOwners(rack);
     describeRack({ rack, devices, unit, deviceKind }, {
-      solid(surface, size, center, _edge, device) {
-        batches.add(surface, size, center, world, ownerFor(device));
+      solid(surface, size, center, _edge, device, kind) {
+        batches.add(surface === 'panel' ? `panel/${kind}` : surface, size, center, world, ownerFor(device));
       },
       detail(surface, size, center, medium, device) {
         if (medium) batches.add(surface, Array.isArray(medium) ? medium : size, center, world, ownerFor(device));
       },
     }, false);
+    if (entry.enclosure) {
+      const enclosure = new THREE.Group();
+      enclosure.position.copy(position);
+      enclosure.quaternion.copy(rotation);
+      enclosure.scale.copy(scale);
+      const doors = addCabinetEnclosure(enclosure, { rack, unit, palette, tint, owner: ownerFor() });
+      doorsByRack.set(String(rack.id), doors);
+      scene.add(enclosure);
+    }
   }
   const meshes = batches.finish();
   const lamps = buildOperatingLamps(scene, entries, unit);
   const semantic = buildSemanticOverlay(scene, entries, unit);
+  let openIds = new Set();
+  let doorMode = true;
+  function updateDoors() {
+    for (const [id, doors] of doorsByRack) doors.visible = doorMode && !openIds.has(id);
+  }
   return {
     meshes,
     lamps,
+    setOpenRacks(ids) {
+      openIds = ids;
+      updateDoors();
+    },
     setMode(mode) {
+      doorMode = mode === 'appearance';
+      updateDoors();
       lamps?.setVisible(mode === 'appearance');
       semantic.setMode(mode);
     },
@@ -763,8 +875,8 @@ export function buildRackModel(scene, options) {
     const id = String(device.id);
     if (!frontPanels.has(id)) {
       // 同一设备正背面的高亮与状态着色由同一材质控制。
-      const panel = material(...SURFACES.panel);
-      panel.emissive.setHex(TYPE_ACCENTS[kind] ?? TYPE_ACCENTS.server);
+      const panel = material(panelColor(kind), SURFACES.panel[1], SURFACES.panel[2]);
+      panel.emissive.setHex(TYPE_ACCENTS[kind] ?? TYPE_ACCENTS.generic);
       panel.emissiveIntensity = 0;
       frontPanels.set(id, panel);
     }
@@ -793,6 +905,8 @@ export function buildRackModel(scene, options) {
   });
   details.finish();
   addScaleStrips(scene, options.rack.height, options.unit, materialFor.scaleMaterial(options.rack.height));
+  const doors = addCabinetEnclosure(scene, { rack: options.rack, unit: options.unit, palette: materialFor });
+  doors.visible = false;
 
   // 为每台设备添加正面（及全深背面）铭牌贴图。
   const plateGeomCache = new Map();
@@ -829,8 +943,8 @@ export function buildRackModel(scene, options) {
     const panel = entry.panel;
     if (!panel) return;
     if (currentMode === 'appearance') {
-      panel.color.setHex(SURFACES.panel[0]);
-      panel.emissive.setHex(TYPE_ACCENTS[entry.kind] ?? TYPE_ACCENTS.server);
+      panel.color.setHex(panelColor(entry.kind));
+      panel.emissive.setHex(TYPE_ACCENTS[entry.kind] ?? TYPE_ACCENTS.generic);
       panel.emissiveIntensity = isHovered ? 0.24 : 0;
     } else if (currentMode === 'status') {
       const hex = STATUS_COLORS[normalizeStatus(entry.device)];
@@ -870,6 +984,7 @@ export function buildRackModel(scene, options) {
     highlight,
     lamps,
     setMode,
+    setDoorVisible(visible) { doors.visible = visible; },
     disposeExtra() {
       materialFor.dispose();
       for (const tex of labelTextures) tex.dispose();

@@ -2,14 +2,14 @@
 
 export const RACK_UNIT = 0.12;
 export const RACK_WIDTH = 1.98;
-export const RACK_DEPTH = 1.27;
+export const RACK_DEPTH = 2.35;
 export const RACK_BOTTOM = -0.1605;
 export const RACK_TOP_MARGIN = 0.1065;
-export const PANEL_Z = 0.573;
-export const DETAIL_Z = 0.596;
 export const DEVICE_HALF_WIDTH = 0.869;
 export const MOUNT_HALF_Z = 0.025;
-export const MOUNT_FULL_Z = 0.593;
+export const MOUNT_FULL_Z = RACK_DEPTH / 2 - 0.10;
+export const PANEL_Z = MOUNT_FULL_Z - 0.020;
+export const DETAIL_Z = MOUNT_FULL_Z + 0.003;
 export const OPERATING_LAMP_X = 0.778;
 export const OPERATING_LAMP_Z = DETAIL_Z + 0.009;
 
@@ -25,9 +25,21 @@ export const SURFACES = {
   screw: [0x79848c, 0.49, 0.46],
   scale: [0x9ba9ae, 0.62, 0.16],
   foot: [0x252a2c, 0.86, 0.08],
+  sidePanel: [0x27313a, 0.54, 0.35],
+  doorFrame: [0x202932, 0.53, 0.39],
+  handle: [0x485560, 0.43, 0.49],
+};
+
+export const PANEL_COLORS = {
+  generic: 0x424c55,
+  server: 0x596570,
+  network: 0x35434b,
+  power: 0x343b44,
+  storage: 0x4c545f,
 };
 
 export const TYPE_ACCENTS = {
+  generic: 0x8698a2,
   server: 0x7295b6,
   network: 0x547780,
   power: 0xd1a157,
@@ -72,6 +84,8 @@ export function deviceMetrics(device, unit = RACK_UNIT) {
   const faceHeight = device.u_height * unit - 0.006;
   const minZ = full || !front ? -MOUNT_FULL_Z : MOUNT_HALF_Z;
   const maxZ = full || front ? MOUNT_FULL_Z : -MOUNT_HALF_Z;
+  const chassisMinZ = minZ + (full || front ? 0.035 : 0);
+  const chassisMaxZ = maxZ - (full || !front ? 0.035 : 0);
   return {
     sign,
     full,
@@ -82,8 +96,8 @@ export function deviceMetrics(device, unit = RACK_UNIT) {
     faceHeight,
     minZ,
     maxZ,
-    chassisDepth: full ? 1.11 : 0.53,
-    chassisCenterZ: full ? 0 : 0.29 * sign,
+    chassisDepth: chassisMaxZ - chassisMinZ,
+    chassisCenterZ: (chassisMinZ + chassisMaxZ) / 2,
   };
 }
 

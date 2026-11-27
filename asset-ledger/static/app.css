@@ -124,14 +124,6 @@ hr { border: 0; border-top: 1px solid var(--line); }
 .page { min-width: 0; padding: 1.2rem var(--page-gutter) 3rem; display: grid; gap: .85rem; }
 .topbar:has(.breadcrumb:not([hidden])) + .page { padding-top: .45rem; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .9rem; }
-.overview-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .85rem .45rem; }
-.overview-controls > .page-head { grid-area: 1 / 1; }
-.overview-controls .panel { grid-column: 1 / -1; }
-.overview-disclosure::after { content: ''; width: .35rem; height: .35rem; margin: -.12rem .12rem 0 .18rem; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); }
-.overview-disclosure[aria-expanded=true]::after { transform: rotate(225deg); margin-top: .18rem; }
-.overview-options { display: contents; }
-.overview-options > .head-actions { grid-area: 1 / 3; justify-content: end; }
-.overview-controls > .primary { grid-area: 1 / 2; }
 .title-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .65rem; margin-top: .35rem; color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
 .head-actions, .row-actions { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
 .version-button.button { color: var(--muted); background: transparent; border-color: var(--line); font: 600 .73rem/1.3 ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
@@ -307,10 +299,6 @@ dialog::backdrop { background: rgba(17, 28, 40, .36); }
   .logout-icon { display: block; }
   .scope { min-height: 2rem; gap: .22rem; padding-inline: .36rem; }
   .scope .account-role { padding-left: .26rem; }
-  .overview-controls { gap: .55rem .4rem; }
-  .overview-disclosure { grid-area: 1 / 3; min-height: 2.5rem; }
-  .overview-options { display: grid; gap: .55rem; grid-column: 1 / -1; }
-  .overview-options > .head-actions { grid-area: auto; justify-content: start; }
   .filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem .65rem; }
   .filters label { display: grid; gap: .18rem; font-size: .75rem; }
   .filters .search-field { grid-column: 1 / -1; }

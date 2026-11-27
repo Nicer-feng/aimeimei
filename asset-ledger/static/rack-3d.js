@@ -1,6 +1,6 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
-import { DETAIL_Z, DEVICE_HALF_WIDTH, MOUNT_FULL_Z, RACK_UNIT, deviceMetrics } from './rack-geometry.js';
+import { DETAIL_Z, DEVICE_HALF_WIDTH, MOUNT_FULL_Z, RACK_DEPTH, RACK_UNIT, deviceMetrics } from './rack-geometry.js';
 import { animateOperatingLamps, buildRackModel, projectCabinetRect, projectScenePoint } from './rack-3d-model.js';
 import { isSelectableRackSlot, operatingStatus, operatingStatusLabel, rackFaceSlots, rackSlotSelection } from './rack.js?v=operating-status';
 import { createContactShadowTexture, createRackEnvironment } from './rack-textures.js';
@@ -137,6 +137,7 @@ export function mountRackScene(host, {
 }) {
   const initialView = initialCamera ?? { direction: CAMERA_VIEWS[0].direction, zoom: 1, activeView: 0, viewMode: 'appearance' };
   let viewMode = RACK_MODES.some((m) => m.id === initialView.viewMode) ? initialView.viewMode : 'appearance';
+  let doorVisible = Boolean(initialView.doorVisible && viewMode === 'appearance' && initialDeviceId == null);
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   const panel = document.createElement('div');
@@ -174,7 +175,7 @@ export function mountRackScene(host, {
   const rotation = document.createElement('div');
   rotation.className = 'rack-camera-controls';
   rotation.setAttribute('role', 'group');
-  rotation.setAttribute('aria-label', '相机方向');
+  rotation.setAttribute('aria-label', '观察机柜');
   const viewButtons = CAMERA_VIEWS.map(({ label, direction }, index) => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -192,6 +193,13 @@ export function mountRackScene(host, {
     rotation.append(button);
     return button;
   });
+  const doorButton = document.createElement('button');
+  doorButton.type = 'button';
+  doorButton.textContent = '柜门';
+  doorButton.title = '显示柜门';
+  doorButton.setAttribute('aria-label', '柜门');
+  doorButton.addEventListener('click', () => setDoorVisible(!doorVisible));
+  rotation.append(doorButton);
 
   const modeGroup = document.createElement('div');
   modeGroup.className = 'rack-camera-controls';
@@ -335,6 +343,7 @@ export function mountRackScene(host, {
       return;
     }
     if (event.pointerType === 'touch') return;
+    if (doorVisible) return;
     const hit = pick(event);
     if (hit) showHover(hit, event);
     else if (clearHover()) invalidate();
@@ -347,6 +356,10 @@ export function mountRackScene(host, {
     if (!isClick) return;
     const hit = pick(event);
     if (clearHover()) invalidate();
+    if (doorVisible) {
+      if (hit) setDoorVisible(false);
+      if (!hit?.device) return;
+    }
     if (hit?.device) onDevice(hit.device, makeAnchor(hit.device, canvas, { x: event.clientX, y: event.clientY }));
     else if (onEmpty && isSelectableRackSlot(hit?.slot)) onEmpty(rackSlotSelection(hit.slot));
     else if (hit?.slot?.kind === 'unknown' && event.pointerType === 'touch') showHover(hit, event);
@@ -383,22 +396,34 @@ export function mountRackScene(host, {
 
   function setSelectedDevice(deviceId) {
     if (disposed) return;
+    if (deviceId != null && doorVisible) setDoorVisible(false);
     selectedDeviceId = deviceId;
     if (deviceId == null) delete canvas.dataset.selectedDeviceId;
     else canvas.dataset.selectedDeviceId = deviceId;
     updateDeviceSelection();
   }
 
+  function setDoorVisible(visible) {
+    doorVisible = visible;
+    doorButton.setAttribute('aria-pressed', String(visible));
+    model.setDoorVisible(visible);
+    if (visible) clearHover();
+    invalidate();
+  }
+
   function clampTarget() {
     requestedTarget.copy(controls.target);
     controls.target.x = THREE.MathUtils.clamp(controls.target.x, -1.0, 1.0);
-    controls.target.z = THREE.MathUtils.clamp(controls.target.z, -0.8, 0.8);
+    const depthLimit = RACK_DEPTH / 2 + 0.15;
+    controls.target.z = THREE.MathUtils.clamp(controls.target.z, -depthLimit, depthLimit);
     controls.target.y = THREE.MathUtils.clamp(controls.target.y, bounds.min.y, bounds.max.y);
     if (!requestedTarget.equals(controls.target)) camera.position.sub(requestedTarget).add(controls.target);
   }
 
   function applyViewMode(mode) {
     viewMode = mode;
+    doorButton.disabled = mode !== 'appearance';
+    setDoorVisible(mode === 'appearance' && doorVisible);
     for (const [id, button] of modeButtons) {
       button.setAttribute('aria-pressed', String(id === mode));
     }
@@ -464,6 +489,7 @@ export function mountRackScene(host, {
       target: controls.target.toArray(),
       activeView,
       viewMode,
+      doorVisible,
     };
   }
 
@@ -619,6 +645,7 @@ export function mountRackScene(host, {
     if (disposed) return false;
     const device = devices.find(({ id: itemId }) => String(itemId) === String(id));
     if (!device) return false;
+    if (doorVisible) setDoorVisible(false);
     if (!sized) {
       pendingDeviceId = device.id;
       return true;

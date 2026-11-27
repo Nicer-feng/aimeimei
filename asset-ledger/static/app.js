@@ -350,34 +350,34 @@ function filterControls(filters, options = {}) {
   return group;
 }
 
-const compactRoomControls = window.matchMedia('(max-width: 670px)');
-
-function syncRoomControls(toggle, options) {
-  const compact = compactRoomControls.matches;
-  const restoreFocus = !compact && document.activeElement === toggle;
-  options.hidden = compact && !state.roomControlsExpanded;
-  toggle.setAttribute('aria-expanded', String(!options.hidden));
-  if (restoreFocus) options.querySelector('select')?.focus({ preventScroll: true });
-  toggle.hidden = !compact;
+function roomDisclosure(label, id, options, initiallyOpen = false, onToggle) {
+  function setOpen(open) {
+    options.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    onToggle?.(open);
+  }
+  const toggle = button(label, () => setOpen(options.hidden), 'small overview-disclosure', {
+    id, 'aria-controls': options.id,
+  });
+  options.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || options.hidden) return;
+    event.preventDefault();
+    setOpen(false);
+    toggle.focus({ preventScroll: true });
+  });
+  setOpen(initiallyOpen);
+  return toggle;
 }
 
-compactRoomControls.addEventListener('change', () => {
-  const toggle = byId('room-control-toggle');
-  const options = byId('room-control-options');
-  if (!toggle || !options) return;
-  if (compactRoomControls.matches && options.contains(document.activeElement)) state.roomControlsExpanded = true;
-  syncRoomControls(toggle, options);
-});
-
 function roomControls(filterPanel, availability, actions) {
-  const options = element('div', { id: 'room-control-options', class: 'overview-options' },
-    actions.length > 0 && element('div', { class: 'head-actions' }, actions), filterPanel);
-  const toggle = button(userCanWrite() ? '筛选与管理' : '筛选与显示', () => {
-    state.roomControlsExpanded = !state.roomControlsExpanded;
-    syncRoomControls(toggle, options);
-  }, 'small overview-disclosure', { id: 'room-control-toggle', 'aria-controls': options.id });
-  syncRoomControls(toggle, options);
-  return element('div', { class: 'overview-controls' }, pageHeading(titles.rooms), availability, toggle, options);
+  const options = element('div', { id: 'room-control-options', class: 'overview-options' }, filterPanel);
+  const management = element('div', { id: 'room-manage-options', class: 'overview-manage-options head-actions' }, actions);
+  const switchRoom = roomDisclosure('切换机房', 'room-control-toggle', options, state.roomControlsExpanded,
+    (open) => { state.roomControlsExpanded = open; });
+  const manageRoom = actions.length ? roomDisclosure(userCanWrite() ? '管理' : '显示选项', 'room-manage-toggle', management) : null;
+  const toolbar = element('div', { class: 'overview-controls' }, switchRoom, availability, manageRoom);
+  const disclosures = element('div', { class: 'room-overview-disclosures' }, options, actions.length ? management : null);
+  return { toolbar, disclosures };
 }
 
 function selectOverviewRoom(filters) {
@@ -422,36 +422,40 @@ function renderRoomPage(requestedId, filterChanged) {
       renderPage({ roomFilterChanged: true });
     },
   }));
-  const availability = room && button('空间核查', () => showAvailability(room), 'primary');
+  const availability = room && button('空间核查', () => showAvailability(room), 'small');
   const actions = room ? [deviceClickModeControl()] : [];
+  const racks = room ? state.catalog.racks.filter((rack) => rack.room_id === room.id) : [];
+  const layout = room && (state.catalog.room_layouts ?? []).find((item) => item.room_id === room.id);
   if (userCanWrite()) {
     actions.push(button('新增机房', () => openRoomEditor(state.catalog, null, roomUI)));
     if (room) {
-      actions.push(button('编辑机房', () => openRoomEditor(state.catalog, room, roomUI)));
-      actions.push(button('新增机柜', () => openRackEditor(state.catalog, room, null, roomUI)));
+      actions.push(
+        button('编辑机房', () => openRoomEditor(state.catalog, room, roomUI)),
+        button('新增机柜', () => openRackEditor(state.catalog, room, null, roomUI)),
+        button('编辑布置', () => openRoomLayoutEditor(room, layout, racks, roomUI)),
+      );
     }
   }
-  page.append(roomControls(filterPanel, availability, actions));
+  const { toolbar, disclosures } = roomControls(filterPanel, availability, actions);
   if (!room) {
-    page.append(empty('当前范围内没有可查看的机房。'));
+    page.append(pageHeading(titles.rooms), toolbar, disclosures, empty('当前范围内没有可查看的机房。'));
     window.scrollTo(0, 0);
     return;
   }
-  const racks = state.catalog.racks.filter((rack) => rack.room_id === room.id);
+  const { site } = roomContext(room.id);
   const devices = state.catalog.devices.filter((device) => device.room_id === room.id);
-  const layout = (state.catalog.room_layouts ?? []).find((item) => item.room_id === room.id);
   const previous = state.roomViews.get(room.id);
   const host = element('section', { id: 'room-overview', 'aria-label': `${room.name}机柜总览` });
   page.append(host);
   const controller = renderRoomOverview(host, {
-    room, layout, racks, devices, systems: state.catalog.systems, deviceKind, units, view: previous?.view,
+    room, layout, racks, devices, systems: state.catalog.systems, deviceKind, units,
+    siteName: site?.name, toolbar, disclosures, view: previous?.view,
     onDevice: openDevicePresentation,
     onSceneInteraction: dismissDeviceQuick,
     onRack: (rack) => {
       if (state.roomOverview) state.roomOverview.leavingScroll = window.scrollY;
       location.hash = `rack/${rack.id}`;
     },
-    onEdit: userCanWrite() ? () => openRoomLayoutEditor(room, layout, racks, roomUI) : undefined,
   });
   const overview = { roomId: room.id, filters: { ...filters }, controller };
   state.roomOverview = overview;

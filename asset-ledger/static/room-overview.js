@@ -71,7 +71,7 @@ function cabinetList(racks, onRack) {
   return list;
 }
 
-function roomStatistics(racks, devices) {
+function roomStatistics(racks, devices, slotCount) {
   const mounted = new Map(racks.map((rack) => [String(rack.id), []]));
   const statusCounts = { running: 0, unknown: 0, unpowered: 0, disabled: 0 };
   let mountedCount = 0;
@@ -89,27 +89,41 @@ function roomStatistics(racks, devices) {
     usedU += rackOccupancy(rack, mounted.get(String(rack.id))).usedU;
     totalU += rack.height;
   }
-  const metrics = element('dl', 'room-statistics');
-  metrics.setAttribute('aria-label', '机房统计');
-  function metric(label, value, detail) {
-    const pill = element('div', 'room-statistic');
+  const statistics = element('div', 'room-statistics');
+  const totals = element('dl', 'room-statistic-list');
+  totals.setAttribute('aria-label', '机房统计');
+  function metric(list, label, value) {
+    const item = element('div', 'room-statistic');
     const reading = element('dd', '', String(value));
-    if (detail) reading.append(element('small', '', detail));
-    pill.append(element('dt', '', label), reading);
-    metrics.append(pill);
-    return pill;
+    item.append(element('dt', '', label), reading);
+    list.append(item);
+    return item;
   }
-  metric('机柜', racks.length);
-  const unmounted = devices.length - mountedCount;
-  metric('在册设备', devices.length, `上架 ${mountedCount} · 未上架 ${unmounted}`);
-  for (const [status, count] of Object.entries(statusCounts)) {
-    const pill = metric(OPERATING_STATUS_LABELS[status], count);
-    pill.dataset.status = status;
-  }
-  const occupancy = metric('U 位利用率', totalU ? `${Math.round(100 * usedU / totalU)}%` : '—',
-    totalU ? `${usedU} / ${totalU}U` : '');
+  metric(totals, '机柜', racks.length);
+  metric(totals, '在册设备', devices.length);
+  const occupancy = metric(totals, 'U 位利用率', totalU ? `${Math.round(100 * usedU / totalU)}%` : '—');
   occupancy.title = '已占物理 U 位 / 机房总 U 位，正背面共用的 U 位只计一次。';
-  return metrics;
+  const details = element('details', 'room-statistic-details');
+  const summary = element('summary', '', '状态明细');
+  const counts = element('dl', 'room-statistic-list');
+  counts.setAttribute('aria-label', '设备状态与上架统计');
+  for (const [status, count] of Object.entries(statusCounts)) {
+    const item = metric(counts, OPERATING_STATUS_LABELS[status], count);
+    item.dataset.status = status;
+  }
+  const unmounted = devices.length - mountedCount;
+  if (slotCount) metric(counts, '柜位', slotCount);
+  metric(counts, '已上架', mountedCount);
+  metric(counts, '未上架', unmounted);
+  if (totalU) metric(counts, '已占 U 位', `${usedU} / ${totalU}U`);
+  const attention = statusCounts.unknown + statusCounts.unpowered;
+  if (attention) {
+    summary.append(element('span', 'room-statistic-alert', String(attention)));
+    summary.setAttribute('aria-label', `状态明细，${attention} 台待核实或未通电`);
+  }
+  details.append(summary, counts);
+  statistics.append(totals, details);
+  return statistics;
 }
 
 function floorPlan(room, layout, racksById, onRack) {
@@ -151,7 +165,8 @@ function floorPlan(room, layout, racksById, onRack) {
 }
 
 export function renderRoomOverview(host, {
-  room, layout, racks, devices = [], systems = [], deviceKind, units, onRack, onDevice, onSceneInteraction, onEdit, view,
+  room, layout, racks, devices = [], systems = [], deviceKind, units, siteName, toolbar, disclosures,
+  onRack, onDevice, onSceneInteraction, view,
 }) {
   const racksById = new Map(racks.map((rack) => [rack.id, rack]));
   const positions = layout?.positions.filter((position) => racksById.has(position.rack_id)) ?? [];
@@ -163,14 +178,19 @@ export function renderRoomOverview(host, {
   const overview = element('section', 'room-overview');
   const header = element('header', 'room-overview-header');
   const info = element('div', 'room-overview-summary');
-  const title = element('h2', '', room.name);
+  const context = element('div', 'room-overview-site');
+  if (siteName && siteName !== room.name) context.append(element('span', '', siteName));
+  if (layout?.illustrative) context.append(element('span', 'room-overview-illustrative', '示意布局'));
+  if (context.childElementCount) info.append(context);
+  const title = element('h1', '', room.name);
   title.id = 'room-overview-title';
   overview.setAttribute('aria-labelledby', title.id);
-  const titleLine = element('div', 'room-overview-title-line');
-  titleLine.append(title);
-  if (layout?.illustrative) titleLine.append(element('span', 'room-overview-illustrative', '示意布局'));
-  if (positions.length) titleLine.append(element('span', 'room-overview-count', `${layout.rows * layout.columns} 个柜位`));
-  info.append(titleLine, roomStatistics(racks, roomDevices));
+  info.append(title);
+  const intro = element('div', 'room-overview-intro');
+  intro.append(info);
+  if (toolbar) intro.append(toolbar);
+  header.append(intro);
+  if (disclosures) header.append(disclosures);
 
   const actions = element('div', 'room-overview-actions');
   const search = element('form', 'room-overview-search');
@@ -179,9 +199,9 @@ export function renderRoomOverview(host, {
   searchInput.type = 'search';
   searchInput.autocomplete = 'off';
   searchInput.maxLength = 160;
-  searchInput.placeholder = '柜号、设备、品牌型号、系统、IP 或端口';
+  searchInput.placeholder = '柜号、设备、型号、系统、IP 或端口';
   searchInput.setAttribute('aria-label', '查找机柜、设备、品牌型号、业务系统、IP、域名或端口');
-  const searchButton = element('button', 'button small', '搜索');
+  const searchButton = element('button', 'button primary', '搜索');
   searchButton.type = 'submit';
   search.append(searchInput, searchButton);
   const clear = action('清除搜索', 'button small quiet', () => {
@@ -191,7 +211,8 @@ export function renderRoomOverview(host, {
   clear.hidden = true;
   const reset = action('回到全览', 'button small quiet', clearLocation);
   reset.hidden = true;
-  if (racks.length || roomDevices.length) actions.append(search, clear, reset);
+  const lookup = element('div', 'room-overview-find');
+  if (racks.length || roomDevices.length) lookup.append(search, clear, reset);
   const controls = element('div', 'room-overview-switch');
   controls.setAttribute('role', 'group');
   controls.setAttribute('aria-label', '机房布置视图');
@@ -199,8 +220,13 @@ export function renderRoomOverview(host, {
   const planButton = action('平面布局', '', () => showPlan());
   controls.append(threeButton, planButton);
   if (positions.length) actions.append(controls);
-  if (onEdit) actions.append(action('编辑布置', 'button', onEdit));
-  header.append(info, actions);
+  const summary = element('div', 'room-overview-viewbar');
+  summary.append(roomStatistics(racks, roomDevices, positions.length ? layout.rows * layout.columns : 0));
+  if (positions.length) summary.append(actions);
+  const querybar = element('div', 'room-overview-querybar');
+  if (lookup.children.length) querybar.append(lookup);
+  querybar.append(summary);
+  header.append(querybar);
   overview.append(header);
   const searchPanel = element('div', 'room-overview-search-panel');
   const searchStatus = element('p', 'room-overview-search-status');
@@ -525,6 +551,7 @@ export function renderRoomOverview(host, {
       if (disposed || ticket !== generation) return;
       const mounted = mountRoomScene(spatial, {
         layout: { ...layout, positions }, racks, devices: roomDevices, deviceKind, units, initialCamera: camera, onRack,
+        roomName: room.name, siteName,
         initialLocatedRackId: locatedRack?.id, initialLocatedDeviceId: locatedDevice?.id,
         initialSearchFilter: searchFilter, onDevice, onSceneInteraction,
         onFallback: () => fallback(ticket),

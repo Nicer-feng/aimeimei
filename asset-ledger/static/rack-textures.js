@@ -28,6 +28,26 @@ function colorTexture(canvas) {
   return texture;
 }
 
+export function createCabinetMeshTexture() {
+  const surface = canvasSurface(128, 384);
+  if (!surface) return null;
+  const { canvas, ctx } = surface;
+  ctx.fillStyle = '#d1d8df';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // 网孔内用低反射的暗色，设备开启检视时再揭开柜门，避免远景漏出亮白的背景噪点。
+  ctx.fillStyle = '#758390';
+  for (let y = 4; y < canvas.height; y += 7) {
+    for (let x = y % 2 ? 4 : 8; x < canvas.width; x += 8) {
+      ctx.beginPath();
+      ctx.arc(x, y, 2.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  const texture = colorTexture(canvas);
+  texture.anisotropy = 4;
+  return texture;
+}
+
 export function createRackEnvironment(renderer) {
   const surface = canvasSurface(256, 128);
   if (!surface) return null;
@@ -174,7 +194,7 @@ export function createDeviceLabelTexture(device, kind) {
   if (!ctx) return null;
 
   const status = normalizeStatus(device);
-  const accent = TYPE_ACCENTS[kind] ?? TYPE_ACCENTS.server;
+  const accent = TYPE_ACCENTS[kind] ?? TYPE_ACCENTS.generic;
 
   ctx.fillStyle = 'rgba(18, 25, 31, 0.92)';
   ctx.fillRect(0, 0, width, height);
