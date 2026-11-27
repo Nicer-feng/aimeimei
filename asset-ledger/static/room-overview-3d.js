@@ -1275,7 +1275,8 @@ export function mountRoomScene(host, {
         if (selected) canvas.dataset.selectedDeviceId = id;
         else delete canvas.dataset.selectedDeviceId;
         model.highlightDevice(entry, selected ? device : undefined);
-        selectionLabel.set(selected ? `${entry.rack.name} · ${units(device)}` : undefined);
+        selectionLabel.set(selected ? `${entry.rack.name} · ${units(device)}` : undefined,
+          () => locateDevice(entry.rack.id, id));
         invalidate();
       },
     };

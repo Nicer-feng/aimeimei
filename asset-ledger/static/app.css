@@ -356,3 +356,27 @@ dialog::backdrop { background: rgba(17, 28, 40, .36); }
 @media (pointer: coarse) {
   .device-quick[data-immersive] { backdrop-filter: none; }
 }
+
+.device-locator { width: min(41rem, calc(100vw - 1.5rem)); }
+.locator-body { display: grid; gap: .6rem; padding: 1rem; }
+.locator-body input { width: 100%; }
+.locator-body p { margin: 0; }
+.locator-results {
+  display: grid;
+  list-style: none;
+  padding: 0 .3rem 0 0;
+  margin: 0;
+  max-height: min(52vh, 28rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.locator-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .22rem .5rem;
+  padding: .55rem .35rem;
+  border-bottom: 1px solid var(--line);
+}
+.locator-result:hover, .locator-result:focus-visible { background: var(--canvas); }
+.locator-result span, .locator-result small { width: 100%; }

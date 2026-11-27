@@ -3,6 +3,7 @@ import { renderRoomOverview } from './room-overview.js';
 import { buildDeviceSearch, deviceAddressLabel, downloadDeviceCsv, endpointLabel } from './asset-search.js';
 import { openAvailabilityPicker, openRackEditor, openRoomEditor, openRoomLayoutEditor } from './room-tools.js';
 import { createSlotPicker } from './slot-picker.js';
+import { openDeviceLocator, locationHash } from './device-locator.js';
 import { releases } from './releases.js';
 
 const byId = (id) => document.getElementById(id);
@@ -29,7 +30,8 @@ deviceQuickTarget.setAttribute('r', '4');
 deviceQuickGuide.append(deviceQuickPath, deviceQuickTarget);
 const preview = byId('pdf-preview');
 const versionDialog = element('dialog', { class: 'editor release-dialog', 'aria-labelledby': 'release-title' });
-document.body.append(versionDialog);
+const locator = element('dialog', { class: 'editor device-locator', 'aria-labelledby': 'locator-title' });
+document.body.append(versionDialog, locator);
 const deviceClickModeKey = 'sroom-device-click-mode';
 const deviceClickModes = [['quick', '就地快览'], ['detail', '直接开详情']];
 const blankFilters = () => ({ unit: '', site: '', room: '', rack: '' });
@@ -134,7 +136,7 @@ function showError(target, message = '') {
 function closeDialogs() {
   availabilityCleanup?.();
   availabilityCleanup = undefined;
-  for (const dialog of [versionDialog, preview, editor]) {
+  for (const dialog of [versionDialog, locator, preview, editor]) {
     if (dialog.open) dialog.close();
   }
   closeDevicePresentation();
@@ -273,7 +275,21 @@ function deviceLocation(device, linkRack = false) {
   if (!rack) return joinedPath(where, device.workstation || '非上架');
   const slot = `${rack.name} · ${faceLabel(device.face)} · ${rackSpan(device)}`;
   if (!linkRack) return joinedPath(where, slot);
-  return element('span', {}, where && `${where} / `, internalLink('rack', rack.id, slot));
+  return element('span', {}, where && `${where} / `, element('a', { href: locationHash(device.id) }, slot));
+}
+
+async function copyDeviceLocation(device) {
+  const url = new URL(locationHash(device.id), location.href).href;
+  try {
+    await navigator.clipboard.writeText(url);
+    notify('已复制设备定位链接');
+  } catch {
+    const input = element('input', { type: 'text', readonly: true, value: url, 'aria-label': '设备定位链接' });
+    locator.replaceChildren(dialogHeader('locator-title', '设备定位链接', null, locator),
+      element('div', { class: 'locator-body' }, input));
+    if (!locator.open) locator.showModal();
+    input.select();
+  }
 }
 
 function labelInput(label, input, extra = '') {
@@ -452,6 +468,9 @@ function renderRoomPage(requestedId, filterChanged, previousRoomId) {
     siteName: site?.name, toolbar, disclosures, view: previous?.view,
     switchingRoom: previousRoomId != null && previousRoomId !== room.id,
     onDevice: openDevicePresentation,
+    onGlobalSearch: (query) => openDeviceLocator(locator, state.catalog, query, {
+      element, dialogHeader, deviceLocation, deviceAddressLabel, endpointLabel,
+    }),
     onSceneInteraction: dismissDeviceQuick,
     onClearDeviceSelection: closeDevicePresentation,
     onRack: (rack) => {
@@ -467,7 +486,7 @@ function renderRoomPage(requestedId, filterChanged, previousRoomId) {
   });
 }
 
-function renderRackPage(requestedId, view, fromRoom3d) {
+function renderRackPage(requestedId, view, fromRoom3d, targetDevice) {
   const filters = state.rackFilters;
   const requested = lookup('racks', requestedId);
   if (requested) {
@@ -509,6 +528,7 @@ function renderRackPage(requestedId, view, fromRoom3d) {
     rack, devices, onDevice: openDevicePresentation, onSceneInteraction: dismissDeviceQuick,
     onClearDeviceSelection: closeDevicePresentation,
     onEmpty: userCanWrite() ? (slot) => openDeviceEditor(null, rack, slot) : undefined,
+    initialDeviceId: targetDevice?.id,
     view: view?.rackId === rack.id ? view : fromRoom3d ? { rackId: rack.id, mode: '3d' } : undefined,
   });
 }
@@ -1101,6 +1121,7 @@ function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview
   selectDevice(device, anchor);
   drawer.dataset.deviceId = device.id;
   const actions = [internalLink('device', device.id, '打开设备详情', { class: 'button primary' })];
+  if (!device.archived_at) actions.push(button('复制定位链接', () => copyDeviceLocation(device)));
   if (userCanWrite() && !device.archived_at) actions.push(button('编辑设备', () => openDeviceEditor(device)));
   byId('drawer-content').replaceChildren(
     dialogHeader('drawer-title', device.name, `${device.code} · ${deviceLocation(device)}`, drawer,
@@ -1120,6 +1141,7 @@ function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview
 
 function renderDevicePage(device) {
   const actions = userCanWrite() ? deviceMaintenanceActions(device) : [];
+  if (!device.archived_at) actions.push(button('复制定位链接', () => copyDeviceLocation(device)));
   page.append(
     pageHeading(device.name, `${device.code} · ${device.type}${device.archived_at ? ' · 已归档' : ''}`, actions),
     element('div', { class: 'detail-columns' },
@@ -1185,7 +1207,9 @@ function renderProjectPage(project) {
 }
 
 function readRoute() {
-  const [kind, id] = location.hash.slice(1).split('/');
+  const [path, query] = location.hash.slice(1).split('?');
+  const [kind, id] = path.split('/');
+  if (kind === 'locate') return { kind, id, section: 'rooms', port: new URLSearchParams(query).get('port') };
   if (Object.hasOwn(collectionRoutes, kind)) return { kind, id, section: collectionRoutes[kind] };
   if (kind === 'rack') return { kind, id, section: 'rooms' };
   if (Object.hasOwn(titles, kind)) return { kind, id, section: kind };
@@ -1214,6 +1238,18 @@ function renderPage({ preserveRackView = false, roomFilterChanged = false } = {}
   if (kind === 'rack') {
     const fromRoom3d = previousRoomId != null && state.roomViews.get(previousRoomId)?.view?.mode === '3d';
     renderRackPage(id, view, fromRoom3d);
+  }
+  if (kind === 'locate') {
+    const device = lookup('devices', id);
+    if (!device || device.archived_at) {
+      detailBreadcrumb('rooms', null, '设备定位');
+      page.append(pageHeading('设备定位'), empty('当前范围内没有可定位的设备。'));
+    } else if (!device.rack_id || !lookup('racks', device.rack_id)) {
+      detailBreadcrumb('devices', null, device.name);
+      renderDevicePage(device);
+    } else {
+      renderRackPage(device.rack_id, view, true, device);
+    }
   }
   if (kind === 'devices') renderDevicesPage();
   if (kind === 'systems') renderSystemsPage();

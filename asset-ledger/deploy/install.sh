@@ -15,7 +15,7 @@ service_user=asset-ledger
 for path in ledger/__main__.py ledger/schema.sql ledger/_vendor/olefile.py ledger/_vendor/olefile.LICENSE \
     static/index.html static/room-overview.js static/room-overview-3d.js static/room-overview.css \
     static/rack-geometry.js static/rack-textures.js static/rack-3d-model.js static/rack-3d.js \
-    static/pdf-preview.js static/pdf-preview.css deploy/asset-ledger.service \
+    static/device-locator.js static/pdf-preview.js static/pdf-preview.css deploy/asset-ledger.service \
     samples/site-a-quantity.pdf samples/site-a-design.pdf samples/site-a-contract.pdf \
     samples/site-a-acceptance.pdf samples/site-a-device.pdf samples/site-b-acceptance.pdf; do
     if [[ ! -f "$source_dir/$path" ]]; then

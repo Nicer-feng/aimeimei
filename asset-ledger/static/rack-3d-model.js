@@ -37,26 +37,67 @@ export function projectScenePoint(camera, canvas, point) {
 }
 
 export function createDeviceSelectionLabel(viewport) {
-  const label = document.createElement('span');
+  const label = document.createElement('button');
+  const indicator = document.createElement('span');
+  const caption = document.createElement('span');
+  label.type = 'button';
   label.className = 'device-3d-selection-label';
-  label.setAttribute('aria-hidden', 'true');
+  indicator.setAttribute('aria-hidden', 'true');
+  label.append(indicator, caption);
   label.hidden = true;
+  let locate;
+  label.addEventListener('click', (event) => {
+    event.stopPropagation();
+    locate?.();
+  });
+  for (const type of ['pointerdown', 'pointerup']) {
+    label.addEventListener(type, (event) => event.stopPropagation());
+  }
   viewport.append(label);
 
   return {
-    set(text) {
-      label.textContent = text ?? '';
+    set(text, onLocate) {
+      caption.textContent = text ?? '';
+      locate = onLocate;
       if (!text) label.hidden = true;
+      label.setAttribute('aria-label', `返回设备 · ${text ?? ''}`);
     },
     update(camera, canvas, center) {
-      if (!label.textContent) return;
+      if (!caption.textContent) return;
+      const rect = canvasRect(canvas);
+      if (!rect || !center) {
+        label.hidden = true;
+        return;
+      }
       const point = projectScenePoint(camera, canvas, center);
-      label.hidden = !point;
-      if (!point) return;
-      const rect = viewport.getBoundingClientRect();
+      const offscreen = !point && Boolean(locate);
+      label.hidden = !point && !offscreen;
+      label.toggleAttribute('data-offscreen', offscreen);
+      label.tabIndex = offscreen ? 0 : -1;
+      label.setAttribute('aria-hidden', String(!offscreen));
+      if (label.hidden) return;
+      const bounds = viewport.getBoundingClientRect();
       const margin = label.offsetWidth / 2 + 7;
-      const left = THREE.MathUtils.clamp(point.x - rect.left + 12, margin, Math.max(margin, rect.width - margin));
-      const top = THREE.MathUtils.clamp(point.y - rect.top + 12, 5, Math.max(5, rect.height - label.offsetHeight - 5));
+      const bottom = bounds.height - label.offsetHeight - (offscreen ? 56 : 5);
+      let x = point?.x - bounds.left + 12;
+      let y = point?.y - bounds.top + 12;
+      if (offscreen) {
+        const view = center.clone().applyMatrix4(camera.matrixWorldInverse);
+        const depth = Math.max(camera.near, Math.abs(view.z));
+        const ndcX = camera.projectionMatrix.elements[0] * view.x / depth;
+        const ndcY = camera.projectionMatrix.elements[5] * view.y / depth;
+        const dx = ndcX * rect.width / 2;
+        const dy = -ndcY * rect.height / 2;
+        const direction = Math.abs(dx) + Math.abs(dy) > 1 ? Math.atan2(dy, dx) : Math.PI;
+        indicator.style.transform = `rotate(${direction}rad)`;
+        const horizontal = Math.max(1, bounds.width / 2 - margin);
+        const vertical = Math.max(1, (bottom - 7) / 2);
+        const edge = Math.max(Math.abs(dx) / horizontal, Math.abs(dy) / vertical, 0.001);
+        x = bounds.width / 2 + (edge === 0.001 ? -horizontal : dx / edge);
+        y = (bottom + 7) / 2 + dy / edge;
+      }
+      const left = THREE.MathUtils.clamp(x, margin, Math.max(margin, bounds.width - margin));
+      const top = THREE.MathUtils.clamp(y, 5, Math.max(5, bottom));
       label.style.transform = `translate(${left}px, ${top}px) translateX(-50%)`;
     },
   };

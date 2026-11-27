@@ -228,6 +228,20 @@
   pointer-events: none;
 }
 
+.device-3d-selection-label > span:first-child { display: none; }
+.device-3d-selection-label[data-offscreen] {
+  z-index: 6;
+  min-height: 2.25rem;
+  padding-inline: .5rem;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.device-3d-selection-label[data-offscreen] > span:first-child {
+  display: inline-block;
+  margin-inline-end: .35rem;
+}
+.device-3d-selection-label[data-offscreen] > span:first-child::before { content: '➜'; }
+
 .rack-spatial-tooltip {
   position: absolute;
   z-index: 5;

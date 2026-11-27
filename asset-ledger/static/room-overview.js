@@ -166,7 +166,7 @@ function floorPlan(room, layout, racksById, onRack) {
 
 export function renderRoomOverview(host, {
   room, layout, racks, devices = [], systems = [], deviceKind, units, siteName, toolbar, disclosures,
-  onRack, onDevice, onSceneInteraction, onClearDeviceSelection, view, switchingRoom = false,
+  onRack, onDevice, onSceneInteraction, onClearDeviceSelection, onGlobalSearch, view, switchingRoom = false,
 }) {
   const racksById = new Map(racks.map((rack) => [rack.id, rack]));
   const positions = layout?.positions.filter((position) => racksById.has(position.rack_id)) ?? [];
@@ -213,6 +213,7 @@ export function renderRoomOverview(host, {
   reset.hidden = true;
   const lookup = element('div', 'room-overview-find');
   if (racks.length || roomDevices.length) lookup.append(search, clear, reset);
+  if (onGlobalSearch) lookup.append(action('跨机房搜索', 'button small', () => onGlobalSearch(searchInput.value)));
   const controls = element('div', 'room-overview-switch');
   controls.setAttribute('role', 'group');
   controls.setAttribute('aria-label', '机房布置视图');

@@ -639,7 +639,7 @@ export function mountRackScene(host, {
     }
     const selected = devices.find(({ id }) => id === selectedDeviceId);
     deviceOutline.set(selected);
-    deviceLabel.set(selected ? `${rack.name} · ${units(selected)}` : null);
+    deviceLabel.set(selected ? `${rack.name} · ${units(selected)}` : null, () => focusDevice(selected.id));
     model.highlight(activeDeviceId ?? hovered?.device?.id ?? null);
     invalidate();
   }
