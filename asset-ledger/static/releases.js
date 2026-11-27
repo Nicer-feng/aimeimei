@@ -1,5 +1,9 @@
 export const releases = [
   {
+    version: '1.5.1',
+    changes: ['3D 总览和单柜始终敞开，缩放、搜索和切换视角时都可直接查看设备和 U 位。'],
+  },
+  {
     version: '1.5.0',
     changes: [
       '首页突出当前机房、设备搜索和 3D 总览，管理操作集中到同一入口。',

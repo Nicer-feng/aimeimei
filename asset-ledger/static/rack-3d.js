@@ -137,7 +137,6 @@ export function mountRackScene(host, {
 }) {
   const initialView = initialCamera ?? { direction: CAMERA_VIEWS[0].direction, zoom: 1, activeView: 0, viewMode: 'appearance' };
   let viewMode = RACK_MODES.some((m) => m.id === initialView.viewMode) ? initialView.viewMode : 'appearance';
-  let doorVisible = Boolean(initialView.doorVisible && viewMode === 'appearance' && initialDeviceId == null);
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   const panel = document.createElement('div');
@@ -193,14 +192,6 @@ export function mountRackScene(host, {
     rotation.append(button);
     return button;
   });
-  const doorButton = document.createElement('button');
-  doorButton.type = 'button';
-  doorButton.textContent = '柜门';
-  doorButton.title = '显示柜门';
-  doorButton.setAttribute('aria-label', '柜门');
-  doorButton.addEventListener('click', () => setDoorVisible(!doorVisible));
-  rotation.append(doorButton);
-
   const modeGroup = document.createElement('div');
   modeGroup.className = 'rack-camera-controls';
   modeGroup.setAttribute('role', 'group');
@@ -343,7 +334,6 @@ export function mountRackScene(host, {
       return;
     }
     if (event.pointerType === 'touch') return;
-    if (doorVisible) return;
     const hit = pick(event);
     if (hit) showHover(hit, event);
     else if (clearHover()) invalidate();
@@ -356,10 +346,6 @@ export function mountRackScene(host, {
     if (!isClick) return;
     const hit = pick(event);
     if (clearHover()) invalidate();
-    if (doorVisible) {
-      if (hit) setDoorVisible(false);
-      if (!hit?.device) return;
-    }
     if (hit?.device) onDevice(hit.device, makeAnchor(hit.device, canvas, { x: event.clientX, y: event.clientY }));
     else if (onEmpty && isSelectableRackSlot(hit?.slot)) onEmpty(rackSlotSelection(hit.slot));
     else if (hit?.slot?.kind === 'unknown' && event.pointerType === 'touch') showHover(hit, event);
@@ -396,19 +382,10 @@ export function mountRackScene(host, {
 
   function setSelectedDevice(deviceId) {
     if (disposed) return;
-    if (deviceId != null && doorVisible) setDoorVisible(false);
     selectedDeviceId = deviceId;
     if (deviceId == null) delete canvas.dataset.selectedDeviceId;
     else canvas.dataset.selectedDeviceId = deviceId;
     updateDeviceSelection();
-  }
-
-  function setDoorVisible(visible) {
-    doorVisible = visible;
-    doorButton.setAttribute('aria-pressed', String(visible));
-    model.setDoorVisible(visible);
-    if (visible) clearHover();
-    invalidate();
   }
 
   function clampTarget() {
@@ -422,8 +399,6 @@ export function mountRackScene(host, {
 
   function applyViewMode(mode) {
     viewMode = mode;
-    doorButton.disabled = mode !== 'appearance';
-    setDoorVisible(mode === 'appearance' && doorVisible);
     for (const [id, button] of modeButtons) {
       button.setAttribute('aria-pressed', String(id === mode));
     }
@@ -489,7 +464,6 @@ export function mountRackScene(host, {
       target: controls.target.toArray(),
       activeView,
       viewMode,
-      doorVisible,
     };
   }
 
@@ -645,7 +619,6 @@ export function mountRackScene(host, {
     if (disposed) return false;
     const device = devices.find(({ id: itemId }) => String(itemId) === String(id));
     if (!device) return false;
-    if (doorVisible) setDoorVisible(false);
     if (!sized) {
       pendingDeviceId = device.id;
       return true;

@@ -4,7 +4,7 @@ import {
   RACK_DEPTH, RACK_WIDTH, STATUS_COLORS, SURFACES, TYPE_ACCENTS,
   deviceMetrics, normalizeDepth, normalizeStatus, rackSummaryColor,
 } from './rack-geometry.js';
-import { createCabinetMeshTexture, createDeviceLabelTexture, createOperatingLampTexture, createRackScaleTexture } from './rack-textures.js';
+import { createDeviceLabelTexture, createOperatingLampTexture, createRackScaleTexture } from './rack-textures.js';
 
 const LAMP_PERIOD_MS = 3200;
 const LAMP_FRAME_MS = 80;
@@ -123,7 +123,6 @@ export function createRackPalette() {
   const materials = new Map();
   const scaleMaterials = new Map();
   const textures = [];
-  let perforatedMaterial;
 
   function materialFor(surface) {
     if (!materials.has(surface)) {
@@ -137,18 +136,6 @@ export function createRackPalette() {
       }
     }
     return materials.get(surface);
-  }
-
-  function cabinetMeshMaterial() {
-    if (!perforatedMaterial) {
-      const map = createCabinetMeshTexture();
-      if (map) textures.push(map);
-      perforatedMaterial = new THREE.MeshStandardMaterial({
-        color: 0x303a42, roughness: 0.66, metalness: 0.26, map,
-      });
-      materials.set('cabinet-mesh', perforatedMaterial);
-    }
-    return perforatedMaterial;
   }
 
   function scaleMaterial(rackHeight) {
@@ -176,7 +163,7 @@ export function createRackPalette() {
     textures.length = 0;
   }
 
-  return Object.assign(materialFor, { scaleMaterial, cabinetMeshMaterial, dispose });
+  return Object.assign(materialFor, { scaleMaterial, dispose });
 }
 
 function matchesRoomSearch(filter, { rackId, deviceId }) {
@@ -288,56 +275,24 @@ function addScaleStrips(parent, rackHeight, unit, scaleMat, tint, owner) {
   }
 }
 
-function addCabinetEnclosure(parent, { rack, unit, palette, tint, owner }) {
+function addCabinetSides(batches, rack, unit, world, owner) {
   const height = rack.height * unit;
-  const sides = instancedBoxes(parent, palette, tint);
   const sections = 3;
   const sectionHeight = height / sections;
   const panelX = RACK_WIDTH / 2 - 0.023;
-  const doorZ = RACK_DEPTH / 2 - 0.035;
-  const doorInset = 0.09;
-  const doorOpening = RACK_WIDTH - doorInset * 3.4;
+  const latchZ = RACK_DEPTH / 2 - 0.265;
   for (const sign of [-1, 1]) {
     for (let index = 0; index < sections; index += 1) {
       const y = sectionHeight * (index + 0.5);
-      sides.add('sidePanel', [0.037, sectionHeight - 0.022, RACK_DEPTH - 0.135], [sign * panelX, y, 0], undefined, owner);
+      batches.add('sidePanel', [0.037, sectionHeight - 0.022, RACK_DEPTH - 0.135], [sign * panelX, y, 0], world, owner);
       for (const end of [-1, 1]) {
-        const z = end * (doorZ - 0.23);
+        const z = end * latchZ;
         const latchY = y + sectionHeight * 0.34;
-        sides.add('handle', [0.014, 0.102, 0.076], [sign * (panelX + 0.020), latchY, z], undefined, owner);
-        sides.add('inset', [0.010, 0.065, 0.045], [sign * (panelX + 0.027), latchY, z], undefined, owner);
+        batches.add('handle', [0.014, 0.102, 0.076], [sign * (panelX + 0.020), latchY, z], world, owner);
+        batches.add('inset', [0.010, 0.065, 0.045], [sign * (panelX + 0.027), latchY, z], world, owner);
       }
     }
   }
-  sides.finish();
-
-  const doors = new THREE.Group();
-  const frames = instancedBoxes(doors, palette, tint);
-  const doorMesh = new THREE.InstancedMesh(
-    new THREE.PlaneGeometry(doorOpening + 0.016, height - 0.16), palette.cabinetMeshMaterial(), 2,
-  );
-  const pose = new THREE.Object3D();
-  for (const [index, sign] of [1, -1].entries()) {
-    for (const end of [-1, 1]) {
-      frames.add('doorFrame', [RACK_WIDTH - 0.10, 0.092, 0.045], [0, end < 0 ? 0.039 : height - 0.039, sign * doorZ], undefined, owner);
-      frames.add('doorFrame', [0.108, height, 0.045], [end * (doorOpening / 2 + 0.048), height / 2, sign * doorZ], undefined, owner);
-    }
-    const pullX = sign * (doorOpening / 2 + 0.021);
-    const pullY = height * 0.42;
-    const length = Math.min(height * 0.20, 0.81);
-    frames.add('inset', [0.072, length + 0.10, 0.022], [pullX, pullY, sign * (doorZ + 0.023)], undefined, owner);
-    frames.add('handle', [0.037, length, 0.029], [pullX, pullY + 0.012, sign * (doorZ + 0.041)], undefined, owner);
-    pose.position.set(0, height / 2, sign * (doorZ + 0.014));
-    pose.rotation.y = sign < 0 ? Math.PI : 0;
-    pose.updateMatrix();
-    doorMesh.setMatrixAt(index, pose.matrix);
-  }
-  doorMesh.instanceMatrix.needsUpdate = true;
-  tint?.add(doorMesh, [owner, owner]);
-  doors.add(doorMesh);
-  frames.finish();
-  parent.add(doors);
-  return doors;
 }
 
 function buildLampGlow(core, texture) {
@@ -786,7 +741,6 @@ function buildSemanticOverlay(scene, entries, unit) {
 export function buildRackOverviewLayer(scene, { entries, unit, deviceKind, palette = createRackPalette() }) {
   const tint = roomSearchTint();
   const batches = instancedBoxes(scene, palette, tint);
-  const doorsByRack = new Map();
   const world = new THREE.Matrix4();
   const axis = new THREE.Vector3(0, 1, 0);
   const position = new THREE.Vector3();
@@ -807,34 +761,15 @@ export function buildRackOverviewLayer(scene, { entries, unit, deviceKind, palet
         if (medium) batches.add(surface, Array.isArray(medium) ? medium : size, center, world, ownerFor(device));
       },
     }, false);
-    if (entry.enclosure) {
-      const enclosure = new THREE.Group();
-      enclosure.position.copy(position);
-      enclosure.quaternion.copy(rotation);
-      enclosure.scale.copy(scale);
-      const doors = addCabinetEnclosure(enclosure, { rack, unit, palette, tint, owner: ownerFor() });
-      doorsByRack.set(String(rack.id), doors);
-      scene.add(enclosure);
-    }
+    if (entry.enclosure) addCabinetSides(batches, rack, unit, world, ownerFor());
   }
   const meshes = batches.finish();
   const lamps = buildOperatingLamps(scene, entries, unit);
   const semantic = buildSemanticOverlay(scene, entries, unit);
-  let openIds = new Set();
-  let doorMode = true;
-  function updateDoors() {
-    for (const [id, doors] of doorsByRack) doors.visible = doorMode && !openIds.has(id);
-  }
   return {
     meshes,
     lamps,
-    setOpenRacks(ids) {
-      openIds = ids;
-      updateDoors();
-    },
     setMode(mode) {
-      doorMode = mode === 'appearance';
-      updateDoors();
       lamps?.setVisible(mode === 'appearance');
       semantic.setMode(mode);
     },
@@ -903,10 +838,9 @@ export function buildRackModel(scene, options) {
     solid,
     detail(surface, size, center) { details.add(surface, size, center); },
   });
+  addCabinetSides(details, options.rack, options.unit);
   details.finish();
   addScaleStrips(scene, options.rack.height, options.unit, materialFor.scaleMaterial(options.rack.height));
-  const doors = addCabinetEnclosure(scene, { rack: options.rack, unit: options.unit, palette: materialFor });
-  doors.visible = false;
 
   // 为每台设备添加正面（及全深背面）铭牌贴图。
   const plateGeomCache = new Map();
@@ -984,7 +918,6 @@ export function buildRackModel(scene, options) {
     highlight,
     lamps,
     setMode,
-    setDoorVisible(visible) { doors.visible = visible; },
     disposeExtra() {
       materialFor.dispose();
       for (const tex of labelTextures) tex.dispose();

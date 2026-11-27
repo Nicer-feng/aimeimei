@@ -316,28 +316,7 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
   let immersiveLayer;
   let highlightedRackId;
   let selectedRackId;
-  let locatedDeviceRackId;
   let activeFilter;
-  let nearbyRackIds = [];
-
-  function updateRackDoors() {
-    if (!photoFront) return;
-    const open = new Set(nearbyRackIds);
-    if (selectedRackId) open.add(selectedRackId);
-    if (locatedDeviceRackId) open.add(locatedDeviceRackId);
-    if (activeFilter?.deviceIds.size) {
-      for (const entry of entries) {
-        if (entry.devices.some(({ id }) => activeFilter.deviceIds.has(String(id)))) open.add(String(entry.rack.id));
-      }
-    }
-    overviewLayer.setOpenRacks?.(open);
-  }
-
-  function setNearbyRacks(ids) {
-    nearbyRackIds = ids;
-    overviewLayer.lamps?.setNearbyRacks(ids);
-    updateRackDoors();
-  }
 
   function updateRoomLighting() {
     if (immersiveLayer?.group.visible) immersiveLayer.highlight(highlightedRackId, selectedRackId, activeFilter);
@@ -409,7 +388,6 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
   function setSearchFilter(filter) {
     overviewLayer.setSearchFilter?.(filter);
     activeFilter = filter;
-    updateRackDoors();
     updateRoomLighting();
     const counts = [0, 0];
     if (filter) {
@@ -462,18 +440,15 @@ function makeRoom(scene, { room, roomName, siteName, racks, devices, deviceKind,
   function highlightDevice(entry, device) {
     positionDeviceOutline(deviceOutline, entry, device, 1.022);
     selectedRackId = device ? String(entry.rack.id) : undefined;
-    updateRackDoors();
     updateRoomLighting();
   }
   function highlightLocatedDevice(entry, device) {
     positionDeviceOutline(locatedDeviceOutline, entry, device, 1.052);
-    locatedDeviceRackId = device ? String(entry.rack.id) : undefined;
-    updateRackDoors();
   }
   const targetForRack = (id) => targetsById.get(String(id));
   const entryForRack = (id) => targetForRack(id)?.userData.entry;
   return { bounds, entries, entryForRack, targetForRack, highlight, highlightDevice, landmarks, lamps: overviewLayer.lamps,
-    highlightLocatedDevice, photoFront, setImmersive, setMode: overviewLayer.setMode, setNearbyRacks, setSearchFilter, symbols, targets };
+    highlightLocatedDevice, photoFront, setImmersive, setMode: overviewLayer.setMode, setSearchFilter, symbols, targets };
 }
 
 export function mountRoomScene(host, {
@@ -1348,7 +1323,7 @@ export function mountRoomScene(host, {
 
     if (changed) {
       const visibleIds = [...selected.keys()];
-      model.setNearbyRacks(visibleIds);
+      model.lamps?.setNearbyRacks(visibleIds);
       lampAnimation?.sync();
       canvas.dataset.detailRacks = visibleIds.join(' ');
       canvas.dataset.detailCount = String(visibleIds.length);

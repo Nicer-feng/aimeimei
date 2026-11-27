@@ -26,7 +26,6 @@ export const SURFACES = {
   scale: [0x9ba9ae, 0.62, 0.16],
   foot: [0x252a2c, 0.86, 0.08],
   sidePanel: [0x27313a, 0.54, 0.35],
-  doorFrame: [0x202932, 0.53, 0.39],
   handle: [0x485560, 0.43, 0.49],
 };
 
