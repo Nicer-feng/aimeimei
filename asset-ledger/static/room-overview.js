@@ -1,3 +1,5 @@
+import { OPERATING_STATUS_LABELS, operatingStatus } from './rack.js?v=operating-status';
+import { rackOccupancy } from './rack-geometry.js';
 import {
   buildDeviceSearch, deviceAddressLabel, endpointLabel, isDeviceArchived, normalizeSearchText as normalize,
 } from './asset-search.js';
@@ -69,6 +71,47 @@ function cabinetList(racks, onRack) {
   return list;
 }
 
+function roomStatistics(racks, devices) {
+  const mounted = new Map(racks.map((rack) => [String(rack.id), []]));
+  const statusCounts = { running: 0, unknown: 0, unpowered: 0, disabled: 0 };
+  let mountedCount = 0;
+  for (const device of devices) {
+    statusCounts[operatingStatus(device)] += 1;
+    const rackDevices = mounted.get(String(device.rack_id));
+    if (rackDevices) {
+      rackDevices.push(device);
+      mountedCount += 1;
+    }
+  }
+  let usedU = 0;
+  let totalU = 0;
+  for (const rack of racks) {
+    usedU += rackOccupancy(rack, mounted.get(String(rack.id))).usedU;
+    totalU += rack.height;
+  }
+  const metrics = element('dl', 'room-statistics');
+  metrics.setAttribute('aria-label', '机房统计');
+  function metric(label, value, detail) {
+    const pill = element('div', 'room-statistic');
+    const reading = element('dd', '', String(value));
+    if (detail) reading.append(element('small', '', detail));
+    pill.append(element('dt', '', label), reading);
+    metrics.append(pill);
+    return pill;
+  }
+  metric('机柜', racks.length);
+  const unmounted = devices.length - mountedCount;
+  metric('在册设备', devices.length, `上架 ${mountedCount} · 未上架 ${unmounted}`);
+  for (const [status, count] of Object.entries(statusCounts)) {
+    const pill = metric(OPERATING_STATUS_LABELS[status], count);
+    pill.dataset.status = status;
+  }
+  const occupancy = metric('U 位利用率', totalU ? `${Math.round(100 * usedU / totalU)}%` : '—',
+    totalU ? `${usedU} / ${totalU}U` : '');
+  occupancy.title = '已占物理 U 位 / 机房总 U 位，正背面共用的 U 位只计一次。';
+  return metrics;
+}
+
 function floorPlan(room, layout, racksById, onRack) {
   const plan = element('section', 'room-overview-plan');
   const scroll = element('div', 'room-overview-plan-scroll');
@@ -126,9 +169,8 @@ export function renderRoomOverview(host, {
   const titleLine = element('div', 'room-overview-title-line');
   titleLine.append(title);
   if (layout?.illustrative) titleLine.append(element('span', 'room-overview-illustrative', '示意布局'));
-  const summary = [`${racks.length} 台机柜`];
-  if (positions.length) summary.push(`${layout.rows * layout.columns} 个柜位`);
-  info.append(titleLine, element('p', 'room-overview-count', summary.join(' · ')));
+  if (positions.length) titleLine.append(element('span', 'room-overview-count', `${layout.rows * layout.columns} 个柜位`));
+  info.append(titleLine, roomStatistics(racks, roomDevices));
 
   const actions = element('div', 'room-overview-actions');
   const search = element('form', 'room-overview-search');

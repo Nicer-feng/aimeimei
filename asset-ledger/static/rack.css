@@ -1,46 +1,50 @@
 .rack-view-bar {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.45rem 0.75rem;
   flex-wrap: wrap;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .rack-mode-switch {
   display: inline-flex;
-  border: 1px solid var(--line, #d8e1e2);
-  border-radius: 0.55rem;
-  padding: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: #f8fafc;
+  padding: 0.18rem;
   gap: 0.15rem;
 }
 
 .rack-mode-button {
   border: 0;
-  border-radius: 0.36rem;
+  border-radius: 0.45rem;
   background: transparent;
-  color: var(--muted, #4f6268);
-  padding: 0.43rem 0.7rem;
+  color: var(--muted);
+  min-height: 2rem;
+  padding: 0.28rem 0.72rem;
   font: inherit;
   font-size: 0.875rem;
   cursor: pointer;
 }
 
+.rack-mode-button:hover { color: var(--accent-dark); }
 .rack-mode-button[aria-pressed='true'] {
-  background: var(--accent-soft, #e2f1ee);
-  color: var(--accent, #12665e);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
   font-weight: 650;
 }
 
 .rack-view-status, .rack-face-stat {
-  color: var(--muted, #4f6268);
-  font-size: 0.875rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .rack-2d {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: clamp(0.6rem, 2vw, 1.5rem);
+  gap: 0.75rem clamp(0.75rem, 1.35vw, 1.3rem);
 }
 
 .rack-2d[hidden], .rack-3d[hidden] { display: none; }
@@ -62,19 +66,23 @@
 
 .rack-status-legend-item {
   padding: 0.12rem 0.42rem;
-  border-radius: 0.27rem;
+  border-radius: 999px;
   background: var(--status-bg);
   color: var(--status-ink);
   font-size: 0.78rem;
   font-weight: 650;
 }
 
+.rack-elevation, .rack-spatial-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  box-shadow: var(--shadow-card);
+}
+
 .rack-elevation {
-  background: var(--surface, #fff);
-  border: 1px solid var(--line, #d8e1e2);
-  border-radius: 0.7rem;
-  padding: 0.85rem clamp(0.45rem, 1.4vw, 1.1rem) 0.6rem;
   min-width: 0;
+  padding: 0 clamp(0.65rem, 1.6vw, 1.4rem) 1rem;
 }
 
 .rack-elevation-caption {
@@ -83,15 +91,17 @@
   gap: 0.25rem 0.75rem;
   align-items: baseline;
   flex-wrap: wrap;
-  margin-bottom: 0.35rem;
+  padding-block: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.7rem;
 }
 
-.rack-elevation-caption h3 { font-size: 1rem; margin: 0; }
+.rack-elevation-caption h3 { font-size: 0.94rem; font-weight: 680; margin: 0; }
 
 .rack-elevation-svg {
   display: block;
   width: 100%;
-  max-width: 24rem;
+  max-width: 28rem;
   margin-inline: auto;
 }
 
@@ -171,18 +181,12 @@
 .rack-elevation-svg [data-slot-state='half-only'] .rack-svg-slot { fill: #e0f0ed; stroke: #a4c8bf; }
 .rack-svg-half-label { fill: #245b51; font-size: 10px; pointer-events: none; }
 
-.rack-spatial-panel {
-  border: 1px solid var(--line, #d8e1e2);
-  border-radius: 0.8rem;
-  overflow: hidden;
-  background: var(--surface, #fff);
-  box-shadow: 0 4px 18px #293c4510;
-}
+.rack-spatial-panel { overflow: hidden; }
 
 .rack-spatial-panel, .room-3d {
-  --scene-glass: rgba(249, 252, 252, 0.84);
-  --scene-glass-border: rgba(85, 111, 118, 0.25);
-  --scene-glass-shadow: 0 3px 14px rgba(32, 53, 61, 0.12);
+  --scene-glass: rgba(255, 255, 255, 0.87);
+  --scene-glass-border: rgba(39, 57, 73, 0.15);
+  --scene-glass-shadow: 0 2px 10px rgba(15, 23, 42, 0.07);
   --scene-glass-filter: blur(10px) saturate(1.15);
 }
 
@@ -190,12 +194,12 @@
   position: relative;
   isolation: isolate;
   width: 100%;
-  height: clamp(21rem, 62vh, 45rem);
-  height: clamp(21rem, 62dvh, 45rem);
+  height: clamp(24rem, 65vh, 46rem);
+  height: clamp(24rem, 65svh, 46rem);
   overflow: hidden;
   background:
-    radial-gradient(ellipse at 47% 31%, #f8fafb 5%, #f3f7f9a8 48%, #dae5eb00 76%),
-    linear-gradient(158deg, #f1f5f7 0%, #e5edf1 57%, #dae5eb 100%);
+    radial-gradient(ellipse at 48% 32%, #fcfdfe 0%, transparent 72%),
+    linear-gradient(160deg, var(--canvas), #e8edf2);
 }
 
 .rack-spatial-viewport canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
@@ -210,10 +214,10 @@
   padding: 0.48rem 0.65rem;
   border: 1px solid var(--scene-glass-border, #cbd9df);
   border-radius: 0.6rem;
-  background: rgba(250, 253, 253, 0.94);
+  background: rgba(255, 255, 255, 0.96);
   backdrop-filter: var(--scene-glass-filter, none);
   box-shadow: var(--scene-glass-shadow, 0 3px 12px #22384429);
-  color: #243b47;
+  color: var(--ink);
   pointer-events: none;
   overflow-wrap: anywhere;
 }
@@ -229,14 +233,14 @@
 }
 .rack-spatial-tooltip strong, .rack-spatial-tooltip span { display: block; }
 .rack-spatial-tooltip strong { font-size: 0.9rem; line-height: 1.3; }
-.rack-spatial-tooltip span { margin-top: 0.14rem; font-size: 0.79rem; color: #516875; line-height: 1.4; }
+.rack-spatial-tooltip span { margin-top: 0.14rem; font-size: 0.79rem; color: var(--muted); line-height: 1.4; }
 .rack-spatial-tooltip :is(.rack-spatial-tooltip-status, .room-3d-tooltip-status) {
   display: flex;
   align-items: center;
   gap: 0.32rem;
   margin-top: 0.28rem;
   font-size: 0.73rem;
-  color: #334f58;
+  color: var(--muted);
 }
 .rack-spatial-tooltip .rack-spatial-tooltip-status[hidden] { display: none; }
 .rack-spatial-tooltip :is(.rack-spatial-tooltip-status, .room-3d-tooltip-status)::before {
@@ -284,7 +288,7 @@
   backdrop-filter: var(--scene-glass-filter);
   box-shadow: var(--scene-glass-shadow);
   font-size: 0.76rem;
-  color: #243b47;
+  color: var(--ink);
   pointer-events: none;
 }
 
@@ -323,42 +327,48 @@
   border-radius: 0.9rem;
   background: var(--scene-glass);
   backdrop-filter: var(--scene-glass-filter);
-  color: var(--muted, #4f6268);
+  color: var(--muted);
   font-size: 0.74rem;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
-.rack-spatial-devices { border-top: 1px solid var(--line, #d8e1e2); padding: 0.65rem 0.8rem; }
+.rack-spatial-devices {
+  padding: 0.65rem clamp(0.65rem, 1.3vw, 1rem);
+  border-top: 1px solid var(--line);
+}
 
 .rack-spatial-slot-controls {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.35rem 0.5rem;
-  padding: 0.6rem 0.8rem;
-  border-top: 1px solid var(--line, #d8e1e2);
+  padding: 0.6rem clamp(0.65rem, 1.3vw, 1rem);
+  border-top: 1px solid var(--line);
   font-size: 0.875rem;
 }
 
 .rack-spatial-slot-controls select, .rack-spatial-slot-controls button {
-  border-radius: 0.38rem;
-  border: 1px solid #b4cdc7;
+  width: auto;
+  max-width: 100%;
+  border-radius: 0.45rem;
+  border: 1px solid var(--control-line);
   padding: 0.35rem 0.55rem;
   min-height: 2.2rem;
   font: inherit;
-  color: #234d43;
-  background: white;
+  color: var(--ink);
+  background: var(--surface);
 }
 
-.rack-spatial-slot-controls button { background: #e3eeeb; font-weight: 650; cursor: pointer; }
+.rack-spatial-slot-controls button { background: var(--accent-soft); color: var(--accent-dark); font-weight: 650; cursor: pointer; }
+.rack-spatial-slot-controls button:hover:enabled { border-color: var(--accent); }
 .rack-spatial-slot-controls button:disabled { opacity: 0.57; cursor: default; }
-.rack-spatial-slot-controls :focus-visible { outline: 2px solid #3c776b; outline-offset: 2px; }
+.rack-spatial-slot-controls :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .rack-camera-controls button, .rack-spatial-devices button {
   font: inherit;
   font-size: 0.875rem;
-  color: #2e4854;
+  color: var(--ink);
   background: transparent;
   border: 1px solid transparent;
   border-radius: 0.4rem;
@@ -369,36 +379,37 @@
 .rack-camera-controls button { min-height: 2rem; border-radius: 0.7rem; font-weight: 650; }
 .rack-spatial-devices button {
   max-width: 100%;
-  border-color: #dce5e9;
+  border-color: var(--control-line);
+  background: #f8fafc;
   text-align: start;
   overflow-wrap: anywhere;
 }
 
 .rack-camera-controls button:hover, .rack-spatial-devices button:hover {
-  background: var(--accent-soft, #e2f1ee);
-  color: var(--accent, #12665e);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .rack-camera-controls button[aria-pressed='true'] {
-  border-color: #b4cdc7;
-  background: #e3eeeb;
-  color: #234d43;
+  border-color: #b9d5d2;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
 }
 
 .rack-spatial-devices button[aria-pressed='true'] {
   border-color: #86b4a8;
-  background: var(--accent-soft, #e2f1ee);
-  color: var(--accent-dark, #104f43);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
 }
 
 .rack-camera-controls button:focus-visible, .rack-spatial-devices button:focus-visible {
-  outline: 2px solid #3c776b;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 @media (max-width: 630px) {
   .rack-2d { grid-template-columns: 1fr; }
-  .rack-elevation-caption { padding-inline: 0.2rem; }
+  .rack-elevation-caption { padding-block: 0.65rem; }
   .rack-spatial-viewport {
     height: clamp(24rem, 57vh, 33rem);
     height: clamp(24rem, 57svh, 33rem);

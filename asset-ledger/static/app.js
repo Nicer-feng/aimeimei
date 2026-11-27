@@ -1,7 +1,7 @@
 import { deviceKind, operatingStatus, operatingStatusLabel, OPERATING_STATUS_LABELS, renderRack, units } from './rack.js?v=operating-status';
 import { renderRoomOverview } from './room-overview.js';
 import { buildDeviceSearch, deviceAddressLabel, downloadDeviceCsv, endpointLabel } from './asset-search.js';
-import { openAvailabilityPicker, openRackEditor, openRoomEditor, openRoomLayoutEditor, renderRoomStatistics } from './room-tools.js';
+import { openAvailabilityPicker, openRackEditor, openRoomEditor, openRoomLayoutEditor } from './room-tools.js';
 import { createSlotPicker } from './slot-picker.js';
 import { releases } from './releases.js';
 
@@ -39,6 +39,7 @@ const state = {
   deviceFilters: blankFilters(),
   rackFilters: blankFilters(),
   roomFilters: blankFilters(),
+  roomControlsExpanded: false,
   deviceSearch: '',
   deviceArchiveFilter: 'active',
   rackView: null,
@@ -152,6 +153,7 @@ function showLogin(message = '') {
   state.deviceFilters = blankFilters();
   state.rackFilters = blankFilters();
   state.roomFilters = blankFilters();
+  state.roomControlsExpanded = false;
   state.deviceSearch = '';
   state.deviceArchiveFilter = 'active';
   page.replaceChildren();
@@ -169,9 +171,15 @@ async function openWorkspace(user) {
   state.user = user;
   login.hidden = true;
   workspace.hidden = false;
-  byId('scope').textContent = user.role === 'admin'
-    ? `${user.username} · ${user.scope_name || '全辖区'} · 管理员`
-    : `${user.username} · ${user.scope_name || '辖区'} · 只读`;
+  const role = user.role === 'admin' ? '管理员' : '只读';
+  const scope = user.scope_name || (user.role === 'admin' ? '全辖区' : '辖区');
+  byId('account-name').textContent = user.username;
+  byId('account-role').textContent = role;
+  byId('account-context').replaceChildren(
+    element('strong', {}, user.username), element('span', {}, `权限范围 · ${scope}`),
+  );
+  byId('scope').title = `${user.username} · ${scope} · ${role}`;
+  account.open = false;
   renderPage();
 }
 
@@ -186,6 +194,14 @@ function notify(message) {
 
 function empty(message) {
   return element('div', { class: 'empty' }, message);
+}
+
+function detailBreadcrumb(section, parentId, title) {
+  byId('breadcrumb').replaceChildren(
+    internalLink(section, parentId, `返回${titles[section]}`, { class: 'back-link' }),
+    element('span', { 'aria-hidden': 'true' }, '/'),
+    element('span', { 'aria-current': 'page' }, title),
+  );
 }
 
 function pageHeading(title, meta, actions = []) {
@@ -334,6 +350,36 @@ function filterControls(filters, options = {}) {
   return group;
 }
 
+const compactRoomControls = window.matchMedia('(max-width: 670px)');
+
+function syncRoomControls(toggle, options) {
+  const compact = compactRoomControls.matches;
+  const restoreFocus = !compact && document.activeElement === toggle;
+  options.hidden = compact && !state.roomControlsExpanded;
+  toggle.setAttribute('aria-expanded', String(!options.hidden));
+  if (restoreFocus) options.querySelector('select')?.focus({ preventScroll: true });
+  toggle.hidden = !compact;
+}
+
+compactRoomControls.addEventListener('change', () => {
+  const toggle = byId('room-control-toggle');
+  const options = byId('room-control-options');
+  if (!toggle || !options) return;
+  if (compactRoomControls.matches && options.contains(document.activeElement)) state.roomControlsExpanded = true;
+  syncRoomControls(toggle, options);
+});
+
+function roomControls(filterPanel, availability, actions) {
+  const options = element('div', { id: 'room-control-options', class: 'overview-options' },
+    actions.length > 0 && element('div', { class: 'head-actions' }, actions), filterPanel);
+  const toggle = button(userCanWrite() ? '筛选与管理' : '筛选与显示', () => {
+    state.roomControlsExpanded = !state.roomControlsExpanded;
+    syncRoomControls(toggle, options);
+  }, 'small overview-disclosure', { id: 'room-control-toggle', 'aria-controls': options.id });
+  syncRoomControls(toggle, options);
+  return element('div', { class: 'overview-controls' }, pageHeading(titles.rooms), availability, toggle, options);
+}
+
 function selectOverviewRoom(filters) {
   const { rooms } = filteredLocations(filters);
   return rooms.find((room) => String(room.id) === filters.room) || rooms[0];
@@ -376,10 +422,8 @@ function renderRoomPage(requestedId, filterChanged) {
       renderPage({ roomFilterChanged: true });
     },
   }));
-  const actions = room ? [
-    button('空间核查', () => showAvailability(room), 'primary'),
-    deviceClickModeControl(),
-  ] : [];
+  const availability = room && button('空间核查', () => showAvailability(room), 'primary');
+  const actions = room ? [deviceClickModeControl()] : [];
   if (userCanWrite()) {
     actions.push(button('新增机房', () => openRoomEditor(state.catalog, null, roomUI)));
     if (room) {
@@ -387,20 +431,18 @@ function renderRoomPage(requestedId, filterChanged) {
       actions.push(button('新增机柜', () => openRackEditor(state.catalog, room, null, roomUI)));
     }
   }
-  page.append(pageHeading(titles.rooms, null, actions), filterPanel);
+  page.append(roomControls(filterPanel, availability, actions));
   if (!room) {
     page.append(empty('当前范围内没有可查看的机房。'));
     window.scrollTo(0, 0);
     return;
   }
-  const { site, unit } = roomContext(room.id);
-  filterPanel.append(element('div', { class: 'rack-context' }, joinedPath(unit?.name, site?.name, room.name)));
   const racks = state.catalog.racks.filter((rack) => rack.room_id === room.id);
   const devices = state.catalog.devices.filter((device) => device.room_id === room.id);
   const layout = (state.catalog.room_layouts ?? []).find((item) => item.room_id === room.id);
   const previous = state.roomViews.get(room.id);
   const host = element('section', { id: 'room-overview', 'aria-label': `${room.name}机柜总览` });
-  page.append(renderRoomStatistics(state.catalog, room, roomUI), host);
+  page.append(host);
   const controller = renderRoomOverview(host, {
     room, layout, racks, devices, systems: state.catalog.systems, deviceKind, units, view: previous?.view,
     onDevice: openDevicePresentation,
@@ -436,11 +478,7 @@ function renderRackPage(requestedId, view) {
     actions.push(button('编辑机柜', () => openRackEditor(state.catalog, lookup('rooms', rack.room_id), rack, roomUI)));
   }
   const overviewRoomId = state.rackOverviewRoomId ?? rack?.room_id;
-  byId('breadcrumb').replaceChildren(
-    internalLink('rooms', overviewRoomId, titles.rooms),
-    ' / ', element('span', { 'aria-current': 'page' }, titles.rack),
-  );
-  page.append(internalLink('rooms', overviewRoomId, '返回机房总览', { class: 'back-link' }));
+  detailBreadcrumb('rooms', overviewRoomId, rack?.name || titles.rack);
   page.append(pageHeading(titles.rack, null, actions));
   const filterPanel = element('section', { class: 'panel' }, filterControls(filters, {
     onlyRack: true,
@@ -923,10 +961,11 @@ function showDeviceAboveSheet(panel) {
   devicePageScroll ??= window.scrollY;
   const height = panel.offsetHeight;
   workspace.style.setProperty('--device-sheet-height', `${height}px`);
-  const visibleHeight = window.innerHeight - height;
+  const visibleTop = workspace.querySelector('.console-header').getBoundingClientRect().bottom;
+  const visibleBottom = panel.getBoundingClientRect().top;
   const y = (target.top + target.bottom) / 2;
-  if (y < 36 || y > visibleHeight - 32) {
-    window.scrollBy(0, y - visibleHeight * .52);
+  if (visibleBottom > visibleTop && (y < visibleTop + 16 || y > visibleBottom - 16)) {
+    window.scrollBy(0, y - (visibleTop + visibleBottom) / 2);
   }
 }
 
@@ -1060,7 +1099,6 @@ function openDeviceDrawer(device, anchor = (state.rackView ?? state.roomOverview
 function renderDevicePage(device) {
   const actions = userCanWrite() ? deviceMaintenanceActions(device) : [];
   page.append(
-    internalLink('devices', null, '返回设备台账', { class: 'back-link' }),
     pageHeading(device.name, `${device.code} · ${device.type}${device.archived_at ? ' · 已归档' : ''}`, actions),
     element('div', { class: 'detail-columns' },
       element('div', { class: 'stack' }, panel('设备资料', deviceFacts(device)), panel('设备地址', deviceAddresses(device)),
@@ -1086,7 +1124,6 @@ function renderSystemPage(system) {
     (device.archived_at ? history : deployments).push(section);
   }
   page.append(
-    internalLink('systems', null, '返回业务系统', { class: 'back-link' }),
     pageHeading(system.name, system.description,
       userCanWrite() ? [button('编辑系统与部署', () => openSystemEditor(system), 'primary'),
         button('删除系统', () => confirmRecordAction({
@@ -1103,7 +1140,6 @@ function renderProjectPage(project) {
   const documents = state.catalog.documents.filter((document) => document.project_id === project.id);
   const devices = project.device_ids.map((id) => lookup('devices', id)).filter(Boolean);
   page.append(
-    internalLink('projects', null, '返回项目档案', { class: 'back-link' }),
     pageHeading(project.name, joinedPath(project.code, lookup('sites', project.site_id)?.name),
       userCanWrite() ? [button('编辑项目', () => openProjectEditor(project), 'primary'),
         button('删除项目', () => confirmRecordAction({
@@ -1144,7 +1180,8 @@ function renderPage({ preserveRackView = false, roomFilterChanged = false } = {}
   if (kind === 'rack' && state.roomOverview) state.rackOverviewRoomId = state.roomOverview.roomId;
   else if (kind !== 'rack') state.rackOverviewRoomId = null;
   disposeRoomOverview(true);
-  byId('breadcrumb').replaceChildren(element('span', { 'aria-current': 'page' }, titles[section]));
+  byId('breadcrumb').hidden = kind === section;
+  byId('breadcrumb').replaceChildren();
   document.querySelectorAll('.nav [data-route]').forEach((link) => {
     if (link.dataset.route === section) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
@@ -1157,6 +1194,7 @@ function renderPage({ preserveRackView = false, roomFilterChanged = false } = {}
   if (kind === 'projects') renderProjectsPage();
   if (Object.hasOwn(collectionRoutes, kind)) {
     const item = lookup(section, id);
+    detailBreadcrumb(section, null, item?.name || '记录详情');
     if (!item) page.append(pageHeading(titles[section]), empty('当前范围内没有这条记录。'));
     else if (kind === 'device') renderDevicePage(item);
     else if (kind === 'system') renderSystemPage(item);
@@ -1713,6 +1751,14 @@ loginForm.addEventListener('submit', async (event) => {
   }
 });
 
+const account = byId('scope').parentElement;
+account.addEventListener('focusout', (event) => {
+  if (!account.contains(event.relatedTarget)) account.open = false;
+});
+account.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') account.open = false;
+});
+
 byId('logout').addEventListener('click', async () => {
   try {
     await request('logout', { method: 'POST', data: {}, ai: auth.mode === 'ai' });
@@ -1810,7 +1856,8 @@ async function loadWorkspace() {
       byId('login-captcha').hidden = false;
       loginForm.elements.captcha.disabled = false;
       loginForm.elements.captcha.required = true;
-      byId('logout').textContent = '退出统一登录';
+      byId('logout').querySelector('span').textContent = '退出统一登录';
+      byId('logout').title = '退出统一登录';
     }
     await openWorkspace(await request('me'));
   } catch (error) {

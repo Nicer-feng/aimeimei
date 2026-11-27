@@ -1,7 +1,4 @@
-import { isDeviceArchived } from './asset-search.js';
 import { FRONT_MARKERS } from './room-overview.js';
-import { OPERATING_STATUS_LABELS, operatingStatus } from './rack.js?v=operating-status';
-import { rackOccupancy } from './rack-geometry.js';
 
 const FACE_NAMES = { front: '正面', rear: '背面' };
 const LAYOUT_ROTATIONS = [0, 90, 180, 270];
@@ -18,49 +15,6 @@ function roomPath(catalog, room) {
 
 function unitRange(start, end) {
   return start === end ? `U${start}` : `U${start}–U${end}`;
-}
-
-function displayedStatus(catalog, room) {
-  const racks = catalog.racks.filter((rack) => rack.room_id === room.id);
-  const devices = catalog.devices.filter((device) => device.room_id === room.id && !isDeviceArchived(device));
-  const mounted = new Map(racks.map((rack) => [rack.id, []]));
-  const statusCounts = Object.fromEntries(Object.keys(OPERATING_STATUS_LABELS).map((key) => [key, 0]));
-  for (const device of devices) {
-    statusCounts[operatingStatus(device)] += 1;
-    mounted.get(device.rack_id)?.push(device);
-  }
-  let usedU = 0;
-  let totalU = 0;
-  let mountedCount = 0;
-  for (const rack of racks) {
-    const rackDevices = mounted.get(rack.id);
-    usedU += rackOccupancy(rack, rackDevices).usedU;
-    totalU += rack.height;
-    mountedCount += rackDevices.length;
-  }
-  return { racks, devices, usedU, totalU, mountedCount, statusCounts };
-}
-
-export function renderRoomStatistics(catalog, room, { element }) {
-  const { racks, devices, usedU, totalU, mountedCount, statusCounts } = displayedStatus(catalog, room);
-  const rate = totalU ? Math.round(100 * usedU / totalU) : 0;
-  const metric = (label, value, detail) => element('div', { class: 'room-statistic' },
-    element('dt', {}, label), element('dd', {}, value), detail);
-  return element('section', { class: 'panel room-statistics', 'aria-label': '机房统计' },
-    element('h2', {}, '机房统计'),
-    element('dl', { class: 'room-statistics-grid' },
-      metric('机柜', racks.length),
-      metric('在册设备', devices.length,
-        element('small', {}, `上架 ${mountedCount} · 未上架 ${devices.length - mountedCount}`)),
-      metric('物理 U 位占用', totalU ? `${usedU} / ${totalU}U` : '—', totalU
-        ? element('small', {}, element('meter', { min: 0, max: totalU, value: usedU, 'aria-label': '物理 U 位占用' }),
-          `${rate}%`)
-        : null)),
-    element('p', { class: 'small-text muted' }, '正背面共用的 U 位只计一次。按面和深度查具体位置请使用空位查询。'),
-    element('ul', { class: 'room-statistics-status', 'aria-label': '人工登记运行状态' },
-      Object.entries(OPERATING_STATUS_LABELS).map(([status, label]) =>
-        element('li', { 'data-status': status }, element('span', {}, label),
-          element('strong', {}, statusCounts[status])))));
 }
 
 function showNameEditor({ element, selectInput, showEditor, request }, {

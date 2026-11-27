@@ -1,28 +1,4 @@
-.room-statistics {
-  display: grid;
-  gap: .7rem;
-}
-
-.room-statistics-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: .55rem;
-}
-
-.room-statistic {
-  min-width: 0;
-  padding: .57rem .7rem;
-  border: 1px solid var(--line);
-  border-radius: .55rem;
-  background: #f6faf7;
-}
-
-.room-statistic dt { color: var(--muted); font-size: .83rem; }
-.room-statistic dd { font-weight: 720; font-size: clamp(1.05rem, 2.6vw, 1.42rem); }
-.room-statistic small { display: flex; gap: .45rem; align-items: center; color: var(--muted); }
-.room-statistic meter { width: min(8.7rem, 82%); height: .74rem; accent-color: var(--accent); }
-
-.room-statistics-status, .rack-availability-ranges {
+.rack-availability-ranges {
   display: flex;
   flex-wrap: wrap;
   gap: .32rem .5rem;
@@ -30,26 +6,6 @@
   margin: 0;
   list-style: none;
 }
-
-.room-statistics-status li {
-  --room-stat-color: #927022;
-  --room-stat-bg: #fff5e2;
-  display: inline-flex;
-  align-items: center;
-  gap: .33rem;
-  padding: .18rem .5rem;
-  border: 1px solid var(--line);
-  border-color: color-mix(in srgb, var(--room-stat-color) 38%, var(--surface));
-  border-radius: .38rem;
-  color: var(--room-stat-color);
-  background: var(--room-stat-bg);
-  font-size: .79rem;
-  line-height: 1.4;
-}
-
-.room-statistics-status [data-status='running'] { --room-stat-color: #205e3a; --room-stat-bg: #e9f5ed; }
-.room-statistics-status [data-status='unpowered'] { --room-stat-color: #8f301f; --room-stat-bg: #fceee9; }
-.room-statistics-status [data-status='disabled'] { --room-stat-color: #4d6069; --room-stat-bg: #edf2f4; }
 
 .rack-availability-dialog {
   width: min(95vw, 47rem);
@@ -87,15 +43,15 @@
   display: grid;
   gap: .35rem;
   padding: .42rem .55rem;
-  border: 1px solid #dbe5de;
+  border: 1px solid var(--line);
   border-radius: .43rem;
-  background: #f7faf8;
+  background: #f8fafc;
   font-size: .82rem;
 }
 
 .rack-availability-ranges li {
   padding: .15rem .45rem;
-  border: 1px solid #bed3c7;
+  border: 1px solid var(--control-line);
   border-radius: .35rem;
   background: var(--surface);
   color: var(--accent-dark);
@@ -139,9 +95,9 @@
   overflow: auto;
   overscroll-behavior: contain;
   padding: .46rem;
-  border: 1px solid #ccdbd0;
+  border: 1px solid var(--control-line);
   border-radius: .52rem;
-  background: #eef5ef;
+  background: #eef2f6;
 }
 
 .room-layout-grid {
@@ -160,7 +116,7 @@
 .room-layout-axis { font-size: .72rem; text-align: center; color: var(--muted); }
 .room-layout-aisle {
   margin-left: 2.29rem;
-  border-block: 1px dashed #bfd0c3;
+  border-block: 1px dashed #c4d1d7;
   text-align: center;
   font-size: .7rem;
   color: var(--muted);
@@ -177,7 +133,7 @@
 .room-layout-cell.room-overview-slot-empty:hover { color: var(--accent-dark); border-color: var(--accent); }
 .room-layout-cell[aria-pressed='true'], .room-layout-rack-buttons button[aria-pressed='true'] {
   border-color: var(--accent);
-  background: #d3ece1;
+  background: var(--accent-soft);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
@@ -205,8 +161,6 @@
 .room-layout-announcement:empty { display: none; }
 
 @media (max-width: 670px) {
-  .room-statistics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .room-statistic:last-child { grid-column: 1 / -1; }
   .rack-availability-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rack-availability-filter label:first-child { grid-column: 1 / -1; }
   .rack-availability-choices .button, .room-layout-controls .button, .room-layout-rack-buttons .button { min-height: 2.75rem; }
