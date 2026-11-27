@@ -6,6 +6,7 @@ import { createSlotPicker } from './slot-picker.js';
 import { openDeviceLocator, locationHash } from './device-locator.js';
 import { renderDevicePorts, renderDevicePortsSummary } from './device-ports.js';
 import { openRackPlanner } from './rack-planner.js';
+import { openRoomPatrol } from './room-patrol.js';
 import { releases } from './releases.js';
 
 const byId = (id) => document.getElementById(id);
@@ -57,6 +58,7 @@ let deviceOpenedByScenePointer = false;
 let devicePageScroll = null;
 let drawerClosingAnimation;
 let availabilityCleanup;
+let patrolCleanup;
 const deviceSheetMedia = window.matchMedia('(max-width: 670px)');
 drawer.before(deviceQuickGuide, deviceQuick);
 byId('logout').before(button(`v${releases[0].version}`, openReleaseNotes, 'version-button small',
@@ -136,6 +138,8 @@ function showError(target, message = '') {
 }
 
 function closeDialogs() {
+  patrolCleanup?.();
+  patrolCleanup = undefined;
   document.querySelector('dialog.rack-planner[open]')?.close();
   availabilityCleanup?.();
   availabilityCleanup = undefined;
@@ -442,6 +446,13 @@ function renderRoomPage(requestedId, filterChanged, previousRoomId) {
     },
   }));
   const availability = room && button('空间核查', () => showAvailability(room), 'small');
+  const patrol = room && button('机房巡检', () => {
+    patrolCleanup?.();
+    patrolCleanup = openRoomPatrol({
+      roomId: room.id, request, element, button, canWrite: userCanWrite(),
+      onLocate: (deviceId) => { location.hash = locationHash(deviceId); },
+    });
+  }, 'small');
   const actions = room ? [deviceClickModeControl()] : [];
   const racks = room ? state.catalog.racks.filter((rack) => rack.room_id === room.id) : [];
   const layout = room && (state.catalog.room_layouts ?? []).find((item) => item.room_id === room.id);
@@ -458,7 +469,7 @@ function renderRoomPage(requestedId, filterChanged, previousRoomId) {
   const planning = room && racks.length
     ? button('上架预演', () => showRackPlanner(racks[0]), 'small')
     : null;
-  const { toolbar, disclosures } = roomControls(filterPanel, [availability, planning], actions);
+  const { toolbar, disclosures } = roomControls(filterPanel, [availability, planning, patrol], actions);
   if (!room) {
     page.append(pageHeading(titles.rooms), toolbar, disclosures, empty('当前范围内没有可查看的机房。'));
     window.scrollTo(0, 0);

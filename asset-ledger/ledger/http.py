@@ -7,7 +7,7 @@ import json
 import re
 import sqlite3
 import sys
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from .attachment_formats import FORMATS, extension
 from .data import (
@@ -17,6 +17,7 @@ from .data import (
 )
 from .edge import LoginThrottle
 from .identity import AI_COOKIE, IdentityError, sroom_user
+from .patrol import record_patrol, room_patrol
 from .ports import create_ports, delete_port, device_ports, edit_port, link_port, unlink_port
 
 
@@ -244,6 +245,11 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 self.json_response(200, catalog(conn, user))
             elif path == "/api/rack-availability":
                 self.json_response(200, rack_availability(conn, user, query))
+            elif path == "/api/room-patrol":
+                room_ids = parse_qs(query).get("room_id", [])
+                if len(room_ids) != 1 or not re.fullmatch(r"[1-9][0-9]{0,9}", room_ids[0]):
+                    raise invalid("请选择有效的机房。")
+                self.json_response(200, room_patrol(conn, user, int(room_ids[0])))
             elif (device := DEVICE_PORTS_ROUTE.fullmatch(path)):
                 self.json_response(200, device_ports(conn, user, int(device[1])))
             else:
@@ -262,6 +268,9 @@ class LedgerHandler(BaseHTTPRequestHandler):
         if user["role"] != "admin":
             raise ApiError(403, "当前账号只有辖区内的查阅权限。")
         if self.command == "POST":
+            if path == "/api/room-patrol":
+                self.json_response(201, record_patrol(conn, user, self.payload(16384)))
+                return
             if (device := DEVICE_PORTS_ROUTE.fullmatch(path)):
                 self.json_response(201, create_ports(conn, user, int(device[1]), self.payload()))
                 return

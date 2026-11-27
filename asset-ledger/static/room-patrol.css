@@ -1,0 +1,141 @@
+.room-patrol-dialog {
+  width: min(44rem, calc(100% - 2rem));
+  max-height: min(46rem, calc(100dvh - 2rem));
+  overflow: hidden;
+}
+.room-patrol-dialog[open] {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+body:has(.room-patrol-dialog[open]) { overflow: hidden; }
+
+.room-patrol-dialog .dialog-head {
+  position: static;
+  align-items: center;
+}
+.room-patrol-dialog .dialog-head button { min-height: 2.75rem; }
+.room-patrol-toolbar {
+  display: grid;
+  gap: .7rem;
+  padding: .8rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+.room-patrol-progress {
+  display: grid;
+  grid-template-columns: minmax(4rem, 1fr) auto;
+  align-items: center;
+  gap: .65rem;
+}
+.room-patrol-progress progress {
+  width: 100%;
+  height: .55rem;
+  accent-color: var(--accent);
+}
+.room-patrol-progress p { font-variant-numeric: tabular-nums; }
+.room-patrol-racks {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: .55rem;
+}
+.room-patrol-racks select, .room-patrol-racks .button { min-height: 2.75rem; }
+.room-patrol-racks .button:disabled { cursor: default; }
+.room-patrol-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .35rem;
+}
+.room-patrol-filters .button {
+  width: 100%;
+  min-height: 2.75rem;
+  padding-inline: .2rem;
+}
+.room-patrol-filters .button[aria-pressed=true] {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border-color: rgba(15, 98, 92, .26);
+}
+
+.room-patrol-scroll {
+  display: grid;
+  align-content: start;
+  gap: .55rem;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: .85rem 1.1rem max(1rem, env(safe-area-inset-bottom));
+  background: var(--canvas);
+}
+.room-patrol-devices {
+  display: grid;
+  gap: .65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.room-patrol-devices:empty { display: none; }
+.room-patrol-device {
+  display: grid;
+  gap: .45rem;
+  padding: .8rem .85rem .6rem;
+  border: 1px solid var(--line);
+  border-radius: .7rem;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.room-patrol-device-title, .room-patrol-device-facts {
+  display: flex;
+  align-items: center;
+  gap: .25rem .6rem;
+}
+.room-patrol-device-title { justify-content: space-between; }
+.room-patrol-device-facts { flex-wrap: wrap; font-size: .83rem; }
+.room-patrol-mark {
+  padding: .05rem .48rem;
+  border-radius: .7rem;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: .77rem;
+  font-weight: 650;
+  flex: none;
+}
+.room-patrol-mark.is-pending { background: #fbf1de; color: #774d13; }
+.room-patrol-status { display: inline-flex; align-items: center; gap: .3rem; }
+.room-patrol-status::before {
+  content: "";
+  width: .43rem;
+  height: .43rem;
+  border-radius: 50%;
+  background: var(--device-status-unknown);
+}
+.room-patrol-status.is-running::before { background: var(--device-status-running); }
+.room-patrol-status.is-disabled::before { background: var(--device-status-disabled); }
+.room-patrol-status.is-unpowered::before { background: var(--device-status-unpowered); }
+
+.room-patrol-records {
+  display: grid;
+  gap: .35rem;
+  color: var(--muted);
+  font-size: .82rem;
+  list-style: none;
+  border-inline-start: 2px solid var(--line);
+  margin: .1rem 0;
+  padding: .16rem .65rem;
+}
+.room-patrol-note { color: var(--ink); white-space: pre-wrap; }
+.room-patrol-form { display: grid; gap: .45rem; border-top: 1px solid var(--line); padding-top: .6rem; }
+.room-patrol-actions { display: flex; flex-wrap: wrap; gap: .35rem; justify-content: flex-end; }
+.room-patrol-actions .button { min-height: 2.75rem; }
+
+@media (max-width: 600px) {
+  .room-patrol-dialog {
+    width: calc(100% - 1rem);
+    max-height: calc(100dvh - 1rem);
+  }
+  .room-patrol-toolbar, .room-patrol-dialog .dialog-head, .room-patrol-scroll {
+    padding-inline: .7rem;
+  }
+  .room-patrol-progress { grid-template-columns: minmax(0, 1fr); gap: .22rem; }
+  .room-patrol-progress progress { grid-row: 2; }
+  .room-patrol-filters .button { font-size: .8rem; }
+  .room-patrol-form textarea { font-size: 1rem; }
+}
