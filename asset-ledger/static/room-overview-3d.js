@@ -9,6 +9,7 @@ import {
   projectCabinetRect, projectScenePoint,
 } from './rack-3d-model.js';
 import { createContactShadowTexture, createFloorTileTexture, createRackEnvironment } from './rack-textures.js';
+import { buildRoomLighting } from './room-immersive.js';
 import { operatingStatusLabel } from './rack.js?v=operating-status';
 
 const COLUMN_GAP = 1.21;
@@ -23,6 +24,7 @@ const MAX_DAMPING_FRAMES = 100;
 const MAX_DAMPING_MS = 1050;
 const SINGLE_CLICK_DELAY = 320;
 const ANGLED = [0.42, 2.30, 1.12];
+const IMMERSIVE_ANGLED = [0.32, 1.20, 1.48];
 const TOP = [0, 1, 0.001];
 const SEARCH_OUTLINE_COLORS = [0x0875ba, 0x02836e];
 const SEARCH_DEVICE_COLOR = 0x79f4ff;
@@ -30,6 +32,7 @@ const FACE_OUTLINE_EDGES = [[-1, 0], [1, 0], [1, 0], [1, 1], [1, 1], [-1, 1], [-
 
 const VIEW_MODES = [
   { id: 'appearance', label: '外观' },
+  { id: 'immersive', label: '沉浸模式' },
   { id: 'status', label: '运行状态' },
   { id: 'capacity', label: '空间核查' },
 ];
@@ -48,6 +51,12 @@ const LEGENDS = {
     ['#e5a131', '含深度待核设备'],
   ],
 };
+
+const IMMERSIVE_SURFACES = new Map([
+  [0xa9babc, 0x162635], [0xd4dfe1, 0x2c4354], [0xd8e2e5, 0x486072],
+  [0xb7d0c2, 0x344e5a], [0xbdcbd0, 0x304855], [0xc9d9d6, 0x476372],
+  [0x487165, 0x5b9ba9], [0x8fa9a5, 0x476372],
+]);
 
 const DEPTH_LABELS = { full: '全深', half: '半深', unknown: '深度待核' };
 
@@ -128,6 +137,7 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), new THREE.MeshStandardMaterial({
       color: 0xd8e2e5, map: floorTexture, roughness: 0.92, metalness: 0,
     }));
+    finishes.set(0xd8e2e5, floor.material);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(0, 0.0005, floorCenter);
     scene.add(floor);
@@ -242,6 +252,29 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
   locatedDeviceOutline.visible = false;
   scene.add(locatedDeviceOutline);
   const outlineEdges = outline.geometry.getAttribute('position');
+  let immersiveLayer;
+  let highlightedRackId;
+  let selectedRackId;
+  let activeFilter;
+
+  function updateRoomLighting() {
+    if (immersiveLayer?.group.visible) immersiveLayer.highlight(highlightedRackId, selectedRackId, activeFilter);
+  }
+
+  function setImmersive(active) {
+    if (active && !immersiveLayer) {
+      immersiveLayer = buildRoomLighting(scene, bounds, entries, CABINET_WIDTH, CABINET_DEPTH);
+    }
+    if (immersiveLayer) immersiveLayer.group.visible = active;
+    for (const [color, material] of finishes) {
+      material.color.setHex(active ? (IMMERSIVE_SURFACES.get(color) ?? color) : color);
+    }
+    outline.material.color.setHex(active ? 0x77eaff : 0x538f80);
+    deviceOutline.material.color.setHex(active ? 0x82edff : 0xffcb72);
+    locatedDeviceOutline.material.color.setHex(active ? 0xb4f7ff : 0xff9f42);
+    updateRoomLighting();
+  }
+
   const searchOutlines = SEARCH_OUTLINE_COLORS.map((color) => searchLines(color, targets.length * outlineEdges.count));
   const deviceFaceLimit = entries.reduce((count, entry) => count + entry.devices.length * 2, 0);
   const deviceSearchOutline = searchLines(SEARCH_DEVICE_COLOR, deviceFaceLimit * FACE_OUTLINE_EDGES.length);
@@ -292,6 +325,8 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
 
   function setSearchFilter(filter) {
     overviewLayer.setSearchFilter?.(filter);
+    activeFilter = filter;
+    updateRoomLighting();
     const counts = [0, 0];
     if (filter) {
       const vertex = new THREE.Vector3();
@@ -312,6 +347,8 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
   }
 
   function highlight(id) {
+    highlightedRackId = id;
+    updateRoomLighting();
     const target = targetsById.get(id);
     outline.visible = Boolean(target);
     if (!target) return;
@@ -340,6 +377,8 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
   }
   function highlightDevice(entry, device) {
     positionDeviceOutline(deviceOutline, entry, device, 1.022);
+    selectedRackId = device ? String(entry.rack.id) : undefined;
+    updateRoomLighting();
   }
   function highlightLocatedDevice(entry, device) {
     positionDeviceOutline(locatedDeviceOutline, entry, device, 1.052);
@@ -347,7 +386,7 @@ function makeRoom(scene, { room, racks, devices, deviceKind, palette, floorTextu
   const targetForRack = (id) => targetsById.get(String(id));
   const entryForRack = (id) => targetForRack(id)?.userData.entry;
   return { bounds, entries, entryForRack, targetForRack, highlight, highlightDevice, landmarks, lamps: overviewLayer.lamps,
-    highlightLocatedDevice, setMode: overviewLayer.setMode, setSearchFilter, symbols, targets };
+    highlightLocatedDevice, setImmersive, setMode: overviewLayer.setMode, setSearchFilter, symbols, targets };
 }
 
 export function mountRoomScene(host, {
@@ -425,14 +464,14 @@ export function mountRoomScene(host, {
   const environment = createRackEnvironment(renderer);
   scene.environment = environment?.texture ?? null;
   scene.environmentIntensity = 0.78;
-  scene.add(new THREE.HemisphereLight(0xf8fcff, 0x748282, 1.8));
+  const ambient = new THREE.HemisphereLight(0xf8fcff, 0x748282, 1.8);
   const key = new THREE.DirectionalLight(0xfff2de, 2.2);
   key.position.set(-5, 12, 9);
   const fill = new THREE.DirectionalLight(0xf4f6f8, 0.52);
   fill.position.set(0, 3, 8);
   const rim = new THREE.DirectionalLight(0xc8e3f4, 1.30);
   rim.position.set(8, 6, -9);
-  scene.add(key, fill, rim);
+  scene.add(ambient, key, fill, rim);
 
   const palette = createRackPalette();
   const floorTexture = createFloorTileTexture();
@@ -502,8 +541,9 @@ export function mountRoomScene(host, {
   const restoredTarget = Array.isArray(initialCamera?.target) && initialCamera.target.length === 3 &&
     initialCamera.target.every(Number.isFinite)
     ? new THREE.Vector3(...initialCamera.target) : center.clone();
+  const defaultAngle = () => viewMode === 'immersive' ? IMMERSIVE_ANGLED : ANGLED;
   const initial = {
-    direction: restored ? initialCamera.direction : ANGLED,
+    direction: restored ? initialCamera.direction : defaultAngle(),
     activeView: restored ? preset : 'angled',
     zoom: Number.isFinite(initialCamera?.zoom) ? THREE.MathUtils.clamp(initialCamera.zoom, 0.12, 3) : 1,
     target: restoredTarget,
@@ -547,12 +587,15 @@ export function mountRoomScene(host, {
     return { ...symbol, item };
   });
 
-  angledButton.addEventListener('click', () => usePreset('angled', ANGLED));
+  angledButton.addEventListener('click', () => usePreset('angled', defaultAngle()));
   topButton.addEventListener('click', () => usePreset('top', TOP));
   for (const [id, button] of modeButtons) {
     button.addEventListener('click', () => {
       if (viewMode === id) return;
+      const angleChanged = (viewMode === 'immersive') !== (id === 'immersive');
       applyViewMode(id);
+      if (angleChanged && activeView === 'angled') usePreset('angled', defaultAngle());
+      else if (angleChanged) onSceneInteraction?.();
       invalidate();
     });
   }
@@ -643,7 +686,20 @@ export function mountRoomScene(host, {
     for (const [id, button] of modeButtons) {
       button.setAttribute('aria-pressed', String(id === mode));
     }
-    model.setMode(mode);
+    const immersive = mode === 'immersive';
+    viewport.toggleAttribute('data-immersive', immersive);
+    scene.background.setHex(immersive ? 0x0b1420 : 0xe8eff2);
+    scene.fog.color.copy(scene.background);
+    scene.environmentIntensity = immersive ? 0.72 : 0.78;
+    ambient.color.setHex(immersive ? 0xd0e9ff : 0xf8fcff);
+    ambient.groundColor.setHex(immersive ? 0x486074 : 0x748282);
+    ambient.intensity = immersive ? 1.33 : 1.8;
+    key.intensity = immersive ? 2.46 : 2.2;
+    fill.intensity = immersive ? 0.74 : 0.52;
+    rim.color.setHex(immersive ? 0x8ecfff : 0xc8e3f4);
+    rim.intensity = immersive ? 2.04 : 1.30;
+    model.setImmersive(immersive);
+    model.setMode(immersive ? 'appearance' : mode);
     const entries = LEGENDS[mode];
     if (!entries) {
       legend.hidden = true;
@@ -886,7 +942,7 @@ export function mountRoomScene(host, {
   function resetView() {
     clearLocatedDevice();
     markLocated();
-    usePreset('angled', ANGLED);
+    usePreset('angled', defaultAngle());
   }
 
   function setSearchFilter(filter) {

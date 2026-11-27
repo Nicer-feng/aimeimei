@@ -1056,6 +1056,11 @@ function openDevicePresentation(device, anchor) {
   const close = button('×', () => closeDevicePresentation({ restoreFocus: true }), 'quiet small device-quick-close',
     { 'aria-label': '关闭快览' });
   const details = button('查看详情', () => openDeviceDrawer(device, anchor), 'primary small', { autofocus: true });
+  const immersive = anchor?.viewport?.hasAttribute('data-immersive') ?? false;
+  deviceQuick.toggleAttribute('data-immersive', immersive);
+  deviceQuickGuide.toggleAttribute('data-immersive', immersive);
+  const systems = immersive ? state.catalog.systems.filter((system) =>
+    system.deployments.some((deployment) => deployment.device_id === device.id)) : [];
   deviceQuick.dataset.deviceId = device.id;
   deviceQuick.replaceChildren(
     element('div', { class: 'device-quick-head' },
@@ -1065,6 +1070,9 @@ function openDevicePresentation(device, anchor) {
       close),
     element('p', { class: 'small-text' }, deviceLocation(device)),
     device.model && element('p', { class: 'muted small-text' }, device.model),
+    systems.length > 0 && element('p', { class: 'device-quick-systems small-text' },
+      systems.slice(0, 3).map((system) => internalLink('system', system.id, system.name)),
+      systems.length > 3 ? '…' : ''),
     element('div', { class: 'device-quick-actions' }, deviceStatusPill(device, { quick: true }), details));
   if (!deviceQuick.open) deviceQuick.show();
   showDeviceAboveSheet(deviceQuick);

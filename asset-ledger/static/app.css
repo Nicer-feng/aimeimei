@@ -342,3 +342,29 @@ dialog::backdrop { background: rgba(17, 28, 40, .36); }
 @media (prefers-reduced-motion: reduce) {
   .device-quick[open], .drawer[open], .drawer.drawer-closing[open] { animation: none; }
 }
+
+.device-quick[data-immersive] {
+  border-color: #54889e;
+  background: #101f2eee;
+  color: #eff9ff;
+  box-shadow: 0 12px 35px #07111bb0, 0 0 14px #56c7ed36;
+  backdrop-filter: blur(6px);
+}
+
+.device-quick[data-immersive] .muted { color: #aec9d9; }
+.device-quick[data-immersive] .code { color: #ccedfa; background: #254055; }
+.device-quick[data-immersive] .device-quick-close { color: #c7e7f4; }
+.device-quick[data-immersive] .device-quick-close:hover { background: #26465b; }
+.device-quick[data-immersive] .device-quick-systems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .2rem .55rem;
+}
+.device-quick[data-immersive] .device-quick-systems a { color: #9de8f7; }
+
+.device-quick-guide[data-immersive] .device-quick-guide-path { stroke: #83dff3; }
+.device-quick-guide[data-immersive] .device-quick-guide-target { fill: #d0f7ff; stroke: #4a99ad; }
+
+@media (pointer: coarse) {
+  .device-quick[data-immersive] { backdrop-filter: none; }
+}

@@ -475,3 +475,37 @@ button.room-3d-label { pointer-events: auto; }
   }
   .room-overview-front { font-size: 0.7rem; }
 }
+
+.room-3d-viewport[data-immersive] {
+  --scene-glass: #101e2ce8;
+  --scene-glass-border: #345568;
+  --scene-glass-shadow: 0 4px 20px #030a1370;
+  --scene-glass-filter: none;
+  --ink: #e2f2ff;
+  --muted: #bccfdd;
+  background: #0b1420;
+}
+
+.room-3d-viewport[data-immersive] .room-3d-label,
+.room-3d-viewport[data-immersive] .room-3d-landmark {
+  border-color: #487885;
+  background: #122533f0;
+  color: #ceebf6;
+  box-shadow: 0 1px 10px #0712197d;
+  backdrop-filter: none;
+}
+
+.room-3d-viewport[data-immersive] .room-3d-label:is(
+  [data-highlighted=true], [data-located=true], [data-search-match=true], :hover, :focus-visible
+) {
+  border-color: #7cdcf1;
+  background: #21495b;
+  color: #f2fcff;
+  box-shadow: 0 0 13px #48c5e14d;
+}
+
+.room-3d-viewport[data-immersive] .room-3d-presets button { color: #c4d9e5; }
+.room-3d-viewport[data-immersive] .room-3d-presets button:is(:hover, [aria-pressed=true]) {
+  background: #254b5e;
+  color: #f2fcff;
+}
