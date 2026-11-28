@@ -1,0 +1,96 @@
+.device-locator.cable-search-dialog { width: min(47rem, calc(100vw - 1.5rem)); }
+.cable-search-body { min-width: 0; gap: .55rem; }
+.cable-search-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .45rem; }
+.cable-search-output { min-width: 0; }
+.cable-search-output:empty { display: none; }
+
+.cable-search-results {
+  display: grid;
+  gap: .5rem;
+  max-height: min(57dvh, 32rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: .12rem .25rem .18rem .12rem;
+  list-style: none;
+}
+
+.cable-search-empty, .cable-search-result {
+  border: 1px solid var(--line);
+  border-radius: .62rem;
+  background: #f8fafc;
+}
+.cable-search-empty { padding: .72rem; }
+.cable-search-result { min-width: 0; padding: .52rem; }
+.cable-result-head { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; margin: 0 .08rem .35rem; }
+.cable-result-state {
+  --state-ink: #465867;
+  --state-fill: #edf1f4;
+  display: inline-flex;
+  align-items: center;
+  gap: .26rem;
+  padding: .13rem .42rem;
+  border-radius: 999px;
+  color: var(--state-ink);
+  background: var(--state-fill);
+  font-size: .72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.cable-result-state::before { content: ''; width: .34rem; height: .34rem; border-radius: 50%; background: currentColor; }
+[data-cable-state="connected"] .cable-result-state { --state-ink: #17693e; --state-fill: #e4f2e9; }
+[data-cable-state="pending"] .cable-result-state { --state-ink: #8a520b; --state-fill: #fff3dd; }
+[data-cable-state="free"] .cable-result-state { --state-ink: #1d6585; --state-fill: #e5f2f8; }
+.cable-result-match { color: var(--muted); font-size: .73rem; }
+.cable-search-endpoints { display: grid; min-width: 0; gap: .25rem; }
+.cable-search-endpoints[data-paired] { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+.cable-search-joint { align-self: center; padding-inline: .16rem; color: var(--muted); font-size: 1rem; }
+.cable-endpoint {
+  display: grid;
+  align-content: start;
+  gap: .19rem;
+  min-width: 0;
+  padding: .48rem .54rem;
+  border: 1px solid var(--line);
+  border-radius: .45rem;
+  font-size: .83rem;
+  line-height: 1.38;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.cable-endpoint-unresolved { background: transparent; }
+.cable-endpoint-side, .cable-endpoint-meta { font-size: .74rem; color: var(--muted); }
+.cable-endpoint-side { font-weight: 650; }
+.cable-endpoint-heading { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: .4rem; }
+.cable-port-name { font-size: .76rem; }
+.cable-endpoint-link {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  padding: .15rem .18rem;
+  margin: -.15rem -.18rem;
+  border-radius: .25rem;
+  text-decoration: none;
+}
+.cable-endpoint-link strong { text-decoration: underline; text-underline-offset: .18em; }
+.cable-endpoint-link:hover { color: var(--accent-dark); background: var(--accent-soft); }
+.cable-endpoint-label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: .32rem;
+  margin-top: .16rem;
+  font-size: .75rem;
+  color: var(--muted);
+}
+.cable-endpoint-label .code { max-width: 100%; }
+
+@media (max-width: 34rem) {
+  .cable-search-body { padding-inline: .7rem; }
+  .cable-search-endpoints[data-paired] { grid-template-columns: minmax(0, 1fr); gap: .14rem; }
+  .cable-search-joint { justify-self: center; line-height: 1; transform: rotate(90deg); }
+  .cable-endpoint { grid-template-columns: minmax(0, 1fr) auto; }
+  .cable-endpoint-side { grid-area: 1 / 2; align-self: center; }
+  .cable-endpoint-meta, .cable-endpoint-label { grid-column: 1 / -1; }
+  .cable-endpoint-link { display: flex; align-items: center; min-height: 2.75rem; margin-block: -.3rem; }
+}

@@ -10,6 +10,7 @@ import sys
 from urllib.parse import parse_qs, quote, urlsplit
 
 from .attachment_formats import FORMATS, extension
+from .cable_search import search_cables
 from .data import (
     ApiError, PROJECT_ROOT, SESSION_SECONDS, catalog, database, delete_record, document_file,
     invalid, log_in, log_out, profile, rack_availability, save_device, save_document, save_project,
@@ -247,6 +248,18 @@ class LedgerHandler(BaseHTTPRequestHandler):
                 self.json_response(200, catalog(conn, user))
             elif path == "/api/rack-availability":
                 self.json_response(200, rack_availability(conn, user, query))
+            elif path == "/api/cable-search":
+                try:
+                    params = parse_qs(query, keep_blank_values=True, max_num_fields=2)
+                except ValueError:
+                    raise invalid("线缆搜索条件无效。") from None
+                terms = params.get("q", [])
+                rooms = params.get("room_id", [])
+                if set(params) - {"q", "room_id"} or len(terms) != 1 or not 1 <= len(terms[0].strip()) <= 160:
+                    raise invalid("请输入 1–160 个字的线标或端口位置。")
+                if rooms and (len(rooms) != 1 or not re.fullmatch(r"[1-9][0-9]{0,9}", rooms[0])):
+                    raise invalid("机房编号无效。")
+                self.json_response(200, search_cables(conn, user, terms[0], int(rooms[0]) if rooms else None))
             elif path == "/api/room-patrol":
                 room_ids = parse_qs(query).get("room_id", [])
                 if len(room_ids) != 1 or not re.fullmatch(r"[1-9][0-9]{0,9}", room_ids[0]):

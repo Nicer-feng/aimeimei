@@ -185,6 +185,19 @@ class SroomIdentityTests(unittest.TestCase):
         self.assertEqual(self.request(path, ADMIN, method="DELETE", headers=origin)[0], 200)
         self.assertEqual(self.request(f"/api/ports/{ident}", ADMIN, method="DELETE", headers=origin)[0], 200)
 
+    def test_cable_search_uses_session_and_private_cache(self):
+        path = "/api/cable-search?q=A01-10U-01&room_id=1"
+        self.assertEqual(self.request(path)[0], 401)
+        status, headers, body = self.request(path, READER)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Cache-Control"], "private, no-store")
+        result = json.loads(body)
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["results"][0]["local"]["port_name"], "GE1/0/01")
+        self.assertEqual(result["results"][0]["peer"]["port_name"], "GE0/1")
+        self.assertEqual(self.request("/api/cable-search?q=one&q=two", READER)[0], 400)
+        self.assertEqual(self.request("/api/cable-search?q=GE0%2F1&room_id=-1", READER)[0], 400)
+
     def test_management_routes_use_authorized_write_branch(self):
         origin = {"Origin": "https://feng.asia"}
         for path, method in (("/api/rooms", "POST"), ("/api/racks/1", "PATCH"),

@@ -167,7 +167,7 @@ function floorPlan(room, layout, racksById, onRack) {
 
 export function renderRoomOverview(host, {
   room, layout, floorProfile, racks, devices = [], systems = [], deviceKind, units, siteName, toolbar, disclosures,
-  onRack, onDevice, onSceneInteraction, onClearDeviceSelection, onGlobalSearch, view, switchingRoom = false,
+  onRack, onDevice, onSceneInteraction, onClearDeviceSelection, onGlobalSearch, onCableSearch, onFindCable, view, switchingRoom = false,
 }) {
   const racksById = new Map(racks.map((rack) => [rack.id, rack]));
   const positions = layout?.positions.filter((position) => racksById.has(position.rack_id)) ?? [];
@@ -200,8 +200,8 @@ export function renderRoomOverview(host, {
   searchInput.type = 'search';
   searchInput.autocomplete = 'off';
   searchInput.maxLength = 160;
-  searchInput.placeholder = '柜号、设备、型号、系统、IP 或端口';
-  searchInput.setAttribute('aria-label', '查找机柜、设备、品牌型号、业务系统、IP、域名或端口');
+  searchInput.placeholder = '柜号、设备、型号、系统、IP、端口或线标';
+  searchInput.setAttribute('aria-label', '查找机柜、设备、品牌型号、业务系统、IP、域名、端口或线标');
   const searchButton = element('button', 'button primary', '搜索');
   searchButton.type = 'submit';
   search.append(searchInput, searchButton);
@@ -215,6 +215,7 @@ export function renderRoomOverview(host, {
   const lookup = element('div', 'room-overview-find');
   if (racks.length || roomDevices.length) lookup.append(search, clear, reset);
   if (onGlobalSearch) lookup.append(action('跨机房搜索', 'button small', () => onGlobalSearch(searchInput.value)));
+  if (onCableSearch) lookup.append(action('线缆搜索', 'button small', () => onCableSearch(searchInput.value.trim())));
   const controls = element('div', 'room-overview-switch');
   controls.setAttribute('role', 'group');
   controls.setAttribute('aria-label', '机房布置视图');
@@ -499,6 +500,11 @@ export function renderRoomOverview(host, {
     applySearch(searchInput.value);
     searchButton.focus({ preventScroll: true });
     const { groups, unmounted } = results;
+    if (!groups.length && !unmounted.length) {
+      const query = searchInput.value.trim();
+      onFindCable?.(query, () => !disposed && searchInput.value.trim() === query && document.activeElement === searchButton);
+      return;
+    }
     const exactRacks = groups.filter(({ rack, direct }) => direct && normalize(rack.name) === term);
     if (exactRacks.length === 1) {
       locate(exactRacks[0].rack);

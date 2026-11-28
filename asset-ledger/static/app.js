@@ -4,6 +4,7 @@ import { buildDeviceSearch, deviceAddressLabel, downloadDeviceCsv, endpointLabel
 import { openAvailabilityPicker, openRackEditor, openRoomEditor, openRoomLayoutEditor } from './room-tools.js';
 import { createSlotPicker } from './slot-picker.js';
 import { openDeviceLocator, locationHash } from './device-locator.js';
+import { renderCableSearchResults } from './cable-search.js';
 import { renderDevicePorts, renderDevicePortsSummary } from './device-ports.js';
 import { openRackPlanner } from './rack-planner.js';
 import { openRoomPatrol } from './room-patrol.js';
@@ -36,7 +37,10 @@ deviceQuickGuide.append(deviceQuickPath, deviceQuickTarget);
 const preview = byId('pdf-preview');
 const versionDialog = element('dialog', { class: 'editor release-dialog', 'aria-labelledby': 'release-title' });
 const locator = element('dialog', { class: 'editor device-locator', 'aria-labelledby': 'locator-title' });
-document.body.append(versionDialog, locator);
+const cableSearchDialog = element('dialog', {
+  class: 'editor device-locator cable-search-dialog', 'aria-labelledby': 'cable-search-title',
+});
+document.body.append(versionDialog, locator, cableSearchDialog);
 const deviceClickModeKey = 'sroom-device-click-mode';
 const deviceClickModes = [['quick', '就地快览'], ['detail', '直接开详情']];
 const blankFilters = () => ({ unit: '', site: '', room: '', rack: '' });
@@ -145,7 +149,7 @@ function closeDialogs() {
   document.querySelector('dialog.rack-planner[open]')?.close();
   availabilityCleanup?.();
   availabilityCleanup = undefined;
-  for (const dialog of [versionDialog, locator, preview, editor]) {
+  for (const dialog of [versionDialog, locator, cableSearchDialog, preview, editor]) {
     if (dialog.open) dialog.close();
   }
   closeDevicePresentation();
@@ -510,6 +514,8 @@ async function renderRoomPage(requestedId, filterChanged, previousRoomId) {
     onGlobalSearch: (query) => openDeviceLocator(locator, state.catalog, query, {
       element, dialogHeader, deviceLocation, deviceAddressLabel, endpointLabel,
     }),
+    onCableSearch: (query) => openCableSearch(query, room.id),
+    onFindCable: (query, stillCurrent) => findCableAfterRoomSearch(query, room.id, stillCurrent),
     onSceneInteraction: dismissDeviceQuick,
     onClearDeviceSelection: closeDevicePresentation,
     onRack: (rack) => {
@@ -911,6 +917,78 @@ function dialogHeader(id, title, subtitle, dialog, close = () => dialog.close())
     element('div', {}, element('h2', { id, class: 'dialog-title' }, title),
       subtitle && element('p', { class: 'muted small-text' }, subtitle)),
     button('关闭', close, 'quiet small'));
+}
+
+function cableSearchRequest(term, roomId) {
+  return request(`cable-search?${new URLSearchParams({ q: term, room_id: String(roomId) })}`);
+}
+
+async function findCableAfterRoomSearch(query, roomId, stillCurrent) {
+  try {
+    const result = await cableSearchRequest(query, roomId);
+    if (result.total && stillCurrent() && state.user && !document.querySelector('dialog:modal')) {
+      openCableSearch(query, roomId, result);
+    }
+  } catch {
+    // 保留机房本地搜索结果，线缆搜索入口可单独重试。
+  }
+}
+
+function openCableSearch(initialQuery, roomId, initialResult) {
+  if (!state.user || cableSearchDialog.open) return;
+  const field = element('input', {
+    type: 'search', maxlength: 160, value: initialQuery, required: true, autocomplete: 'off',
+    placeholder: '原线标或 A01-33U-20口', 'aria-label': '线标、柜号 U 位和物理端口',
+  });
+  const submit = element('button', { class: 'button primary', type: 'submit' }, '搜索');
+  const status = element('p', { role: 'status', class: 'muted small-text' });
+  const results = element('div', { class: 'cable-search-output' });
+  let searchId = 0;
+
+  function showResults(payload) {
+    status.textContent = payload.total > payload.results.length
+      ? `找到 ${payload.total} 项，显示前 ${payload.results.length} 项`
+      : payload.total ? `找到 ${payload.total} 项` : '';
+    results.replaceChildren(renderCableSearchResults(payload, {
+      element,
+      deviceLink: (endpoint) => element('a', {
+        href: locationHash(endpoint.device_id, endpoint.port_id),
+        'aria-label': `定位 ${endpoint.device_name} · ${endpoint.port_name}`,
+      }),
+    }));
+  }
+
+  async function search(event) {
+    event?.preventDefault();
+    const term = field.value.trim();
+    if (!term) return;
+    const current = ++searchId;
+    results.replaceChildren();
+    status.textContent = '正在查询线缆…';
+    const isCurrent = () => cableSearchDialog.open && field.isConnected && searchId === current;
+    try {
+      const payload = await cableSearchRequest(term, roomId);
+      if (isCurrent()) showResults(payload);
+    } catch (error) {
+      if (isCurrent()) status.textContent = error.message;
+    }
+  }
+
+  const form = element('form', { role: 'search', class: 'cable-search-form', onsubmit: search }, field, submit);
+  field.addEventListener('input', () => {
+    searchId += 1;
+    status.textContent = '';
+    results.replaceChildren();
+  });
+  cableSearchDialog.replaceChildren(
+    dialogHeader('cable-search-title', '线缆搜索', '可搜任一端的原线标，或输入柜号、U 位和端口。', cableSearchDialog),
+    element('div', { class: 'editor-body cable-search-body' }, form, status, results));
+  cableSearchDialog.showModal();
+  if (initialResult) showResults(initialResult);
+  else {
+    field.focus();
+    if (initialQuery.trim()) void search();
+  }
 }
 
 function openReleaseNotes() {
