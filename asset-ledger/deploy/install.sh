@@ -17,7 +17,7 @@ for path in ledger/__main__.py ledger/schema.sql ledger/_vendor/olefile.py ledge
     ledger/room_profiles.py static/room-profiles.js static/room-profiles.css static/device-model-templates.js \
     ledger/patrol.py static/room-patrol.js static/room-patrol.css \
     ledger/cable_search.py static/cable-search.js static/cable-search.css \
-    static/index.html static/room-overview.js static/room-overview-3d.js static/room-overview.css \
+    static/version-update.js static/index.html static/room-overview.js static/room-overview-3d.js static/room-overview.css \
     static/rack-geometry.js static/rack-textures.js static/rack-3d-model.js static/rack-3d.js \
     ledger/ports.py static/device-locator.js static/device-ports.js static/device-ports.css static/pdf-preview.js static/pdf-preview.css deploy/asset-ledger.service \
     samples/site-a-quantity.pdf samples/site-a-design.pdf samples/site-a-contract.pdf \

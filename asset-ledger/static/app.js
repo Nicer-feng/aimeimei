@@ -11,6 +11,7 @@ import { openRoomPatrol } from './room-patrol.js';
 import { openRoomProfileEditor } from './room-profiles.js';
 import { deviceModelPanel, deviceModelTemplatePicker, matchDeviceModelTemplate } from './device-model-templates.js';
 import { releases } from './releases.js';
+import { watchVersionUpdates } from './version-update.js';
 
 const byId = (id) => document.getElementById(id);
 const page = byId('page');
@@ -2028,7 +2029,7 @@ document.addEventListener('pointerdown', (event) => {
   deviceOpenedByScenePointer = false;
   const panel = deviceQuick.open ? deviceQuick : drawer.open ? drawer : null;
   outsideDevicePointer = panel && !editor.open && !preview.open && event.isPrimary && event.button === 0
-    && !panel.contains(event.target)
+    && !panel.contains(event.target) && !event.target.closest?.('#sroom-update-notice')
     ? { panel, selection: deviceSelection, id: event.pointerId, touch: event.pointerType === 'touch',
       x: event.clientX, y: event.clientY } : null;
 }, { capture: true });
@@ -2110,4 +2111,5 @@ async function loadWorkspace() {
   }
 }
 
+watchVersionUpdates(releases[0].version);
 void loadWorkspace();

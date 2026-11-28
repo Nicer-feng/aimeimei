@@ -79,6 +79,17 @@
   <dialog id="pdf-preview" class="pdf-preview" aria-labelledby="pdf-title">
     <div id="pdf-content" class="pdf-content"></div>
   </dialog>
+  <section id="sroom-update-notice" class="version-update-notice" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <span class="version-update-icon" aria-hidden="true">↻</span>
+    <div class="version-update-copy">
+      <strong>发现新版本，刷新后生效</strong>
+      <span id="sroom-update-version" class="muted small-text"></span>
+    </div>
+    <div class="version-update-actions">
+      <button id="sroom-update-refresh" class="button primary small" type="button">刷新更新</button>
+      <button id="sroom-update-snooze" class="button quiet small" type="button">稍后提醒</button>
+    </div>
+  </section>
   <div id="status-message" class="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

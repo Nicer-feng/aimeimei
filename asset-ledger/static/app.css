@@ -380,3 +380,39 @@ dialog::backdrop { background: rgba(17, 28, 40, .36); }
 }
 .locator-result:hover, .locator-result:focus-visible { background: var(--canvas); }
 .locator-result span, .locator-result small { width: 100%; }
+
+.version-update-notice {
+  position: fixed;
+  top: max(.85rem, env(safe-area-inset-top));
+  right: .85rem;
+  z-index: 9;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .45rem .65rem;
+  width: min(28rem, calc(100vw - 1.7rem));
+  padding: .6rem .72rem;
+  border: 1px solid var(--line);
+  border-radius: .68rem;
+  background: var(--surface);
+  box-shadow: 0 8px 26px rgb(15 23 42 / 15%);
+}
+.version-update-icon {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 2rem;
+  border-radius: 50%;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  font-size: 1.15rem;
+}
+.version-update-copy { flex: 1; min-width: 9rem; display: grid; gap: .08rem; }
+.version-update-copy strong { font-size: .88rem; }
+.version-update-actions { display: flex; gap: .24rem; margin-inline-start: auto; }
+.version-update-actions .button { white-space: nowrap; }
+
+@media (pointer: coarse) {
+  .version-update-actions .button { min-height: 2.75rem; }
+}
